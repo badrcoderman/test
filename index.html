@@ -11,60 +11,30 @@
     <h3>JANUS_JIT_MEMORY_LEAKER v1.0</h3>
     <div id="console"></div>
 
-    <script>
-        const log = (msg) => {
-            const consoleDiv = document.getElementById('console');
-            consoleDiv.innerHTML += `<div class="log">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
-            consoleDiv.scrollTop = consoleDiv.scrollHeight;
-        };
+<script>
+    // 1. إنشاء ذاكرة خطية (Linear Memory) - هذا هو ملعبنا الحقيقي
+    // تخصيص صفحة واحدة (64KB)
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    const memoryBuffer = new Uint8Array(memory.buffer);
 
-        // 1. هياكل البيانات للتلاعب
-        let floatArr = [1.1, 2.2, 3.3];
-        let objArr = [{}];
+    // 2. محاكاة "ثغرة" (OOB Write)
+    // لنفرض أن المصفوفة المنطقية تنتهي عند العنوان 10
+    const ARRAY_SIZE = 10;
+    
+    function writeToMemory(index, value) {
+        // "الثغرة" هنا: لا يوجد فحص للحدود (Bounds Checking)
+        memoryBuffer[index] = value;
+    }
 
-        function triggerConfusion(f, o, val) {
-            f[0] = val; 
-            return o[0];
-        }
+    // 3. التنفيذ
+    console.log("الوصول الطبيعي:");
+    writeToMemory(5, 0xAA); // كتابة داخل النطاق
+    
+    console.log("الوصول غير القانوني (الثغرة):");
+    writeToMemory(1000, 0xBB); // كتابة خارج النطاق في الذاكرة الخام!
+    
+    console.log("قيمة العنوان 1000 أصبحت: " + memoryBuffer[1000].toString(16));
+</script>
 
-        window.onload = async () => {
-            log("INIT: Starting JIT Memory Hijacking & Address Leaking...");
-
-            // 2. تدريب المترجم
-            for (let i = 0; i < 20000; i++) {
-                triggerConfusion(floatArr, objArr, 1.1);
-            }
-
-            // 3. تعريف كائن حقيقي نريد معرفة مكانه في الذاكرة
-            let secretObj = { data: 0xDEADBEEF };
-            
-            try {
-                log("Executing Confusion to leak secretObj...");
-                
-                // هنا نقوم بوضع الكائن الحقيقي في الـ FloatArray ثم استخراجه كـ Object
-                let leaked = triggerConfusion(floatArr, objArr, secretObj);
-                
-                log("!!! PRIMITIVE_SUCCESSFUL !!!");
-                
-                // 4. استخراج العنوان
-                // نقوم بتحويل الكائن المستخرج إلى رقم (Double) لنرى عنوانه الحقيقي
-                let addr = triggerConfusion(floatArr, objArr, secretObj);
-                
-                // طباعة البيانات المحمية
-                log("OBJECT_MEMORY_LEAK: " + JSON.stringify(leaked));
-                
-                // عرض العنوان الحقيقي في الذاكرة (سيكون بنظام Hex)
-                // نستخدم BigInt لتحويل القيمة إلى عنوان ذاكرة 64-bit
-                let view = new DataView(new ArrayBuffer(8));
-                view.setFloat64(0, leaked); // لن نستخدمه مباشرة هنا بل نطبع الكائن
-                
-                log("LEAKED_ADDRESS_STATUS: Address successfully resolved.");
-                log("ANALYSIS: We have successfully mapped the real object location in the browser's heap.");
-                
-            } catch(e) {
-                log("MEMORY_ACCESS_FAULT: " + e.message);
-            }
-        };
-    </script>
 </body>
 </html>
