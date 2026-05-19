@@ -8,21 +8,51 @@
     </style>
 </head>
 <body>
-    <h3>JANUS_KERNEL_DEBUGGER v3.2 [DIRECT_BUFFER_ATTACK]</h3>
+    <h3>JANUS_JIT_ENGINE_ANALYZER v1.0</h3>
     <div id="console"></div>
-    <style id="s">@font-face { font-family: 'targetFont'; src: url(nonexistent.woff); unicode-range: U+0042; }</style>
 
-<script>
-    // استخدام WebAssembly لخلق ذاكرة خام خارج عزل الـ Heap
-    let memory = new WebAssembly.Memory({ initial: 1 });
-    let view = new Uint8Array(memory.buffer);
-    
-    // محاولة تسميم الذاكرة الخاصة بالمحرك مباشرة
-    view.fill(0x41); 
-    
-    // إذا كان بإمكاننا جعل المحرك يقرأ من 'memory' بدلاً من 'FontFace'
-    // سنكون قد تجاوزنا كل الحواجز.
-</script>
+    <script>
+        const log = (msg) => {
+            const consoleDiv = document.getElementById('console');
+            consoleDiv.innerHTML += `<div class="log">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        };
 
+        // دالة الـ JIT المستهدفة
+        function jit_speculation(arr, val, trigger) {
+            arr[0] = 1.1; // المحرك سيفترض أن هذه مصفوفة Doubles
+            if (trigger) {
+                arr[0] = val; // هنا نحاول كسر الافتراض
+            }
+            return arr[0];
+        }
+
+        window.onload = () => {
+            log("INIT: JIT Engine stress test starting...");
+            
+            let arr = [1.1, 2.2, 3.3];
+            
+            // 1. مرحلة التدريب (Warm-up): إجبار المترجم على إنشاء نسخة سريعة (Optimized Code)
+            for (let i = 0; i < 20000; i++) {
+                jit_speculation(arr, 4.4, false);
+            }
+            log("JIT Warm-up complete. Speculative optimization active.");
+
+            // 2. مرحلة الكسر (Type Confusion Attack)
+            try {
+                // نمرر كائن (Object) بدلاً من رقم، لنرى هل سيفشل الـ JIT في اكتشاف نوع البيانات
+                let result = jit_speculation(arr, {}, true);
+                
+                log("JIT_TEST_RESULT: " + typeof result);
+                if (typeof result === 'object') {
+                    log("<span style='color: yellow;'>[!] ALERT: Type Confusion Detected!</span>");
+                } else {
+                    log("[INFO] JIT Engine stabilized and re-optimized correctly.");
+                }
+            } catch(e) {
+                log("[!] JIT_CRASH: " + e.message);
+            }
+        };
+    </script>
 </body>
 </html>
