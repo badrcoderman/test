@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<body style="background:#111; color:#0f0; font-family:monospace;">
+    <h3>الكونسول البعيد للـ PS5</h3>
+    <div id="log-container"></div>
+    <script>
+        // تحديث البيانات كل ثانية من السيرفر
+        setInterval(() => {
+            fetch('https://your-server.com/get-logs')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('log-container').innerHTML = 
+                        data.map(d => `[${d.time}] ${d.log}`).join('<br>');
+                });
+        }, 1000);
+    </script>
+</body>
+</html>
