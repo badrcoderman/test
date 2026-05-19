@@ -35,7 +35,8 @@
                         new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
                         
                         debug("Executing Rule Deletion...");
-                        document.getElementById('s').sheet.deleteRule(0);
+                        setTimeout(() => { document.getElementById('s').sheet.deleteRule(0); }, 50);
+
                         
                         debug("Triggering Reflow...");
                         document.body.offsetTop;
