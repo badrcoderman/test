@@ -35,6 +35,9 @@
                         new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
                         
                         debug("Executing Rule Deletion...");
+                        // محاولة إجبار المحرك على إعادة ترتيب الذاكرة (Memory Pressure)
+let junk = new Array(1000).fill(new Uint8Array(0x10000));
+
                         setTimeout(() => { document.getElementById('s').sheet.deleteRule(0); }, 50);
 
                         
