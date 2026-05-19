@@ -1,31 +1,9 @@
 <!DOCTYPE html>
 <html>
-<body>
-    <div id="console" style="background:#000; color:#0f0; font-family:monospace; height:90vh; overflow:auto;"></div>
+<body style="background:black; color:white; font-family:monospace;">
+    <div id="status">جاري الاختبار...</div>
     <script>
-        const logBox = document.getElementById('console');
-        function debug(msg) { logBox.innerHTML += `<div>[${performance.now().toFixed(2)}ms] ${msg}</div>`; }
-
-        window.onload = () => {
-            let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-            document.fonts.add(A);
-            
-            // مصفوفة لنرى هل سيتم الكتابة فوقها
-            let victim = new Uint32Array(0x10);
-            victim.fill(0xDEADBEEF);
-
-            Object.defineProperty(FontFace.prototype, 'then', {
-                configurable: true,
-                get() {
-                    debug("!!! TRAP HIT: Scanning Memory...");
-                    // محاولة قراءة ذاكرة المصفوفة بعد إفسادها
-                    debug("Memory snapshot[0]: " + victim[0].toString(16));
-                    return undefined;
-                }
-            });
-
-            document.fonts.load('1em x', 'AB');
-        };
+        document.getElementById('status').innerHTML = "المتصفح يعمل - JavaScript نشط!";
     </script>
 </body>
 </html>
