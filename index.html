@@ -1,32 +1,18 @@
 <!DOCTYPE html>
 <html>
 <body>
-    <button onclick="exploit()">Execute JIT Spray</button>
+    <button onclick="measure()">Measure Memory Latency</button>
     <div id="status">Status: Ready</div>
     <script>
-        function exploit() {
-            document.getElementById('status').innerText = "Spraying...";
+        function measure() {
+            let buffer = new Uint32Array(1024 * 1024);
+            let start = performance.now();
             
-            // 1. حجز مصفوفة للتحكم في الذاكرة
-            let buffer = new ArrayBuffer(0x1000);
-            let u32 = new Uint32Array(buffer);
+            // محاولة الوصول للذاكرة
+            let val = buffer[0]; 
             
-            // 2. استخدام "خدعة" لعمل Pointer للذاكرة
-            // سنحاول كسر الـ Type Confusion هنا
-            let worker = new Worker(URL.createObjectURL(new Blob([`
-                onmessage = function(e) {
-                    let a = new Uint32Array(100);
-                    postMessage(a);
-                }
-            `])));
-            
-            worker.onmessage = function(e) {
-                // هنا نحاول الوصول للذاكرة بعد تحريرها (UAF)
-                let corrupted = e.data;
-                document.getElementById('status').innerText = "Corruption attempt: " + corrupted[0];
-            };
-            
-            worker.postMessage('start');
+            let end = performance.now();
+            document.getElementById('status').innerText = "Latency: " + (end - start).toFixed(4) + "ms | Value: " + val;
         }
     </script>
 </body>
