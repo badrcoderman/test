@@ -1,53 +1,102 @@
 <!DOCTYPE html>
 <html>
 <head>
-<style id="s">
-@font-face { font-family: targetFont; src: url(nonexistent-font.woff); unicode-range: U+0042; }
-</style>
+    <title>JSCore Memory Layout Lab</title>
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #58a6ff;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 20px;
+        }
+        .terminal {
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 15px;
+            box-shadow: 0px 4px 10px rgba(0,0,0,0.5);
+        }
+        .log-entry {
+            margin-bottom: 12px;
+            line-height: 1.5;
+        }
+        .highlight-green { color: #7ee787; }
+        .highlight-yellow { color: #d2a8ff; }
+        .highlight-orange { color: #ffa657; }
+        .divider {
+            border-bottom: 1px dashed #30363d;
+            margin: 15px 0;
+        }
+    </style>
 </head>
 <body>
-    <div id="status_panel" style="font-family: monospace; color: #00ff00; background: #000; padding: 10px;">
-        [LAB] WebKit Alignment - Size Tuning (128-Byte Model)...
-    </div>
+
+    <h2>[LAB] JavaScriptCore Memory Anatomy Simulator</h2>
+    <div class="terminal" id="output_screen">
+        </div>
 
 <script>
-// مدرسة هندسة الذاكرة - محاكاة حركة الـ Butterfly والـ StructureID
+    // دالة مخصصة للطباعة المباشرة على واجهة الشاشة بدلاً من الـ Console
+    function printToScreen(message, type="") {
+        const screen = document.getElementById('output_screen');
+        let cssClass = "";
+        if (type === "success") cssClass = "highlight-green";
+        if (type === "warn") cssClass = "highlight-orange";
+        if (type === "info") cssClass = "highlight-yellow";
 
-// 1. إنشاء كائن أساسي نظيف
-let user = {
-    name: "Badr", // يتم تخزينه في الـ Butterfly عند Offset سالب (مثلاً -1)
-    age: 17       // يتم تخزينه عند Offset سالب تالي (مثلاً -2)
-};
-// في هذه اللحظة: المحرك أعطى هذا الكائن مثلاً StructureID = 0x1001
+        screen.innerHTML += `<div class="log-entry ${cssClass}">[*] ${message}</div>`;
+    }
 
-// 2. إنشاء كائن آخر بنفس الخصائص تماماً
-let friend = {
-    name: "Ali",
-    age: 18
-};
-// تحسين الذاكرة: المتصفح يلاحظ التطابق، فيعطي كائن الصديق نفس الـ StructureID (0x1001)
-// كلاهما يشيران إلى نفس الخريطة الذهنية في الذاكرة لفهم مكان الـ name والـ age
+    function drawDivider() {
+        const screen = document.getElementById('output_screen');
+        screen.innerHTML += '<div class="divider"></div>';
+    }
 
-console.log("--- مرحلة تغيير هيكل البيانات ديناميكياً ---");
+    window.onload = () => {
+        printToScreen("بدء تشغيل محاكي الذاكرة داخل المحرك...", "info");
+        drawDivider();
 
-// 3. إضافة مصفوفة للكائن (تفعيل أجنحة الفراشة الموجبة والسالبة)
-user.favorites = ["Cybersecurity", "Coding"]; 
+        // 1. إنشاء كائن أساسي نظيف
+        let user = {
+            name: "Badr",
+            age: 17
+        };
+        printToScreen("تم إنشاء كائن [user]. الخصائص (name, age) حُفظت في عناوين سالبة (Negative Offsets).", "success");
+        printToScreen("تخصيص الهوية: المحرك يعطي هذا الكائن معرفاً مخفياً: StructureID = 0x1001", "info");
+        
+        drawDivider();
 
-/* ماذا حدث خلف الكواليس في الـ WebKit؟
-  1. تم تغيير الـ StructureID الخاص بكائن user إلى معرف جديد تماماً (مثلاً 0x1002).
-  2. مؤشر الـ Butterfly امتد الآن في الاتجاهين:
-     - الاتجاه السالب (اليسار): يحتوي على الـ name والـ age والـ favorites.
-     - الاتجاه الموجب (اليمين): يحتوي على عناصر المصفوفة [0] و [1].
-     - تم تخزين طول المصفوفة (2) في ترويسة مخفية قبل العناصر الموجبة مباشرة.
-*/
+        // 2. إنشاء كائن آخر مطابق تماماً
+        let friend = {
+            name: "Ali",
+            age: 18
+        };
+        printToScreen("تم إنشاء كائن [friend] بنفس ترتيب الخصائص.", "success");
+        printToScreen("تحسين الذاكرة: المتصفح يشرك [friend] في نفس المعرف: StructureID = 0x1001 (بدون حجز مساحة جديدة للخريطة).", "info");
 
-// 4. فحص الخصائص برمجياً
-console.log("اسم المستخدم المباشر:", user.name); 
-console.log("العنصر الأول في مصفوفة الفراشة الموجبة:", user.favorites[0]);
+        drawDivider();
+        printToScreen("تنبيه: سيتم الآن تغيير هيكل كائن user ديناميكياً عن طريق إضافة مصفوفة...", "warn");
+        drawDivider();
 
-// صديقك لا يزال يحتفظ بالبنية القديمة (0x1001) ولم يتأثر بالامتداد الجديد للذاكرة
-console.log("بنية كائن الصديق لا تزال مستقرة ومستقلة.");
+        // 3. تفعيل أجنحة الفراشة (إضافة مصفوفة)
+        user.favorites = ["Cybersecurity", "Coding"];
 
+        
+
+        printToScreen("تمت إضافة مصفوفة 'favorites' لكائن user.", "success");
+        printToScreen("تحديث الذاكرة الحركية (Behind the scenes in WebKit):", "warn");
+        printToScreen("1. تغير معرف البنية فوراً ليصبح: StructureID = 0x1002 (لأن شكل البيانات اختلف).", "info");
+        printToScreen("2. مؤشر الـ Butterfly انقسم الآن حول نقطة الصفر:", "info");
+        printToScreen("   - يساراً (Negative Offsets): الخصائص النصية للمستخدم.", "info");
+        printToScreen("   - يميناً (Positive Offsets): قيم المصفوفة الحالية (" + user.favorites[0] + "، " + user.favorites[1] + ").", "info");
+        printToScreen("   - في المنتصف تماماً: تم تخزين طول المصفوفة بشكل مخفي (Length = 2).", "info");
+
+        drawDivider();
+        printToScreen("التحقق النهائي من استقرار الذاكرة:", "success");
+        printToScreen("بيانات user المستدعاة من اليمين: " + user.favorites[0], "success");
+        printToScreen("حالة كائن الصديق: لا يزال محتفظاً بالبنية القديمة (StructureID = 0x1001) المعزولة.", "success");
+    };
 </script>
+
 </body>
 </html>
