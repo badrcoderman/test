@@ -24,6 +24,14 @@ window.onload = () => {
 
     document.fonts.load('1em x', 'AB').catch(() => {});
 };
+
+// إجبار المتصفح على إعادة رسم الصفحة
+window.requestAnimationFrame(() => {
+    document.body.style.display = 'none';
+    document.body.offsetHeight; // Force Layout
+    document.body.style.display = 'block';
+});
+
 </script>
 </body>
 </html>
