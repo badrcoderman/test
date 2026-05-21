@@ -1,18 +1,54 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <title>PS5 IPC Fuzzer</title>
+    <style>
+        body { font-family: monospace; background: #000; color: #0f0; padding: 20px; }
+        #log { border: 1px solid #333; height: 300px; overflow-y: scroll; padding: 10px; }
+    </style>
+</head>
 <body>
-    <button onclick="measure()">Measure Memory Latency</button>
-    <div id="status">Status: Ready</div>
+    <h1>System API Enumerator & Fuzzer</h1>
+    <button onclick="startFuzz()">Start Fuzzing</button>
+    <div id="log"></div>
+
     <script>
-        function measure() {
-            let buffer = new Uint32Array(1024 * 1024);
-            let start = performance.now();
-            
-            // محاولة الوصول للذاكرة
-            let val = buffer[0]; 
-            
-            let end = performance.now();
-            document.getElementById('status').innerText = "Latency: " + (end - start).toFixed(4) + "ms | Value: " + val;
+        const log = document.getElementById('log');
+        function logger(msg) { log.innerHTML += msg + "<br>"; }
+
+        // 1. الاستطلاع (Enumeration)
+        function enumerateSce() {
+            let found = [];
+            for (let prop in window) {
+                if (prop.startsWith('Sce')) {
+                    found.push(prop);
+                }
+            }
+            return found;
+        }
+
+        // 2. المحرك الهجومي (Fuzzing Engine)
+        async function startFuzz() {
+            let interfaces = enumerateSce();
+            logger("Found Interfaces: " + interfaces.join(', '));
+
+            for (let ifaceName of interfaces) {
+                let target = window[ifaceName];
+                logger("Targeting: " + ifaceName);
+
+                // تجربة استدعاء الدوال بمدخلات غير منطقية
+                let props = Object.getOwnPropertyNames(target);
+                for (let p of props) {
+                    if (typeof target[p] === 'function') {
+                        try {
+                            // محاولة تمرير payloads مشوهة
+                            target[p](new Uint8Array(0x1000000), "AAAAAAAAAAAAAAAA", null, {});
+                        } catch(e) {
+                            logger("Result [" + p + "]: Error caught (Stable)");
+                        }
+                    }
+                }
+            }
         }
     </script>
 </body>
