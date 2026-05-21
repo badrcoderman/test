@@ -60,6 +60,10 @@ window.onload = () => {
 
     setTimeout(() => {
         updateStatus("Sequence complete. Observation phase active.");
+        // أضف هذا السطر بعد الرسائل الخضراء مباشرة
+updateStatus("حالة الذاكرة: " + (window.performance && window.performance.memory ? "متاحة" : "محمية"));
+console.log("Memory Layout Check: ", typeof A); // لنرى هل لا يزال الكائن A موجوداً أم أصبح "Undefined"
+
     }, 500);
 };
 </script>
