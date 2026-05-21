@@ -5,26 +5,25 @@
 <body>
     
 <script>
-    function testAPI(name) {
-        let start = performance.now();
-        try {
-            // محاولة الوصول للكائن
-            let obj = window[name];
-            let end = performance.now();
-            
-            // إذا كان الكائن موجوداً، الـ Access يكون أسرع من الـ Error
-            if (end - start < 0.01) {
-                document.body.style.backgroundColor = "green"; // إشارة نجاح (مخفية)
-                alert("Found: " + name); 
+    function probeInterface(ifaceName) {
+        let obj = window[ifaceName];
+        let methods = [];
+        
+        // استخراج جميع الدوال المتاحة داخل الواجهة
+        for (let prop in obj) {
+            if (typeof obj[prop] === 'function') {
+                methods.push(prop);
             }
-        } catch(e) {}
+        }
+        
+        // إظهار النتائج عبر التنبيه
+        alert("Interface: " + ifaceName + " | Methods: " + methods.join(', '));
     }
 
-    // سنختبر أسماء معروفة في أنظمة FreeBSD/WebKit
-    testAPI('SceShell');
-    testAPI('SceDownload');
-    testAPI('navigator');
+    probeInterface('SceShell');
+    probeInterface('SceDownload');
 </script>
+
 
 
 </body>
