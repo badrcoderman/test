@@ -2,7 +2,7 @@
 <html>
 <head>
     <style id="s">
-        @font-face { font-family: 'x'; src: url(https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Me5WZK.woff2); }
+        @font-face { font-family: 'x'; src: url(data:font/woff2;base64,d09GMgABAAAAA); }
     </style>
 </head>
 <body>
@@ -11,22 +11,23 @@
     <script>
         const debug = document.getElementById('debug');
 
-        // إنشاء كائن FontFace جديد وإضافة الخاصية عليه مباشرة قبل تحميله
-        // هذا يتجنب التلاعب المباشر بـ Prototype الأساسي
         function trigger() {
-            let A = new FontFace('x', 'url(https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Me5WZK.woff2)');
+            // بيانات وهمية للخط
+            let A = new FontFace('x', 'url(data:font/woff2;base64,d09GMgABAAAAA)');
             
-            // حقن الـ then مباشرة في الكائن وليس في الـ Prototype
-            A.then = function(onFulfilled, onRejected) {
+            // حقن مباشر
+            A.then = function(resolve, reject) {
                 debug.innerText = "Intercepted!";
+                // الحذف هنا
                 document.getElementById('s').sheet.deleteRule(0);
-                return Promise.prototype.then.call(this, onFulfilled, onRejected);
+                return Promise.prototype.then.call(this, resolve, reject);
             };
 
             document.fonts.add(A);
             
+            // تحميل الخط
             A.load().then(() => {
-                debug.innerText = "Finished successfully.";
+                debug.innerText = "Done!";
             }).catch((e) => {
                 debug.innerText = "Caught: " + e.message;
             });
