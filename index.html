@@ -5,24 +5,24 @@
 <body>
     
 <script>
-    function probeInterface(ifaceName) {
-        let obj = window[ifaceName];
-        let methods = [];
-        
-        // استخراج جميع الدوال المتاحة داخل الواجهة
-        for (let prop in obj) {
-            if (typeof obj[prop] === 'function') {
-                methods.push(prop);
+    function blindCall(ifaceName, methodName) {
+        try {
+            if (window[ifaceName] && typeof window[ifaceName][methodName] === 'function') {
+                window[ifaceName][methodName]();
+                alert("Triggered: " + ifaceName + "." + methodName);
             }
+        } catch(e) {
+            // تجاهل الأخطاء العادية
         }
-        
-        // إظهار النتائج عبر التنبيه
-        alert("Interface: " + ifaceName + " | Methods: " + methods.join(', '));
     }
 
-    probeInterface('SceShell');
-    probeInterface('SceDownload');
+    // محاولة استدعاء دوال شائعة (تخمين)
+    blindCall('SceShell', 'getShellStatus');
+    blindCall('SceShell', 'update');
+    blindCall('SceDownload', 'start');
+    blindCall('SceDownload', 'status');
 </script>
+
 
 
 
