@@ -1,40 +1,25 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <style>
-        body { background: #1a1a1a; color: #00ff00; font-family: monospace; padding: 20px; }
-        #log { border: 1px solid #333; padding: 10px; height: 300px; overflow-y: scroll; }
-    </style>
-</head>
 <body>
-    <h3>Memory Layout Probe</h3>
-    <div id="log"></div>
-
+    <div id="status">Grooming Heap...</div>
     <script>
-        function log(msg) {
-            document.getElementById('log').innerHTML += msg + "<br>";
-        }
-
-        function probeMemory() {
-            let objects = [];
-            let sizes = [0x100, 0x1000, 0x10000];
-            
-            log("Starting memory probe...");
-            
-            try {
-                for (let size of sizes) {
-                    for (let i = 0; i < 50; i++) {
-                        objects.push(new Uint8Array(size));
-                    }
-                    log("Allocated block size: " + size.toString(16) + " bytes");
-                }
-                log("Probe complete. Memory allocated: " + (objects.length * 65536 / 1024 / 1024) + " MB");
-            } catch(e) {
-                log("Memory limit reached at: " + objects.length);
+        function groom() {
+            let fillers = [];
+            // 1. تصفيف الذاكرة بكتل ثابتة الحجم (0x1000)
+            // هذا يخلق "شبكة" منتظمة في الذاكرة
+            for (let i = 0; i < 500; i++) {
+                fillers.push(new Uint8Array(0x1000));
             }
+            
+            // 2. إحداث "ثقوب" (نحذف كل عنصر ثاني)
+            for (let i = 0; i < 500; i += 2) {
+                fillers[i] = null; 
+            }
+            
+            document.getElementById('status').innerHTML = "Heap Groomed. Holes created.";
+            console.log("Heap groomed successfully.");
         }
-
-        probeMemory();
+        groom();
     </script>
 </body>
 </html>
