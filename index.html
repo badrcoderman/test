@@ -3,21 +3,29 @@
 <title>Hook</title>
 </head>
 <body>
-
+    
 <script>
-    function sendToRemote(data) {
-        fetch('https://webhook.site/6111dfaf-6540-4e7c-a774-27883c7b3ea9?data=' + encodeURIComponent(JSON.stringify(data)));
+    function testAPI(name) {
+        let start = performance.now();
+        try {
+            // محاولة الوصول للكائن
+            let obj = window[name];
+            let end = performance.now();
+            
+            // إذا كان الكائن موجوداً، الـ Access يكون أسرع من الـ Error
+            if (end - start < 0.01) {
+                document.body.style.backgroundColor = "green"; // إشارة نجاح (مخفية)
+                alert("Found: " + name); 
+            }
+        } catch(e) {}
     }
 
-    let results = {
-        windowProps: Object.getOwnPropertyNames(window),
-        navigatorProps: Object.getOwnPropertyNames(navigator),
-        documentProps: Object.getOwnPropertyNames(document)
-    };
-
-    // نرسل كل شيء لنرى ما إذا كان هناك شيء مخفي
-    sendToRemote(results);
+    // سنختبر أسماء معروفة في أنظمة FreeBSD/WebKit
+    testAPI('SceShell');
+    testAPI('SceDownload');
+    testAPI('navigator');
 </script>
+
 
 </body>
 </html>
