@@ -2,27 +2,20 @@
 <html>
 <body>
     <script>
-        // 1. الخلطة العجيبة: مصفوفة مضللة (Type Confusion Setup)
-        let arb = new Uint32Array(10);
-        let obj = { a: 1 };
+        // استخدام عداد دقيق جداً (Performance API)
+        const start = performance.now();
         
-        // 2. إجبار الـ JIT على تحسين الكود بناءً على افتراض خاطئ
-        function confuse(arr, val) {
-            arr[0] = val; // هنا سيقوم المحرك بتحسين الكود
+        // محاولة الوصول لخاصية محمية
+        let x = {};
+        for(let i = 0; i < 1000000; i++) {
+            x.y = i;
         }
         
-        // 3. التفعيل الهجين:
-        // بدلاً من حذف الخطوط، سنقوم بتغيير نوع المصفوفة ديناميكياً 
-        // أثناء عمل الـ JIT Compiler
-        for (let i = 0; i < 10000; i++) {
-            confuse(arb, 1.1); // إرسال أرقام عشرية لإجبار المحرك على التحويل
-        }
-
-        // 4. الحقن: الآن المصفوفة تعتقد أنها تحمل أرقاماً، لكننا نرسل لها كائنات
-        confuse(arb, obj);
+        const end = performance.now();
+        const duration = end - start;
         
-        // إذا نجحت الخلطة، ستتمكن 'arb' من قراءة الـ Pointers داخل 'obj'
-        alert("Memory Corruption Triggered: " + arb[0].toString(16));
+        // إذا كان الوقت أقل من المعتاد، فهذا يعني أننا نرى الذاكرة (Memory Leak)
+        document.body.innerHTML = "Performance measured: " + duration + " ms";
     </script>
 </body>
 </html>
