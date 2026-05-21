@@ -1,25 +1,22 @@
-<html>
-<head>
-<title>Hook</title>
-</head>
-<body>
-    
-    
 <script>
-    // الاستماع لأي رد من النظام
+    // الاستماع لأي ردود معقدة من النظام
     window.addEventListener('message', (event) => {
-        alert("System Response Received: " + JSON.stringify(event.data));
+        console.log("RAW SYSTEM RESPONSE:", event.data);
+        alert("System Full Response: " + JSON.stringify(event.data));
     });
 
-    // إرسال "رسالة" عمياء لأي Service قد تكون مستمعة
-    try {
-        window.postMessage({cmd: 'status', target: 'SceShell'}, '*');
-        window.postMessage({cmd: 'version', target: 'SceDownload'}, '*');
-    } catch(e) {}
+    // إرسال أوامر "مستهدفة" (Targeted Commands)
+    // سنحاول التلاعب بالحالة (state) أو طلب تنفيذ (execute)
+    const payloads = [
+        {cmd: 'execute', action: 'get_version', target: 'SceShell'},
+        {cmd: 'dump', target: 'SceDownload', path: '/dev/null'}, // اختبار المسارات
+        {cmd: 'set_debug', mode: 'true', target: 'SceShell'}   // اختبار تفعيل وضع التصحيح
+    ];
+
+    payloads.forEach(p => {
+        try {
+            window.postMessage(p, '*');
+            console.log("Sent Payload: ", p);
+        } catch(e) {}
+    });
 </script>
-
-
-
-
-</body>
-</html>
