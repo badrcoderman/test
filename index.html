@@ -1,31 +1,40 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <style>
+        body { background: #1a1a1a; color: #00ff00; font-family: monospace; padding: 20px; }
+        #log { border: 1px solid #333; padding: 10px; height: 300px; overflow-y: scroll; }
+    </style>
 </head>
 <body>
- <script>
-    // سكربت استطلاع لبنية الذاكرة
-    function probeMemory() {
-        let objects = [];
-        let sizes = [0x100, 0x1000, 0x10000]; // أحجام كتل مختلفة
-        
-        console.log("Starting memory probe...");
-        
-        try {
-            for (let size of sizes) {
-                for (let i = 0; i < 50; i++) {
-                    // إنشاء مصفوفات بسيطة لرؤية كيف يتم تخصيصها
-                    objects.push(new Uint8Array(size));
-                }
-            }
-            console.log("Probe complete. Memory allocated: " + objects.length * 65536 + " bytes");
-        } catch(e) {
-            console.log("Memory limit reached at: " + objects.length);
+    <h3>Memory Layout Probe</h3>
+    <div id="log"></div>
+
+    <script>
+        function log(msg) {
+            document.getElementById('log').innerHTML += msg + "<br>";
         }
-    }
 
-    probeMemory();
-</script>
+        function probeMemory() {
+            let objects = [];
+            let sizes = [0x100, 0x1000, 0x10000];
+            
+            log("Starting memory probe...");
+            
+            try {
+                for (let size of sizes) {
+                    for (let i = 0; i < 50; i++) {
+                        objects.push(new Uint8Array(size));
+                    }
+                    log("Allocated block size: " + size.toString(16) + " bytes");
+                }
+                log("Probe complete. Memory allocated: " + (objects.length * 65536 / 1024 / 1024) + " MB");
+            } catch(e) {
+                log("Memory limit reached at: " + objects.length);
+            }
+        }
 
+        probeMemory();
+    </script>
 </body>
 </html>
