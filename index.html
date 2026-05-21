@@ -1,17 +1,23 @@
+<html>
+<head>
+<title>Hook</title>
+</head>
+<body>
+
 <script>
     function sendToRemote(data) {
-        // نرسل البيانات كـ Request إلى السيرفر الخاص بنا
         fetch('https://webhook.site/6111dfaf-6540-4e7c-a774-27883c7b3ea9?data=' + encodeURIComponent(JSON.stringify(data)));
     }
 
-    // استطلاع الـ APIs وإرسالها
-    let sceInterfaces = [];
-    for (let prop in window) {
-        if (prop.startsWith('Sce')) {
-            sceInterfaces.push(prop);
-        }
-    }
-    
-    // إرسال القائمة فوراً
-    sendToRemote(sceInterfaces);
+    let results = {
+        windowProps: Object.getOwnPropertyNames(window),
+        navigatorProps: Object.getOwnPropertyNames(navigator),
+        documentProps: Object.getOwnPropertyNames(document)
+    };
+
+    // نرسل كل شيء لنرى ما إذا كان هناك شيء مخفي
+    sendToRemote(results);
 </script>
+
+</body>
+</html>
