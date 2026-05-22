@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>تتبع الحالة الزمنية المستقرة</title>
+    <title>بيئة الفحص الآمنة والمستقرة</title>
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
         #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
@@ -17,11 +17,12 @@
 </head>
 <body>
 
-    <h2>مراقبة تتبع دورة حياة كائن الخط (Lifecycle Instrumentation)</h2>
-    <div id="custom-console">[نظام المحاكاة نشط]: في انتظار استقرار المستند...</div>
+    <h2>مراقبة مسار معالجة الخطوط - النسخة المستقرة</h2>
+    <div id="custom-console">[نظام المحاكاة]: في انتظار استقرار المستند...</div>
 
     <script>
         const consoleElement = document.getElementById('custom-console');
+        
         function screenLog(msg, type = "normal") {
             const entry = document.createElement('div');
             if (type === "warn") entry.className = 'log warn';
@@ -32,38 +33,41 @@
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
 
-        function runLifecycleTracking() {
+        function runSafeAnalysis() {
             consoleElement.innerHTML = "";
-            screenLog("بدء تشغيل تتبع الحالة النظيفة...");
+            screenLog("بدء تشغيل الفحص الآمن (منع الجمود)...");
 
             try {
+                // إعداد كائن الخط الأساسي
                 let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
                 document.fonts.add(A);
                 void A.loaded;
 
                 let fired = false;
 
+                // إعداد المقاطعة الآمنة
                 Object.defineProperty(FontFace.prototype, 'then', {
                     configurable: true,
                     get() {
                         if (!fired && this === A) {
                             fired = true;
-                            screenLog("!! تم تنشيط المقاطعة بنجاح !!", "warn");
-                            screenLog("الحالة البدئية للخط: " + A.status);
+                            screenLog("!! تم تفعيل المقاطعة بنجاح !!", "warn");
                             
-                            try {
-                                document.getElementById('s').sheet.deleteRule(0);
-                                screenLog("تم حذف قاعدة التنسيق.");
-                            } catch(e) { screenLog("خطأ الحذف: " + e.message, "warn"); }
-                            
-                            // فحص تتبعي على مراحل زمنية قصيرة جداً لمراقبة سلوك المحرك دون إرهاق الذاكرة
-                            let checks = [10, 30, 50, 100];
-                            checks.forEach((delay) => {
-                                setTimeout(() => {
-                                    let offset = document.body.offsetTop;
-                                    screenLog(`بعد ${delay} ملي ثانية - حالة الخط: ${A.status} | الـ Offset: ${offset}`, "success");
-                                }, delay);
-                            });
+                            // حل مشكلة الجمود: تأجيل الحذف إلى الدورة التالية للـ Event Loop
+                            setTimeout(() => {
+                                try {
+                                    document.getElementById('s').sheet.deleteRule(0);
+                                    screenLog("تم حذف القاعدة التنسيقية بأمان بعد استقرار المسار الطبيعي.");
+                                } catch(e) { 
+                                    screenLog("خطأ أثناء الحذف: " + e.message, "warn"); 
+                                }
+                            }, 0);
+
+                            // تتبع الحالة بعد مهلة قصيرة
+                            setTimeout(() => {
+                                let offset = document.body.offsetTop;
+                                screenLog(`التحقق النهائي - حالة الخط: ${A.status} | الـ Offset: ${offset}`, "success");
+                            }, 50);
                         }
                         return function(resolve) { if (resolve) resolve(); };
                     }
@@ -73,12 +77,14 @@
                 document.fonts.load('1em x', 'AB');
 
             } catch (err) {
-                screenLog("خطأ عام: " + err.message, "warn");
+                screenLog("خطأ عام في النظام: " + err.message, "warn");
             }
         }
 
+        // تشغيل الكود بعد التأكد من تحميل الصفحة بالكامل
         window.onload = () => {
-            setTimeout(runLifecycleTracking, 1500);
+            screenLog("تم تحميل المستند. جاري الانتظار للاستقرار البدئي...");
+            setTimeout(runSafeAnalysis, 1000);
         };
     </script>
 </body>
