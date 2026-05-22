@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>JSC JIT Subsystem Diagnostic</title>
+    <title>JSC JIT Structure Transition Blueprint</title>
 </head>
 <body>
-    <h3 id="status">Initializing JSC Test...</h3>
+    <h3 id="status">Testing Structure Transitions...</h3>
     <div id="log"></div>
 
     <script>
@@ -12,45 +12,45 @@
             document.getElementById("log").innerHTML += msg + "<br>";
         }
 
-        // 1. الدالة المستهدفة للتحسين (Target Function)
-        // نريد مراقبة كيف يفترض الـ JIT نوع المدخلات
-        function read_array_element(arr, index) {
-            return arr[index];
+        // دالة تحاكي التعامل مع الأوفست (ByOffset)
+        function getPropertyByOffset(obj) {
+            return obj.p3;
         }
 
         window.onload = function() {
-            // إنشاء مصفوفة من الأرقام العشرية (تخزن كـ Unboxed Doubles في الـ Butterfly)
-            let doubleArray = [1.1, 2.2, 3.3, 4.4, 5.5];
+            logger("Step 1: Creating a specific Structure Transition Chain...");
+
+            // بناء سلسلة تحولات (Transitions) متطابقة تجعل الـ JIT يحفظ التصميم (Layout)
+            let arr = [];
+            for (let i = 0; i < 100; i++) {
+                let o = {};
+                o.p1 = 1.1;
+                o.p2 = 2.2;
+                o.p3 = i + 0.3; // تعبئة أرقام عشرية ثابتة
+                arr.push(o);
+            }
+
+            logger("Step 2: Warming up the compiler on the Transition Chain...");
+            // إحماء الدالة لتبدأ مرحلة الـ Speculation على الأوفست الخاص بـ p3
+            for (let i = 0; i < 40000; i++) {
+                getPropertyByOffset(arr[i % 100]);
+            }
+
+            logger("Step 3: Simulating Type Break on the specific Layout...");
+            // إنشاء كائن يكسر التصميم المفترض عن طريق تغيير نوع الخاصية p3 إلى كائن بدلاً من رقم
+            let corruptedObj = {};
+            corruptedObj.p1 = 1.1;
+            corruptedObj.p2 = 2.2;
+            corruptedObj.p3 = { target: "Badr" }; // كسر النوع هنا
+
+            let finalResult = getPropertyByOffset(corruptedObj);
+            logger("Final Result Type: " + typeof finalResult);
             
-            logger("Starting JIT Warmup (Baseline -> DFG)...");
-
-            // 2. مرحلة الإحماء (Warmup Phase)
-            // استدعاء الدالة آلاف المرات لإجبار DFG JIT على تحسينها بناءً على فرضية الـ Double
-            for (let i = 0; i < 50000; i++) {
-                read_array_element(doubleArray, 0);
+            if (typeof finalResult === "object") {
+                logger("Successfully read object through transition check: " + finalResult.target);
             }
 
-            logger("Warmup complete. JIT compiler optimized the function.");
-
-            // 3. اختبار الفرضية (Speculation Guard Check)
-            // سنحاول الآن تمرير كائن بدلاً من الرقم لمعرفة هل يقوم المحرك بـ OSR Exit آمن أم يعلق
-            try {
-                let complexObject = { propertyA: "Badr" };
-                let mixedArray = [complexObject, 2.2, 3.3];
-
-                // استدعاء الدالة المحسنة بمدخلات مغايرة للنوع المفترض
-                let result = read_array_element(mixedArray, 0);
-                
-                logger("Execution after type modification: " + typeof result);
-                if (typeof result === "object") {
-                    logger("Result Value: " + result.propertyA);
-                }
-                
-                document.getElementById("status").innerHTML = "Test Finished Safely.";
-            } catch (e) {
-                logger("Exception caught: " + e.message);
-                document.getElementById("status").innerHTML = "Test Aborted via Exception.";
-            }
+            document.getElementById("status").innerHTML = "Structure Transition Test Complete.";
         };
     </script>
 </body>
