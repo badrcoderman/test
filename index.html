@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>JSC JIT Optimization Boundary Exploration</title>
+    <title>JSC Dynamic Butterfly Boundary Exploration</title>
 </head>
 <body>
-    <h3 id="status">Testing Optimization Boundaries...</h3>
+    <h3 id="status">Testing Butterfly Resizing Boundaries...</h3>
     <div id="log"></div>
 
     <script>
@@ -12,39 +12,29 @@
             document.getElementById("log").innerHTML += msg + "<br>";
         }
 
-        // دالة نضعها داخل حلقة ضغط برمجية لمراقبة سلوك التخمين (Speculation)
-        function optimizeAndInvalidate(obj, toggle) {
-            // عملية منطقية تعتمد على نوع المدخل ديناميكياً
-            if (toggle) {
-                return obj.f1 + 1.1;
-            } else {
-                return obj.f1;
-            }
+        // دالة تجبر المحرك على توسيع المصفوفة ديناميكياً بناءً على مؤشر متغير
+        function resizeButterfly(arr, index, value) {
+            arr[index] = value;
         }
 
         window.onload = function() {
-            logger("Step 1: Preparing contrasting structure types...");
+            logger("Step 1: Initializing Baseline Arrays...");
             
-            // نوعان مختلفان تماماً من الكائنات لإرباك الـ Speculation Profile
-            let typeDouble = { f1: 2.2 };
-            let typeObject = { f1: { name: "Badr" } };
-
             let start = performance.now();
-            logger("Step 2: Triggering Rapid Optimization / Invalidation Loop...");
-
-            // حلقة ضخمة تقوم بالتناوب السريع جداً بين إجبار الـ JIT على التحسين 
-            // ثم إجباره فوراً على الـ OSR Exit ومراقبة استقرار الأداء
-            for (let i = 0; i < 100000; i++) {
-                if (i % 2 === 0) {
-                    optimizeAndInvalidate(typeDouble, true);
-                } else {
-                    optimizeAndInvalidate(typeObject, false);
-                }
+            
+            // حلقة تقوم بإنشاء مصفوفات وتوسيع حجمها بشكل مفاجئ وغير متوقع للـ JIT
+            // لمعرفة كيف يتم إدارة الـ Memory Allocation داخلياً
+            for (let i = 0; i < 20000; i++) {
+                let testArray = [1.1, 2.2, 3.3]; // مصفوفة صغيرة ثابتة
+                
+                // دفع الـ JIT لتوسيع الـ Butterfly بشكل مفاجئ بمقدار أوفست كبير
+                // هذا يجبر المحرك على نقل عناصر الـ Butterfly في الذاكرة
+                resizeButterfly(testArray, i % 50 ? 4 : 500, i + 0.5);
             }
 
             let end = performance.now();
-            logger("Boundary Test Complete in: " + (end - start).toFixed(2) + " ms");
-            document.getElementById("status").innerHTML = "Boundary Exploration Finished.";
+            logger("Resizing Boundary Test Complete in: " + (end - start).toFixed(2) + " ms");
+            document.getElementById("status").innerHTML = "Butterfly Exploration Finished.";
         };
     </script>
 </body>
