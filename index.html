@@ -1,21 +1,57 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <title>JSC JIT Subsystem Diagnostic</title>
+</head>
 <body>
+    <h3 id="status">Initializing JSC Test...</h3>
+    <div id="log"></div>
+
     <script>
-        // استخدام عداد دقيق جداً (Performance API)
-        const start = performance.now();
-        
-        // محاولة الوصول لخاصية محمية
-        let x = {};
-        for(let i = 0; i < 1000000; i++) {
-            x.y = i;
+        function logger(msg) {
+            document.getElementById("log").innerHTML += msg + "<br>";
         }
-        
-        const end = performance.now();
-        const duration = end - start;
-        
-        // إذا كان الوقت أقل من المعتاد، فهذا يعني أننا نرى الذاكرة (Memory Leak)
-        document.body.innerHTML = "Performance measured: " + duration + " ms";
+
+        // 1. الدالة المستهدفة للتحسين (Target Function)
+        // نريد مراقبة كيف يفترض الـ JIT نوع المدخلات
+        function read_array_element(arr, index) {
+            return arr[index];
+        }
+
+        window.onload = function() {
+            // إنشاء مصفوفة من الأرقام العشرية (تخزن كـ Unboxed Doubles في الـ Butterfly)
+            let doubleArray = [1.1, 2.2, 3.3, 4.4, 5.5];
+            
+            logger("Starting JIT Warmup (Baseline -> DFG)...");
+
+            // 2. مرحلة الإحماء (Warmup Phase)
+            // استدعاء الدالة آلاف المرات لإجبار DFG JIT على تحسينها بناءً على فرضية الـ Double
+            for (let i = 0; i < 50000; i++) {
+                read_array_element(doubleArray, 0);
+            }
+
+            logger("Warmup complete. JIT compiler optimized the function.");
+
+            // 3. اختبار الفرضية (Speculation Guard Check)
+            // سنحاول الآن تمرير كائن بدلاً من الرقم لمعرفة هل يقوم المحرك بـ OSR Exit آمن أم يعلق
+            try {
+                let complexObject = { propertyA: "Badr" };
+                let mixedArray = [complexObject, 2.2, 3.3];
+
+                // استدعاء الدالة المحسنة بمدخلات مغايرة للنوع المفترض
+                let result = read_array_element(mixedArray, 0);
+                
+                logger("Execution after type modification: " + typeof result);
+                if (typeof result === "object") {
+                    logger("Result Value: " + result.propertyA);
+                }
+                
+                document.getElementById("status").innerHTML = "Test Finished Safely.";
+            } catch (e) {
+                logger("Exception caught: " + e.message);
+                document.getElementById("status").innerHTML = "Test Aborted via Exception.";
+            }
+        };
     </script>
 </body>
 </html>
