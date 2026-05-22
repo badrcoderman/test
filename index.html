@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>فحص المسار الصافي - تفكيك الجمود</title>
+    <title>تتبع الحالة الزمنية المستقرة</title>
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
         #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
@@ -17,7 +17,7 @@
 </head>
 <body>
 
-    <h2>مراقبة مسار معالجة الخطوط الصافي (Minimal Target Loop)</h2>
+    <h2>مراقبة تتبع دورة حياة كائن الخط (Lifecycle Instrumentation)</h2>
     <div id="custom-console">[نظام المحاكاة نشط]: في انتظار استقرار المستند...</div>
 
     <script>
@@ -32,51 +32,44 @@
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
 
-        var control_storage = [];
-
-        function runMinimalAnalysis() {
+        function runLifecycleTracking() {
             consoleElement.innerHTML = "";
-            screenLog("بدء تشغيل الفحص النظيف (بدون حشو مسبق)...");
+            screenLog("بدء تشغيل تتبع الحالة النظيفة...");
 
             try {
-                // إعداد الكائن المستهدف مباشرة لضمان سلامة الـ Heap البدئي
                 let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
                 document.fonts.add(A);
                 void A.loaded;
 
                 let fired = false;
 
-                // كمين المقاطعة المنطقية المستقر
                 Object.defineProperty(FontFace.prototype, 'then', {
                     configurable: true,
                     get() {
                         if (!fired && this === A) {
                             fired = true;
-                            screenLog("!! تم رصد وتفعيل المقاطعة بنجاح !!", "warn");
+                            screenLog("!! تم تنشيط المقاطعة بنجاح !!", "warn");
+                            screenLog("الحالة البدئية للخط: " + A.status);
                             
                             try {
-                                // تدمير القاعدة التنسيقية لتوليد الفجوة الهيكلية
                                 document.getElementById('s').sheet.deleteRule(0);
-                                screenLog("تم حذف القاعدة التنسيقية بنجاح.");
+                                screenLog("تم حذف قاعدة التنسيق.");
                             } catch(e) { screenLog("خطأ الحذف: " + e.message, "warn"); }
                             
-                            // تخصيص عنصرين فقط كعينة فحص نوعية بحجم متوافق (0xb8) لمنع الـ OOM والجمود
-                            screenLog("حقن عينة فحص مصغرة جداً في الـ Heap...");
-                            control_storage.push(new FontFace("target1", "", {}));
-                            control_storage.push(new FontFace("target2", "", {}));
-                            
-                            // إغلاق الدالة وتمرير التنفيذ فوراً دون تأخير
-                            setTimeout(() => {
-                                screenLog("محاولة قراءة الـ Offset بعد خروج المكدس...");
-                                let offset = document.body.offsetTop;
-                                screenLog("قيمة الـ Offset المسترجعة: " + offset);
-                            }, 30);
+                            // فحص تتبعي على مراحل زمنية قصيرة جداً لمراقبة سلوك المحرك دون إرهاق الذاكرة
+                            let checks = [10, 30, 50, 100];
+                            checks.forEach((delay) => {
+                                setTimeout(() => {
+                                    let offset = document.body.offsetTop;
+                                    screenLog(`بعد ${delay} ملي ثانية - حالة الخط: ${A.status} | الـ Offset: ${offset}`, "success");
+                                }, delay);
+                            });
                         }
                         return function(resolve) { if (resolve) resolve(); };
                     }
                 });
 
-                screenLog("إطلاق طلب المعالجة المباشر عبر الـ Layout Pipeline...");
+                screenLog("إرسال طلب التحميل إلى الـ Layout Pipeline...");
                 document.fonts.load('1em x', 'AB');
 
             } catch (err) {
@@ -85,8 +78,7 @@
         }
 
         window.onload = () => {
-            screenLog("تم تحميل الصفحة تماماً. الانتظار 1.5 ثانية للاستقرار...");
-            setTimeout(runMinimalAnalysis, 1500);
+            setTimeout(runLifecycleTracking, 1500);
         };
     </script>
 </body>
