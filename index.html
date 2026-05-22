@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>JSC Dynamic Butterfly Boundary Exploration</title>
+    <title>JSC GC Heap Pressure Exploration</title>
 </head>
 <body>
-    <h3 id="status">Testing Butterfly Resizing Boundaries...</h3>
+    <h3 id="status">Testing GC Heap Pressure...</h3>
     <div id="log"></div>
 
     <script>
@@ -12,29 +12,33 @@
             document.getElementById("log").innerHTML += msg + "<br>";
         }
 
-        // دالة تجبر المحرك على توسيع المصفوفة ديناميكياً بناءً على مؤشر متغير
-        function resizeButterfly(arr, index, value) {
-            arr[index] = value;
-        }
-
         window.onload = function() {
-            logger("Step 1: Initializing Baseline Arrays...");
+            logger("Step 1: Preparing Heavy Butterfly Discarding Loop...");
             
             let start = performance.now();
-            
-            // حلقة تقوم بإنشاء مصفوفات وتوسيع حجمها بشكل مفاجئ وغير متوقع للـ JIT
-            // لمعرفة كيف يتم إدارة الـ Memory Allocation داخلياً
-            for (let i = 0; i < 20000; i++) {
-                let testArray = [1.1, 2.2, 3.3]; // مصفوفة صغيرة ثابتة
+            let lastCheck = start;
+
+            // حلقة ضخمة تقوم بإنشاء وتدمير مصفوفات بشكل متسارع جداً 
+            // لخلق ضغط عالي على الـ MarkedSpace (Heap Pressure)
+            for (let i = 0; i < 60000; i++) {
+                // إنشاء مصفوفة ونقلها فوراً ليتم هجر العنوان القديم
+                let discardableArray = [1.1, 2.2, 3.3];
+                discardableArray[1000] = i + 0.5; 
                 
-                // دفع الـ JIT لتوسيع الـ Butterfly بشكل مفاجئ بمقدار أوفست كبير
-                // هذا يجبر المحرك على نقل عناصر الـ Butterfly في الذاكرة
-                resizeButterfly(testArray, i % 50 ? 4 : 500, i + 0.5);
+                // تفريغ المؤشر ليصبح جاهزاً للـ GC
+                discardableArray = null;
+
+                // رصد الوقت كل 15000 تكرار لمعرفة هل يحدث تباطؤ مفاجئ (GC Pause)
+                if (i % 15000 === 0 && i > 0) {
+                    let now = performance.now();
+                    logger("Checkpoint at " + i + ": " + (now - lastCheck).toFixed(2) + " ms");
+                    lastCheck = now;
+                }
             }
 
             let end = performance.now();
-            logger("Resizing Boundary Test Complete in: " + (end - start).toFixed(2) + " ms");
-            document.getElementById("status").innerHTML = "Butterfly Exploration Finished.";
+            logger("GC Pressure Test Finished Total Time: " + (end - start).toFixed(2) + " ms");
+            document.getElementById("status").innerHTML = "GC Exploration Complete.";
         };
     </script>
 </body>
