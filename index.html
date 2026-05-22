@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>JSC GC Heap Pressure Exploration</title>
+    <title>JSC Composite Heap & JIT Exploration</title>
 </head>
 <body>
-    <h3 id="status">Testing GC Heap Pressure...</h3>
+    <h3 id="status">Testing Composite Boundaries...</h3>
     <div id="log"></div>
 
     <script>
@@ -12,33 +12,38 @@
             document.getElementById("log").innerHTML += msg + "<br>";
         }
 
+        // دالة الدمج: تغيير حجم المصفوفة لخلق نفاذ ونقل للـ Butterfly
+        function compositeTrigger(arr, index, value) {
+            arr[index] = value;
+        }
+
         window.onload = function() {
-            logger("Step 1: Preparing Heavy Butterfly Discarding Loop...");
+            logger("Step 1: Starting Composite Stress Loop (JIT + Butterfly + GC)...");
             
             let start = performance.now();
             let lastCheck = start;
 
-            // حلقة ضخمة تقوم بإنشاء وتدمير مصفوفات بشكل متسارع جداً 
-            // لخلق ضغط عالي على الـ MarkedSpace (Heap Pressure)
-            for (let i = 0; i < 60000; i++) {
-                // إنشاء مصفوفة ونقلها فوراً ليتم هجر العنوان القديم
-                let discardableArray = [1.1, 2.2, 3.3];
-                discardableArray[1000] = i + 0.5; 
+            for (let i = 0; i < 40000; i++) {
+                // 1. خلق مصفوفة ديناميكية (تستهلك ذاكرة وتترك مخلفات للـ GC)
+                let targetArray = [1.1, 2.2, 3.3];
                 
-                // تفريغ المؤشر ليصبح جاهزاً للـ GC
-                discardableArray = null;
+                // 2. إجبار الـ JIT على عملية نقل وتوسيع مفاجئة للـ Butterfly
+                compositeTrigger(targetArray, i % 100 === 0 ? 600 : 4, i + 0.5);
+                
+                // 3. تصفير المؤشر لخلق ضغط تنظيف فوري
+                targetArray = null;
 
-                // رصد الوقت كل 15000 تكرار لمعرفة هل يحدث تباطؤ مفاجئ (GC Pause)
-                if (i % 15000 === 0 && i > 0) {
+                // رصد المؤشرات الزمنية المركبة
+                if (i % 10000 === 0 && i > 0) {
                     let now = performance.now();
-                    logger("Checkpoint at " + i + ": " + (now - lastCheck).toFixed(2) + " ms");
+                    logger("Composite Check at " + i + ": " + (now - lastCheck).toFixed(2) + " ms");
                     lastCheck = now;
                 }
             }
 
             let end = performance.now();
-            logger("GC Pressure Test Finished Total Time: " + (end - start).toFixed(2) + " ms");
-            document.getElementById("status").innerHTML = "GC Exploration Complete.";
+            logger("Total Composite Time: " + (end - start).toFixed(2) + " ms");
+            document.getElementById("status").innerHTML = "Composite Exploration Finished.";
         };
     </script>
 </body>
