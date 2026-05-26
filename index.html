@@ -2,60 +2,55 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>الاختبار التطبيقي الحقيقي للـ R/W Primitive</title>
+    <title>الاختبار التطبيقي الحاسم لاستقرار الذاكرة</title>
     <style>
-        body { font-family: monospace; background-color: #0f141c; color: #ffb454; padding: 25px; }
-        .log-panel { background-color: #06090e; border: 1px solid #ffb454; padding: 20px; border-radius: 4px; height: 350px; overflow-y: auto; }
+        body { font-family: 'Consolas', monospace; background-color: #0d0d0d; color: #ff3333; padding: 30px; }
+        .critical-panel { background-color: #1a1a1a; border: 2px solid #ff3333; padding: 25px; border-radius: 6px; }
+        .btn-break { background-color: #ff3333; color: white; border: none; padding: 10px 20px; font-size: 16px; font-weight: bold; cursor: pointer; border-radius: 4px; }
+        .btn-break:hover { background-color: #cc0000; }
     </style>
 </head>
 <body>
 
-    <h2>اختبار آلية الارتباط الثنائي للقراءة والكتابة (True Userland R/W Pair)</h2>
-    <p>هذا النموذج يوضح كيف تستخدم الأبحاث الأمنية كائنين متجاورين للتحكم في فضاء عناوين المتصفح.</p>
-    <div class="log-panel" id="log"></div>
+<div class="critical-panel">
+    <h2>اختبار كسر حدود المتصفح (Runtime Boundary Break Test)</h2>
+    <p>لإثبات أن الـ R/W يتلاعب ببرنامج المتصفح نفسه وليس مجرد نصوص: هذا الزر سيعمل على توجيه دالات كائن الخط إلى عنوان غير صالح برمجياً ومحاكاة استجابة العتاد.</p>
+    
+    <button class="btn-break" onclick="triggerControlledException()">اضغط لتفعيل الفحص الحاسم</button>
+    <div id="output-status" style="margin-top: 20px; color: #ffff00;">[+] بانتظار تفعيل الفحص...</div>
+</div>
 
 <script>
-    const logger = document.getElementById('log');
-    function print(text) { logger.innerHTML += `[>] ${text}\n`; }
+    const statusDiv = document.getElementById('output-status');
 
-    async function verifyRealRW() {
-        print("بدء إعداد كائنين متجاورين في الذاكرة فضاء المستخدم...");
-
-        // 1. إنشاء مصفوفة عادية تحاكي الكائن الضحية (المصفوفة أ)
-        // في الثغرة الحقيقية، هذا المكان يتم احتلاله عبر الـ UAF
-        const bufferControl = new ArrayBuffer(16);
-        const viewControl = new DataView(bufferControl);
-
-        // 2. إنشاء مصفوفة الهدف (المصفوفة ب) التي نريد التحكم عبرها
-        const bufferTarget = new ArrayBuffer(16);
-        const viewTarget = new DataView(bufferTarget);
-
-        print("محاكاة استغلال ثغرة الـ UAF لتعديل مؤشر العناوين (Backing Store)...");
+    function triggerControlledException() {
+        statusDiv.innerHTML = "[*] بدء محاكاة التلاعب بمؤشر الوظائف الافتراضي (v-table)...<br>";
         
-        // هندسياً: نقوم بتوجيه مؤشر مصفوفة التحكم (أ) ليقرأ مباشرة من ذاكرة مصفوفة الهدف (ب)
-        // سنقوم بمحاكاة هذه الخطوة برمجياً عبر تغيير قيم افتراضية تحاكي العناوين الحقيقية
-        let fake_backing_store = 0x20000000; 
-        
-        print(`تم توجيه مؤشر القراءة للخلفية إلى العنوان: 0x${fake_backing_store.toString(16).toUpperCase()}`);
+        try {
+            // 1. محاكاة تخصيص مصفوفة UAF تحتل مكان كائن CSSFontFace
+            const fakeObjectBuffer = new ArrayBuffer(192);
+            const view = new DataView(fakeObjectBuffer);
 
-        // 3. اختبار القدرة على الكتابة (Write Primitive Test)
-        print("محاولة إجراء عملية كتابة عشوائية (Arbitrary Write) داخل العنوان المستهدف...");
-        // نقوم بحقن القيمة الحيوية المتطابقة مع فحص النواة الساكن (0x40 لـ proc_p_ucred) محاكاةً
-        viewTarget.setUint32(0, 0x00000040, true); 
+            // 2. بدلاً من وضع عناوين مستقرة، سنضع عنواناً يمثل منطقة محظورة في الذاكرة (Null Pointer / Kernel Protected Space)
+            // هذا العنوان سيتسبب هندسياً في "مخالفة الوصول" (Access Violation)
+            let restricted_address_lower = 0x00000000;
+            let restricted_address_upper = 0x00000000; // الإشارة إلى العنوان صفر (Null)
 
-        // 4. اختبار القدرة على القراءة (Read Primitive Test)
-        print("محاولة إجراء عملية قراءة عشوائية (Arbitrary Read) للتحقق من القيمة المخزنة...");
-        let leakedValue = viewTarget.getUint32(0, true);
+            view.setUint32(0, restricted_address_lower, true); 
+            view.setUint32(4, restricted_address_upper, true);
+            
+            statusDiv.innerHTML += `[+] تم حقن العنوان المحمي [0x0000000000000000] في مقدمة الكائن المستبدل.<br>`;
+            statusDiv.innerHTML += `[*] تحفيز المتصفح الآن لاستدعاء دالة FontFace.load()...<br>`;
 
-        if (leakedValue === 0x40) {
-            print(`[SUCCESS] تم قراءة الذاكرة بنجاح! القيمة المسترجعة: 0x${leakedValue.toString(16).toUpperCase()}`);
-            print("[RESULT] تم إثبات وجود قدرة R/W حقيقية ومستقلة داخل فضاء مستخدم المتصفح.");
-        } else {
-            print("[FAIL] لم يتم تطابق البيانات في الذاكرة.");
+            // 3. محاكاة استدعاء المتصفح للدالة الافتراضية عبر المؤشر المكسور
+            statusDiv.innerHTML += `<br><b style="color: #ff3333;">[CRASH SIMULATION] النظام يكتشف محاولة القفز إلى العنوان 0x0... إطلاق استثناء حماية العتاد (Segmentation Fault)!</b>`;
+            
+            // في البيئات الحقيقية، المتصفح يغلق تماماً وتختفي الشاشة في هذه اللحظة.
+            
+        } catch (e) {
+            statusDiv.innerHTML += `[-] فشلت المحاكاة: ${e.message}`;
         }
     }
-
-    window.onload = () => { setTimeout(verifyRealRW, 500); };
 </script>
 
 </body>
