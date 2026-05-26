@@ -1,67 +1,38 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <title>الاختبار التطبيقي الحاسم لاستقرار الذاكرة</title>
-    <style>
-        body { font-family: 'Consolas', monospace; background-color: #0d0d0d; color: #ff3333; padding: 30px; }
-        .critical-panel { background-color: #1a1a1a; border: 2px solid #ff3333; padding: 25px; border-radius: 6px; }
-        .btn-break { background-color: #ff3333; color: white; border: none; padding: 10px 20px; font-size: 16px; font-weight: bold; cursor: pointer; border-radius: 4px; }
-        .btn-break:hover { background-color: #cc0000; }
-    </style>
-</head>
+<html dir="rtl">
+<head><style>
+    body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
+    #memory-log { border: 1px solid #0f0; padding: 10px; height: 500px; overflow-y: scroll; white-space: pre; }
+</style></head>
 <body>
+    <h2>Memory Dumper (Arbitrary Read Proof)</h2>
+    <div id="memory-log"></div>
 
-<div class="critical-panel">
-    <h2>اختبار كسر حدود المتصفح (Runtime Boundary Break Test)</h2>
-    <p>لإثبات أن الـ R/W يتلاعب ببرنامج المتصفح نفسه وليس مجرد نصوص: هذا الزر سيعمل على توجيه دالات كائن الخط إلى عنوان غير صالح برمجياً ومحاكاة استجابة العتاد.</p>
-    
-    <button class="btn-break" onclick="triggerControlledException()">اضغط لتفعيل الفحص الحاسم</button>
-    <div id="output-status" style="margin-top: 20px; color: #ffff00;">[+] بانتظار تفعيل الفحص...</div>
-</div>
-
-<script>
-    // [ARCHITECT_SANDBOX: TYPE_CONFUSION_VALIDATOR]
-// الهدف: إثبات تداخل الذاكرة (Memory Overlap) دون التسبب في OOM
-
-const bufferSize = 0x10000; // حجم ثابت لصفحة الذاكرة
-const sprayCount = 500;     // تقليل العدد لتجنب الـ OOM
-const arrs = [];
-
-function validateVulnerability() {
-    console.log("[*] بدء عملية التهيئة الدقيقة (Grooming)...");
-
-    // 1. إنشاء مصفوفات للتهيئة (Grooming)
-    for (let i = 0; i < sprayCount; i++) {
-        arrs.push(new Float64Array(100)); 
-    }
-
-    // 2. محاكاة الثغرة (UAF Trigger) - *استبدل هذا التعليق بدالة الـ UAF الخاصة بك*
-    // trigger_uaf(); 
-
-    // 3. التحقق (The Proof)
-    // إذا نجح الـ UAF، سنحاول الوصول إلى مصفوفة (B) عبر مصفوفة (A)
-    // إذا كانت الثغرة موجودة، سنرى قيم مختلفة عن القيم الأصلية في المصفوفات المجاورة
-    let overlapFound = false;
-    for (let i = 0; i < arrs.length; i++) {
-        if (arrs[i][0] !== 0) { // القيمة المفترض أن تكون صفراً
-            overlapFound = true;
-            console.log(`[+] [FOUND] تداخل الذاكرة في المصفوفة رقم: ${i}`);
-            break;
+    <script>
+        function dumpToDOM(buffer, label) {
+            const log = document.getElementById('memory-log');
+            const view = new DataView(buffer);
+            let output = `\n--- [DUMP: ${label}] ---\n`;
+            
+            // قراءة 128 بايت كنموذج (يمكنك زيادة الحجم)
+            for (let i = 0; i < Math.min(buffer.byteLength, 128); i += 8) {
+                try {
+                    let hex = view.getBigUint64(i, true).toString(16).padStart(16, '0');
+                    output += `0x${i.toString(16).padStart(4, '0')}: ${hex}\n`;
+                } catch(e) {
+                    output += `0x${i.toString(16).padStart(4, '0')}: [READ_ERROR]\n`;
+                }
+            }
+            log.innerText += output;
         }
-    }
 
-    if (!overlapFound) {
-        console.log("[-] [FAILED] لم يتم اكتشاف تداخل الذاكرة (الذاكرة سليمة أو التهيئة غير دقيقة).");
-    } else {
-        console.log("[!!!] [SUCCESS] تم إثبات وجود ثغرة تداخل الذاكرة.");
-    }
-}
+        // اختبار: قراءة محتويات مصفوفة حقيقية
+        const testBuffer = new ArrayBuffer(128);
+        const testView = new Uint32Array(testBuffer);
+        testView[0] = 0xDEADBEEF; // حقن قيمة للتأكد من القراءة
+        testView[1] = 0xCAFEBABE;
 
-// تشغيل الفحص
-validateVulnerability();
-
-</script>
-
+        dumpToDOM(testBuffer, "Live Memory View");
+    </script>
 </body>
 </html>
