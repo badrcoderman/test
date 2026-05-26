@@ -1,38 +1,52 @@
 <!DOCTYPE html>
 <html dir="rtl">
-<head><style>
-    body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
-    #memory-log { border: 1px solid #0f0; padding: 10px; height: 500px; overflow-y: scroll; white-space: pre; }
-</style></head>
+<head>
+    <style>
+        body { background: #0b0c10; color: #66fcf1; font-family: 'Consolas', monospace; padding: 20px; }
+        #analyzer-log { border: 1px solid #45a29e; padding: 15px; height: 600px; overflow-y: scroll; white-space: pre; }
+    </style>
+</head>
 <body>
-    <h2>Memory Dumper (Arbitrary Read Proof)</h2>
-    <div id="memory-log"></div>
+    <h3>[ARCHITECT] Heap Memory & JSCell Analyzer</h3>
+    <div id="analyzer-log"></div>
 
     <script>
-        function dumpToDOM(buffer, label) {
-            const log = document.getElementById('memory-log');
-            const view = new DataView(buffer);
-            let output = `\n--- [DUMP: ${label}] ---\n`;
+        const logDiv = document.getElementById('analyzer-log');
+        
+        function log(msg) { logDiv.innerText += msg + "\n"; }
+
+        // كائنات للبحث عنها في الذاكرة (Objects to identify in heap)
+        const targetObjects = {
+            "array": [1.1, 2.2, 3.3],
+            "obj": { a: 1, b: 2 }
+        };
+
+        function analyzeHeap(baseAddress, size) {
+            log(`[*] بدء تحليل الذاكرة من العنوان: ${baseAddress.toString(16)}`);
             
-            // قراءة 128 بايت كنموذج (يمكنك زيادة الحجم)
-            for (let i = 0; i < Math.min(buffer.byteLength, 128); i += 8) {
+            // في البيئة الحقيقية، هنا تستخدم Primitive القراءة الخاص بك (Arbitrary Read)
+            // هنا نستخدم DataView لمحاكاة الوصول لذاكرة الـ Heap
+            const buffer = new ArrayBuffer(size);
+            const view = new DataView(buffer);
+
+            // مسح الذاكرة للبحث عن أنماط الـ Headers
+            for (let i = 0; i < size; i += 8) {
                 try {
-                    let hex = view.getBigUint64(i, true).toString(16).padStart(16, '0');
-                    output += `0x${i.toString(16).padStart(4, '0')}: ${hex}\n`;
-                } catch(e) {
-                    output += `0x${i.toString(16).padStart(4, '0')}: [READ_ERROR]\n`;
-                }
+                    // قراءة الـ 64 بت الأولى من كل كتلة (يحتوي عادةً على الـ StructureID)
+                    const potentialHeader = view.getBigUint64(i, true);
+                    
+                    // البحث عن أنماط معينة (StructureIDs في WebKit تبدأ غالباً بترويسة مميزة)
+                    if (potentialHeader > 0x1000n && potentialHeader < 0xFFFFFFFFn) {
+                        log(`[!] Found potential JSCell Header at offset 0x${i.toString(16)}: 0x${potentialHeader.toString(16)}`);
+                    }
+                } catch(e) {}
             }
-            log.innerText += output;
+            log("[*] التحليل اكتمل.");
         }
 
-        // اختبار: قراءة محتويات مصفوفة حقيقية
-        const testBuffer = new ArrayBuffer(128);
-        const testView = new Uint32Array(testBuffer);
-        testView[0] = 0xDEADBEEF; // حقن قيمة للتأكد من القراءة
-        testView[1] = 0xCAFEBABE;
-
-        dumpToDOM(testBuffer, "Live Memory View");
+        // تشغيل المحلل على مساحة الـ Heap
+        // لاحظ: في الـ Exploit، المسار (BaseAddress) يجب أن يتم تسريبه أولاً
+        analyzeHeap(0x0, 0x1000); 
     </script>
 </body>
 </html>
