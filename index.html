@@ -223,10 +223,14 @@ window.onload = () => {
 
   // === [ كود الحمولة المضاف فقط ] ===
   setTimeout(() => {
-    const payload = new Uint8Array([0x00, 0x00, 0x00, 0x00]); // ضع بايتات الحمولة هنا لاحقاً
-    if (payload[0] === 0x00) {
-      alert("Success Stage Reached! Payload structure is ready.");
-    }
+    (async () => {
+      try {
+        await log("Hello from remote JS!");
+        send_notification("Hello from remote JS!");
+      } catch(payload_err) {
+        console.log("[Remote JS Payload Error] " + payload_err);
+      }
+    })();
   }, 500);
   // ===================================
 
