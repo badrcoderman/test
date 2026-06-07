@@ -166,35 +166,38 @@ function cssFontFaceBufferSpray() {
 }
 
 function probeFace(face) {
-    // 1. تجميع بيانات الذاكرة في المصفوفة (للحفاظ على سلامة الـ PoC)
     keep.push(face.family);
-    keep.push(face.style);
-    keep.push(face.weight);
-    keep.push(face.status);
 
-    // 2. استخدام Canvas لقياس أبعاد الخط المستهدف في الذاكرة
     const ctx = document.getElementById("c").getContext("2d");
     ctx.font = "64px " + face.family;
-    const metrics = ctx.measureText("AAAAIIIIWWWW");
-
-    // 3. تخزين النتيجة
-    keep.push(metrics.width);
-
-    // 4. استطلاع فعلي: عرض النتائج مباشرة على شاشة الـ PS5
-    // هنا نقوم بتحويل "عرض النص" إلى قيمة رقمية تمثل جزءاً من الذاكرة
-    let memoryLeakValue = metrics.width.toFixed(4);
     
-    // عرض النتيجة داخل الصندوق الأخضر في الشاشة
-    showMessage("استطلاع الذاكرة (Recon):\nالقيمة: " + memoryLeakValue + "\nالنظام: 13.40", true);
+    // محاولة قراءة أبعاد النص أكثر من مرة
+    let val = ctx.measureText("AAAAIIIIWWWW").width;
+    
+    // إذا كانت القيمة 0، قد يعني أن الخط لم يحمل بعد، ننتظر لحظة
+    if (val === 0) {
+        // نستخدم void للحظة انتظار برمجية لإجبار المتصفح على التحديث
+        void document.body.offsetHeight;
+        val = ctx.measureText("AAAAIIIIWWWW").width;
+    }
 
-    // 5. التحقق عبر الـ DOM (كما في الكود الأصلي)
+    keep.push(val);
+
+    // عرض النتيجة مهما كانت، حتى لو كانت 0 عشان نتأكد أن الكود شغال
+    showMessage("الاستطلاع النشط:\nالقيمة الحالية: " + val.toFixed(4), true);
+
     const div = document.createElement("div");
     div.textContent = "AAAAIIIIWWWW";
     div.style.cssText = "position:absolute;left:-10000px;top:0;font:64px " + face.family;
     document.body.appendChild(div);
-    keep.push(div.offsetWidth);
+    
+    // تحديث أخير للتأكد من ظهور البيانات في الـ DOM
+    let offset = div.offsetWidth;
+    showMessage("استطلاع الذاكرة:\nCanvas: " + val.toFixed(2) + " | DOM: " + offset, true);
+    
     document.body.removeChild(div);
 }
+
 
 window.onload = () => {
  detectFirmware();
