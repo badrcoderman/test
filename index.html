@@ -174,15 +174,23 @@ function probeFace(face) {
  keep.push(face.featureSettings);
  keep.push(face.display);
  keep.push(face.status);
+
  const ctx = document.getElementById("c").getContext("2d");
  ctx.font = "64px " + face.family;
+
  const metrics = ctx.measureText("AAAAIIIIWWWW");
+
+ console.log("[DEBUG] Memory Value at probe: " + metrics.width);
+ showMessage("Memory Value: " + metrics.width, true);
+
  keep.push(metrics.width);
  keep.push(metrics.actualBoundingBoxLeft);
  keep.push(metrics.actualBoundingBoxRight);
+
  const div = document.createElement("div");
  div.textContent = "AAAAIIIIWWWW";
  div.style.cssText = "position:absolute;left:-10000px;top:0;font:64px " + face.family;
+
  document.body.appendChild(div);
  keep.push(div.offsetWidth);
  document.body.removeChild(div);
