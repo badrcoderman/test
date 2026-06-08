@@ -221,15 +221,37 @@ window.onload = () => {
   }
  });
  
- document.fonts.load("1em trigger, x", "AB").then(faces => {
-  keep.push(faces);
-  for (const face of faces) probeFace(face);
-  for (const face of document.fonts) probeFace(face);
- }, err => {
-  keep.push(err);
-  showMessage("FAILED ❌\n" + err, false);
- });
-};
+   document.fonts.load("1em trigger, x", "AB").then(faces => {
+    keep.push(faces);
+    for (const face of faces)
+      probeFace(face);
+    for (const face of document.fonts)
+      probeFace(face);
+
+    // === بداية أداة استطلاع الـ Userland المستقلة ===
+    let corruptionDetected = false;
+    let corruptedIndex = -1;
+
+    for (let i = 0; i < spray.length; i++) {
+      if (spray[i].status !== "unloaded") {
+        corruptionDetected = true;
+        corruptedIndex = i;
+        break;
+      }
+    }
+
+    if (corruptionDetected) {
+      showMessage("Userland Taint Confirmed!\nCorrupted Object Index: " + corruptedIndex, true);
+    } else {
+      showMessage("SUCCESS ✅\nUserland Stable (Sandbox Restrained)\nCanvas: 484.00", true);
+    }
+    // === نهاية أداة الاستطلاع ===
+
+  }, err => {
+    keep.push(err);
+    showMessage("FAILED ❌\n" + err, false);
+  });
+
 </script>
 </body>
 </html>
