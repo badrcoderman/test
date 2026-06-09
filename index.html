@@ -2,185 +2,253 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>WebKit Layout Performance & Stress Benchmark</title>
+<title>Advanced WebKit Layout & Rendering Benchmark</title>
 <style id="s">
 html, body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  background: #050505;
-  color: #fff;
-  font-family: Arial, Helvetica, sans-serif;
-  overflow: hidden;
+  margin: 0; padding: 0; width: 100%; height: 100%;
+  background: #09090b; color: #fafafa;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow-y: auto;
 }
-#box {
-  position: fixed;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 82%;
-  max-width: 900px;
-  padding: 38px 28px;
-  border: 2px solid rgba(0, 255, 160, 0.8);
-  border-radius: 22px;
-  background: linear-gradient(135deg, rgba(0,40,25,.92), rgba(0,0,0,.92));
-  box-shadow: 0 0 45px rgba(0,255,160,.35);
-  text-align: center;
-  z-index: 9999;
+#wrapper {
+  max-width: 950px; margin: 40px auto; padding: 20px;
+}
+#dashboard {
+  background: #18181b; border: 1px solid #27272a;
+  border-radius: 12px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.4);
 }
 #title {
-  font-size: 42px;
-  font-weight: bold;
-  color: #00ffa0;
-  margin-bottom: 18px;
+  font-size: 28px; font-weight: bold; color: #10b981; margin-bottom: 8px;
 }
-#msg {
-  font-size: 26px;
-  line-height: 1.45;
-  white-space: pre-line;
+#meta-env { font-size: 14px; color: #71717a; margin-bottom: 20px; }
+#status-box {
+  background: #27272a; padding: 16px; border-radius: 8px;
+  font-size: 16px; line-height: 1.5; white-space: pre-line; margin-bottom: 24px;
 }
-#fw {
-  margin-top: 14px;
-  font-size: 22px;
-  color: #00ffa0;
-  font-weight: bold;
-}
-#c {
-  position: absolute;
-  left: -9999px;
-  top: -9999px;
-}
+.report-section { margin-top: 24px; display: none; }
+.report-title { font-size: 20px; color: #3b82f6; margin-bottom: 12px; font-weight: bold; }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+th, td { padding: 10px; border: 1px solid #3f3f46; text-align: left; font-size: 13px; }
+th { background: #27272a; color: #a1a1aa; }
+.fps-indicator { color: #f59e0b; font-weight: bold; }
+#c { position: absolute; left: -9999px; top: -9999px; }
 </style>
 </head>
 <body>
-<div id="box">
-  <div id="title">LAYOUT BENCHMARK</div>
-  <div id="msg">Initializing test metrics...</div>
-  <div id="fw">Detecting Environment...</div>
+
+<div id="wrapper">
+  <div id="dashboard">
+    <div id="title">ENGINE LAYOUT BENCHMARK Pro</div>
+    <div id="meta-env">Detecting Environment...</div>
+    
+    <div id="status-box">Ready to initialize advanced benchmark sequence...</div>
+    
+    <div id="report" class="report-section">
+      <div class="report-title">📊 Final Performance Statistics</div>
+      <table id="metrics-table">
+        <thead>
+          <tr>
+            <th>Engine Type</th>
+            <th>Test Profile</th>
+            <th>Mean Time</th>
+            <th>Median Time</th>
+            <th>Min Time</th>
+            <th>Max Time</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      
+      <div class="report-title" style="margin-top:20px;">🧠 System Telemetry Summary</div>
+      <table id="telemetry-table">
+        <thead>
+          <tr>
+            <th>Metric Group</th>
+            <th>Recorded Value</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
 </div>
+
 <canvas id="c" width="512" height="128"></canvas>
 
 <script>
 "use strict";
 
+// إعدادات البيئة والاختبارات المتعددة
+const RUNS = 1000;
+const WARM_UP_RUNS = 100;
+const SAMPLE_TEXTS = [
+  "The quick brown fox jumps over the lazy dog",
+  "مرحبا بالعالم العربي 123",
+  "A"
+];
+const FONT_SIZES = [16, 32, 64];
+
+let fpsFrameCount = 0;
+let lastFpsUpdate = performance.now();
+let averageFps = 60;
+
+// حساب الـ FPS الفعلي أثناء التشغيل لضمان رصد أي جودة رسومية تعاني من البطء
+function monitorFPS() {
+  fpsFrameCount++;
+  const now = performance.now();
+  if (now - lastFpsUpdate >= 500) {
+    averageFps = Math.round((fpsFrameCount * 1000) / (now - lastFpsUpdate));
+    fpsFrameCount = 0;
+    lastFpsUpdate = now;
+  }
+  requestAnimationFrame(monitorFPS);
+}
+requestAnimationFrame(monitorFPS);
+
 function detectEnvironment() {
   const ua = navigator.userAgent || "";
-  let env = "Standard Browser";
+  let env = "Standard Desktop Browser";
   let m = ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
-  if (m && m[1]) env = "PS5 / FW: " + m[1];
+  if (m && m[1]) env = "PlayStation 5 (Firmware: " + m[1] + ")";
+  else if (/iPhone|iPad|iPod/i.test(ua)) env = "iOS Device WebKit";
   
-  const el = document.getElementById("fw");
-  if (el) el.textContent = "Environment: " + env;
+  document.getElementById("meta-env").textContent = `Platform: ${env} | Agent: ${navigator.vendor || "Unknown Vendor"}`;
+  return env;
 }
 
-function showMessage(text, isNominal) {
-  const msg = document.getElementById("msg");
-  const title = document.getElementById("title");
-  if (msg) msg.textContent = text;
-  if (title) title.textContent = isNominal ? "✅ BENCHMARK COMPLETE" : "LAYOUT BENCHMARK";
+function updateStatus(text) {
+  document.getElementById("status-box").textContent = text;
 }
 
-window.onerror = function(message, source, lineno, colno, error) {
-  showMessage("ERROR:\n" + message + "\nLine: " + lineno, false);
-};
-
-let fontRegistryPool = [];
-let calculationRegistry = [];
-
-// توليد بايتات خط افتراضية خفيفة لأغراض اختبار أداء التخطيط
-const FONT_B64 = "d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
-const FONT_BYTES = (() => {
-  const s = atob(FONT_B64);
-  const bytes = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
-  return bytes;
-})();
-
-function getFontBuffer() {
-  const copy = new Uint8Array(FONT_BYTES.length);
-  copy.set(FONT_BYTES);
-  return copy.buffer;
-}
-
-// دالة اختبار قياس جهد الذاكرة بشكل آمن دون التسبب في انهيار المتصفح
-function runMemoryStressTest() {
-  let temporaryGarbage = [];
-  for (let i = 0; i < 50; i++) {
-    let buffer = new ArrayBuffer(i * 1024); // حجز كتل منظمة بحجم 1 كيلوبايت تصاعدياً
-    temporaryGarbage.push(buffer);
+// دالة حساب الإحصائيات الرياضية الصارمة (Mean, Median, Min, Max)
+function calculateStats(latencies) {
+  latencies.sort((a, b) => a - b);
+  const sum = latencies.reduce((a, b) => a + b, 0);
+  const mean = sum / latencies.length;
+  
+  let median;
+  const mid = Math.floor(latencies.length / 2);
+  if (latencies.length % 2 !== 0) {
+    median = latencies[mid];
+  } else {
+    median = (latencies[mid - 1] + latencies[mid]) / 2;
   }
-  // تفريغ فوري للمصفوفة لمساعدة الـ Garbage Collector على حماية الأداء
-  temporaryGarbage = null;
+  
+  return {
+    mean: mean.toFixed(5),
+    median: median.toFixed(5),
+    min: latencies[0].toFixed(5),
+    max: latencies[latencies.length - 1].toFixed(5)
+  };
 }
 
-function loadBenchmarkFonts() {
-  // شحن عدد محدود ومنظم من الخطوط لاختبار سرعة استجابة المحرك (Engine Throughput)
-  for (let i = 0; i < 100; i++) {
-    const f = new FontFace("BENCHMARK_FONT_" + i, getFontBuffer(), { unicodeRange: "U+0041" });
-    document.fonts.add(f);
-    fontRegistryPool.push(f);
-  }
-}
-
-function executeMetricAnalysis(fontName) {
+function runBenchmark() {
   const ctx = document.getElementById("c").getContext("2d");
-  ctx.font = "64px " + fontName;
+  const tableBody = document.querySelector("#metrics-table tbody");
+  const telemetryBody = document.querySelector("#telemetry-table tbody");
   
-  // 1. حساب الأبعاد عبر محرك الـ Canvas
-  let canvasStartTime = performance.now();
-  let canvasWidth = ctx.measureText("AAAAIIIIWWWW").width;
-  let canvasDuration = performance.now() - canvasStartTime;
+  let initialMemory = performance.memory ? performance.memory.usedJSHeapSize : null;
+  
+  // تكرار الفحص على مصفوفة النصوص والأحجام المطلوبة
+  SAMPLE_TEXTS.forEach(text => {
+    FONT_SIZES.forEach(size => {
+      const fontSpec = `${size}px Arial`;
+      
+      // ==========================================
+      // 1. BENCHMARK: CANVAS ENGINE
+      // ==========================================
+      ctx.font = fontSpec;
+      
+      // مرحلة الـ Warm-Up لمحرك الـ Canvas
+      for (let i = 0; i < WARM_UP_RUNS; i++) {
+        ctx.measureText(text);
+      }
+      
+      // القياس الحقيقي المتكرر
+      let canvasLatencies = [];
+      for (let i = 0; i < RUNS; i++) {
+        let t0 = performance.now();
+        ctx.measureText(text);
+        let t1 = performance.now();
+        canvasLatencies.push(t1 - t0);
+      }
+      const canvasStats = calculateStats(canvasLatencies);
+      appendTableRow(tableBody, "Canvas 2D", `Text: "${text.substring(0,15)}..." | Size: ${size}px`, canvasStats);
 
-  // 2. حساب الأبعاد عبر محرك الـ DOM
-  let div = document.createElement("div");
-  div.textContent = "AAAAIIIIWWWW";
-  div.style.cssText = "position:absolute;left:-10000px;top:0;font:64px " + fontName;
-  document.body.appendChild(div);
-  
-  let domStartTime = performance.now();
-  let domOffset = div.offsetWidth;
-  let domDuration = performance.now() - domStartTime;
-  
-  document.body.removeChild(div);
+      // ==========================================
+      // 2. BENCHMARK: DOM LAYOUT ENGINE
+      // ==========================================
+      const div = document.createElement("div");
+      div.textContent = text;
+      div.style.cssText = `position:absolute;left:-10000px;top:0;font:${fontSpec};`;
+      document.body.appendChild(div);
+      
+      // مرحلة الـ Warm-Up لمحرك الـ DOM
+      for (let i = 0; i < WARM_UP_RUNS; i++) {
+        void div.offsetWidth;
+      }
+      
+      let domLatencies = [];
+      for (let i = 0; i < RUNS; i++) {
+        let t0 = performance.now();
+        void div.offsetWidth; // إجبار المحرك على حساب الـ Layout المتزامن
+        let t1 = performance.now();
+        domLatencies.push(t1 - t0);
+      }
+      document.body.removeChild(div);
+      
+      const domStats = calculateStats(domLatencies);
+      appendTableRow(tableBody, "DOM Layout", `Text: "${text.substring(0,15)}..." | Size: ${size}px`, domStats);
+    });
+  });
 
-  // تسجيل المخرجات الزمنية للمقارنة
-  calculationRegistry.push({ canvasWidth, domOffset, canvasDuration, domDuration });
+  // جمع معلومات الذاكرة بعد الضغط وقياس التخزين
+  let finalMemory = performance.memory ? performance.memory.usedJSHeapSize : null;
   
-  showMessage(
-    `Render Metrics:\nCanvas Width: ${canvasWidth.toFixed(2)}px (${canvasDuration.toFixed(3)}ms)\nDOM Width: ${domOffset}px (${domDuration.toFixed(3)}ms)`, 
-    true
-  );
+  appendTelemetryRow(telemetryBody, "Execution Fluidity (Average FPS)", `<span class="fps-indicator">${averageFps} FPS</span>`);
+  if (initialMemory && finalMemory) {
+    let deltaMB = ((finalMemory - initialMemory) / (1024 * 1024)).toFixed(3);
+    appendTelemetryRow(telemetryBody, "JS Heap Delta (Memory Delta)", `${deltaMB} MB Generated`);
+    appendTelemetryRow(telemetryBody, "Peak Allocated Heap Size", `${(finalMemory / (1024 * 1024)).toFixed(2)} MB`);
+  } else {
+    appendTelemetryRow(telemetryBody, "JS Heap Telemetry", "Not supported by this browser environment");
+  }
+  
+  document.getElementById("report").style.display = "block";
+  updateStatus("All batch cycles completed successfully. Metrics compiled below.");
+}
+
+function appendTableRow(tbody, engine, profile, stats) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><strong>${engine}</strong></td>
+    <td>${profile}</td>
+    <td>${stats.mean} ms</td>
+    <td>${stats.median} ms</td>
+    <td>${stats.min} ms</td>
+    <td>${stats.max} ms</td>
+  `;
+  tbody.appendChild(tr);
+}
+
+function appendTelemetryRow(tbody, key, val) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td>${key}</td><td><strong>${val}</strong></td>`;
+  tbody.appendChild(tr);
 }
 
 window.onload = () => {
-  detectEnvironment();
-  showMessage("Stage 1/2:\nRunning memory structure baseline...", false);
+  const env = detectEnvironment();
+  updateStatus("Initiating execution loop layers...\nPerforming pre-heat structural sync.");
   
-  runMemoryStressTest();
-  loadBenchmarkFonts();
-
-  showMessage("Stage 2/2:\nExecuting synchronous font layout resolution...", false);
-
-  // استخدام وعود جافا سكريبت القياسية لضمان التوافقية الكاملة
-  document.fonts.ready.then(() => {
-    executeMetricAnalysis("BENCHMARK_FONT_0");
-    
-    // التحقق من سلامة كائنات الخطوط داخل النطاق الآمن
-    let isRegistryStable = fontRegistryPool.every(f => f.status !== "error");
-    
-    if (isRegistryStable) {
-      const lastMetric = calculationRegistry[calculationRegistry.length - 1];
-      showMessage(
-        `SUCCESS ✅\nLayout Engine Stable.\nCanvas Result: ${lastMetric.canvasWidth.toFixed(2)} | DOM Result: ${lastMetric.domOffset}`, 
-        true
-      );
-    } else {
-      showMessage("Benchmark completed with rendering layout warnings.", false);
-    }
-  }).catch(err => {
-    showMessage("Benchmark execution failed:\n" + err, false);
-  });
+  // تأخير بسيط لبدء المعايرة لضمان استقرار معدل الإطارات الأولية
+  setTimeout(() => {
+    updateStatus("Benchmark executing 1,000 iterations per node pool. Please wait...");
+    // إدخال دورة تنفيذ خفيفة في الخلفية لعدم تجميد الشاشة بالكامل أثناء العمليات الحسابية
+    setTimeout(() => {
+      runBenchmark();
+    }, 50);
+  }, 1000);
 };
 </script>
 </body>
