@@ -4,130 +4,65 @@
     <meta charset="utf-8" />
   </head>
   <body>
-    <p>Running WebKit YARR JIT Diagnostic Isolation Layer...</p>
-    <div id="result" style="font-family: monospace; white-space: pre-line; font-size: 20px; color: #00ffa0;">
-      Initializing sequence...
+    <p>
+      This tests calling createContextualFragment with trusted types createHTML callback which clears range's endpoints.
+      <br />
+      WebKit should not crash or hit any assertions under ASAN and you should see PASS below:
+    </p>
+    <div id="result" style="font-size: 24px; font-weight: bold; color: #00ffa0; margin-top: 20px;">
+      Testing...
     </div>
+
     <script>
-"use strict";
-
-function logProgress(msg) {
-    const el = document.getElementById("result");
-    if (el) el.textContent += "\n> " + msg;
-    try { console.log("[YARR_BENCH] " + msg); } catch(e) {}
-}
-
-function shouldBe(actual, expected, message) {
-    if (JSON.stringify(actual) !== JSON.stringify(expected))
-        throw new Error(message + ": expected " + JSON.stringify(expected) + " but got " + JSON.stringify(actual));
-}
-
-window.onerror = function(message, source, lineno, colno, error) {
-    logProgress("EXCEPTION TRIGGERED: " + message + " at line " + lineno);
-};
-
-window.onload = () => {
-    document.getElementById("result").textContent = "Starting Isolation Sequence...";
-
-    // 1
-    logProgress("Testing 1: PoC Pattern...");
-    (function testPoCPattern() {
-        var re = new RegExp('((c|b)*?(y|x)+?.){3}mp');
-        var shortInputs = ['bx.cx.by.mp', 'by.cy.bx.mp', 'byx.cyx.bxy.mp', 'nope', 'ab', ''];
-        for (var i = 0; i < 200; i++) {
-            for (var j = 0; j < shortInputs.length; j++) {
-                re.test(shortInputs[j]); re.exec(shortInputs[j]);
-            }
+      // دالة بديلة لمحاكاة الـ Garbage Collection في البيئات القياسية
+      function triggerAlternativeGC() {
+        if (typeof gc === 'function') {
+          gc(); // لو كان المتصفح في وضع المطورين ويدعمها
+        } else {
+          // محاكاة دفع المحرك للتنظيف عبر إنشاء وحذف كتل ذاكرة مؤقتة مكثفة
+          let storage = [];
+          for (let i = 0; i < 200; i++) {
+            storage.push(new ArrayBuffer(1024 * 64)); // كتل 64 كيلوبايت
+          }
+          storage = null; // تحريرها فوراً لإغراء الـ GC بالعمل
         }
-        shouldBe(re.exec('nope'), null, "PoC pattern should not match");
-    })();
+      }
 
-    // 2
-    logProgress("Testing 2: IsCopy Plus Non-Greedy...");
-    (function testIsCopyPlusNonGreedy() {
-        var re = /((a|b)+?c){2}d/;
-        for (var i = 0; i < 200; i++) {
-            re.exec("acabcd"); re.exec("abcbcd");
+      const resultElement = document.getElementById('result');
+      const range = document.createRange();
+      let div = document.createElement('div');
+      range.setStart(div, 0);
+      range.setEnd(div, 0);
+
+      let didRun = false;
+
+      // التأكد من دعم المتصفح للـ trustedTypes أولاً لمنع توقف الكود
+      if (window.trustedTypes) {
+        trustedTypes.createPolicy('default', {
+          createHTML(string) {
+            if (didRun) return string;
+            didRun = true;
+
+            range.setEnd(document, 0); // إسقاط مراجع الـ Range للـ div
+            div = null;                 // إسقاط مرجع الجافا سكريبت للـ div
+            
+            triggerAlternativeGC();     // استدعاء دالة التنظيف البديلة
+
+            return string;
+          }
+        });
+
+        try {
+          range.createContextualFragment('x');
+          resultElement.textContent = 'PASS';
+        } catch(e) {
+          resultElement.textContent = 'ERROR DURING EXECUTION:\n' + e.message;
         }
-    })();
-
-    // 3
-    logProgress("Testing 3: IsCopy Inside Fixed-Count...");
-    (function testIsCopyInsideFixedCount() {
-        var re = /((x|y)+?(a|b)+?.){3}end/;
-        for (var i = 0; i < 200; i++) { re.exec("xaxbyaybxbend"); }
-    })();
-
-    // 4
-    logProgress("Testing 4: Sibling Groups UAF...");
-    (function testSiblingGroups() {
-        var re = /((a)*?(b)*?c){2}d/;
-        for (var i = 0; i < 200; i++) { re.exec("abcabcd"); }
-    })();
-
-    // 5
-    logProgress("Testing 5: Ancestor Sibling Groups...");
-    (function testAncestorSiblingGroups() {
-        var re = /((?:(x)*?y)(z)*?w){2}end/;
-        for (var i = 0; i < 200; i++) { re.exec("xywzwendxywzwend"); }
-    })();
-
-    // 6
-    logProgress("Testing 6: Greedy Copy With Captures...");
-    (function testGreedyCopyWithCaptures() {
-        var re = /(([a-c])b*?\2){3}/;
-        for (var i = 0; i < 200; i++) re.exec("ababbbcbc");
-    })();
-
-    // 7
-    logProgress("Testing 7: Bounded Non-Greedy Copy...");
-    (function testBoundedNonGreedyCopy() {
-        var re = /((a|b){2,5}?c){2}d/;
-        for (var i = 0; i < 200; i++) { re.exec("abcabcd"); }
-    })();
-
-    // 8
-    logProgress("Testing 8: Deep Nesting Sequence...");
-    (function testDeepNesting() {
-        var re = /(((a|b)*?c)+?d){2}e/;
-        for (var i = 0; i < 200; i++) { re.exec("acdcde"); }
-    })();
-
-    // 9
-    logProgress("Testing 9: Heavy Stress Loop...");
-    (function testStress() {
-        var patterns = [ /((a|b)*?(c|d)+?.){3}zz/, /((x)*?(y)*?z){2}w/ ];
-        var inputs = [ "abcdabcdabcdzz", "xyzxyzw" ];
-        for (var i = 0; i < 500; i++) {
-            var re = patterns[i % patterns.length];
-            var input = inputs[i % inputs.length];
-            re.test(input);
-        }
-    })();
-
-    // 10
-    logProgress("Testing 10: Original Regression Patterns...");
-    (function testOriginalRegressionPatterns() {
-        for (var i = 0; i < 200; i++) { /(?:(a|b)*?.){2}xx/.exec('aabbcc'); }
-    })();
-
-    // 11
-    logProgress("Testing 11: Three Non-Greedy Siblings...");
-    (function testThreeNonGreedySiblings() {
-        var re = /((a)*?(b)*?(c)*?d){2}e/;
-        for (var i = 0; i < 200; i++) { re.exec("abcdabcde"); }
-    })();
-
-    // 12
-    logProgress("Testing 12: Fixed-Count Previous Sibling...");
-    (function testFixedCountPrevSiblingNonGreedyLater() {
-        var re = /((a)+.(b)*?c){2}d/;
-        for (var i = 0; i < 200; i++) { re.exec("aa.bcaa.bcd"); }
-    })();
-
-    logProgress("ALL CONTEXT CYCLES COMPLETED NOMINALLY.");
-    logProgress("PASS");
-};
+      } else {
+        // إذا كان المتصفح قديماً ولا يدعم السياسة الأمنية الجديدة للـ Trusted Types
+        resultElement.textContent = 'SKIPPED: trustedTypes API is not supported in this browser environment.';
+        resultElement.style.color = '#ff9900';
+      }
     </script>
   </body>
 </html>
