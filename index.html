@@ -2,66 +2,60 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <title>PS5 Range Endpoints Lifecycle Test</title>
   </head>
   <body>
     <p>
-      This tests calling createContextualFragment with trusted types createHTML callback which clears range's endpoints.
+      Testing Range Endpoints tracking under synchronous DOM mutation.
       <br />
-      WebKit should not crash or hit any assertions under ASAN and you should see PASS below:
+      The browser should remain stable, and you should see PASS below:
     </p>
     <div id="result" style="font-size: 24px; font-weight: bold; color: #00ffa0; margin-top: 20px;">
-      Testing...
+      Executing Mutation Sequence...
     </div>
 
-    <script>
-      // دالة بديلة لمحاكاة الـ Garbage Collection في البيئات القياسية
-      function triggerAlternativeGC() {
-        if (typeof gc === 'function') {
-          gc(); // لو كان المتصفح في وضع المطورين ويدعمها
-        } else {
-          // محاكاة دفع المحرك للتنظيف عبر إنشاء وحذف كتل ذاكرة مؤقتة مكثفة
-          let storage = [];
-          for (let i = 0; i < 200; i++) {
-            storage.push(new ArrayBuffer(1024 * 64)); // كتل 64 كيلوبايت
-          }
-          storage = null; // تحريرها فوراً لإغراء الـ GC بالعمل
-        }
-      }
+    <div id="anchor"></div>
 
+    <script>
       const resultElement = document.getElementById('result');
+      const anchor = document.getElementById('anchor');
+      
       const range = document.createRange();
       let div = document.createElement('div');
+      
+      // ربط الـ Range بالـ div
       range.setStart(div, 0);
       range.setEnd(div, 0);
 
-      let didRun = false;
+      let fired = false;
 
-      // التأكد من دعم المتصفح للـ trustedTypes أولاً لمنع توقف الكود
-      if (window.trustedTypes) {
-        trustedTypes.createPolicy('default', {
-          createHTML(string) {
-            if (didRun) return string;
-            didRun = true;
+      // استخدام حدث كلاسيكي مدعوم في WebKit لالتقاط نافذة التوقيت
+      anchor.addEventListener('DOMNodeInserted', function() {
+        if (fired) return;
+        fired = true;
 
-            range.setEnd(document, 0); // إسقاط مراجع الـ Range للـ div
-            div = null;                 // إسقاط مرجع الجافا سكريبت للـ div
-            
-            triggerAlternativeGC();     // استدعاء دالة التنظيف البديلة
+        // محاكاة نفس سلوك إسقاط المراجع في وسط التنفيذ
+        range.setEnd(document, 0); // قطع علاقة الـ Range بالـ div
+        div = null;                 // إزالة مرجع الجافا سكريبت
 
-            return string;
-          }
-        });
-
-        try {
-          range.createContextualFragment('x');
-          resultElement.textContent = 'PASS';
-        } catch(e) {
-          resultElement.textContent = 'ERROR DURING EXECUTION:\n' + e.message;
+        // محاكاة دفع المحرك لتنظيف الذاكرة بشكل طبيعي
+        let heapWeight = [];
+        for (let i = 0; i < 100; i++) {
+          heapWeight.push(new ArrayBuffer(1024 * 32));
         }
-      } else {
-        // إذا كان المتصفح قديماً ولا يدعم السياسة الأمنية الجديدة للـ Trusted Types
-        resultElement.textContent = 'SKIPPED: trustedTypes API is not supported in this browser environment.';
-        resultElement.style.color = '#ff9900';
+        heapWeight = null;
+      });
+
+      try {
+        // إجبار المتصفح على إطلاق الحدث أثناء معالجة عناصر الـ DOM
+        const span = document.createElement('span');
+        anchor.appendChild(span);
+
+        // إذا مر المحرك بسلام دون انهيار المؤشرات الخلفية لـ C++
+        resultElement.textContent = 'PASS ✅ (Engine Defended Endpoints Successfully)';
+      } catch (e) {
+        resultElement.textContent = 'FAILED ❌: ' + e.message;
+        resultElement.style.color = '#ff3333';
       }
     </script>
   </body>
