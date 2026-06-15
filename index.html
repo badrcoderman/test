@@ -68,7 +68,7 @@ const bar=document.getElementById("bar");
 function pg(p){bar.style.width=p+"%"}
 function hu(id,v){const e=document.getElementById(id);if(e)e.innerHTML=v}
 function P(m,c){const s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";O.appendChild(s);O.scrollTop=C.scrollHeight;
+s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight;
 try{console.log("[v21] "+m)}catch(e){}}
 function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
 function Wr(m){P("  ⚠ "+m,"wr")}function Hi(m){P("  ► "+m,"hl")}
