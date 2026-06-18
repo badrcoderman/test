@@ -42,34 +42,13 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 <script>
 "use strict";
 
-// ============================================================
-//  PS5 v34 — Double Reclaim Outbound Read
-//
-//  STRATEGY:
-//  1. UAF frees "x" CSSFontFace
-//  2. Spray A_0..A_2047 → one reclaims "x" slot (e.g. A_61)
-//  3. Read "x" → confirms A_61 (cross-object read)
-//  4. Delete A_61's CSSRule → frees A_61 from "A_61" bucket
-//     BUT "x" bucket still points to A_61's memory!
-//  5. GC pressure → finalize A_61 free
-//  6. Spray B_0..B_2047 with DIFFERENT properties
-//  7. One B_NNN reclaims A_61's freed memory
-//  8. Read "x" → should now return B_NNN's properties!
-//  9. If B_NNN properties differ from A_61 = OUTBOUND READ!
-//
-//  KEY INSIGHT from source code:
-//  removeFromFacesLookupTable searches by face.families()
-//  A_61's family = "A_61", NOT "x"
-//  So deleting A_61 removes it from "A_61" bucket
-//  But "x" bucket retains dangling Ref<CSSFontFace>!
-// ============================================================
-
 var O=document.getElementById("out");
 var bar=document.getElementById("bar");
 function pg(p){bar.style.width=p+"%"}
 function hu(id,v){var e=document.getElementById(id);if(e)e.innerHTML=v}
 function P(m,c){var s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
+s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight;
+try{console.log("[v34] "+m)}catch(e){}}
 function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
 function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
 function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
