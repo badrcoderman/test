@@ -1,170 +1,333 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>CVE-2025-31278 PS5 Tester</title>
+    <title>CVE-2025-31278 Memory Leak Diagnostic</title>
+    <style>
+        body { font-family: monospace; background: black; color: lime; }
+        #output { white-space: pre; overflow: auto; max-height: 90vh; }
+        .leak { color: red; font-weight: bold; }
+        .success { color: green; font-weight: bold; }
+    </style>
 </head>
 <body>
-<h1>Testing CVE-2025-31278 Pattern on PS5</h1>
+<div id="output"></div>
 
 <script>
-// ===== المرحلة 1: Baseline UAF Test =====
+const output = document.getElementById('output');
+let logBuffer = [];
 
-function testDOMCorruption() {
-    console.log("[*] Starting DOM Corruption Test");
+function log(msg, type = 'info') {
+    const timestamp = new Date().toISOString();
+    const formatted = `[${timestamp}] ${msg}`;
+    logBuffer.push(formatted);
     
-    // نمط 1: Rapid DOM mutation during layout
+    const div = document.createElement('div');
+    if (type === 'leak') div.className = 'leak';
+    if (type === 'success') div.className = 'success';
+    div.textContent = formatted;
+    output.appendChild(div);
+    output.scrollTop = output.scrollHeight;
+    console.log(formatted);
+}
+
+// ===== PHASE 1: Memory Leak Detection =====
+
+function detectMemoryLeak() {
+    log("=== PHASE 1: MEMORY LEAK DETECTION ===");
+    
+    const initialMemory = performance.memory?.usedJSHeapSize || 0;
+    log(`Initial heap: ${(initialMemory / 1024 / 1024).toFixed(2)} MB`);
+    
+    let leakContainer = document.createElement('div');
+    leakContainer.style.display = 'none';
+    leakContainer.id = 'leak-container';
+    document.body.appendChild(leakContainer);
+    
+    // Allocate many elements
+    for (let i = 0; i < 1000; i++) {
+        let elem = document.createElement('div');
+        elem.innerHTML = "A".repeat(1000);
+        elem.style.cssText = `
+            position: absolute;
+            left: ${Math.random() * 10000}px;
+            top: ${Math.random() * 10000}px;
+            width: 100px;
+            height: 100px;
+            background: red;
+            overflow: hidden;
+        `;
+        leakContainer.appendChild(elem);
+    }
+    
+    // Force layout
+    let height = leakContainer.offsetHeight;
+    log(`Created 1000 elements, container height: ${height}`);
+    
+    // Now remove them
+    while (leakContainer.firstChild) {
+        leakContainer.removeChild(leakContainer.firstChild);
+    }
+    
+    // Check memory
+    const afterMemory = performance.memory?.usedJSHeapSize || 0;
+    const diff = (afterMemory - initialMemory) / 1024 / 1024;
+    
+    log(`Memory after cleanup: ${(afterMemory / 1024 / 1024).toFixed(2)} MB`);
+    log(`Memory difference: ${diff.toFixed(2)} MB`, diff > 5 ? 'leak' : 'success');
+    
+    return diff > 5;
+}
+
+// ===== PHASE 2: Style Computation Corruption =====
+
+function detectStyleCorruption() {
+    log("\n=== PHASE 2: STYLE COMPUTATION CORRUPTION ===");
+    
+    let testDiv = document.createElement('div');
+    testDiv.style.cssText = `
+        width: 100px;
+        height: 100px;
+        background: blue;
+        display: block;
+    `;
+    document.body.appendChild(testDiv);
+    
+    // Get initial style
+    let style1 = window.getComputedStyle(testDiv);
+    log(`Initial computed width: ${style1.width}`);
+    log(`Initial computed height: ${style1.height}`);
+    
+    // Rapid style changes
+    for (let i = 0; i < 100; i++) {
+        testDiv.style.width = (100 + i) + 'px';
+        testDiv.style.height = (100 + i) + 'px';
+        
+        let style = window.getComputedStyle(testDiv);
+        let w = style.width;
+        let h = style.height;
+        
+        // Look for corruption signs
+        if (!w || w.includes('NaN') || w === '' || w === undefined) {
+            log(`⚠️ CORRUPTION DETECTED at iteration ${i}:`, 'leak');
+            log(`Width: "${w}", Height: "${h}"`, 'leak');
+            return true;
+        }
+    }
+    
+    log("✅ No style corruption detected", 'success');
+    return false;
+}
+
+// ===== PHASE 3: Layout Calculation Corruption =====
+
+function detectLayoutCorruption() {
+    log("\n=== PHASE 3: LAYOUT CALCULATION CORRUPTION ===");
+    
+    let parent = document.createElement('div');
+    parent.style.cssText = 'width: 500px; height: 500px; background: yellow;';
+    document.body.appendChild(parent);
+    
+    // Create nested layout
+    for (let i = 0; i < 50; i++) {
+        let child = document.createElement('div');
+        child.style.cssText = `
+            position: relative;
+            width: ${100 - i}%;
+            height: ${100 - i}%;
+            background: rgb(${i * 5}, 0, 0);
+        `;
+        parent.appendChild(child);
+    }
+    
+    // Force multiple layout recalculations
+    let results = [];
+    for (let i = 0; i < 10; i++) {
+        let rect = parent.getBoundingClientRect();
+        results.push({
+            iteration: i,
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+            height: rect.height
+        });
+        
+        // Modify layout
+        parent.style.width = (500 + i * 10) + 'px';
+    }
+    
+    log("Layout calculation results:");
+    let corrupted = false;
+    results.forEach(r => {
+        if (isNaN(r.width) || r.width < 0 || isNaN(r.height) || r.height < 0) {
+            log(`  ⚠️ Iteration ${r.iteration}: W=${r.width}, H=${r.height}`, 'leak');
+            corrupted = true;
+        } else {
+            log(`  ✓ Iteration ${r.iteration}: W=${r.width}, H=${r.height}`);
+        }
+    });
+    
+    return corrupted;
+}
+
+// ===== PHASE 4: RenderObject Tree Corruption =====
+
+function detectRenderTreeCorruption() {
+    log("\n=== PHASE 4: RENDER TREE CORRUPTION ===");
+    
+    // Create complex DOM tree
     let root = document.createElement('div');
-    root.id = 'root';
+    root.style.cssText = 'width: 100%; height: 100%; background: purple;';
     document.body.appendChild(root);
     
-    // Allocate many DOM nodes
-    for (let i = 0; i < 1000; i++) {
+    // Build tree
+    for (let i = 0; i < 100; i++) {
         let elem = document.createElement('span');
-        elem.textContent = "X".repeat(100);
-        elem.style.display = 'inline-block';
+        elem.innerHTML = `Element${i}:`.repeat(50);
+        elem.style.cssText = `
+            display: inline-block;
+            width: 50px;
+            height: 50px;
+            background: green;
+            margin: 2px;
+            padding: 5px;
+            border: 1px solid black;
+        `;
         root.appendChild(elem);
     }
     
-    // Force initial layout
-    let h1 = root.offsetHeight;
-    console.log("[*] Initial height:", h1);
-    
-    // Pattern: rapid mutation + layout requests
-    for (let j = 0; j < 100; j++) {
-        // Add/Remove during layout
-        if (j % 2 === 0) {
-            root.removeChild(root.firstChild);
-        } else {
-            let elem = document.createElement('span');
-            elem.textContent = "Y".repeat(50);
-            root.appendChild(elem);
-        }
-        
-        // Force layout = trigger rendering path
-        let h = root.offsetHeight;
-        
-        if (h === 0xDEADBEEF || h === -1 || isNaN(h)) {
-            console.log("🔴 POSSIBLE CORRUPTION DETECTED: height =", h);
-            return true;  // ✅ Found it!
-        }
-    }
-    
-    return false;
-}
-
-// ===== المرحلة 2: Style Recalculation UAF =====
-
-function testStyleRecalcUAF() {
-    console.log("[*] Starting Style Recalc UAF Test");
-    
-    let container = document.createElement('div');
-    document.body.appendChild(container);
-    
-    // Create element with complex styles
-    let elem = document.createElement('div');
-    elem.style.cssText = `
-        width: 100px;
-        height: 100px;
-        background: red;
-        position: relative;
-        left: 0px;
-        top: 0px;
-    `;
-    container.appendChild(elem);
-    
-    // Trigger style recalculation
-    let style1 = window.getComputedStyle(elem);
-    console.log("[*] Initial width:", style1.width);
-    
-    // Pattern: remove while accessing computed style
-    setTimeout(() => {
-        elem.style.width = "200px";
-        let style2 = window.getComputedStyle(elem);  // ← Could UAF here
-        
-        if (style2.width === "" || style2.width === "NaN" || !style2) {
-            console.log("🔴 POSSIBLE UAF IN STYLE: width =", style2.width);
-            return true;
-        }
-    }, 10);
-    
-    return false;
-}
-
-// ===== المرحلة 3: Rendering Path Corruption =====
-
-function testRenderingPathOOB() {
-    console.log("[*] Starting Rendering Path OOB Test");
-    
-    // Large SVG or complex layout
-    let svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('width', '1000');
-    svg.setAttribute('height', '1000');
-    document.body.appendChild(svg);
-    
-    // Add many elements
-    for (let i = 0; i < 500; i++) {
-        let rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect.setAttribute('x', i * 2);
-        rect.setAttribute('y', i * 2);
-        rect.setAttribute('width', '10');
-        rect.setAttribute('height', '10');
-        svg.appendChild(rect);
-    }
+    log(`Created render tree with ${root.children.length} nodes`);
     
     // Force render
-    let bbox = svg.getBBox ? svg.getBBox() : null;
-    console.log("[*] SVG BBox:", bbox);
+    let firstChild = root.firstChild;
+    let lastChild = root.lastChild;
     
-    // Rapid manipulation
-    for (let i = 0; i < 50; i++) {
-        svg.style.transform = `rotate(${i}deg)`;
-        let newBbox = svg.getBBox ? svg.getBBox() : null;
-        
-        if (!newBbox || newBbox.x === undefined) {
-            console.log("🔴 POSSIBLE RENDERING CORRUPTION");
-            return true;
+    // Try to corrupt by removing during access
+    let corruption = false;
+    for (let i = 0; i < 20; i++) {
+        try {
+            // Access render properties
+            let fc = root.firstChild;
+            let lc = root.lastChild;
+            
+            // Modify tree
+            if (root.children.length > 10) {
+                root.removeChild(root.firstChild);
+            }
+            
+            // Force reflow
+            let h = root.offsetHeight;
+            
+            if (!fc || !lc) {
+                log(`⚠️ Render tree inconsistency detected!`, 'leak');
+                corruption = true;
+                break;
+            }
+        } catch (e) {
+            log(`❌ Exception in render tree access: ${e.message}`, 'leak');
+            corruption = true;
+            break;
         }
     }
     
-    return false;
+    if (!corruption) {
+        log("✅ Render tree stable", 'success');
+    }
+    
+    return corruption;
 }
 
-// ===== Main Execution =====
+// ===== PHASE 5: Memory Pattern Analysis =====
 
-console.log("========================================");
-console.log("CVE-2025-31278 Test Suite for PS5");
-console.log("========================================");
-
-let results = [];
-
-results.push({
-    test: "DOM Corruption",
-    result: testDOMCorruption()
-});
-
-results.push({
-    test: "Style Recalc UAF",
-    result: testStyleRecalcUAF()
-});
-
-results.push({
-    test: "Rendering Path OOB",
-    result: testRenderingPathOOB()
-});
-
-console.log("\n========== RESULTS ==========");
-results.forEach(r => {
-    console.log(`${r.test}: ${r.result ? '🔴 VULNERABLE' : '✅ NO CRASH'}`);
-});
-
-// If any test triggered corruption, we might have a lead
-let vulnerable = results.some(r => r.result);
-if (vulnerable) {
-    console.log("\n⚠️ POTENTIAL VULNERABILITY FOUND!");
-    console.log("This pattern might work for exploitation");
-} else {
-    console.log("\n✅ No crash detected with these patterns");
+function analyzeMemoryPatterns() {
+    log("\n=== PHASE 5: MEMORY PATTERN ANALYSIS ===");
+    
+    // Create TypedArray to analyze memory
+    let buffer = new ArrayBuffer(0x10000);
+    let view = new Uint32Array(buffer);
+    
+    // Fill with pattern
+    for (let i = 0; i < view.length; i++) {
+        view[i] = 0x41414141;  // 'AAAA'
+    }
+    
+    log(`Created ${view.length * 4} bytes of pattern memory`);
+    
+    // Verify pattern
+    let intact = 0;
+    let corrupted = 0;
+    for (let i = 0; i < Math.min(100, view.length); i++) {
+        if (view[i] === 0x41414141) {
+            intact++;
+        } else {
+            corrupted++;
+            log(`Pattern corruption at offset ${i * 4}: ${view[i].toString(16)}`, 'leak');
+        }
+    }
+    
+    log(`Pattern integrity: ${intact}/100 intact, ${corrupted}/100 corrupted`);
+    return corrupted > 0;
 }
+
+// ===== MAIN EXECUTION =====
+
+async function runFullDiagnostic() {
+    log("╔════════════════════════════════════════╗");
+    log("║  CVE-2025-31278 PS5 DIAGNOSTIC TOOL   ║");
+    log("║       Memory Corruption Detector       ║");
+    log("╚════════════════════════════════════════╝");
+    
+    let findings = {
+        memoryLeak: false,
+        styleCorruption: false,
+        layoutCorruption: false,
+        renderTreeCorruption: false,
+        memoryPatternCorruption: false
+    };
+    
+    // Run all tests
+    findings.memoryLeak = detectMemoryLeak();
+    await new Promise(r => setTimeout(r, 500));
+    
+    findings.styleCorruption = detectStyleCorruption();
+    await new Promise(r => setTimeout(r, 500));
+    
+    findings.layoutCorruption = detectLayoutCorruption();
+    await new Promise(r => setTimeout(r, 500));
+    
+    findings.renderTreeCorruption = detectRenderTreeCorruption();
+    await new Promise(r => setTimeout(r, 500));
+    
+    findings.memoryPatternCorruption = analyzeMemoryPatterns();
+    
+    // Summary
+    log("\n╔════════════════════════════════════════╗");
+    log("║           SUMMARY REPORT              ║");
+    log("╚════════════════════════════════════════╝");
+    
+    const vulnerableCount = Object.values(findings).filter(v => v).length;
+    
+    log(`\nMemory Leak:          ${findings.memoryLeak ? '🔴 DETECTED' : '✅ NONE'}`, findings.memoryLeak ? 'leak' : 'success');
+    log(`Style Corruption:     ${findings.styleCorruption ? '🔴 DETECTED' : '✅ NONE'}`, findings.styleCorruption ? 'leak' : 'success');
+    log(`Layout Corruption:    ${findings.layoutCorruption ? '🔴 DETECTED' : '✅ NONE'}`, findings.layoutCorruption ? 'leak' : 'success');
+    log(`RenderTree Corruption:${findings.renderTreeCorruption ? '🔴 DETECTED' : '✅ NONE'}`, findings.renderTreeCorruption ? 'leak' : 'success');
+    log(`Memory Pattern:       ${findings.memoryPatternCorruption ? '🔴 DETECTED' : '✅ NONE'}`, findings.memoryPatternCorruption ? 'leak' : 'success');
+    
+    log(`\n📊 Vulnerabilities Found: ${vulnerableCount}/5`);
+    
+    if (vulnerableCount > 0) {
+        log("\n🔴 ⚠️ VULNERABILITY PATTERN DETECTED!", 'leak');
+        log("This system appears vulnerable to CVE-2025-31278 or similar");
+        log("Next step: Build addrof/fakeobj primitives", 'leak');
+    } else {
+        log("\n✅ No obvious corruption detected", 'success');
+        log("May need more aggressive payload patterns");
+    }
+}
+
+// Auto-run on load
+window.addEventListener('load', () => {
+    setTimeout(runFullDiagnostic, 500);
+});
 
 </script>
 </body>
