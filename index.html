@@ -1,92 +1,94 @@
-<!DOCTYPE html>
-<html lang="ar">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PS5 WebKit Remote Console Harness</title>
-    <style>
-        body {
-            background-color: #1a1a1a;
-            color: #ffffff;
-            font-family: 'Courier New', monospace;
-            padding: 30px;
-            text-align: center;
+<script>
+(() => {
+  const SOCKET_URL = 'ws://192.168.8.230:8000';
+  let socketOpened = false;
+
+  // ------------------------------------------------------------
+  // 1. WebSocket: only log on open
+  // ------------------------------------------------------------
+  const ws = new WebSocket(SOCKET_URL);
+  ws.onopen = () => {
+    socketOpened = true;
+    console.log('socket:open');
+    // Run the diagnostic immediately after channel is established
+    runDiagnostic();
+  };
+  ws.onerror = () => {
+    // If socket fails, still attempt to run diagnostic (no-op if already ran)
+    if (!socketOpened) runDiagnostic();
+  };
+
+  // ------------------------------------------------------------
+  // 2. Core diagnostic – DOM re-entrancy via removeChild override
+  // ------------------------------------------------------------
+  function runDiagnostic() {
+    try {
+      // --- Heap grooming: concrete HTMLDivElement objects ---
+      const container = document.createElement('div');
+      const childCount = 200;
+      const children = [];
+      for (let i = 0; i < childCount; i++) {
+        const div = document.createElement('div');
+        div.textContent = 'c' + i;
+        container.appendChild(div);
+        children.push(div);
+      }
+
+      // Preserve original removeChild to avoid infinite recursion
+      const originalRemove = Node.prototype.removeChild;
+      let removalDepth = 0;
+      const MAX_DEPTH = 10;          // safely small; avoids stack blowout and watchdog
+
+      // Override: synchronous re-entrancy on every removal
+      Node.prototype.removeChild = function (child) {
+        // Perform the actual removal first (child is now detached)
+        const removed = originalRemove.call(this, child);
+        removalDepth++;
+
+        // Re-entrant removal: remove another child from the *same parent*,
+        // but only if depth is within limit and a sibling exists.
+        if (removalDepth <= MAX_DEPTH && this.childNodes.length > 0) {
+          // Pick a different sibling – here the first remaining child
+          const nextChild = this.childNodes[0];
+          if (nextChild && nextChild !== child) {
+            // This call will re-enter the overridden removeChild
+            this.removeChild(nextChild);
+          }
         }
-        .container {
-            border: 2px dashed #00ff00;
-            padding: 20px;
-            display: inline-block;
-            margin-top: 50px;
-            background: #252525;
+
+        // (Optional) benign access to the detached node to stress memory semantics
+        // Accessing parentNode should be null, but internal representation may be stale.
+        void (removed.parentNode === null);
+
+        removalDepth--;
+        return removed;
+      };
+
+      // --- Trigger the initial removal to start the chain ---
+      if (container.firstChild) {
+        container.removeChild(container.firstChild);
+      }
+
+      // --- Restore original to avoid side effects on page ---
+      Node.prototype.removeChild = originalRemove;
+
+      // --- Cooperative yield for system stability (no busy-wait) ---
+      // Schedule a no-op that lets the event loop breathe.
+      setTimeout(() => {
+        // Optional: pressure GC if interface exists (PS5 may lack GCController)
+        if (typeof GCController !== 'undefined') {
+          GCController.collect();
         }
-        h1 { color: #00ff00; font-size: 20px; }
-        p { color: #cccccc; font-size: 14px; }
-    </style>
-</head>
-<body>
+        // --- Final log: success ---
+        console.log('done');
+        ws.close();
+      }, 0);
 
-    <div class="container">
-        <h1>🎮 بيئة فحص متصفح PS5 نشطة</h1>
-        <p>يتم الآن نقل جميع سجلات الـ Console والأخطاء إلى الأيفون تلقائياً...</p>
-    </div>
-
-    <script>
-        (function() {
-            "use strict";
-
-            // تم تحديث الـ IP الخاص بجهازك هنا تلقائياً
-            var iPhone_IP = "192.168.8.230"; 
-            var server_port = "8000";
-
-            // إنشاء اتصال الـ WebSocket بالسيرفر المشغّل على iSH
-            var socket = new WebSocket("ws://" + iPhone_IP + ":" + server_port);
-
-            // عند نجاح الاتصال بالأيفون
-            socket.onopen = function() {
-                socket.send(JSON.stringify({ type: 'sys', data: 'PS5 Browser Connected Successfully!' }));
-            };
-
-            // اختطاف الـ console.log وتمرير مخرجاته للأيفون
-            var oldLog = console.log;
-            console.log = function() {
-                var argsArray = Array.prototype.slice.call(arguments);
-                var message = argsArray.join(' ');
-                
-                if (socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ type: 'log', data: message }));
-                }
-                oldLog.apply(console, arguments);
-            };
-
-            // اختطاف الأخطاء والـ Crashes غير المتوقعة وتنبيه الأيفون بها
-            window.onerror = function(message, source, lineno, colno, error) {
-                var errorDetails = message + " في الملف: " + source + " (السطر: " + lineno + ")";
-                if (socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ type: 'error', data: errorDetails }));
-                }
-                return false;
-            };
-        })();
-
-        // =====================================================================
-        // 🛠️ مكان وضع أكواد الفحص واختبار الثغرات الخاصة بك (Your Test Code)
-        // =====================================================================
-        
-        window.onload = function() {
-            console.log("بداية تشغيل السكربت على البلايستيشن...");
-
-            try {
-                // سطر اختبار للتأكد من نجاح الربط
-                console.log("إصدار المتصفح الحالي هو: " + navigator.userAgent);
-                
-                // ⏬ ضع كود الـ DOM Mutation أو الـ UAF الخاص بك هنا ⏬
-                // ...
-                // ...
-
-            } catch (err) {
-                console.log("خطأ في كود الفحص: " + err.message);
-            }
-        };
-    </script>
-</body>
-</html>
+    } catch (e) {
+      // --- Final log: native runtime error caught ---
+      console.log('error: ' + e.message);
+      ws.close();
+    }
+  }
+})();
+</script>
