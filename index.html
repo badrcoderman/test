@@ -1,105 +1,192 @@
-<script>
-// يمكنك دمج هذا الكود مباشرة داخل صفحتك المفتوحة على البلايستيشن
-(function() {
-    console.log("[*] بدء عملية الفحص والتشخيص المتقدم للبيئة...");
-
-    // كائن لتجميع نتائج الفحص
-    var auditResults = {
-        timestamp: new Date().toISOString(),
-        jitEnabled: false,
-        jitSpeedScore: 0,
-        nonStandardObjects: [],
-        historicalProperties: {}
-    };
-
-    // --- 1. فحص سلوك الـ JIT (Just-In-Time Compiler) ---
-    // الفكرة تعتمد على تشغيل دالة حسابية مكثفة بشكل متكرر لملاحظة ما إذا كان المحرك
-    // يقوم بتحسين الكود (Optimization) ورفع السرعة بعد عدة تكرارات.
-    try {
-        function testMath() {
-            var x = 0;
-            for (var i = 0; i < 1000000; i++) {
-                x += Math.sin(i) * Math.cos(i);
-            }
-            return x;
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PS5 Browser Environment Auditor</title>
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 20px;
+            direction: ltr;
         }
-
-        // الدورة الأولى (بدون تحسين مسبق)
-        var startNormal = performance.now();
-        testMath();
-        var endNormal = performance.now();
-        var durationNormal = endNormal - startNormal;
-
-        // الدورة الثانية (يفترض أن يكون الـ JIT قد قام بتحسين الدالة الحين)
-        var startJit = performance.now();
-        testMath();
-        var endJit = performance.now();
-        var durationJit = endJit - startJit;
-
-        auditResults.jitSpeedScore = durationNormal / (durationJit || 1);
-        // إذا كان الوقت في المرة الثانية أسرع بشكل ملحوظ، فالـ JIT فعال ويقوم بتحسين العمليات
-        auditResults.jitEnabled = (durationJit < durationNormal);
-        
-        console.log("[+] فحص الـ JIT مكتمل. النتيجة: " + (auditResults.jitEnabled ? "مُفعّل" : "غير نشط"));
-    } catch (e) {
-        auditResults.jitError = e.message;
-    }
-
-    // --- 2. مسح الكائنات غير القياسية (Object Enumeration) ---
-    try {
-        // قائمة بالكائنات القياسية المعروفة في المتصفحات العادية لتصفيتها
-        var standardBuiltins = new Set([
-            'window', 'self', 'document', 'name', 'location', 'history', 'customElements',
-            'locationbar', 'menubar', 'personalbar', 'scrollbars', 'statusbar', 'toolbar',
-            'status', 'closed', 'frames', 'length', 'top', 'opener', 'parent', 'frameElement',
-            'navigator', 'origin', 'external', 'screen', 'innerWidth', 'innerHeight',
-            'scrollX', 'pageXOffset', 'scrollY', 'pageYOffset', 'screenX', 'screenY',
-            'outerWidth', 'outerHeight', 'devicePixelRatio', 'clientInformation', 'chrome'
-        ]);
-
-        var allKeys = Object.keys(window);
-        var custom发现 = [];
-
-        for (var i = 0; i < allKeys.length; i++) {
-            var key = allKeys[i];
-            // إذا وجدنا كائن غريب ليس من الكائنات القياسية، نقوم بتسجيله
-            if (!standardBuiltins.has(key)) {
-                custom发现.push(key);
-            }
+        h1 {
+            color: #58a6ff;
+            border-bottom: 1px solid #30363d;
+            padding-bottom: 10px;
+            text-align: center;
         }
-        auditResults.nonStandardObjects = custom发现;
-        console.log("[+] تم العثور على عدد (" + custom发现.length + ") كائن غير قياسي.");
-    } catch (e) {
-        auditResults.enumError = e.message;
-    }
+        .section {
+            margin-bottom: 20px;
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 15px;
+        }
+        .section-title {
+            color: #ff7b72;
+            font-size: 1.2em;
+            margin-top: 0;
+            border-bottom: 1px solid #21262d;
+            padding-bottom: 5px;
+        }
+        .metric {
+            margin: 8px 0;
+            display: flex;
+            justify-content: space-between;
+        }
+        .label { color: #8b949e; }
+        .value { font-weight: bold; }
+        .true { color: #7ee787; }
+        .false { color: #f85149; }
+        .highlight { color: #d2a8ff; }
+        pre {
+            background-color: #010409;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            max-height: 200px;
+            color: #79c0ff;
+        }
+    </style>
+</head>
+<body>
 
-    // --- 3. فحص الخصائص الهيكلية (Historical Property Profiling) ---
-    // فحص عينات من بنيات البيانات البرمجية لمعرفة طريقة معالجة المحرك لها
-    try {
-        auditResults.historicalProperties = {
-            hasSharedArrayBuffer: (typeof SharedArrayBuffer !== 'undefined'),
-            hasBigInt64Array: (typeof BigInt64Array !== 'undefined'),
-            hasProxy: (typeof Proxy !== 'undefined'),
-            hasWebAssembly: (typeof WebAssembly !== 'undefined')
-        };
-    } catch (e) {
-        auditResults.propError = e.message;
-    }
+    <h1>PS5 Environment Audit Report</h1>
 
-    // --- 4. إرسال أو عرض النتائج ---
-    console.log("[*] نتائج الفحص الكاملة:", auditResults);
+    <div class="section">
+        <div class="section-title">1. Base Environment</div>
+        <div class="metric">
+            <span class="label">User Agent:</span>
+            <span class="value highlight" id="ua">-</span>
+        </div>
+        <div class="metric">
+            <span class="label">Current URL:</span>
+            <span class="value" id="url">-</span>
+        </div>
+    </div>
 
-    // إذا كنت لا تزال تستخدم الـ WebSocket، يمكنك إرسال التقرير مباشرة للـ ws.py الحين:
-    try {
-        var ws = new WebSocket("ws://192.168.8.47:1337");
-        ws.onopen = function() {
-            ws.send(JSON.stringify({
-                type: "advanced_audit",
-                data: auditResults
-            }));
-        };
-    } catch (wsErr) {
-        console.log("[-] فشل إرسال النتائج عبر الـ WebSocket: " + wsErr.message);
-    }
-})();
-</script>
+    <div class="section">
+        <div class="section-title">2. JIT Compiler Status</div>
+        <div class="metric">
+            <span class="label">JIT Enabled Optimization:</span>
+            <span class="value" id="jit-status">-</span>
+        </div>
+        <div class="metric">
+            <span class="label">JIT Speed Ratio (Loop 1 / Loop 2):</span>
+            <span class="value highlight" id="jit-score">-</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">3. Engine Capabilities & Features</div>
+        <div class="metric">
+            <span class="label">SharedArrayBuffer:</span>
+            <span class="value" id="has-sab">-</span>
+        </div>
+        <div class="metric">
+            <span class="label">BigInt64Array:</span>
+            <span class="value" id="has-bi64">-</span>
+        </div>
+        <div class="metric">
+            <span class="label">Proxy Object Support:</span>
+            <span class="value" id="has-proxy">-</span>
+        </div>
+        <div class="metric">
+            <span class="label">WebAssembly (WASM):</span>
+            <span class="value" id="has-wasm">-</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">4. Non-Standard / Custom Objects (Found: <span id="custom-count">0</span>)</div>
+        <pre id="custom-objects">Scanning window context...</pre>
+    </div>
+
+    <script>
+        (function() {
+            // 1. طباعة البيانات الأساسية
+            document.getElementById('ua').innerText = navigator.userAgent;
+            document.getElementById('url').innerText = window.location.href;
+
+            // 2. فحص الـ JIT
+            try {
+                function testMath() {
+                    var x = 0;
+                    for (var i = 0; i < 1000000; i++) {
+                        x += Math.sin(i) * Math.cos(i);
+                    }
+                    return x;
+                }
+
+                var startNormal = performance.now();
+                testMath();
+                var endNormal = performance.now();
+                var durationNormal = endNormal - startNormal;
+
+                var startJit = performance.now();
+                testMath();
+                var endJit = performance.now();
+                var durationJit = endJit - startJit;
+
+                var score = durationNormal / (durationJit || 1);
+                var jitEnabled = (durationJit < durationNormal && score > 1.05);
+
+                var jitElem = document.getElementById('jit-status');
+                jitElem.innerText = jitEnabled ? "TRUE (JIT Active)" : "FALSE (No-JIT / Interpreter Only)";
+                jitElem.className = "value " + (jitEnabled ? "true" : "false");
+                document.getElementById('jit-score').innerText = score.toFixed(4);
+            } catch(e) {
+                document.getElementById('jit-status').innerText = "Error: " + e.message;
+            }
+
+            // 3. فحص الخصائص الهيكلية
+            var features = {
+                'has-sab': typeof SharedArrayBuffer !== 'undefined',
+                'has-bi64': typeof BigInt64Array !== 'undefined',
+                'has-proxy': typeof Proxy !== 'undefined',
+                'has-wasm': typeof WebAssembly !== 'undefined'
+            };
+
+            for (var id in features) {
+                var elem = document.getElementById(id);
+                elem.innerText = features[id] ? "SUPPORTED" : "NOT SUPPORTED";
+                elem.className = "value " + (features[id] ? "true" : "false");
+            }
+
+            // 4. مسح الكائنات غير القياسية
+            try {
+                var standardBuiltins = new Set([
+                    'window', 'self', 'document', 'name', 'location', 'history', 'customElements',
+                    'locationbar', 'menubar', 'personalbar', 'scrollbars', 'statusbar', 'toolbar',
+                    'status', 'closed', 'frames', 'length', 'top', 'opener', 'parent', 'frameElement',
+                    'navigator', 'origin', 'external', 'screen', 'innerWidth', 'innerHeight',
+                    'scrollX', 'pageXOffset', 'scrollY', 'pageYOffset', 'screenX', 'screenY',
+                    'outerWidth', 'outerHeight', 'devicePixelRatio', 'clientInformation', 'chrome'
+                ]);
+
+                var allKeys = Object.keys(window);
+                var customObjects = [];
+
+                for (var i = 0; i < allKeys.length; i++) {
+                    var key = allKeys[i];
+                    if (!standardBuiltins.has(key)) {
+                        customObjects.push(key);
+                    }
+                }
+
+                document.getElementById('custom-count').innerText = customObjects.length;
+                if (customObjects.length > 0) {
+                    document.getElementById('custom-objects').innerText = JSON.stringify(customObjects, null, 2);
+                } else {
+                    document.getElementById('custom-objects').innerText = "No custom extensions found in window object.";
+                }
+            } catch(e) {
+                document.getElementById('custom-objects').innerText = "Error scanning objects: " + e.message;
+            }
+        })();
+    </script>
+</body>
+</html>
