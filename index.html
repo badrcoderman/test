@@ -2,190 +2,106 @@
 <html lang="ar">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PS5 Browser Environment Auditor</title>
+    <title>WebKit DOM Stability Tester</title>
     <style>
         body {
             background-color: #0d1117;
             color: #c9d1d9;
-            font-family: 'Courier New', Courier, monospace;
+            font-family: monospace;
             padding: 20px;
-            direction: ltr;
-        }
-        h1 {
-            color: #58a6ff;
-            border-bottom: 1px solid #30363d;
-            padding-bottom: 10px;
             text-align: center;
         }
-        .section {
-            margin-bottom: 20px;
+        #status-box {
             background-color: #161b22;
             border: 1px solid #30363d;
             border-radius: 6px;
-            padding: 15px;
+            padding: 20px;
+            margin: 20px auto;
+            max-width: 600px;
         }
-        .section-title {
-            color: #ff7b72;
-            font-size: 1.2em;
-            margin-top: 0;
-            border-bottom: 1px solid #21262d;
-            padding-bottom: 5px;
+        .counter {
+            font-size: 2em;
+            color: #58a6ff;
+            font-weight: bold;
         }
-        .metric {
-            margin: 8px 0;
-            display: flex;
-            justify-content: space-between;
+        #arena {
+            display: none; /* إخفاء ساحة التوليد لتسريع العملية برمجياً */
         }
-        .label { color: #8b949e; }
-        .value { font-weight: bold; }
-        .true { color: #7ee787; }
-        .false { color: #f85149; }
-        .highlight { color: #d2a8ff; }
-        pre {
-            background-color: #010409;
-            padding: 10px;
-            border-radius: 4px;
-            overflow-x: auto;
-            max-height: 200px;
-            color: #79c0ff;
+        .test-node {
+            padding: 5px;
+            border: 1px solid red;
+            transform: rotate(1deg);
         }
     </style>
 </head>
 <body>
 
-    <h1>PS5 Environment Audit Report</h1>
-
-    <div class="section">
-        <div class="section-title">1. Base Environment</div>
-        <div class="metric">
-            <span class="label">User Agent:</span>
-            <span class="value highlight" id="ua">-</span>
-        </div>
-        <div class="metric">
-            <span class="label">Current URL:</span>
-            <span class="value" id="url">-</span>
-        </div>
+    <h1>WebKit DOM Stress Tester</h1>
+    
+    <div id="status-box">
+        <p>جاري تشغيل حلقة الإجهاد المكثف لذاكرة المتصفح...</p>
+        <div class="counter" id="cycle-count">0</div>
+        <p id="log">بدء التخصيص الافتراضي لعناصر الذاكرة...</p>
     </div>
 
-    <div class="section">
-        <div class="section-title">2. JIT Compiler Status</div>
-        <div class="metric">
-            <span class="label">JIT Enabled Optimization:</span>
-            <span class="value" id="jit-status">-</span>
-        </div>
-        <div class="metric">
-            <span class="label">JIT Speed Ratio (Loop 1 / Loop 2):</span>
-            <span class="value highlight" id="jit-score">-</span>
-        </div>
-    </div>
-
-    <div class="section">
-        <div class="section-title">3. Engine Capabilities & Features</div>
-        <div class="metric">
-            <span class="label">SharedArrayBuffer:</span>
-            <span class="value" id="has-sab">-</span>
-        </div>
-        <div class="metric">
-            <span class="label">BigInt64Array:</span>
-            <span class="value" id="has-bi64">-</span>
-        </div>
-        <div class="metric">
-            <span class="label">Proxy Object Support:</span>
-            <span class="value" id="has-proxy">-</span>
-        </div>
-        <div class="metric">
-            <span class="label">WebAssembly (WASM):</span>
-            <span class="value" id="has-wasm">-</span>
-        </div>
-    </div>
-
-    <div class="section">
-        <div class="section-title">4. Non-Standard / Custom Objects (Found: <span id="custom-count">0</span>)</div>
-        <pre id="custom-objects">Scanning window context...</pre>
-    </div>
+    <div id="arena"></div>
 
     <script>
         (function() {
-            // 1. طباعة البيانات الأساسية
-            document.getElementById('ua').innerText = navigator.userAgent;
-            document.getElementById('url').innerText = window.location.href;
+            var arena = document.getElementById('arena');
+            var cycleCountElem = document.getElementById('cycle-count');
+            var logElem = document.getElementById('log');
+            var cycle = 0;
 
-            // 2. فحص الـ JIT
-            try {
-                function testMath() {
-                    var x = 0;
-                    for (var i = 0; i < 1000000; i++) {
-                        x += Math.sin(i) * Math.cos(i);
+            // دالة لتوليد شجرة عناصر متداخلة بعمق كبير لتحدي بنية الـ DOM Tree
+            function createDeepTree(depth) {
+                var root = document.createElement('div');
+                root.className = 'test-node';
+                var current = root;
+                
+                for (var i = 0; i < depth; i++) {
+                    var child = document.createElement('div');
+                    child.className = 'test-node';
+                    // إضافة خصائص نصية وتنسيقية ديناميكية لتشتيت مفسر الأنماط
+                    child.setAttribute('data-id', Math.random().toString());
+                    child.style.margin = (Math.random() * 10) + 'px';
+                    
+                    current.appendChild(child);
+                    current = child; // الانتقال للمستوى الأعمق
+                }
+                return root;
+            }
+
+            // الحلقة الأساسية للاختبار
+            def runStressCycle() {
+                cycle++;
+                cycleCountElem.innerText = cycle;
+
+                try {
+                    // 1. توليد 500 شجرة عناصر عميقة في الذاكرة وحقنها
+                    for (var i = 0; i < 500; i++) {
+                        var tree = createDeepTree(20); // عمق 20 عنصر متداخل
+                        arena.appendChild(tree);
                     }
-                    return x;
+
+                    // 2. إجبار المحرك على حساب التنسيقات (Force Layout Reflow)
+                    // قراءة خاصية مثل offsetHeight تجبر الـ WebKit على معالجة كل العناصر فوراً في الذاكرة
+                    var triggerReflow = arena.offsetHeight;
+
+                    // 3. حذف كل العناصر دفعة واحدة لترك الذاكرة معلقة وتحفيز الـ Garbage Collection
+                    arena.innerHTML = '';
+
+                    // 4. استدعاء الدورة التالية بسرعة باستخدام setTimeout لمنع تعليق المتصفح المباشر
+                    setTimeout(runStressCycle, 5);
+
+                } catch (e) {
+                    logElem.innerText = "حدث خطأ أثناء الدورة: " + e.message;
+                    logElem.style.color = '#f85149';
                 }
-
-                var startNormal = performance.now();
-                testMath();
-                var endNormal = performance.now();
-                var durationNormal = endNormal - startNormal;
-
-                var startJit = performance.now();
-                testMath();
-                var endJit = performance.now();
-                var durationJit = endJit - startJit;
-
-                var score = durationNormal / (durationJit || 1);
-                var jitEnabled = (durationJit < durationNormal && score > 1.05);
-
-                var jitElem = document.getElementById('jit-status');
-                jitElem.innerText = jitEnabled ? "TRUE (JIT Active)" : "FALSE (No-JIT / Interpreter Only)";
-                jitElem.className = "value " + (jitEnabled ? "true" : "false");
-                document.getElementById('jit-score').innerText = score.toFixed(4);
-            } catch(e) {
-                document.getElementById('jit-status').innerText = "Error: " + e.message;
             }
 
-            // 3. فحص الخصائص الهيكلية
-            var features = {
-                'has-sab': typeof SharedArrayBuffer !== 'undefined',
-                'has-bi64': typeof BigInt64Array !== 'undefined',
-                'has-proxy': typeof Proxy !== 'undefined',
-                'has-wasm': typeof WebAssembly !== 'undefined'
-            };
-
-            for (var id in features) {
-                var elem = document.getElementById(id);
-                elem.innerText = features[id] ? "SUPPORTED" : "NOT SUPPORTED";
-                elem.className = "value " + (features[id] ? "true" : "false");
-            }
-
-            // 4. مسح الكائنات غير القياسية
-            try {
-                var standardBuiltins = new Set([
-                    'window', 'self', 'document', 'name', 'location', 'history', 'customElements',
-                    'locationbar', 'menubar', 'personalbar', 'scrollbars', 'statusbar', 'toolbar',
-                    'status', 'closed', 'frames', 'length', 'top', 'opener', 'parent', 'frameElement',
-                    'navigator', 'origin', 'external', 'screen', 'innerWidth', 'innerHeight',
-                    'scrollX', 'pageXOffset', 'scrollY', 'pageYOffset', 'screenX', 'screenY',
-                    'outerWidth', 'outerHeight', 'devicePixelRatio', 'clientInformation', 'chrome'
-                ]);
-
-                var allKeys = Object.keys(window);
-                var customObjects = [];
-
-                for (var i = 0; i < allKeys.length; i++) {
-                    var key = allKeys[i];
-                    if (!standardBuiltins.has(key)) {
-                        customObjects.push(key);
-                    }
-                }
-
-                document.getElementById('custom-count').innerText = customObjects.length;
-                if (customObjects.length > 0) {
-                    document.getElementById('custom-objects').innerText = JSON.stringify(customObjects, null, 2);
-                } else {
-                    document.getElementById('custom-objects').innerText = "No custom extensions found in window object.";
-                }
-            } catch(e) {
-                document.getElementById('custom-objects').innerText = "Error scanning objects: " + e.message;
-            }
+            // بدء تشغيل الفحص التلقائي بمجرد تحميل الصفحة
+            setTimeout(runStressCycle, 1000);
         })();
     </script>
 </body>
