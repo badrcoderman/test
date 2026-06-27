@@ -3,213 +3,516 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CSSFontFace lifetime validation - missing remote font variant</title>
+<title>WebGL Timer Query Microtask Lifetime Validation</title>
 <style>
-html { font-family: system-ui, -apple-system, sans-serif; background: #111; color: #eee; }
-body { margin: 0; padding: 16px; line-height: 1.45; }
-button { font: inherit; padding: 10px 14px; margin: 4px 8px 12px 0; }
-.box { border: 1px solid #444; border-radius: 8px; padding: 12px; margin: 12px 0; background: #181818; }
-.warn { color: #ffd479; }
-.ok { color: #98f598; }
-.bad { color: #ff8f8f; }
-#stage { font-size: 20px; font-weight: 700; }
-#probe { position: absolute; left: -10000px; top: -10000px; font-family: "ps5-cssfontface-validation-missing"; }
-#log, #previous { white-space: pre-wrap; word-break: break-word; background: #050505; color: #d7ffd7; padding: 12px; border-radius: 8px; min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
-</style>
-<style id="validation-style">
-@font-face {
-    font-family: "ps5-cssfontface-validation-missing";
-    src: url("missing-font.woff") format("woff");
-    unicode-range: U+0042; /* B: stylesheet-backed CSSFontFace with intentionally missing remote font */
-}
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    padding: 18px;
+    font: 15px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #e8eef8;
+    background: #10141f;
+  }
+  h1 { margin: 0 0 8px; font-size: 22px; }
+  .note {
+    border: 1px solid #33405d;
+    background: #151c2b;
+    border-radius: 10px;
+    padding: 12px;
+    margin: 12px 0;
+  }
+  .stage {
+    margin: 14px 0;
+    padding: 14px;
+    border-radius: 10px;
+    border: 1px solid #3f5f9a;
+    background: #17243a;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+  button {
+    border: 1px solid #4f6592;
+    background: #23314d;
+    color: #fff;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-weight: 650;
+  }
+  button:active { transform: translateY(1px); }
+  pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    border: 1px solid #293651;
+    background: #080b11;
+    border-radius: 10px;
+    padding: 10px;
+    min-height: 120px;
+    max-height: 45vh;
+    overflow: auto;
+  }
+  .ok { color: #8ff0a4; }
+  .warn { color: #ffd479; }
+  .bad { color: #ff8d8d; }
+  canvas { width: 1px; height: 1px; position: absolute; left: -1000px; top: -1000px; }
 </style>
 </head>
 <body>
-<h1>CSSFontFace lifetime validation</h1>
-<h2>Variant 2: missing remote CSS @font-face</h2>
-
-<div class="box warn">
-Validation-only page. It does not contain heap spray, exploit primitives, ARW/addrof/fakeobj, shellcode, or sandbox escape logic.
-Its only purpose is to exercise a suspected stale CSSFontFace reference path and show the last visible stage before crash/reload.
+<h1>WebGL Timer Query Microtask Lifetime Validation</h1>
+<div class="note">
+  <div><strong>Purpose:</strong> validation-only test for WebGL timer-query microtask lifetime candidates.</div>
+  <div>No heap spray, no exploit primitives, no ARW/addrof/fakeobj, no shellcode, no sandbox escape.</div>
+  <div>Crash/reload/error after <code>queryCounterEXT</code> + delete/loss/iframe teardown supports the lifetime hypothesis. No crash does not fully disprove it.</div>
 </div>
 
-<div class="box">
-<div id="stage">Stage: not started</div>
-<button id="run">Run validation</button>
-<button id="clear">Clear logs</button>
-<div id="probe">AB</div>
+<div id="stage" class="stage">Stage: page loaded</div>
+<div class="buttons">
+  <button onclick="supportCheck()">1. Support check</button>
+  <button onclick="runWebGL1Delete()">2. WebGL1 delete</button>
+  <button onclick="runWebGL1DeleteLose()">3. WebGL1 delete + lose context</button>
+  <button onclick="runWebGL2Delete()">4. WebGL2 delete</button>
+  <button onclick="runWebGL2DeleteLose()">5. WebGL2 delete + lose context</button>
+  <button onclick="runIframeWebGL1(false)">6a. iframe WebGL1 delete</button>
+  <button onclick="runIframeWebGL1(true)">6b. iframe WebGL1 delete + lose</button>
+  <button onclick="runIframeWebGL2(false)">6c. iframe WebGL2 delete</button>
+  <button onclick="runIframeWebGL2(true)">6d. iframe WebGL2 delete + lose</button>
+  <button onclick="runAll()">Run all sequentially</button>
+  <button onclick="clearLogs()">Clear logs</button>
 </div>
 
-<div class="box">
-<h3>Current run log</h3>
+<h2>Current log</h2>
 <pre id="log"></pre>
-</div>
-
-<div class="box">
-<h3>Previous persisted log</h3>
+<h2>Previous persisted log</h2>
 <pre id="previous"></pre>
-</div>
 
 <script>
-(function () {
-    "use strict";
+'use strict';
 
-    const VARIANT = "missing-remote-font";
-    const FAMILY = "ps5-cssfontface-validation-missing";
-    const STORAGE_KEY = "cssfontface-validation-log-" + VARIANT;
-    const stageElement = document.getElementById("stage");
-    const logElement = document.getElementById("log");
-    const previousElement = document.getElementById("previous");
-    const runButton = document.getElementById("run");
-    const clearButton = document.getElementById("clear");
+const STORAGE_KEY = 'webgl-timer-query-microtask-lifetime-validation:last-log';
+let runCounter = 0;
+let currentLog = [];
 
-    let sequence = 0;
-    let running = false;
-    let reentered = false;
+function now() {
+  const d = new Date();
+  return d.toISOString();
+}
 
-    function timestamp() {
-        return new Date().toISOString();
+function persist() {
+  try {
+    localStorage.setItem(STORAGE_KEY, currentLog.join('\n'));
+  } catch (e) {
+    // Ignore storage failures, but keep visible logging alive.
+  }
+}
+
+function setStage(text, cssClass) {
+  const el = document.getElementById('stage');
+  el.textContent = 'Stage: ' + text;
+  el.className = 'stage' + (cssClass ? ' ' + cssClass : '');
+  log('STAGE: ' + text);
+}
+
+function log(text) {
+  const line = '[' + now() + '] ' + text;
+  currentLog.push(line);
+  const logEl = document.getElementById('log');
+  logEl.textContent = currentLog.join('\n');
+  logEl.scrollTop = logEl.scrollHeight;
+  persist();
+}
+
+function clearLogs() {
+  currentLog = [];
+  document.getElementById('log').textContent = '';
+  try { localStorage.removeItem(STORAGE_KEY); } catch (e) { }
+  document.getElementById('previous').textContent = '(cleared)';
+  setStage('logs cleared', 'ok');
+}
+
+function loadPreviousLog() {
+  let previous = '';
+  try { previous = localStorage.getItem(STORAGE_KEY) || ''; } catch (e) { previous = ''; }
+  document.getElementById('previous').textContent = previous || '(no previous persisted log)';
+}
+
+window.addEventListener('error', event => {
+  log('window.onerror: ' + event.message + ' at ' + event.filename + ':' + event.lineno + ':' + event.colno);
+});
+window.addEventListener('unhandledrejection', event => {
+  log('unhandledrejection: ' + String(event.reason && (event.reason.stack || event.reason.message) || event.reason));
+});
+window.addEventListener('beforeunload', () => {
+  log('beforeunload fired; if this was unexpected, compare previous persisted log after reload');
+});
+window.addEventListener('message', event => {
+  if (!event.data || event.data.kind !== 'timer-query-validation-log')
+    return;
+  log('iframe[' + event.data.label + ']: ' + event.data.message);
+});
+
+function sleepTask() {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+async function twoMicrotasks(label) {
+  log(label + ': awaiting Promise.resolve() #1');
+  await Promise.resolve();
+  log(label + ': survived microtask #1');
+  await Promise.resolve();
+  log(label + ': survived microtask #2');
+}
+
+function createCanvas() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
+  document.body.appendChild(canvas);
+  return canvas;
+}
+
+function getGL1(canvas) {
+  return canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+}
+
+function getGL2(canvas) {
+  return canvas.getContext('webgl2');
+}
+
+function describeSupport() {
+  const result = {};
+  let canvas = createCanvas();
+  try {
+    const gl1 = getGL1(canvas);
+    result.webgl1 = !!gl1;
+    result.extDisjointTimerQuery = !!(gl1 && gl1.getExtension('EXT_disjoint_timer_query'));
+    result.loseContextWebGL1 = !!(gl1 && gl1.getExtension('WEBGL_lose_context'));
+  } catch (e) {
+    result.webgl1Error = String(e && (e.stack || e.message) || e);
+  } finally {
+    canvas.remove();
+  }
+
+  canvas = createCanvas();
+  try {
+    const gl2 = getGL2(canvas);
+    result.webgl2 = !!gl2;
+    result.extDisjointTimerQueryWebGL2 = !!(gl2 && gl2.getExtension('EXT_disjoint_timer_query_webgl2'));
+    result.loseContextWebGL2 = !!(gl2 && gl2.getExtension('WEBGL_lose_context'));
+  } catch (e) {
+    result.webgl2Error = String(e && (e.stack || e.message) || e);
+  } finally {
+    canvas.remove();
+  }
+  return result;
+}
+
+function supportCheck() {
+  setStage('support check started');
+  const s = describeSupport();
+  log('Support WebGL1: ' + s.webgl1);
+  log('Support EXT_disjoint_timer_query: ' + s.extDisjointTimerQuery);
+  log('Support WebGL2: ' + s.webgl2);
+  log('Support EXT_disjoint_timer_query_webgl2: ' + s.extDisjointTimerQueryWebGL2);
+  log('Support WEBGL_lose_context WebGL1: ' + s.loseContextWebGL1);
+  log('Support WEBGL_lose_context WebGL2: ' + s.loseContextWebGL2);
+  if (s.webgl1Error)
+    log('WebGL1 support check exception: ' + s.webgl1Error);
+  if (s.webgl2Error)
+    log('WebGL2 support check exception: ' + s.webgl2Error);
+  setStage('support check complete', 'ok');
+}
+
+async function runWebGL1Delete() {
+  const id = ++runCounter;
+  const label = 'WebGL1 delete #' + id;
+  setStage(label + ': start');
+  const canvas = createCanvas();
+  try {
+    const gl = getGL1(canvas);
+    log(label + ': WebGL1 context = ' + !!gl);
+    if (!gl) {
+      setStage(label + ': skipped, no WebGL1', 'warn');
+      return;
     }
-
-    function persist(line) {
-        try {
-            const previous = localStorage.getItem(STORAGE_KEY) || "";
-            localStorage.setItem(STORAGE_KEY, previous + line + "\n");
-        } catch (e) {
-            // Ignore storage failures; visible logging still works.
-        }
+    const ext = gl.getExtension('EXT_disjoint_timer_query');
+    log(label + ': EXT_disjoint_timer_query = ' + !!ext);
+    if (!ext) {
+      setStage(label + ': skipped, missing extension', 'warn');
+      return;
     }
+    let query = ext.createQueryEXT();
+    log(label + ': created query = ' + !!query);
+    setStage(label + ': calling queryCounterEXT');
+    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
+    log(label + ': returned from queryCounterEXT');
+    setStage(label + ': deleting query before microtask checkpoint');
+    ext.deleteQueryEXT(query);
+    log(label + ': returned from deleteQueryEXT');
+    query = null;
+    log(label + ': query variable set to null');
+    await twoMicrotasks(label);
+    setStage(label + ': survived queued microtasks', 'ok');
+  } catch (e) {
+    log(label + ': exception: ' + String(e && (e.stack || e.message) || e));
+    setStage(label + ': exception logged', 'bad');
+  } finally {
+    canvas.remove();
+    log(label + ': canvas removed');
+  }
+}
 
-    function setStage(name) {
-        sequence += 1;
-        const line = "[" + sequence + "] " + timestamp() + " :: " + name;
-        stageElement.textContent = "Stage " + sequence + ": " + name;
-        logElement.textContent += line + "\n";
-        persist(line);
-        if (window.console)
-            console.log(line);
+async function runWebGL1DeleteLose() {
+  const id = ++runCounter;
+  const label = 'WebGL1 delete+lose #' + id;
+  setStage(label + ': start');
+  const canvas = createCanvas();
+  try {
+    const gl = getGL1(canvas);
+    log(label + ': WebGL1 context = ' + !!gl);
+    if (!gl) {
+      setStage(label + ': skipped, no WebGL1', 'warn');
+      return;
     }
-
-    function loadPreviousLog() {
-        try {
-            previousElement.textContent = localStorage.getItem(STORAGE_KEY) || "(no previous persisted log)";
-        } catch (e) {
-            previousElement.textContent = "(localStorage unavailable: " + e.name + ")";
-        }
+    const ext = gl.getExtension('EXT_disjoint_timer_query');
+    const lose = gl.getExtension('WEBGL_lose_context');
+    log(label + ': EXT_disjoint_timer_query = ' + !!ext);
+    log(label + ': WEBGL_lose_context = ' + !!lose);
+    if (!ext) {
+      setStage(label + ': skipped, missing extension', 'warn');
+      return;
     }
-
-    window.addEventListener("error", event => {
-        setStage("window.error: " + event.message);
-    });
-
-    window.addEventListener("unhandledrejection", event => {
-        setStage("unhandledrejection: " + event.reason);
-    });
-
-    window.addEventListener("beforeunload", () => {
-        persist("[beforeunload] " + timestamp() + " :: page unloading/reloading");
-    });
-
-    clearButton.addEventListener("click", () => {
-        try { localStorage.removeItem(STORAGE_KEY); } catch (e) { }
-        logElement.textContent = "";
-        previousElement.textContent = "(cleared)";
-        stageElement.textContent = "Stage: logs cleared";
-        sequence = 0;
-    });
-
-    async function runValidation() {
-        if (running)
-            return;
-        running = true;
-        reentered = false;
-        logElement.textContent = "";
-        persist("\n=== new run: " + timestamp() + " variant=" + VARIANT + " ===");
-
-        setStage("start validation-only run");
-
-        const styleElement = document.getElementById("validation-style");
-        const sheet = styleElement && styleElement.sheet;
-        setStage("stylesheet located; cssRules=" + (sheet ? sheet.cssRules.length : "no sheet"));
-
-        // A: JavaScript-created local FontFace. The local source is used only to
-        // create a synchronous/near-synchronous promise path for re-entry.
-        // B is supplied by the stylesheet-backed missing remote font above.
-        const jsFace = new FontFace(
-            FAMILY,
-            "local(Arial), local(Helvetica), local(Times New Roman), local(Courier New)",
-            { unicodeRange: "U+0041" } // A: JS-created FontFace
-        );
-        setStage("created JS FontFace for U+0041");
-
-        document.fonts.add(jsFace);
-        setStage("added JS FontFace to document.fonts; current size=" + document.fonts.size);
-
-        Object.defineProperty(jsFace, "then", {
-            configurable: true,
-            get() {
-                if (reentered) {
-                    setStage("then getter called again; ignored");
-                    return undefined;
-                }
-                reentered = true;
-                setStage("then getter re-entry reached");
-
-                try {
-                    setStage("about to delete stylesheet @font-face rule for missing-font.woff");
-                    if (sheet && sheet.cssRules.length)
-                        sheet.deleteRule(0);
-                    setStage("deleted stylesheet rule; cssRules=" + (sheet ? sheet.cssRules.length : "no sheet"));
-                } catch (e) {
-                    setStage("deleteRule threw " + e.name + ": " + e.message);
-                }
-
-                try {
-                    setStage("forcing style/layout recalculation");
-                    void document.body.offsetTop;
-                    void getComputedStyle(document.getElementById("probe")).fontFamily;
-                    setStage("forced style/layout recalculation complete; document.fonts.size=" + document.fonts.size);
-                } catch (e) {
-                    setStage("style/layout force threw " + e.name + ": " + e.message);
-                }
-
-                return undefined;
-            }
-        });
-        setStage("installed controlled then getter on JS FontFace");
-
-        try {
-            setStage("calling document.fonts.load for text AB");
-            const loadPromise = document.fonts.load("1em " + FAMILY, "AB");
-            setStage("document.fonts.load returned Promise");
-
-            loadPromise.then(faces => {
-                setStage("load promise resolved; faces.length=" + faces.length);
-                setStage("final state: reentered=" + reentered + ", cssRules=" + (sheet ? sheet.cssRules.length : "no sheet") + ", document.fonts.size=" + document.fonts.size);
-                setStage("NO CRASH observed in JS-visible path");
-                running = false;
-            }, error => {
-                setStage("load promise rejected: " + error.name + ": " + error.message);
-                setStage("final state after rejection: reentered=" + reentered + ", cssRules=" + (sheet ? sheet.cssRules.length : "no sheet"));
-                running = false;
-            });
-        } catch (e) {
-            setStage("synchronous exception from document.fonts.load: " + e.name + ": " + e.message);
-            running = false;
-        }
-
-        setTimeout(() => {
-            if (running) {
-                setStage("timeout: run still pending after 3000ms; reentered=" + reentered);
-                running = false;
-            }
-        }, 3000);
+    let query = ext.createQueryEXT();
+    log(label + ': created query = ' + !!query);
+    setStage(label + ': calling queryCounterEXT');
+    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
+    log(label + ': returned from queryCounterEXT');
+    setStage(label + ': deleting query before context loss');
+    ext.deleteQueryEXT(query);
+    log(label + ': returned from deleteQueryEXT');
+    query = null;
+    log(label + ': query variable set to null');
+    if (lose) {
+      setStage(label + ': calling WEBGL_lose_context.loseContext before microtask checkpoint');
+      lose.loseContext();
+      log(label + ': returned from loseContext');
     }
+    await twoMicrotasks(label);
+    setStage(label + ': survived delete + context loss microtasks', 'ok');
+  } catch (e) {
+    log(label + ': exception: ' + String(e && (e.stack || e.message) || e));
+    setStage(label + ': exception logged', 'bad');
+  } finally {
+    canvas.remove();
+    log(label + ': canvas removed');
+  }
+}
 
-    runButton.addEventListener("click", runValidation);
-    loadPreviousLog();
-    setStage("page loaded; press Run validation");
-})();
+async function runWebGL2Delete() {
+  const id = ++runCounter;
+  const label = 'WebGL2 delete #' + id;
+  setStage(label + ': start');
+  const canvas = createCanvas();
+  try {
+    const gl = getGL2(canvas);
+    log(label + ': WebGL2 context = ' + !!gl);
+    if (!gl) {
+      setStage(label + ': skipped, no WebGL2', 'warn');
+      return;
+    }
+    const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    log(label + ': EXT_disjoint_timer_query_webgl2 = ' + !!ext);
+    if (!ext) {
+      setStage(label + ': skipped, missing extension', 'warn');
+      return;
+    }
+    let query = gl.createQuery();
+    log(label + ': created query = ' + !!query);
+    setStage(label + ': calling queryCounterEXT');
+    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
+    log(label + ': returned from queryCounterEXT');
+    setStage(label + ': deleting query before microtask checkpoint');
+    gl.deleteQuery(query);
+    log(label + ': returned from deleteQuery');
+    query = null;
+    log(label + ': query variable set to null');
+    await twoMicrotasks(label);
+    setStage(label + ': survived queued microtasks', 'ok');
+  } catch (e) {
+    log(label + ': exception: ' + String(e && (e.stack || e.message) || e));
+    setStage(label + ': exception logged', 'bad');
+  } finally {
+    canvas.remove();
+    log(label + ': canvas removed');
+  }
+}
+
+async function runWebGL2DeleteLose() {
+  const id = ++runCounter;
+  const label = 'WebGL2 delete+lose #' + id;
+  setStage(label + ': start');
+  const canvas = createCanvas();
+  try {
+    const gl = getGL2(canvas);
+    log(label + ': WebGL2 context = ' + !!gl);
+    if (!gl) {
+      setStage(label + ': skipped, no WebGL2', 'warn');
+      return;
+    }
+    const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    const lose = gl.getExtension('WEBGL_lose_context');
+    log(label + ': EXT_disjoint_timer_query_webgl2 = ' + !!ext);
+    log(label + ': WEBGL_lose_context = ' + !!lose);
+    if (!ext) {
+      setStage(label + ': skipped, missing extension', 'warn');
+      return;
+    }
+    let query = gl.createQuery();
+    log(label + ': created query = ' + !!query);
+    setStage(label + ': calling queryCounterEXT');
+    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
+    log(label + ': returned from queryCounterEXT');
+    setStage(label + ': deleting query before context loss');
+    gl.deleteQuery(query);
+    log(label + ': returned from deleteQuery');
+    query = null;
+    log(label + ': query variable set to null');
+    if (lose) {
+      setStage(label + ': calling WEBGL_lose_context.loseContext before microtask checkpoint');
+      lose.loseContext();
+      log(label + ': returned from loseContext');
+    }
+    await twoMicrotasks(label);
+    setStage(label + ': survived delete + context loss microtasks', 'ok');
+  } catch (e) {
+    log(label + ': exception: ' + String(e && (e.stack || e.message) || e));
+    setStage(label + ': exception logged', 'bad');
+  } finally {
+    canvas.remove();
+    log(label + ': canvas removed');
+  }
+}
+
+function iframeSrcdoc(kind, loseContext) {
+  const isWebGL2 = kind === 'webgl2';
+  const label = kind + (loseContext ? '-delete-lose-iframe' : '-delete-iframe');
+  return `<!doctype html><meta charset="utf-8"><body><script>
+  'use strict';
+  function send(message) {
+    try { parent.postMessage({ kind: 'timer-query-validation-log', label: ${JSON.stringify(label)}, message: String(message) }, '*'); } catch (e) { }
+  }
+  window.onerror = function(message, source, lineno, colno) {
+    send('iframe onerror: ' + message + ' at ' + lineno + ':' + colno);
+  };
+  window.onunhandledrejection = function(event) {
+    send('iframe unhandledrejection: ' + String(event.reason && (event.reason.stack || event.reason.message) || event.reason));
+  };
+  window.runTimerQueryValidation = function() {
+    send('runTimerQueryValidation start');
+    var canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    document.body.appendChild(canvas);
+    try {
+      var gl = ${isWebGL2 ? "canvas.getContext('webgl2')" : "(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'))"};
+      send('context created = ' + !!gl);
+      if (!gl)
+        return 'no-context';
+      var ext = gl.getExtension(${JSON.stringify(isWebGL2 ? 'EXT_disjoint_timer_query_webgl2' : 'EXT_disjoint_timer_query')});
+      var lose = gl.getExtension('WEBGL_lose_context');
+      send('timer extension = ' + !!ext);
+      send('WEBGL_lose_context = ' + !!lose);
+      if (!ext)
+        return 'no-extension';
+      var query = ${isWebGL2 ? 'gl.createQuery()' : 'ext.createQueryEXT()'};
+      send('created query = ' + !!query);
+      send('calling queryCounterEXT');
+      ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
+      send('returned from queryCounterEXT');
+      send('deleting query before parent removes iframe');
+      ${isWebGL2 ? 'gl.deleteQuery(query);' : 'ext.deleteQueryEXT(query);'}
+      send('returned from delete');
+      query = null;
+      send('query variable set to null');
+      if (${loseContext ? 'true' : 'false'} && lose) {
+        send('calling loseContext before parent removes iframe');
+        lose.loseContext();
+        send('returned from loseContext');
+      }
+      Promise.resolve().then(function() { send('iframe microtask #1 survived'); });
+      Promise.resolve().then(function() { return Promise.resolve(); }).then(function() { send('iframe microtask #2 survived'); });
+      return 'scheduled';
+    } catch (e) {
+      send('exception: ' + String(e && (e.stack || e.message) || e));
+      return 'exception';
+    }
+  };
+<\/script></body>`;
+}
+
+async function runIframeVariant(kind, loseContext) {
+  const id = ++runCounter;
+  const label = 'iframe ' + kind + (loseContext ? ' delete+lose ' : ' delete ') + '#' + id;
+  setStage(label + ': create iframe');
+  let iframe = document.createElement('iframe');
+  iframe.style.width = '1px';
+  iframe.style.height = '1px';
+  iframe.style.position = 'absolute';
+  iframe.style.left = '-1000px';
+  iframe.style.top = '-1000px';
+  iframe.srcdoc = iframeSrcdoc(kind, loseContext);
+  document.body.appendChild(iframe);
+  await sleepTask();
+  try {
+    setStage(label + ': invoking iframe test');
+    const result = iframe.contentWindow.runTimerQueryValidation();
+    log(label + ': iframe returned ' + result);
+    setStage(label + ': removing iframe before microtask checkpoint');
+    iframe.remove();
+    iframe = null;
+    log(label + ': iframe removed');
+    await twoMicrotasks(label + ' parent');
+    await sleepTask();
+    setStage(label + ': parent survived iframe teardown', 'ok');
+  } catch (e) {
+    log(label + ': parent exception: ' + String(e && (e.stack || e.message) || e));
+    setStage(label + ': parent exception logged', 'bad');
+    try { if (iframe) iframe.remove(); } catch (_) { }
+  }
+}
+
+function runIframeWebGL1(loseContext) {
+  return runIframeVariant('webgl1', loseContext);
+}
+
+function runIframeWebGL2(loseContext) {
+  return runIframeVariant('webgl2', loseContext);
+}
+
+async function runAll() {
+  setStage('run all started');
+  supportCheck();
+  await sleepTask();
+  await runWebGL1Delete();
+  await sleepTask();
+  await runWebGL1DeleteLose();
+  await sleepTask();
+  await runWebGL2Delete();
+  await sleepTask();
+  await runWebGL2DeleteLose();
+  await sleepTask();
+  await runIframeWebGL1(false);
+  await sleepTask();
+  await runIframeWebGL1(true);
+  await sleepTask();
+  await runIframeWebGL2(false);
+  await sleepTask();
+  await runIframeWebGL2(true);
+  setStage('run all complete; no JS-visible crash observed', 'ok');
+}
+
+loadPreviousLog();
+log('page loaded; previous persisted log shown below');
 </script>
 </body>
 </html>
