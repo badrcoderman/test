@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PS5 FontFace OOM Minimal Diagnostic</title>
+<title>PS5 FontFace Repeat OOM Test</title>
 <style>
 html {
     font-family: system-ui, -apple-system, sans-serif;
@@ -15,10 +15,13 @@ body {
     padding: 16px;
     line-height: 1.45;
 }
-button {
+button, input, select {
     font: inherit;
-    padding: 10px 14px;
+    padding: 9px 12px;
     margin: 4px 8px 10px 0;
+}
+input {
+    width: 80px;
 }
 .box {
     border: 1px solid #444;
@@ -29,6 +32,12 @@ button {
 }
 .warn {
     color: #ffd479;
+}
+.ok {
+    color: #98f598;
+}
+.bad {
+    color: #ff8f8f;
 }
 #stage {
     font-size: 22px;
@@ -46,7 +55,7 @@ button {
     color: #d7ffd7;
     padding: 12px;
     border-radius: 8px;
-    min-height: 150px;
+    min-height: 160px;
     font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 13px;
 }
@@ -54,21 +63,29 @@ button {
 </head>
 <body>
 
-<h1>PS5 FontFace OOM Minimal Diagnostic</h1>
+<h1>PS5 FontFace Repeat OOM Test</h1>
 
 <div class="box warn">
-Validation-only page. No exploit primitives, no heap spray, no ARW/addrof/fakeobj, no shellcode, no ROP/JOP.
-Goal: isolate PS5 WebKit OOM around CSS @font-face + JS FontFace + document.fonts.check / style recalc.
+Validation-only test. No exploit primitives, no heap spray, no ARW/addrof/fakeobj, no shellcode, no ROP/JOP.
+Goal: check whether repeated FontFace setup/check/recalc causes reproducible PS5 WebKit OOM.
 </div>
 
 <div class="box">
     <div id="stage">Stage: ready</div>
 
-    <button id="run-add-local">1. Add only - local</button>
-    <button id="run-check-local">2. Add + fonts.check - local</button>
-    <button id="run-recalc-local">3. Add + style recalc - local</button>
-    <button id="run-check-missing">4. Add + fonts.check - missing</button>
-    <button id="run-recalc-missing">5. Add + style recalc - missing</button>
+    <label>Iterations:</label>
+    <input id="iterations" type="number" min="1" max="200" value="25">
+
+    <label>Delay ms:</label>
+    <input id="delay" type="number" min="0" max="5000" value="250">
+
+    <br>
+
+    <button id="run-add">Run repeat: add only</button>
+    <button id="run-check">Run repeat: fonts.check</button>
+    <button id="run-recalc">Run repeat: style recalc</button>
+    <button id="run-mixed">Run repeat: mixed</button>
+    <button id="stop">Stop</button>
     <button id="clear">Clear logs</button>
 
     <div id="probe">AB</div>
@@ -88,14 +105,20 @@ Goal: isolate PS5 WebKit OOM around CSS @font-face + JS FontFace + document.font
 (function () {
     "use strict";
 
-    const STORAGE_KEY = "ps5-fontface-oom-minimal-log";
+    const STORAGE_KEY = "ps5-fontface-repeat-oom-log";
+
+    const stageElement = document.getElementById("stage");
     const logElement = document.getElementById("log");
     const previousElement = document.getElementById("previous");
-    const stageElement = document.getElementById("stage");
     const probe = document.getElementById("probe");
+
+    const iterationsInput = document.getElementById("iterations");
+    const delayInput = document.getElementById("delay");
 
     let seq = 0;
     let runId = 0;
+    let running = false;
+    let stopRequested = false;
     let faces = [];
 
     function now() {
@@ -108,8 +131,8 @@ Goal: isolate PS5 WebKit OOM around CSS @font-face + JS FontFace + document.font
             old += line + "\n";
 
             const lines = old.split("\n");
-            if (lines.length > 120)
-                old = lines.slice(lines.length - 120).join("\n");
+            if (lines.length > 160)
+                old = lines.slice(lines.length - 160).join("\n");
 
             localStorage.setItem(STORAGE_KEY, old);
         } catch (e) {
@@ -120,7 +143,11 @@ Goal: isolate PS5 WebKit OOM around CSS @font-face + JS FontFace + document.font
         const line = "[" + (++seq) + "] " + now() + " :: " + message;
         logElement.textContent += line + "\n";
         save(line);
-        try { console.log(line); } catch (e) {}
+
+        try {
+            console.log(line);
+        } catch (e) {
+        }
     }
 
     function stage(message) {
@@ -128,8 +155,18 @@ Goal: isolate PS5 WebKit OOM around CSS @font-face + JS FontFace + document.font
         log("STAGE => " + message);
     }
 
+    function sleep(ms) {
+        return new Promise(function (resolve) {
+            setTimeout(resolve, ms);
+        });
+    }
+
     function clearLogs() {
-        try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+        try {
+            localStorage.removeItem(STORAGE_KEY);
+        } catch (e) {
+        }
+
         seq = 0;
         logElement.textContent = "";
         previousElement.textContent = "";
@@ -146,6 +183,7 @@ Goal: isolate PS5 WebKit OOM around CSS @font-face + JS FontFace + document.font
 
     window.onerror = function (message, source, line, col, error) {
         log("window.onerror: " + message + " at " + line + ":" + col);
+
         if (error && error.stack)
             log("stack: " + error.stack);
     };
@@ -159,13 +197,17 @@ Goal: isolate PS5 WebKit OOM around CSS @font-face + JS FontFace + document.font
     });
 
     function cleanup() {
-        const oldStyles = document.querySelectorAll("style[data-ps5-fontface-oom='1']");
-        for (const s of oldStyles)
-            s.remove();
+        const oldStyles = document.querySelectorAll("style[data-ps5-repeat-fontface='1']");
+
+        for (const style of oldStyles)
+            style.remove();
 
         if (document.fonts) {
             for (const face of faces) {
-                try { document.fonts.delete(face); } catch (e) {}
+                try {
+                    document.fonts.delete(face);
+                } catch (e) {
+                }
             }
         }
 
@@ -178,27 +220,21 @@ Goal: isolate PS5 WebKit OOM around CSS @font-face + JS FontFace + document.font
         try {
             if (!styleElement || !styleElement.sheet)
                 return "no-sheet";
+
             return styleElement.sheet.cssRules.length;
         } catch (e) {
             return "throws:" + e.name;
         }
     }
 
-    function makeStyle(family, variant) {
+    function createStyle(family) {
         const style = document.createElement("style");
-        style.setAttribute("data-ps5-fontface-oom", "1");
-
-        let src;
-        if (variant === "missing") {
-            src = 'url("missing-font-' + Date.now() + '.woff") format("woff")';
-        } else {
-            src = 'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")';
-        }
+        style.setAttribute("data-ps5-repeat-fontface", "1");
 
         style.textContent =
             '@font-face {\n' +
             '  font-family: "' + family + '";\n' +
-            '  src: ' + src + ';\n' +
+            '  src: local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New");\n' +
             '  unicode-range: U+0042;\n' +
             '}\n';
 
@@ -206,7 +242,7 @@ Goal: isolate PS5 WebKit OOM around CSS @font-face + JS FontFace + document.font
         return style;
     }
 
-    function makeJSFace(family) {
+    function createJSFace(family) {
         const face = new FontFace(
             family,
             'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
@@ -217,126 +253,144 @@ Goal: isolate PS5 WebKit OOM around CSS @font-face + JS FontFace + document.font
         return face;
     }
 
-    function setup(variant) {
+    function setupOneCycle(iteration) {
         cleanup();
-        runId++;
 
-        if (!window.FontFace) {
-            stage("FontFace API missing");
-            throw new Error("FontFace API missing");
-        }
+        const family = "ps5-repeat-" + Date.now() + "-" + runId + "-" + iteration;
 
-        if (!document.fonts) {
-            stage("document.fonts missing");
-            throw new Error("document.fonts missing");
-        }
-
-        const family = "ps5-oom-" + variant + "-" + Date.now() + "-" + runId;
-
-        stage("setup " + variant);
-        log("family=" + family);
-
-        const styleElement = makeStyle(family, variant);
-        log("initial cssRules=" + cssRuleCount(styleElement));
-        log("initial document.fonts.size=" + document.fonts.size);
-
-        const jsFace = makeJSFace(family);
-        log("created JS FontFace; status=" + jsFace.status);
+        const styleElement = createStyle(family);
+        const jsFace = createJSFace(family);
 
         probe.style.fontFamily = '"' + family + '"';
         probe.textContent = "AB";
 
         document.fonts.add(jsFace);
-        log("added JS FontFace; document.fonts.size=" + document.fonts.size);
 
-        return { family, styleElement, jsFace };
+        return {
+            family: family,
+            styleElement: styleElement,
+            jsFace: jsFace
+        };
     }
 
-    function runAddOnly(variant) {
+    function doFontsCheck(ctx) {
+        const a = document.fonts.check('16px "' + ctx.family + '"', "A");
+        const b = document.fonts.check('16px "' + ctx.family + '"', "B");
+        const ab = document.fonts.check('16px "' + ctx.family + '"', "AB");
+
+        return "check A=" + a + ", B=" + b + ", AB=" + ab;
+    }
+
+    function doStyleRecalc(ctx) {
+        const offsetTop = document.body.offsetTop;
+        const width = probe.offsetWidth;
+        const fontFamily = getComputedStyle(probe).fontFamily;
+
+        return "recalc offsetTop=" + offsetTop + ", width=" + width + ", fontFamily=" + fontFamily;
+    }
+
+    async function runRepeat(mode) {
+        if (running) {
+            log("ignored: a test is already running");
+            return;
+        }
+
+        if (!window.FontFace) {
+            stage("FontFace API missing");
+            log("FontFace API missing");
+            return;
+        }
+
+        if (!document.fonts) {
+            stage("document.fonts missing");
+            log("document.fonts missing");
+            return;
+        }
+
+        running = true;
+        stopRequested = false;
+        runId++;
+
+        const iterations = Math.max(1, Math.min(200, Number(iterationsInput.value) || 25));
+        const delayMs = Math.max(0, Math.min(5000, Number(delayInput.value) || 250));
+
+        stage("starting repeat mode=" + mode);
+        log("runId=" + runId + ", mode=" + mode + ", iterations=" + iterations + ", delayMs=" + delayMs);
+        log("initial document.fonts.size=" + document.fonts.size);
+
         try {
-            const ctx = setup(variant);
-            log("add-only done; cssRules=" + cssRuleCount(ctx.styleElement));
-            stage("add-only completed");
+            for (let i = 1; i <= iterations; i++) {
+                if (stopRequested) {
+                    stage("stopped at iteration " + i);
+                    break;
+                }
+
+                stage("iteration " + i + "/" + iterations + " mode=" + mode);
+
+                const ctx = setupOneCycle(i);
+
+                log("iteration " + i + ": setup ok; cssRules=" + cssRuleCount(ctx.styleElement) + ", document.fonts.size=" + document.fonts.size);
+
+                if (mode === "add") {
+                    log("iteration " + i + ": add-only completed");
+                } else if (mode === "check") {
+                    log("iteration " + i + ": before fonts.check");
+                    const result = doFontsCheck(ctx);
+                    log("iteration " + i + ": " + result);
+                } else if (mode === "recalc") {
+                    log("iteration " + i + ": before style recalc");
+                    const result = doStyleRecalc(ctx);
+                    log("iteration " + i + ": " + result);
+                } else if (mode === "mixed") {
+                    log("iteration " + i + ": before fonts.check");
+                    const checkResult = doFontsCheck(ctx);
+                    log("iteration " + i + ": " + checkResult);
+
+                    log("iteration " + i + ": before style recalc");
+                    const recalcResult = doStyleRecalc(ctx);
+                    log("iteration " + i + ": " + recalcResult);
+                }
+
+                cleanup();
+                log("iteration " + i + ": cleanup done; document.fonts.size=" + document.fonts.size);
+
+                await sleep(delayMs);
+            }
+
+            cleanup();
+            stage("completed repeat mode=" + mode);
+            log("completed; final document.fonts.size=" + document.fonts.size);
         } catch (e) {
             stage("exception");
             log("exception: " + e.name + ": " + e.message);
+
+            if (e.stack)
+                log("stack: " + e.stack);
+        } finally {
+            running = false;
+            stopRequested = false;
         }
     }
 
-    function runFontsCheck(variant) {
-        try {
-            const ctx = setup(variant);
-
-            stage("before document.fonts.check A");
-            log("calling document.fonts.check for A");
-            const a = document.fonts.check('16px "' + ctx.family + '"', "A");
-            log("check A result=" + a);
-
-            stage("before document.fonts.check B");
-            log("calling document.fonts.check for B");
-            const b = document.fonts.check('16px "' + ctx.family + '"', "B");
-            log("check B result=" + b);
-
-            stage("before document.fonts.check AB");
-            log("calling document.fonts.check for AB");
-            const ab = document.fonts.check('16px "' + ctx.family + '"', "AB");
-            log("check AB result=" + ab);
-
-            stage("fonts.check completed");
-            log("final cssRules=" + cssRuleCount(ctx.styleElement));
-            log("final document.fonts.size=" + document.fonts.size);
-        } catch (e) {
-            stage("exception");
-            log("exception: " + e.name + ": " + e.message);
-        }
-    }
-
-    function runStyleRecalc(variant) {
-        try {
-            const ctx = setup(variant);
-
-            stage("before style recalc offsetTop");
-            log("reading document.body.offsetTop");
-            const offsetTop = document.body.offsetTop;
-            log("offsetTop=" + offsetTop);
-
-            stage("before style recalc probe.offsetWidth");
-            log("reading probe.offsetWidth");
-            const width = probe.offsetWidth;
-            log("probe.offsetWidth=" + width);
-
-            stage("before getComputedStyle");
-            log("reading getComputedStyle(probe).fontFamily");
-            const family = getComputedStyle(probe).fontFamily;
-            log("computed fontFamily=" + family);
-
-            stage("style recalc completed");
-            log("final cssRules=" + cssRuleCount(ctx.styleElement));
-            log("final document.fonts.size=" + document.fonts.size);
-        } catch (e) {
-            stage("exception");
-            log("exception: " + e.name + ": " + e.message);
-        }
-    }
-
-    document.getElementById("run-add-local").onclick = function () {
-        runAddOnly("local");
+    document.getElementById("run-add").onclick = function () {
+        runRepeat("add");
     };
 
-    document.getElementById("run-check-local").onclick = function () {
-        runFontsCheck("local");
+    document.getElementById("run-check").onclick = function () {
+        runRepeat("check");
     };
 
-    document.getElementById("run-recalc-local").onclick = function () {
-        runStyleRecalc("local");
+    document.getElementById("run-recalc").onclick = function () {
+        runRepeat("recalc");
     };
 
-    document.getElementById("run-check-missing").onclick = function () {
-        runFontsCheck("missing");
+    document.getElementById("run-mixed").onclick = function () {
+        runRepeat("mixed");
     };
 
-    document.getElementById("run-recalc-missing").onclick = function () {
-        runStyleRecalc("missing");
+    document.getElementById("stop").onclick = function () {
+        stopRequested = true;
+        log("stop requested");
     };
 
     document.getElementById("clear").onclick = clearLogs;
