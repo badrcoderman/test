@@ -3,18 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WebGL timer query microtask lifetime validation</title>
+<title>Document::setReadyState readystatechange lifetime validation</title>
 <style>
   :root { color-scheme: dark; }
   body {
     margin: 0;
     padding: 16px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-    background: #0b1020;
-    color: #e8eefc;
+    background: #080b14;
+    color: #e6edf7;
   }
-  h1 { font-size: 20px; margin: 0 0 8px; }
-  p { line-height: 1.45; color: #c7d2fe; }
+  h1 { font-size: 20px; margin: 0 0 10px; }
+  h2 { font-size: 15px; margin: 14px 0 6px; }
+  code { color: #fef08a; }
   button {
     margin: 4px;
     padding: 10px 12px;
@@ -23,16 +24,9 @@
     background: #172554;
     color: #f8fafc;
     font-weight: 700;
+    cursor: pointer;
   }
   button:active { transform: translateY(1px); }
-  .danger-note {
-    border: 1px solid #7f1d1d;
-    background: #1f1111;
-    color: #fecaca;
-    padding: 10px;
-    border-radius: 8px;
-    margin: 12px 0;
-  }
   .panel {
     border: 1px solid #334155;
     border-radius: 10px;
@@ -40,73 +34,100 @@
     margin: 12px 0;
     background: #0f172a;
   }
+  .note {
+    border: 1px solid #475569;
+    background: #111827;
+    color: #dbeafe;
+    border-radius: 10px;
+    padding: 12px;
+    margin: 12px 0;
+    line-height: 1.45;
+  }
+  .warning {
+    border-color: #7c2d12;
+    background: #1c1009;
+    color: #fed7aa;
+  }
   #stage {
-    font-size: 18px;
-    color: #fef08a;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    color: #fef08a;
+    font-size: 17px;
+    line-height: 1.45;
   }
   pre {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    min-height: 160px;
-    max-height: 46vh;
+    min-height: 150px;
+    max-height: 44vh;
     overflow: auto;
     padding: 10px;
-    background: #020617;
-    border: 1px solid #1e293b;
     border-radius: 8px;
+    border: 1px solid #1e293b;
+    background: #020617;
+    line-height: 1.35;
   }
-  .ok { color: #86efac; }
-  .bad { color: #fca5a5; }
+  iframe.test-frame {
+    width: 360px;
+    height: 90px;
+    border: 1px solid #475569;
+    margin: 6px;
+    background: white;
+  }
+  .frames { min-height: 110px; }
 </style>
 </head>
 <body>
-<h1>WebGL timer query microtask lifetime validation</h1>
-<p>
-Validation-only page for WebKit WebGL timer-query microtask lifetime candidates.
-It attempts to delete WebGL query objects, lose context, or remove iframes before the queued
-microtask from <code>queryCounterEXT()</code> runs. It contains no heap spray, exploit primitive,
-ARW/addrof/fakeobj, shellcode, or sandbox escape logic.
-</p>
-<div class="danger-note">
-Expected interpretation: crash/reload/error after queryCounterEXT + delete/loss/iframe teardown supports the lifetime hypothesis.
-No crash does not fully disprove it because JS wrappers or GC timing may keep the C++ object alive.
+<h1>Document::setReadyState readystatechange lifetime validation</h1>
+
+<div class="note">
+  Target shape: <code>Document::setReadyState</code> dispatches <code>readystatechange</code>, then continues and may access
+  <code>settings().suppressesIncrementalRendering()</code> / <code>setVisualUpdatesAllowed(readyState)</code> without a local
+  <code>Ref&lt;Document&gt; protectedThis</code>. This page exercises document/frame teardown during the event dispatch.
+</div>
+<div class="note warning">
+  Validation-only behavior: this file only creates/removes/navigates iframes during <code>readystatechange</code> and logs survival.
+  It does not contain heap spraying, ARW/addrof/fakeobj, shellcode, ROP/JOP, sandbox-escape logic, or exploit primitives.
 </div>
 
 <div class="panel">
-  <button onclick="supportCheck()">1. Support check</button>
-  <button onclick="testWebGL1Delete()">2. WebGL1 delete</button>
-  <button onclick="testWebGL1DeleteLose()">3. WebGL1 delete + lose context</button>
-  <button onclick="testWebGL2Delete()">4. WebGL2 delete</button>
-  <button onclick="testWebGL2DeleteLose()">5. WebGL2 delete + lose context</button>
-  <button onclick="testIframeVariants()">6. Iframe teardown variants</button>
-  <button onclick="runAll()">Run all</button>
+  <button onclick="runBasicSrcdocTeardown()">1. Basic iframe readystatechange teardown</button>
+  <button onclick="runSelfRemovalSrcdoc()">2. Self-removal variant</button>
+  <button onclick="runNavigationVariant()">3. Navigation variant</button>
+  <button onclick="runNestedIframeVariant()">4. Nested iframe removes outer iframe</button>
+  <button onclick="runSrcdocAndDynamicVariants()">5. srcdoc + document.write variants</button>
+  <button onclick="runAll()">Run all sequentially</button>
   <button onclick="clearLogs()">Clear logs</button>
 </div>
 
 <div class="panel">
-  <strong>Current stage</strong>
+  <h2>Current stage</h2>
   <div id="stage">idle</div>
 </div>
 
 <div class="panel">
-  <strong>Current log</strong>
+  <h2>Current log</h2>
   <pre id="log"></pre>
 </div>
 
 <div class="panel">
-  <strong>Previous persisted log</strong>
+  <h2>Previous persisted log</h2>
   <pre id="previous"></pre>
+</div>
+
+<div class="panel frames" id="frameContainer">
+  <h2>Live test frames</h2>
 </div>
 
 <script>
 'use strict';
 
-const STORAGE_KEY = 'webgl-timer-query-microtask-lifetime-validation-log-v1';
-let runId = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
-let stepNo = 0;
+const STORAGE_KEY = 'document-set-ready-state-lifetime-validation:last-log:v1';
 let logLines = [];
+let stageNo = 0;
+let testNo = 0;
+let runId = new Date().toISOString() + '-' + Math.random().toString(16).slice(2);
+const pendingFrames = new Map();
 
 function now() {
   return new Date().toISOString();
@@ -116,32 +137,38 @@ function persist() {
   try {
     localStorage.setItem(STORAGE_KEY, logLines.join('\n'));
   } catch (e) {
-    // localStorage can fail in private modes. Keep visible logging alive.
+    // Keep visible logging even when localStorage is unavailable.
   }
 }
 
-function setStage(text) {
-  const line = `Stage ${++stepNo}: ${text}`;
-  document.getElementById('stage').textContent = line;
-  log(line);
-}
-
-function log(text, cls) {
-  const line = `[${now()}] [${runId}] ${text}`;
+function log(message) {
+  const line = '[' + now() + '] [' + runId + '] ' + message;
   logLines.push(line);
   const el = document.getElementById('log');
   el.textContent = logLines.join('\n');
   el.scrollTop = el.scrollHeight;
   persist();
-  if (cls)
-    console.log('%c' + line, cls);
-  else
-    console.log(line);
+  console.log(line);
+}
+
+function setStage(message) {
+  const text = 'Stage ' + (++stageNo) + ': ' + message;
+  document.getElementById('stage').textContent = text;
+  log(text);
+}
+
+function loadPreviousLog() {
+  try {
+    document.getElementById('previous').textContent = localStorage.getItem(STORAGE_KEY) || '(no previous persisted log)';
+  } catch (e) {
+    document.getElementById('previous').textContent = '(localStorage unavailable: ' + String(e) + ')';
+  }
 }
 
 function clearLogs() {
-  stepNo = 0;
   logLines = [];
+  stageNo = 0;
+  runId = new Date().toISOString() + '-' + Math.random().toString(16).slice(2);
   document.getElementById('stage').textContent = 'idle';
   document.getElementById('log').textContent = '';
   document.getElementById('previous').textContent = '';
@@ -149,335 +176,272 @@ function clearLogs() {
   log('logs cleared');
 }
 
-function loadPreviousLog() {
-  try {
-    document.getElementById('previous').textContent = localStorage.getItem(STORAGE_KEY) || '(none)';
-  } catch (e) {
-    document.getElementById('previous').textContent = '(localStorage unavailable: ' + e + ')';
-  }
+function nextLabel(prefix) {
+  return prefix + '-' + (++testNo);
 }
-
-window.addEventListener('error', event => {
-  log('window.onerror: ' + event.message + ' at ' + event.filename + ':' + event.lineno + ':' + event.colno, 'color:#fca5a5');
-});
-
-window.addEventListener('unhandledrejection', event => {
-  log('unhandledrejection: ' + String(event.reason), 'color:#fca5a5');
-});
-
-window.addEventListener('beforeunload', () => {
-  log('beforeunload fired; if unexpected, note last stage before reload/crash');
-});
 
 function sleepTask() {
   return new Promise(resolve => setTimeout(resolve, 0));
 }
 
-async function awaitMicrotasks(label) {
-  setStage(label + ': awaiting Promise.resolve() #1');
+async function survivalCheckpoint(label) {
+  setStage(label + ': parent survival checkpoint: await Promise.resolve #1');
   await Promise.resolve();
-  setStage(label + ': awaiting Promise.resolve() #2');
+  setStage(label + ': parent survival checkpoint: await Promise.resolve #2');
   await Promise.resolve();
-  setStage(label + ': microtask awaits completed; page survived this checkpoint');
+  setStage(label + ': parent survival checkpoint: await setTimeout(0)');
+  await sleepTask();
+  setStage(label + ': parent survived two microtasks and one task');
 }
 
-function createCanvasIn(doc) {
-  const canvas = doc.createElement('canvas');
-  canvas.width = 16;
-  canvas.height = 16;
-  canvas.style.cssText = 'width:16px;height:16px;border:1px solid #334155;margin:2px;';
-  doc.body.appendChild(canvas);
-  return canvas;
+window.addEventListener('error', event => {
+  log('window.onerror: ' + event.message + ' at ' + event.filename + ':' + event.lineno + ':' + event.colno);
+});
+
+window.addEventListener('unhandledrejection', event => {
+  log('unhandledrejection: ' + String(event.reason && (event.reason.stack || event.reason.message) || event.reason));
+});
+
+window.addEventListener('beforeunload', () => {
+  log('beforeunload fired; if unexpected, inspect previous persisted log after reload');
+});
+
+window.addEventListener('message', event => {
+  const data = event.data;
+  if (!data || data.kind !== 'document-ready-state-validation')
+    return;
+
+  const label = data.label || 'unlabeled';
+  log('message from child [' + label + ']: ' + data.message);
+
+  const record = pendingFrames.get(label);
+  if (!record)
+    return;
+
+  if (data.action === 'remove') {
+    log('parent action [' + label + ']: removing iframe immediately during child readystatechange');
+    try {
+      if (record.frame && record.frame.isConnected)
+        record.frame.remove();
+      log('parent action [' + label + ']: iframe.remove() returned');
+    } catch (e) {
+      log('parent action [' + label + ']: iframe.remove() exception: ' + String(e && (e.stack || e.message) || e));
+    }
+  } else if (data.action === 'navigate') {
+    log('parent action [' + label + ']: setting iframe.src = about:blank during child readystatechange');
+    try {
+      record.frame.src = 'about:blank';
+      log('parent action [' + label + ']: iframe.src assignment returned');
+    } catch (e) {
+      log('parent action [' + label + ']: navigation exception: ' + String(e && (e.stack || e.message) || e));
+    }
+  } else if (data.action === 'remove-outer') {
+    log('parent action [' + label + ']: removing outer iframe immediately during nested inner readystatechange');
+    try {
+      if (record.frame && record.frame.isConnected)
+        record.frame.remove();
+      log('parent action [' + label + ']: outer iframe.remove() returned');
+    } catch (e) {
+      log('parent action [' + label + ']: outer iframe.remove() exception: ' + String(e && (e.stack || e.message) || e));
+    }
+  }
+});
+
+function makeFrame(label) {
+  const frame = document.createElement('iframe');
+  frame.className = 'test-frame';
+  frame.setAttribute('data-label', label);
+  document.getElementById('frameContainer').appendChild(frame);
+  return frame;
 }
 
-function getContext(canvas, kind) {
-  const attrs = { alpha: false, depth: false, stencil: false, antialias: false, preserveDrawingBuffer: false };
+function childScript(label, mode) {
+  // mode: parent-remove, self-remove, parent-navigate, passive
+  return `
+(function() {
+  'use strict';
+  var label = ${JSON.stringify(label)};
+  var mode = ${JSON.stringify(mode)};
+  function send(message, action) {
+    try {
+      parent.postMessage({ kind: 'document-ready-state-validation', label: label, message: String(message), action: action || '' }, '*');
+    } catch (e) { }
+  }
+  window.addEventListener('error', function(event) {
+    send('child window.onerror: ' + event.message + ' at ' + event.lineno + ':' + event.colno);
+  });
+  window.addEventListener('unhandledrejection', function(event) {
+    send('child unhandledrejection: ' + String(event.reason));
+  });
+  send('child script installed; initial document.readyState=' + document.readyState);
+  document.addEventListener('readystatechange', function() {
+    send('readystatechange fired; readyState=' + document.readyState);
+    send('before listener action; mode=' + mode + '; frameElement exists=' + !!window.frameElement);
+    try {
+      if (mode === 'parent-remove') {
+        send('requesting parent iframe removal now', 'remove');
+      } else if (mode === 'self-remove') {
+        if (window.frameElement) {
+          window.frameElement.remove();
+          send('after frameElement.remove(); code reached in child');
+        } else
+          send('self-remove skipped: no frameElement');
+      } else if (mode === 'parent-navigate') {
+        send('requesting parent navigation to about:blank now', 'navigate');
+      } else {
+        send('passive mode: no teardown action');
+      }
+      send('after listener action; readyState=' + document.readyState);
+    } catch (e) {
+      send('listener exception: ' + String(e && (e.stack || e.message) || e));
+    }
+  });
+})();`;
+}
+
+function escapeClosingScript(value) {
+  return String(value).split('</script').join('<\\/script');
+}
+
+function srcdocFor(label, mode) {
+  return '<!doctype html><html><head><meta charset="utf-8"><script>' + escapeClosingScript(childScript(label, mode)) + '<\/script></head><body><p>srcdoc child ' + label + '</p></body></html>';
+}
+
+async function runSrcdocFrame(label, mode) {
+  setStage(label + ': creating srcdoc iframe; mode=' + mode);
+  const frame = makeFrame(label);
+  pendingFrames.set(label, { frame, mode });
+  frame.srcdoc = srcdocFor(label, mode);
+  await survivalCheckpoint(label);
+  pendingFrames.delete(label);
   try {
-    return canvas.getContext(kind, attrs);
+    if (frame.isConnected) {
+      log(label + ': cleanup removing still-connected iframe');
+      frame.remove();
+    }
   } catch (e) {
-    log(kind + ' getContext exception: ' + e, 'color:#fca5a5');
-    return null;
+    log(label + ': cleanup exception: ' + String(e && (e.stack || e.message) || e));
   }
 }
 
-function getExt(gl, name) {
-  if (!gl)
-    return null;
+async function runDynamicWriteFrame(label, mode) {
+  setStage(label + ': creating about:blank iframe for document.open/write/close; mode=' + mode);
+  const frame = makeFrame(label);
+  pendingFrames.set(label, { frame, mode });
+  frame.src = 'about:blank';
+  await sleepTask();
   try {
-    return gl.getExtension(name);
+    setStage(label + ': writing child document with readystatechange listener');
+    const doc = frame.contentDocument;
+    doc.open();
+    doc.write('<!doctype html><html><head><meta charset="utf-8"><script>' + escapeClosingScript(childScript(label, mode)) + '<\/script></head><body><p>dynamic child ' + label + '</p></body></html>');
+    setStage(label + ': closing written document to trigger readyState transitions');
+    doc.close();
   } catch (e) {
-    log('getExtension(' + name + ') exception: ' + e, 'color:#fca5a5');
-    return null;
+    log(label + ': dynamic document write exception: ' + String(e && (e.stack || e.message) || e));
+  }
+  await survivalCheckpoint(label);
+  pendingFrames.delete(label);
+  try {
+    if (frame.isConnected) {
+      log(label + ': cleanup removing still-connected iframe');
+      frame.remove();
+    }
+  } catch (e) {
+    log(label + ': cleanup exception: ' + String(e && (e.stack || e.message) || e));
   }
 }
 
-function supportSnapshot(doc) {
-  const out = [];
-  const c1 = createCanvasIn(doc || document);
-  const gl1 = getContext(c1, 'webgl') || getContext(c1, 'experimental-webgl');
-  const ext1 = getExt(gl1, 'EXT_disjoint_timer_query');
-  const lose1 = getExt(gl1, 'WEBGL_lose_context');
-  out.push('WebGL1: ' + !!gl1);
-  out.push('EXT_disjoint_timer_query: ' + !!ext1);
-  out.push('WEBGL_lose_context on WebGL1: ' + !!lose1);
-
-  const c2 = createCanvasIn(doc || document);
-  const gl2 = getContext(c2, 'webgl2');
-  const ext2 = getExt(gl2, 'EXT_disjoint_timer_query_webgl2');
-  const lose2 = getExt(gl2, 'WEBGL_lose_context');
-  out.push('WebGL2: ' + !!gl2);
-  out.push('EXT_disjoint_timer_query_webgl2: ' + !!ext2);
-  out.push('WEBGL_lose_context on WebGL2: ' + !!lose2);
-  return { gl1, ext1, lose1, gl2, ext2, lose2, text: out.join('\n') };
+async function runBasicSrcdocTeardown() {
+  await runSrcdocFrame(nextLabel('basic-srcdoc-parent-remove'), 'parent-remove');
 }
 
-async function supportCheck() {
+async function runSelfRemovalSrcdoc() {
+  await runSrcdocFrame(nextLabel('self-remove-srcdoc'), 'self-remove');
+}
+
+async function runNavigationVariant() {
+  await runSrcdocFrame(nextLabel('navigation-srcdoc'), 'parent-navigate');
+}
+
+function nestedOuterSrcdoc(label) {
+  const innerScript = `
+(function() {
+  'use strict';
+  var label = ${JSON.stringify(label)};
+  function send(message, action) {
+    try { parent.parent.postMessage({ kind: 'document-ready-state-validation', label: label, message: String(message), action: action || '' }, '*'); } catch (e) { }
+  }
+  send('nested inner script installed; initial readyState=' + document.readyState);
+  document.addEventListener('readystatechange', function() {
+    send('nested inner readystatechange; readyState=' + document.readyState);
+    send('nested inner before requesting outer removal', 'remove-outer');
+    send('nested inner after requesting outer removal; code reached');
+  });
+})();`;
+
+  const innerSrcdoc = '<!doctype html><html><head><meta charset="utf-8"><script>' + escapeClosingScript(innerScript) + '<\/script></head><body><p>inner child</p></body></html>';
+  const outerScript = `
+(function() {
+  'use strict';
+  function send(message) {
+    try { parent.postMessage({ kind: 'document-ready-state-validation', label: ${JSON.stringify(label)}, message: String(message) }, '*'); } catch (e) { }
+  }
+  send('nested outer script installed; readyState=' + document.readyState);
+})();`;
+
+  return '<!doctype html><html><head><meta charset="utf-8"><script>' + escapeClosingScript(outerScript) + '<\/script></head><body><p>outer child</p><iframe srcdoc="' + escapeHtmlAttribute(innerSrcdoc) + '"></iframe></body></html>';
+}
+
+function escapeHtmlAttribute(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+async function runNestedIframeVariant() {
+  const label = nextLabel('nested-inner-removes-outer');
+  setStage(label + ': creating outer iframe containing inner iframe');
+  const outer = makeFrame(label);
+  pendingFrames.set(label, { frame: outer, mode: 'nested-remove-outer' });
+  outer.srcdoc = nestedOuterSrcdoc(label);
+  await survivalCheckpoint(label);
+  pendingFrames.delete(label);
   try {
-    setStage('support check: starting');
-    const s = supportSnapshot(document);
-    log('support check results:\n' + s.text);
-    setStage('support check: complete');
+    if (outer.isConnected) {
+      log(label + ': cleanup removing still-connected outer iframe');
+      outer.remove();
+    }
   } catch (e) {
-    log('support check exception: ' + (e && e.stack || e), 'color:#fca5a5');
+    log(label + ': cleanup exception: ' + String(e && (e.stack || e.message) || e));
   }
 }
 
-function setupWebGL1(label) {
-  const canvas = createCanvasIn(document);
-  const gl = getContext(canvas, 'webgl') || getContext(canvas, 'experimental-webgl');
-  if (!gl)
-    throw new Error(label + ': WebGL1 unavailable');
-  const ext = getExt(gl, 'EXT_disjoint_timer_query');
-  if (!ext)
-    throw new Error(label + ': EXT_disjoint_timer_query unavailable');
-  const lose = getExt(gl, 'WEBGL_lose_context');
-  return { canvas, gl, ext, lose };
-}
-
-function setupWebGL2(label) {
-  const canvas = createCanvasIn(document);
-  const gl = getContext(canvas, 'webgl2');
-  if (!gl)
-    throw new Error(label + ': WebGL2 unavailable');
-  const ext = getExt(gl, 'EXT_disjoint_timer_query_webgl2');
-  if (!ext)
-    throw new Error(label + ': EXT_disjoint_timer_query_webgl2 unavailable');
-  const lose = getExt(gl, 'WEBGL_lose_context');
-  return { canvas, gl, ext, lose };
-}
-
-async function testWebGL1Delete() {
-  const label = 'WebGL1 single-document delete';
-  try {
-    setStage(label + ': setup');
-    const { ext } = setupWebGL1(label);
-    setStage(label + ': createQueryEXT');
-    let query = ext.createQueryEXT();
-    if (!query)
-      throw new Error(label + ': createQueryEXT returned null');
-    setStage(label + ': queryCounterEXT(query, TIMESTAMP_EXT)');
-    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
-    setStage(label + ': deleteQueryEXT(query) before microtask checkpoint');
-    ext.deleteQueryEXT(query);
-    setStage(label + ': set query = null');
-    query = null;
-    await awaitMicrotasks(label);
-    log(label + ': SURVIVED', 'color:#86efac');
-  } catch (e) {
-    log(label + ': exception: ' + (e && e.stack || e), 'color:#fca5a5');
-  }
-}
-
-async function testWebGL1DeleteLose() {
-  const label = 'WebGL1 delete + lose context';
-  try {
-    setStage(label + ': setup');
-    const { ext, lose } = setupWebGL1(label);
-    setStage(label + ': createQueryEXT');
-    let query = ext.createQueryEXT();
-    if (!query)
-      throw new Error(label + ': createQueryEXT returned null');
-    setStage(label + ': queryCounterEXT(query, TIMESTAMP_EXT)');
-    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
-    setStage(label + ': deleteQueryEXT(query) before microtask checkpoint');
-    ext.deleteQueryEXT(query);
-    setStage(label + ': set query = null');
-    query = null;
-    if (lose) {
-      setStage(label + ': WEBGL_lose_context.loseContext() before microtask checkpoint');
-      lose.loseContext();
-    } else
-      log(label + ': WEBGL_lose_context unavailable; continuing without context loss');
-    await awaitMicrotasks(label);
-    log(label + ': SURVIVED', 'color:#86efac');
-  } catch (e) {
-    log(label + ': exception: ' + (e && e.stack || e), 'color:#fca5a5');
-  }
-}
-
-async function testWebGL2Delete() {
-  const label = 'WebGL2 single-document delete';
-  try {
-    setStage(label + ': setup');
-    const { gl, ext } = setupWebGL2(label);
-    setStage(label + ': createQuery');
-    let query = gl.createQuery();
-    if (!query)
-      throw new Error(label + ': createQuery returned null');
-    setStage(label + ': ext.queryCounterEXT(query, TIMESTAMP_EXT)');
-    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
-    setStage(label + ': gl.deleteQuery(query) before microtask checkpoint');
-    gl.deleteQuery(query);
-    setStage(label + ': set query = null');
-    query = null;
-    await awaitMicrotasks(label);
-    log(label + ': SURVIVED', 'color:#86efac');
-  } catch (e) {
-    log(label + ': exception: ' + (e && e.stack || e), 'color:#fca5a5');
-  }
-}
-
-async function testWebGL2DeleteLose() {
-  const label = 'WebGL2 delete + lose context';
-  try {
-    setStage(label + ': setup');
-    const { gl, ext, lose } = setupWebGL2(label);
-    setStage(label + ': createQuery');
-    let query = gl.createQuery();
-    if (!query)
-      throw new Error(label + ': createQuery returned null');
-    setStage(label + ': ext.queryCounterEXT(query, TIMESTAMP_EXT)');
-    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
-    setStage(label + ': gl.deleteQuery(query) before microtask checkpoint');
-    gl.deleteQuery(query);
-    setStage(label + ': set query = null');
-    query = null;
-    if (lose) {
-      setStage(label + ': WEBGL_lose_context.loseContext() before microtask checkpoint');
-      lose.loseContext();
-    } else
-      log(label + ': WEBGL_lose_context unavailable; continuing without context loss');
-    await awaitMicrotasks(label);
-    log(label + ': SURVIVED', 'color:#86efac');
-  } catch (e) {
-    log(label + ': exception: ' + (e && e.stack || e), 'color:#fca5a5');
-  }
-}
-
-function makeIframe() {
-  const iframe = document.createElement('iframe');
-  iframe.src = 'about:blank';
-  iframe.style.cssText = 'width:220px;height:80px;border:1px solid #475569;margin:4px;';
-  document.body.appendChild(iframe);
-  return iframe;
-}
-
-function iframeDoc(iframe) {
-  const doc = iframe.contentDocument;
-  doc.open();
-  doc.write('<!doctype html><meta charset="utf-8"><body><p>iframe WebGL timer query test</p></body>');
-  doc.close();
-  return doc;
-}
-
-async function iframeWebGL1Variant(loseContext) {
-  const label = 'Iframe WebGL1 delete' + (loseContext ? ' + lose context' : '') + ' + teardown';
-  try {
-    setStage(label + ': create iframe');
-    const iframe = makeIframe();
-    const doc = iframeDoc(iframe);
-    setStage(label + ': create iframe canvas/context/query');
-    const canvas = createCanvasIn(doc);
-    const gl = getContext(canvas, 'webgl') || getContext(canvas, 'experimental-webgl');
-    if (!gl)
-      throw new Error(label + ': WebGL1 unavailable in iframe');
-    const ext = getExt(gl, 'EXT_disjoint_timer_query');
-    if (!ext)
-      throw new Error(label + ': EXT_disjoint_timer_query unavailable in iframe');
-    const lose = getExt(gl, 'WEBGL_lose_context');
-    let query = ext.createQueryEXT();
-    if (!query)
-      throw new Error(label + ': createQueryEXT returned null');
-    setStage(label + ': queryCounterEXT');
-    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
-    setStage(label + ': deleteQueryEXT');
-    ext.deleteQueryEXT(query);
-    query = null;
-    if (loseContext && lose) {
-      setStage(label + ': loseContext before iframe removal');
-      lose.loseContext();
-    } else if (loseContext)
-      log(label + ': WEBGL_lose_context unavailable in iframe');
-    setStage(label + ': remove iframe before microtask checkpoint');
-    iframe.remove();
-    await awaitMicrotasks(label);
-    await sleepTask();
-    log(label + ': parent survived iframe teardown', 'color:#86efac');
-  } catch (e) {
-    log(label + ': exception: ' + (e && e.stack || e), 'color:#fca5a5');
-  }
-}
-
-async function iframeWebGL2Variant(loseContext) {
-  const label = 'Iframe WebGL2 delete' + (loseContext ? ' + lose context' : '') + ' + teardown';
-  try {
-    setStage(label + ': create iframe');
-    const iframe = makeIframe();
-    const doc = iframeDoc(iframe);
-    setStage(label + ': create iframe canvas/context/query');
-    const canvas = createCanvasIn(doc);
-    const gl = getContext(canvas, 'webgl2');
-    if (!gl)
-      throw new Error(label + ': WebGL2 unavailable in iframe');
-    const ext = getExt(gl, 'EXT_disjoint_timer_query_webgl2');
-    if (!ext)
-      throw new Error(label + ': EXT_disjoint_timer_query_webgl2 unavailable in iframe');
-    const lose = getExt(gl, 'WEBGL_lose_context');
-    let query = gl.createQuery();
-    if (!query)
-      throw new Error(label + ': createQuery returned null');
-    setStage(label + ': ext.queryCounterEXT');
-    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
-    setStage(label + ': gl.deleteQuery');
-    gl.deleteQuery(query);
-    query = null;
-    if (loseContext && lose) {
-      setStage(label + ': loseContext before iframe removal');
-      lose.loseContext();
-    } else if (loseContext)
-      log(label + ': WEBGL_lose_context unavailable in iframe');
-    setStage(label + ': remove iframe before microtask checkpoint');
-    iframe.remove();
-    await awaitMicrotasks(label);
-    await sleepTask();
-    log(label + ': parent survived iframe teardown', 'color:#86efac');
-  } catch (e) {
-    log(label + ': exception: ' + (e && e.stack || e), 'color:#fca5a5');
-  }
-}
-
-async function testIframeVariants() {
-  setStage('iframe teardown variants: starting');
-  await iframeWebGL1Variant(false);
-  await iframeWebGL1Variant(true);
-  await iframeWebGL2Variant(false);
-  await iframeWebGL2Variant(true);
-  setStage('iframe teardown variants: complete');
+async function runSrcdocAndDynamicVariants() {
+  setStage('srcdoc + document.write variants: starting');
+  await runSrcdocFrame(nextLabel('srcdoc-parent-remove'), 'parent-remove');
+  await runSrcdocFrame(nextLabel('srcdoc-self-remove'), 'self-remove');
+  await runSrcdocFrame(nextLabel('srcdoc-parent-navigate'), 'parent-navigate');
+  await runDynamicWriteFrame(nextLabel('dynamic-parent-remove'), 'parent-remove');
+  await runDynamicWriteFrame(nextLabel('dynamic-self-remove'), 'self-remove');
+  await runDynamicWriteFrame(nextLabel('dynamic-parent-navigate'), 'parent-navigate');
+  setStage('srcdoc + document.write variants: complete');
 }
 
 async function runAll() {
   setStage('run all: starting');
-  await supportCheck();
-  await testWebGL1Delete();
-  await testWebGL1DeleteLose();
-  await testWebGL2Delete();
-  await testWebGL2DeleteLose();
-  await testIframeVariants();
-  setStage('run all: complete; page survived all JS-visible checkpoints');
+  await runBasicSrcdocTeardown();
+  await runSelfRemovalSrcdoc();
+  await runNavigationVariant();
+  await runNestedIframeVariant();
+  await runSrcdocAndDynamicVariants();
+  setStage('run all: complete; parent survived all JS-visible checkpoints');
 }
 
 loadPreviousLog();
-log('page loaded; previous log shown above');
+log('page loaded; previous persisted log is shown above');
 </script>
 </body>
 </html>
