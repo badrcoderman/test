@@ -30,6 +30,7 @@
     }
 
     const storageKey = "fface-quiet-checkpoint";
+    const logElement = document.getElementById("result");
     const resultLines = [];
     let finished = false;
     let getterHits = 0;
@@ -57,7 +58,7 @@
             return;
         finished = true;
         try {
-            document.getElementById("result").textContent = resultLines.join("\n");
+            logElement.textContent = resultLines.join("\n");
         } catch (e) {
         }
         if (window.testRunner)
@@ -142,10 +143,18 @@
             hardMark("MATCHED ORIGINAL CRASH STATE");
             record("MATCHED ORIGINAL CRASH STATE A=false B=true AB=false");
 
-            hardMark("before body.offsetTop");
-            record("before body.offsetTop");
+            hardMark("before DOM mutation");
+            logElement.textContent += "pre-offsetTop-dom-mutation\n";
+            hardMark("after DOM mutation");
+            console.log("DOM mutation executed");
+
+            hardMark("before body.offsetTop after DOM mutation");
+            console.log("before body.offsetTop after DOM mutation");
             const offset = document.body.offsetTop;
             hardMark("after body.offsetTop");
+            console.log("after body.offsetTop value=" + offset);
+            record("DOM mutation executed");
+            record("before body.offsetTop after DOM mutation");
             record("after body.offsetTop value=" + offset);
         } else
             record("CHECK STATE DIFFERENT A=" + checkA + " B=" + checkB + " AB=" + checkAB);
