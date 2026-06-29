@@ -2,15 +2,15 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>CSSFontFace heavy logging pre-offset diagnostic</title>
+<title>CSSFontFace loaded callbacks pre-offset diagnostic</title>
 <style>
 @font-face {
-  font-family: "fface-heavylog-ps5";
+  font-family: "fface-loaded-callbacks-ps5";
   src: local("DejaVuSans"), local("DejaVu Sans"), local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New");
   unicode-range: U+0042;
 }
 #probe {
-  font-family: "fface-heavylog-ps5";
+  font-family: "fface-loaded-callbacks-ps5";
   position: absolute;
   left: -10000px;
   top: -10000px;
@@ -18,9 +18,8 @@
 </style>
 </head>
 <body>
-<div id="stage">Stage: not started</div>
 <span id="probe">B</span>
-<pre id="log">running</pre>
+<pre id="result">running</pre>
 <script>
 (function () {
     "use strict";
@@ -30,21 +29,10 @@
         testRunner.waitUntilDone();
     }
 
-    const storageKey = "fface-heavylog-preoffset-checkpoint";
-    const stageElement = document.getElementById("stage");
-    const logElement = document.getElementById("log");
+    const resultElement = document.getElementById("result");
     const resultLines = [];
     let finished = false;
     let getterHits = 0;
-    let seq = 0;
-
-    function hardMark(message)
-    {
-        try {
-            localStorage.setItem(storageKey, "[" + Date.now() + "] " + message);
-        } catch (e) {
-        }
-    }
 
     function record(message)
     {
@@ -61,7 +49,7 @@
             return;
         finished = true;
         try {
-            logElement.textContent += "\n" + resultLines.join("\n");
+            resultElement.textContent = resultLines.join("\n");
         } catch (e) {
         }
         if (window.testRunner)
@@ -72,122 +60,73 @@
     {
         record(message);
         record("DONE");
-        setTimeout(finish, 0);
+        setTimeout(finish, 20);
     }
 
     function makeThenGetter()
     {
         return function () {
             ++getterHits;
-            hardMark("quiet then getter read");
             return undefined;
         };
     }
 
-    function heavyLoggingBeforeOffset()
-    {
-        hardMark("heavy logging entered");
-        for (let i = 0; i < 8; ++i) {
-            const line = "heavy logging line " + i + " seq=" + (++seq);
-            logElement.textContent += line + "\n";
-            stageElement.textContent = "Stage: heavy logging " + i;
-            try {
-                localStorage.setItem(storageKey + "-" + i, "[" + Date.now() + "] " + line);
-                localStorage.setItem(storageKey, line);
-            } catch (e) {
-            }
-            console.log("heavy logging step " + i);
-        }
-        hardMark("heavy logging exit");
-        console.log("heavy logging complete");
-        record("heavy logging complete");
-    }
-
     function run()
     {
-        hardMark("heavylog run start");
-        record("POC STARTED: CSSFontFace heavy logging pre-offset diagnostic");
+        record("POC STARTED: CSSFontFace loaded callbacks pre-offset diagnostic");
 
         if (!window.FontFace)
             return fail("FontFace API missing");
         if (!document.fonts)
             return fail("document.fonts missing");
 
-        const family = "fface-heavylog-ps5";
-        hardMark("css font-face present");
-
-        hardMark("before js FontFace create");
+        const family = "fface-loaded-callbacks-ps5";
         const jsFace = new FontFace(
             family,
             'local("DejaVuSans"), local("DejaVu Sans"), local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
             { unicodeRange: "U+0041" }
         );
-        hardMark("after js FontFace create");
 
-        hardMark("before define own then getter");
         Object.defineProperty(jsFace, "then", {
             configurable: true,
             get: makeThenGetter()
         });
-        hardMark("after define own then getter");
 
-        hardMark("before jsFace.loaded access");
         const loadedPromise = jsFace.loaded;
-        hardMark("after jsFace.loaded access");
-        if (loadedPromise) {
-            loadedPromise.then(function () {
-                hardMark("jsFace.loaded resolved");
-            }, function () {
-                hardMark("jsFace.loaded rejected");
-            });
-        }
+        loadedPromise.then(
+            value => console.log("jsFace.loaded resolved callback; valueIsFace=" + (value === jsFace) + ", status=" + jsFace.status),
+            error => console.log("jsFace.loaded rejected callback: " + error + ", status=" + jsFace.status)
+        );
 
-        hardMark("before document.fonts.add");
         document.fonts.add(jsFace);
-        hardMark("after document.fonts.add");
 
-        hardMark("before document.fonts.check A");
         const checkA = document.fonts.check('16px "' + family + '"', "A");
-        hardMark("after document.fonts.check A");
-
-        hardMark("before document.fonts.check B");
         const checkB = document.fonts.check('16px "' + family + '"', "B");
-        hardMark("after document.fonts.check B");
-
-        hardMark("before document.fonts.check AB");
         const checkAB = document.fonts.check('16px "' + family + '"', "AB");
-        hardMark("after document.fonts.check AB");
 
         record("document.fonts.check A=" + checkA + " B=" + checkB + " AB=" + checkAB);
         record("then getter hits=" + getterHits);
 
         if (checkA === false && checkB === true && checkAB === false) {
-            hardMark("MATCHED ORIGINAL CRASH STATE");
             record("MATCHED ORIGINAL CRASH STATE A=false B=true AB=false");
-
-            heavyLoggingBeforeOffset();
-
-            hardMark("before body.offsetTop after heavy logging");
-            console.log("before body.offsetTop after heavy logging");
+            console.log("before body.offsetTop after loaded callbacks");
             const offset = document.body.offsetTop;
-            hardMark("after body.offsetTop");
             console.log("after body.offsetTop value=" + offset);
-            record("before body.offsetTop after heavy logging");
+            record("before body.offsetTop after loaded callbacks");
             record("after body.offsetTop value=" + offset);
         } else
             record("CHECK STATE DIFFERENT A=" + checkA + " B=" + checkB + " AB=" + checkAB);
 
         record("NO CRASH OBSERVED");
         record("DONE");
-        setTimeout(finish, 0);
+        setTimeout(finish, 20);
     }
 
     window.onerror = function (message, source, line, column)
     {
-        hardMark("window.onerror");
         record("window.onerror: " + message + " at " + line + ":" + column);
         record("DONE");
-        setTimeout(finish, 0);
+        setTimeout(finish, 20);
     };
 
     setTimeout(run, 0);
