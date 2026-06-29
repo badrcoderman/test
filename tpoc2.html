@@ -551,21 +551,16 @@ no shellcode, no ROP/JOP, no sandbox escape.
     } catch (e) {
     }
 
-    log("POC STARTED: CSSFontFace original own-local crash marker diagnostic");
+    log("POC STARTED: CSSFontFace own-local only crash marker diagnostic");
     stage("auto sequence starting: own + local only");
 
-    /*
-     * Important:
-     * Do not run manual getter first.
-     * The latest PS5 crash happened after "manual getter works",
-     * before reaching the own+local path, so manual sanity pollutes isolation.
-     */
     await runDocumentFontsLoad("own", "local");
 
     await sleep(100);
 
     stage("auto sequence complete");
     finish();
+}
 }
     }
     setTimeout(function () {
