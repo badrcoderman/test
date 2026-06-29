@@ -543,26 +543,27 @@ no shellcode, no ROP/JOP, no sandbox escape.
             active.armed = false;
         }
     }
-    async function runAll() {
-    loadPrevious();
+        async function runAll() {
+        loadPrevious();
 
-    try {
-        localStorage.removeItem(STORAGE_KEY);
-    } catch (e) {
+        try {
+            localStorage.removeItem(STORAGE_KEY);
+        } catch (e) {
+        }
+
+        log("POC STARTED: CSSFontFace own-local only crash marker diagnostic");
+        stage("auto sequence starting: own + local only");
+
+        // Important: run only the own + local path.
+        // Do not run manual getter, prototype, missing-font, or direct jsFace.load tests.
+        await runDocumentFontsLoad("own", "local");
+
+        await sleep(100);
+
+        stage("auto sequence complete");
+        finish();
     }
 
-    log("POC STARTED: CSSFontFace own-local only crash marker diagnostic");
-    stage("auto sequence starting: own + local only");
-
-    await runDocumentFontsLoad("own", "local");
-
-    await sleep(100);
-
-    stage("auto sequence complete");
-    finish();
-}
-}
-    }
     setTimeout(function () {
         runAll().catch(function (e) {
             log("TOP LEVEL RUNALL ERROR: " + e.name + ": " + e.message);
