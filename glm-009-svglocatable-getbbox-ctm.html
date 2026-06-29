@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>GLM-009 SVGLocatable getBBox computeCTM lifetime</title></head>
+<body><pre id="log">POC STARTED: GLM-009 SVGLocatable getBBox/computeCTM
+</pre>
+<script>
+if (window.testRunner) { testRunner.dumpAsText(); testRunner.waitUntilDone(); }
+function log(m) { document.getElementById('log').textContent += m + '\n'; }
+function finish(){ log('NO CRASH OBSERVED'); log('DONE'); if (window.testRunner) testRunner.notifyDone(); }
+function run(){
+    log('PHASE: setup SVG tree');
+    let host = document.createElement('div'); document.body.appendChild(host);
+    let svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('width','100'); svg.setAttribute('height','100');
+    let g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    let r = document.createElementNS('http://www.w3.org/2000/svg', 'rect'); r.setAttribute('x','5'); r.setAttribute('y','5'); r.setAttribute('width','50'); r.setAttribute('height','40');
+    g.appendChild(r); svg.appendChild(g); host.appendChild(svg);
+    for (let i = 0; i < 8; ++i) {
+        log('PHASE: SVGLocatable iteration ' + i);
+        try { r.setAttribute('transform', 'translate(' + i + ',' + i + ') scale(1)'); log('ACTION: transform mutation attempted'); } catch(e){ log('ACTION: transform threw ' + e.name); }
+        try { r.remove(); log('ACTION: locatable element removal attempted'); } catch(e){ log('ACTION: removal threw ' + e.name); }
+        try { g.appendChild(r); log('ACTION: locatable element reinsert attempted'); } catch(e){ log('ACTION: reinsert threw ' + e.name); }
+        try { document.body.offsetLeft; log('ACTION: layout forced'); } catch(e){ log('ACTION: layout force threw ' + e.name); }
+        try { let b = r.getBBox(); log('ACTION: getBBox -> ' + b.x + ',' + b.y + ',' + b.width + ',' + b.height); } catch(e){ log('ACTION: getBBox threw ' + e.name); }
+        try { let m = r.getCTM(); log('ACTION: getCTM -> ' + (m ? 'matrix' : 'null')); } catch(e){ log('ACTION: getCTM threw ' + e.name); }
+        try { let m = r.getScreenCTM(); log('ACTION: getScreenCTM -> ' + (m ? 'matrix' : 'null')); } catch(e){ log('ACTION: getScreenCTM threw ' + e.name); }
+    }
+    try { host.remove(); log('ACTION: cleanup removed host'); } catch(e) { log('ACTION: cleanup threw ' + e.name); }
+    finish();
+}
+run();
+</script></body></html>

