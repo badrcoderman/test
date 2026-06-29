@@ -1,9 +1,10 @@
 <!doctype html>
+
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CSSFontFace own-local PS5 diagnostic</title>
+<title>CSSFontFace pre-load recalc isolate</title>
 <style>
 html {
     font-family: system-ui, -apple-system, sans-serif;
@@ -48,48 +49,36 @@ body {
 </style>
 </head>
 <body>
-
-<h1>CSSFontFace own-local PS5 diagnostic</h1>
-
+<h1>CSSFontFace pre-load recalc isolate</h1>
 <div class="box warn">
 Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP, no sandbox escape.
 </div>
-
 <div class="box">
     <div id="stage">Stage: not started</div>
     <div id="probe">AB</div>
 </div>
-
 <div class="box">
     <h3>Current log</h3>
     <pre id="log"></pre>
 </div>
-
 <div class="box">
     <h3>Previous persisted log</h3>
     <pre id="previous"></pre>
 </div>
-
 <script>
 (function () {
     "use strict";
-
-    const STORAGE_KEY = "cssfontface-own-local-ps5-log";
+    const STORAGE_KEY = "cssfontface-preload-recalc-isolate-log";
     const stageElement = document.getElementById("stage");
     const logElement = document.getElementById("log");
     const previousElement = document.getElementById("previous");
     const probe = document.getElementById("probe");
-
     let seq = 0;
-    let runCounter = 0;
-    let createdFaces = [];
-    let active = null;
     let finished = false;
-
+    let createdFaces = [];
     function now() {
         return new Date().toISOString();
     }
-
     function persist(line) {
         try {
             const old = localStorage.getItem(STORAGE_KEY) || "";
@@ -97,19 +86,16 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         } catch (e) {
         }
     }
-
     function log(msg) {
         const line = "[" + (++seq) + "] " + now() + " :: " + msg;
         logElement.textContent += line + "\n";
         persist(line);
         try { console.log(line); } catch (e) {}
     }
-
     function stage(msg) {
         stageElement.textContent = "Stage: " + msg;
         log("STAGE => " + msg);
     }
-
     function finish() {
         if (finished)
             return;
@@ -117,7 +103,6 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         log("NO CRASH OBSERVED");
         log("DONE");
     }
-
     function loadPrevious() {
         try {
             previousElement.textContent = localStorage.getItem(STORAGE_KEY) || "";
@@ -125,54 +110,37 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             previousElement.textContent = "localStorage unavailable: " + e;
         }
     }
-
     window.onerror = function (message, source, lineno, colno, error) {
         log("window.onerror: " + message + " at " + lineno + ":" + colno);
         if (error && error.stack)
             log("stack: " + error.stack);
     };
-
     window.onunhandledrejection = function (event) {
         log("unhandledrejection: " + event.reason);
     };
-
     window.addEventListener("beforeunload", function () {
         log("beforeunload fired");
     });
-
-    function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    function removeOldStyles() {
-        const old = document.querySelectorAll("style[data-validation-style='1']");
-        for (const node of old)
-            node.remove();
-    }
-
-    function cleanupFaces() {
-        if (!document.fonts)
-            return;
-
-        for (const face of createdFaces) {
-            try {
-                document.fonts.delete(face);
-            } catch (e) {
-                log("document.fonts.delete threw: " + e.name + ": " + e.message);
-            }
-        }
-
-        createdFaces = [];
-    }
-
     function cleanup() {
-        removeOldStyles();
-        cleanupFaces();
+        try {
+            const oldStyles = document.querySelectorAll("style[data-test-style='1']");
+            for (const s of oldStyles)
+                s.remove();
+        } catch (e) {
+            log("cleanup styles threw: " + e.name + ": " + e.message);
+        }
+        try {
+            if (document.fonts) {
+                for (const face of createdFaces)
+                    document.fonts.delete(face);
+            }
+        } catch (e) {
+            log("cleanup fonts threw: " + e.name + ": " + e.message);
+        }
+        createdFaces = [];
         probe.style.fontFamily = "";
         probe.textContent = "AB";
-        active = null;
     }
-
     function cssRuleCount(styleElement) {
         try {
             if (!styleElement || !styleElement.sheet)
@@ -182,256 +150,127 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             return "throws:" + e.name;
         }
     }
-
-    function makeStyle(family) {
+    function makeCSSFace(family) {
         const style = document.createElement("style");
-        style.setAttribute("data-validation-style", "1");
-
+        style.setAttribute("data-test-style", "1");
         style.textContent =
             '@font-face {\n' +
             '    font-family: "' + family + '";\n' +
             '    src: local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New");\n' +
             '    unicode-range: U+0042;\n' +
             '}\n';
-
         document.head.appendChild(style);
         return style;
     }
-
-    function forceStyleRecalc(label) {
-        try {
-            const a = document.body.offsetTop;
-            const b = probe.offsetWidth;
-            const c = getComputedStyle(probe).fontFamily;
-            log(label + ": forced style/layout recalc ok; offsetTop=" + a + ", probeWidth=" + b + ", fontFamily=" + c);
-        } catch (e) {
-            log(label + ": forceStyleRecalc threw: " + e.name + ": " + e.message);
-        }
-    }
-
-    function mutateFromThenGetter(label) {
-        if (!active)
-            return;
-
-        active.reentered = true;
-        active.reentryCount++;
-
-        stage("RE-ENTRY FIRED from " + label);
-        log("THEN GETTER FIRED from " + label);
-        log("before mutation: cssRules=" + cssRuleCount(active.styleElement));
-
-        try {
-            const sheet = active.styleElement && active.styleElement.sheet;
-            if (sheet && sheet.cssRules && sheet.cssRules.length > 0) {
-                sheet.deleteRule(0);
-                log("deleteRule(0) executed");
-            } else {
-                log("deleteRule skipped: no cssRules");
-            }
-        } catch (e) {
-            log("deleteRule threw: " + e.name + ": " + e.message);
-        }
-
-        log("after deleteRule: cssRules=" + cssRuleCount(active.styleElement));
-
-        forceStyleRecalc("inside then getter");
-
-        try {
-            const checkA = document.fonts.check('16px "' + active.family + '"', "A");
-            const checkB = document.fonts.check('16px "' + active.family + '"', "B");
-            const checkAB = document.fonts.check('16px "' + active.family + '"', "AB");
-            log("document.fonts.check after mutation: A=" + checkA + ", B=" + checkB + ", AB=" + checkAB);
-        } catch (e) {
-            log("document.fonts.check after mutation threw: " + e.name + ": " + e.message);
-        }
-    }
-
-    function makeThenGetter(label) {
-        return function () {
-            log("then getter property read: " + label + ", armed=" + !!(active && active.armed));
-            if (active && active.armed)
-                mutateFromThenGetter(label);
-            return undefined;
-        };
-    }
-
-    function withTimeout(promise, ms) {
-        return new Promise(function (resolve) {
-            let done = false;
-
-            const timer = setTimeout(function () {
-                if (done)
-                    return;
-                done = true;
-                resolve({ type: "timeout" });
-            }, ms);
-
-            promise.then(function (value) {
-                if (done)
-                    return;
-                done = true;
-                clearTimeout(timer);
-                resolve({ type: "resolved", value: value });
-            }, function (error) {
-                if (done)
-                    return;
-                done = true;
-                clearTimeout(timer);
-                resolve({ type: "rejected", error: error });
-            });
-        });
-    }
-
-    function createJSFace(family) {
+    function makeJSFace(family) {
         const face = new FontFace(
             family,
             'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
             { unicodeRange: "U+0041" }
         );
-
         createdFaces.push(face);
         return face;
     }
-
-    async function runOwnLocal() {
+    function checkFonts(label, family) {
+        stage(label + " document.fonts.check A");
+        try {
+            log(label + " A=" + document.fonts.check('16px "' + family + '"', "A"));
+        } catch (e) {
+            log(label + " A threw: " + e.name + ": " + e.message);
+        }
+        stage(label + " document.fonts.check B");
+        try {
+            log(label + " B=" + document.fonts.check('16px "' + family + '"', "B"));
+        } catch (e) {
+            log(label + " B threw: " + e.name + ": " + e.message);
+        }
+        stage(label + " document.fonts.check AB");
+        try {
+            log(label + " AB=" + document.fonts.check('16px "' + family + '"', "AB"));
+        } catch (e) {
+            log(label + " AB threw: " + e.name + ": " + e.message);
+        }
+    }
+    function forceStyleRecalc(label) {
+        stage(label + " forceStyleRecalc: body.offsetTop");
+        try {
+            log(label + " body.offsetTop=" + document.body.offsetTop);
+        } catch (e) {
+            log(label + " body.offsetTop threw: " + e.name + ": " + e.message);
+        }
+        stage(label + " forceStyleRecalc: probe.offsetWidth");
+        try {
+            log(label + " probe.offsetWidth=" + probe.offsetWidth);
+        } catch (e) {
+            log(label + " probe.offsetWidth threw: " + e.name + ": " + e.message);
+        }
+        stage(label + " forceStyleRecalc: getComputedStyle");
+        try {
+            log(label + " fontFamily=" + getComputedStyle(probe).fontFamily);
+        } catch (e) {
+            log(label + " getComputedStyle threw: " + e.name + ": " + e.message);
+        }
+    }
+    async function run() {
+        loadPrevious();
+        try {
+            localStorage.removeItem(STORAGE_KEY);
+        } catch (e) {
+        }
+        stage("ready");
+        log("POC STARTED: CSSFontFace pre-load recalc isolate");
         cleanup();
-        runCounter++;
-
-        log("POC STARTED: CSSFontFace own-local PS5 diagnostic");
-
         if (!window.FontFace) {
             stage("FontFace API missing");
-            log("FontFace API is not available");
+            log("FontFace API unavailable");
             finish();
             return;
         }
-
         if (!document.fonts) {
             stage("document.fonts missing");
-            log("document.fonts is not available");
+            log("document.fonts unavailable");
             finish();
             return;
         }
-
-        const family = "ps5-own-local-" + Date.now() + "-" + runCounter;
-        const styleElement = makeStyle(family);
-
+        const family = "ps5-preload-recalc-" + Date.now();
+        stage("create CSS @font-face");
+        const styleElement = makeCSSFace(family);
+        log("family=" + family);
+        log("cssRules after CSS face=" + cssRuleCount(styleElement));
+        stage("create JS FontFace same family");
+        const jsFace = makeJSFace(family);
+        log("jsFace.status initial=" + jsFace.status);
+        stage("assign probe font-family");
         probe.style.fontFamily = '"' + family + '"';
         probe.textContent = "AB";
-
-        active = {
-            family: family,
-            styleElement: styleElement,
-            armed: false,
-            reentered: false,
-            reentryCount: 0
-        };
-
-        stage("setup own + local");
-        log("family=" + family);
-        log("initial cssRules=" + cssRuleCount(styleElement));
-        log("initial document.fonts.size=" + document.fonts.size);
-
+        log("probe assigned family and text AB");
+        stage("add JS face to document.fonts");
         try {
-            const jsFace = createJSFace(family);
-            log("created JS FontFace; status=" + jsFace.status);
-
-            Object.defineProperty(jsFace, "then", {
-                configurable: true,
-                get: makeThenGetter("jsFace.then")
-            });
-
-            log("installed own getter on jsFace.then");
-            log('"then" in jsFace = ' + ("then" in jsFace));
-            log("own then descriptor exists = " + !!Object.getOwnPropertyDescriptor(jsFace, "then"));
-
-            const loadedPromise = jsFace.loaded;
-            log("accessed jsFace.loaded before document.fonts.load; face.status=" + jsFace.status);
-
-            loadedPromise.then(function (value) {
-                log("jsFace.loaded resolved callback; valueIsFace=" + (value === jsFace) + ", status=" + jsFace.status);
-            }, function (error) {
-                log("jsFace.loaded rejected callback: " + error + ", status=" + jsFace.status);
-            });
-
             document.fonts.add(jsFace);
-            log("added JS face to document.fonts; size=" + document.fonts.size + ", status=" + jsFace.status);
-
-            try {
-                log("document.fonts.check before load A=" + document.fonts.check('16px "' + family + '"', "A"));
-                log("document.fonts.check before load B=" + document.fonts.check('16px "' + family + '"', "B"));
-                log("document.fonts.check before load AB=" + document.fonts.check('16px "' + family + '"', "AB"));
-            } catch (e) {
-                log("document.fonts.check before load threw: " + e.name + ": " + e.message);
-            }
-
-            log("SKIP: before document.fonts.load forceStyleRecalc disabled for isolation");
-
-active.armed = true;
-stage("CALLING document.fonts.load own-local");
-
-            const loadPromise = document.fonts.load('16px "' + family + '"', "AB");
-            log("document.fonts.load returned Promise");
-
-            const result = await withTimeout(loadPromise, 5000);
-
-            active.armed = false;
-
-            if (result.type === "resolved") {
-                const faces = result.value;
-                log("document.fonts.load resolved; faces.length=" + (faces && faces.length));
-                if (faces && faces.length) {
-                    for (let i = 0; i < faces.length; i++)
-                        log("returned face[" + i + "].status=" + faces[i].status + ", sameAsJSFace=" + (faces[i] === jsFace));
-                }
-            } else if (result.type === "rejected") {
-                log("document.fonts.load rejected: " + result.error);
-            } else {
-                log("document.fonts.load timed out");
-            }
-
-            forceStyleRecalc("after document.fonts.load");
-
-            log("final jsFace.status=" + jsFace.status);
-            log("final cssRules=" + cssRuleCount(styleElement));
-            log("final document.fonts.size=" + document.fonts.size);
-            log("final reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
-
-            if (active.reentered && cssRuleCount(styleElement) === "0")
-                stage("RE-ENTRY reached and CSS rule deleted");
-            else if (active.reentered)
-                stage("RE-ENTRY reached but CSS rule not deleted");
-            else
-                stage("NO RE-ENTRY observed");
-
-            finish();
+            log("document.fonts.add completed; size=" + document.fonts.size + ", status=" + jsFace.status);
         } catch (e) {
-            active.armed = false;
-            stage("exception");
-            log("exception: " + e.name + ": " + e.message);
-            if (e.stack)
-                log("stack: " + e.stack);
+            log("document.fonts.add threw: " + e.name + ": " + e.message);
             finish();
+            return;
         }
+        checkFonts("before recalc", family);
+        log("ABOUT TO FORCE STYLE RECALC");
+        forceStyleRecalc("preload");
+        stage("after forceStyleRecalc");
+        log("after recalc cssRules=" + cssRuleCount(styleElement));
+        log("after recalc jsFace.status=" + jsFace.status);
+        log("after recalc document.fonts.size=" + document.fonts.size);
+        checkFonts("after recalc", family);
+        stage("complete");
+        finish();
     }
-
-    loadPrevious();
-
-    try {
-        localStorage.removeItem(STORAGE_KEY);
-    } catch (e) {
-    }
-
-    stage("ready");
-
     setTimeout(function () {
-        runOwnLocal().catch(function (e) {
+        run().catch(function (e) {
             log("TOP LEVEL ERROR: " + e.name + ": " + e.message);
             finish();
         });
     }, 500);
 })();
 </script>
-
 </body>
 </html>
