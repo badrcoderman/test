@@ -544,25 +544,29 @@ no shellcode, no ROP/JOP, no sandbox escape.
         }
     }
     async function runAll() {
-        loadPrevious();
-        try {
-            localStorage.removeItem(STORAGE_KEY);
-        } catch (e) {
-        }
-        log("POC STARTED: CSSFontFace original crash marker diagnostic");
-        stage("auto sequence starting");
-        await runManualGetterSanity();
-        await sleep(100);
-        await runDocumentFontsLoad("own", "local");
-        await sleep(100);
-        await runDocumentFontsLoad("prototype", "local");
-        await sleep(100);
-        await runDocumentFontsLoad("own", "missing");
-        await sleep(100);
-        await runDirectJSFaceLoad();
-        await sleep(100);
-        stage("auto sequence complete");
-        finish();
+    loadPrevious();
+
+    try {
+        localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+    }
+
+    log("POC STARTED: CSSFontFace original own-local crash marker diagnostic");
+    stage("auto sequence starting: own + local only");
+
+    /*
+     * Important:
+     * Do not run manual getter first.
+     * The latest PS5 crash happened after "manual getter works",
+     * before reaching the own+local path, so manual sanity pollutes isolation.
+     */
+    await runDocumentFontsLoad("own", "local");
+
+    await sleep(100);
+
+    stage("auto sequence complete");
+    finish();
+}
     }
     setTimeout(function () {
         runAll().catch(function (e) {
