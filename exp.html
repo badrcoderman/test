@@ -2,20 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>CSSFontFace loaded callbacks pre-offset diagnostic</title>
-<style>
-@font-face {
-  font-family: "fface-loaded-callbacks-ps5";
-  src: local("DejaVuSans"), local("DejaVu Sans"), local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New");
-  unicode-range: U+0042;
-}
-#probe {
-  font-family: "fface-loaded-callbacks-ps5";
-  position: absolute;
-  left: -10000px;
-  top: -10000px;
-}
-</style>
+<title>CSSFontFace dynamic style loaded callbacks pre-offset diagnostic</title>
 </head>
 <body>
 <span id="probe">B</span>
@@ -30,6 +17,7 @@
     }
 
     const resultElement = document.getElementById("result");
+    const probe = document.getElementById("probe");
     const resultLines = [];
     let finished = false;
     let getterHits = 0;
@@ -73,17 +61,29 @@
 
     function run()
     {
-        record("POC STARTED: CSSFontFace loaded callbacks pre-offset diagnostic");
+        record("POC STARTED: CSSFontFace dynamic style loaded callbacks pre-offset diagnostic");
 
         if (!window.FontFace)
             return fail("FontFace API missing");
         if (!document.fonts)
             return fail("document.fonts missing");
 
-        const family = "fface-loaded-callbacks-ps5";
+        const family = "fface-dynamic-style-loaded-" + Date.now();
+
+        const style = document.createElement("style");
+        style.textContent =
+            '@font-face {\n' +
+            '  font-family: "' + family + '";\n' +
+            '  src: local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New");\n' +
+            '  unicode-range: U+0042;\n' +
+            '}\n';
+        document.head.appendChild(style);
+        probe.style.fontFamily = '"' + family + '"';
+        record("dynamic style appended");
+
         const jsFace = new FontFace(
             family,
-            'local("DejaVuSans"), local("DejaVu Sans"), local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
+            'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
             { unicodeRange: "U+0041" }
         );
 
@@ -108,11 +108,12 @@
         record("then getter hits=" + getterHits);
 
         if (checkA === false && checkB === true && checkAB === false) {
+            console.log("MATCHED ORIGINAL CRASH STATE A=false B=true AB=false");
             record("MATCHED ORIGINAL CRASH STATE A=false B=true AB=false");
-            console.log("before body.offsetTop after loaded callbacks");
+            console.log("before body.offsetTop dynamic style loaded callbacks");
             const offset = document.body.offsetTop;
             console.log("after body.offsetTop value=" + offset);
-            record("before body.offsetTop after loaded callbacks");
+            record("before body.offsetTop dynamic style loaded callbacks");
             record("after body.offsetTop value=" + offset);
         } else
             record("CHECK STATE DIFFERENT A=" + checkA + " B=" + checkB + " AB=" + checkAB);
