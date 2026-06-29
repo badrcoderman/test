@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>POP-FAMILY Popover beforetoggle reentry</title>
+<style>
+body { font-family: monospace; }
+.pop { border: 1px solid #888; padding: 4px; margin: 4px; }
+</style>
+</head>
+<body>
+<pre id="log">POC STARTED: POP-FAMILY Popover beforetoggle reentry
+</pre>
+<div id="host"></div>
+<iframe id="move-frame" srcdoc="<!DOCTYPE html><html><body><div id='frame-host'></div></body></html>"></iframe>
+<script>
+if (window.testRunner) {
+    testRunner.dumpAsText();
+    testRunner.waitUntilDone();
+}
+
+function log(message) {
+    document.getElementById("log").textContent += message + "\n";
+}
+
+let done = false;
+let activeIteration = 0;
+let inHandler = false;
+let popovers = [];
+let host = document.getElementById("host");
+let frame = document.getElementById("move-frame");
+
+function finish() {
+    if (done)
+        return;
+    done = true;
+    log("NO CRASH OBSERVED");
+    log("DONE");
+    if (window.testRunner)
+        testRunner.notifyDone();
+}
+
+function tryAction(label, action) {
+    try {
+        action();
+        log("ACTION: " + label + " completed");
+    } catch (e) {
+        log("ACTION: " + label + " threw " + e.name + ": " + e.message);
+    }
+}
+
+function forceStyleAndLayout(element) {
+    tryAction("style/layout read attempted", function() {
+        let rect = element.getBoundingClientRect();
+        log("ACTION: layout rect " + rect.width + "x" + rect.height);
+        document.body.offsetTop;
+        getComputedStyle(element).display;
+    });
+}
+
+function createPopover(id, parent) {
+    let popover = document.createElement("div");
+    popover.id = id;
+    popover.className = "pop";
+    popover.setAttribute("popover", "auto");
+    popover.textContent = id;
+
+    popover.addEventListener("beforetoggle", function(event) {
+        log("EVENT: beforetoggle " + id + " " + event.oldState + "->" + event.newState);
+        if (inHandler)
+            return;
+        inHandler = true;
+        try {
+            let variant = activeIteration % 5;
+            if (variant === 0) {
+                log("ACTION: remove attempted");
+                tryAction("remove attempted", function() { popover.remove(); });
+            } else if (variant === 1) {
+                log("ACTION: attribute mutation attempted");
+                tryAction("attribute mutation attempted", function() {
+                    if (popover.hasAttribute("popover"))
+                        popover.removeAttribute("popover");
+                    else
+                        popover.setAttribute("popover", "auto");
+                });
+            } else if (variant === 2) {
+                log("ACTION: iframe move attempted");
+                tryAction("iframe move attempted", function() {
+                    let frameHost = frame.contentDocument && frame.contentDocument.getElementById("frame-host");
+                    if (frameHost)
+                        frameHost.appendChild(popover);
+                    host.appendChild(popover);
+                });
+            } else if (variant === 3) {
+                log("ACTION: nested hideAllPopoversUntil trigger attempted");
+                tryAction("nested popover show attempted", function() {
+                    let other = popovers[(popovers.indexOf(popover) + 1) % popovers.length];
+                    if (other && other !== popover && other.isConnected && other.matches(":popover-open") === false)
+                        other.showPopover();
+                });
+            } else {
+                log("ACTION: remove attempted");
+                tryAction("remove/reinsert attempted", function() {
+                    popover.remove();
+                    host.appendChild(popover);
+                });
+                log("ACTION: attribute mutation attempted");
+                tryAction("popover attribute flip attempted", function() {
+                    popover.setAttribute("popover", "manual");
+                    popover.setAttribute("popover", "auto");
+                });
+            }
+            forceStyleAndLayout(popover);
+        } finally {
+            inHandler = false;
+        }
+    });
+
+    popover.addEventListener("toggle", function(event) {
+        log("EVENT: toggle " + id + " " + event.oldState + "->" + event.newState);
+    });
+
+    parent.appendChild(popover);
+    return popover;
+}
+
+function resetPopovers() {
+    tryAction("cleanup old popovers", function() {
+        for (let popover of popovers) {
+            try {
+                if (popover.matches && popover.matches(":popover-open"))
+                    popover.hidePopover();
+            } catch (e) { }
+            try { popover.remove(); } catch (e) { }
+        }
+        popovers = [];
+        host.textContent = "";
+    });
+
+    let outer = createPopover("outer-popover-" + activeIteration, host);
+    let middle = createPopover("middle-popover-" + activeIteration, outer);
+    let inner = createPopover("inner-popover-" + activeIteration, middle);
+    popovers = [outer, middle, inner];
+    log("ACTION: nested auto popovers created");
+}
+
+function safeShow(popover) {
+    tryAction("showPopover called on " + popover.id, function() {
+        if (!popover.isConnected)
+            host.appendChild(popover);
+        if (popover.getAttribute("popover") !== "auto")
+            popover.setAttribute("popover", "auto");
+        popover.showPopover();
+    });
+}
+
+function safeHide(popover) {
+    tryAction("hidePopover called on " + popover.id, function() {
+        if (popover.isConnected && popover.matches(":popover-open"))
+            popover.hidePopover();
+    });
+}
+
+function runIteration(i) {
+    activeIteration = i;
+    log("PHASE: iteration " + i);
+    resetPopovers();
+
+    log("PHASE: showPopover");
+    safeShow(popovers[0]);
+    safeShow(popovers[1]);
+    safeShow(popovers[2]);
+
+    log("PHASE: nested popover hideAllPopoversUntil");
+    tryAction("show sibling popover to hide existing auto popovers", function() {
+        let sibling = createPopover("sibling-popover-" + i, host);
+        popovers.push(sibling);
+        sibling.showPopover();
+    });
+
+    log("PHASE: attribute mutation");
+    tryAction("attribute mutation while showing", function() {
+        let target = popovers[0];
+        if (!target.isConnected)
+            host.appendChild(target);
+        if (target.getAttribute("popover") !== "auto")
+            target.setAttribute("popover", "auto");
+        try { target.showPopover(); } catch (e) { }
+        target.setAttribute("popover", "manual");
+        target.removeAttribute("popover");
+        target.setAttribute("popover", "auto");
+    });
+
+    log("PHASE: hidePopover");
+    for (let popover of popovers)
+        safeHide(popover);
+
+    log("PHASE: light-dismiss style interaction");
+    tryAction("document click dispatch attempted", function() {
+        document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true, view: window }));
+        document.body.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, cancelable: true, view: window }));
+        document.body.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    });
+}
+
+function run() {
+    let available = !!HTMLElement.prototype.showPopover && !!HTMLElement.prototype.hidePopover && "popover" in HTMLElement.prototype;
+    log("API: Popover " + (available ? "available" : "unavailable"));
+    if (!available) {
+        finish();
+        return;
+    }
+
+    for (let i = 0; i < 10; ++i)
+        runIteration(i);
+
+    tryAction("final cleanup", function() {
+        for (let popover of popovers) {
+            try { popover.remove(); } catch (e) { }
+        }
+        popovers = [];
+    });
+    finish();
+}
+
+try {
+    run();
+} catch (e) {
+    log("ACTION: top-level threw " + e.name + ": " + e.message);
+    finish();
+}
+
+setTimeout(function() {
+    log("PHASE: failsafe timeout");
+    finish();
+}, 3000);
+</script>
+</body>
+</html>

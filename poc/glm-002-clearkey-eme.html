@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>GLM-002 CDMClearKey EME loadSession lifetime</title></head>
+<body><pre id="log">POC STARTED: GLM-002 CDMClearKey
+</pre><video id="v" muted></video>
+<script>
+if (window.testRunner) { testRunner.dumpAsText(); testRunner.waitUntilDone(); }
+function log(m) { document.getElementById('log').textContent += m + '\n'; }
+function finish(){ log('NO CRASH OBSERVED'); log('DONE'); if (window.testRunner) testRunner.notifyDone(); }
+async function run(){
+    log('PHASE: setup EME ClearKey');
+    if (!navigator.requestMediaKeySystemAccess) { log('ACTION: EME unavailable'); finish(); return; }
+    try {
+        let access = await navigator.requestMediaKeySystemAccess('org.w3.clearkey', [{ initDataTypes:['keyids'], videoCapabilities:[{contentType:'video/mp4; codecs="avc1.42E01E"'}], sessionTypes:['temporary'] }]);
+        log('ACTION: ClearKey access granted');
+        let keys = await access.createMediaKeys(); log('ACTION: MediaKeys created');
+        let video = document.getElementById('v'); await video.setMediaKeys(keys); log('ACTION: MediaKeys attached');
+        for (let i = 0; i < 4; ++i) {
+            log('PHASE: loadSession iteration ' + i);
+            let session = keys.createSession('temporary'); log('ACTION: session created');
+            try { await session.load('ps5-glm-002-nonexistent-' + i); log('ACTION: session.load resolved'); } catch(e) { log('ACTION: session.load rejected ' + e.name); }
+            try { await session.close(); log('ACTION: session close attempted'); } catch(e) { log('ACTION: session close rejected ' + e.name); }
+            session = null;
+        }
+    } catch(e) { log('ACTION: ClearKey path unavailable or rejected ' + e.name + ': ' + e.message); }
+    finish();
+}
+run();
+</script></body></html>

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>GLM-001 WebPage::close validation harness</title>
+</head>
+<body>
+<pre id="log">POC STARTED: GLM-001 WebPage::close
+</pre>
+<script>
+if (window.testRunner) {
+    testRunner.dumpAsText();
+    testRunner.waitUntilDone();
+}
+
+function log(message) {
+    document.getElementById("log").textContent += message + "\n";
+}
+
+let done = false;
+let popup = null;
+let iframe = null;
+let childWindowReference = null;
+
+function finish() {
+    if (done)
+        return;
+    done = true;
+    log("NO CRASH OBSERVED");
+    log("DONE");
+    if (window.testRunner)
+        testRunner.notifyDone();
+}
+
+function tryAction(label, action) {
+    log("PHASE: " + label);
+    try {
+        action();
+        log("ACTION: " + label + " completed");
+    } catch (e) {
+        log("ACTION: " + label + " threw " + e.name + ": " + e.message);
+    }
+}
+
+function churnNestedBrowsingContexts(iteration) {
+    log("PHASE: nested browsing context churn " + iteration);
+
+    tryAction("create iframe", function() {
+        iframe = document.createElement("iframe");
+        iframe.srcdoc = "<!DOCTYPE html><html><body><script>parent.postMessage('child-loaded-' + " + iteration + ", '*');<\/script>child</body></html>";
+        document.body.appendChild(iframe);
+    });
+
+    tryAction("capture child window reference", function() {
+        childWindowReference = iframe ? iframe.contentWindow : null;
+        log("ACTION: child window reference " + (childWindowReference ? "captured" : "null"));
+    });
+
+    log("ACTION: iframe navigation");
+    tryAction("iframe navigation", function() {
+        if (iframe)
+            iframe.src = "about:blank#glm001-" + iteration;
+    });
+
+    log("ACTION: iframe removal");
+    tryAction("iframe removal", function() {
+        if (iframe)
+            iframe.remove();
+    });
+
+    tryAction("drop child references", function() {
+        childWindowReference = null;
+        iframe = null;
+    });
+}
+
+function churnAuxiliaryWindow(iteration) {
+    log("PHASE: auxiliary window churn " + iteration);
+
+    log("ACTION: window.open attempted");
+    tryAction("window.open attempted", function() {
+        popup = window.open("about:blank#glm001-" + iteration, "glm001_popup_" + iteration, "width=64,height=64");
+        log("ACTION: popup reference " + (popup ? "captured" : "null"));
+    });
+
+    tryAction("popup document write attempted", function() {
+        if (popup && popup.document) {
+            popup.document.open();
+            popup.document.write("<!DOCTYPE html><html><body>GLM-001 child " + iteration + "</body></html>");
+            popup.document.close();
+        }
+    });
+
+    tryAction("popup navigation attempted", function() {
+        if (popup)
+            popup.location = "about:blank#glm001-nav-" + iteration;
+    });
+
+    log("ACTION: popup close attempted");
+    tryAction("popup close attempted", function() {
+        if (popup)
+            popup.close();
+    });
+
+    tryAction("drop popup reference", function() {
+        popup = null;
+    });
+}
+
+function churnSelfNavigationSignals(iteration) {
+    log("PHASE: self page-close signal churn " + iteration);
+
+    tryAction("history mutation attempted", function() {
+        history.replaceState({ iteration: iteration }, "", "#glm001-" + iteration);
+    });
+
+    tryAction("microtask navigation marker", function() {
+        Promise.resolve().then(function() {
+            log("ACTION: microtask reached after close/navigation attempts " + iteration);
+        });
+    });
+
+    tryAction("timer navigation marker", function() {
+        setTimeout(function() {
+            log("ACTION: timer reached after close/navigation attempts " + iteration);
+        }, 0);
+    });
+}
+
+window.addEventListener("message", function(event) {
+    log("ACTION: message received " + event.data);
+});
+
+window.addEventListener("pagehide", function() {
+    log("ACTION: pagehide fired");
+});
+
+window.addEventListener("beforeunload", function() {
+    log("ACTION: beforeunload fired");
+});
+
+function run() {
+    log("PHASE: begin bounded WebPage close validation");
+    log("ACTION: HTML can only request ordinary browsing-context close/navigation paths");
+
+    for (let i = 0; i < 4; ++i) {
+        churnNestedBrowsingContexts(i);
+        churnAuxiliaryWindow(i);
+        churnSelfNavigationSignals(i);
+    }
+
+    setTimeout(function() {
+        log("PHASE: final cleanup");
+        tryAction("final popup cleanup", function() {
+            if (popup)
+                popup.close();
+            popup = null;
+        });
+        tryAction("final iframe cleanup", function() {
+            if (iframe)
+                iframe.remove();
+            iframe = null;
+            childWindowReference = null;
+        });
+        finish();
+    }, 100);
+}
+
+run();
+setTimeout(function() {
+    log("PHASE: failsafe timeout");
+    finish();
+}, 2000);
+</script>
+</body>
+</html>

