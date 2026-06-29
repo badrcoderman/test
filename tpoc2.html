@@ -365,10 +365,10 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
                 log("document.fonts.check before load threw: " + e.name + ": " + e.message);
             }
 
-            forceStyleRecalc("before document.fonts.load");
+            log("SKIP: before document.fonts.load forceStyleRecalc disabled for isolation");
 
-            active.armed = true;
-            stage("CALLING document.fonts.load own-local");
+active.armed = true;
+stage("CALLING document.fonts.load own-local");
 
             const loadPromise = document.fonts.load('16px "' + family + '"', "AB");
             log("document.fonts.load returned Promise");
