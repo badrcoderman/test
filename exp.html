@@ -2,15 +2,15 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>CSSFontFace quiet PS5 diagnostic</title>
+<title>CSSFontFace heavy logging pre-offset diagnostic</title>
 <style>
 @font-face {
-  font-family: "fface-quiet-ps5";
+  font-family: "fface-heavylog-ps5";
   src: local("DejaVuSans"), local("DejaVu Sans"), local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New");
   unicode-range: U+0042;
 }
 #probe {
-  font-family: "fface-quiet-ps5";
+  font-family: "fface-heavylog-ps5";
   position: absolute;
   left: -10000px;
   top: -10000px;
@@ -18,8 +18,9 @@
 </style>
 </head>
 <body>
+<div id="stage">Stage: not started</div>
 <span id="probe">B</span>
-<pre id="result">running</pre>
+<pre id="log">running</pre>
 <script>
 (function () {
     "use strict";
@@ -29,11 +30,13 @@
         testRunner.waitUntilDone();
     }
 
-    const storageKey = "fface-quiet-checkpoint";
-    const logElement = document.getElementById("result");
+    const storageKey = "fface-heavylog-preoffset-checkpoint";
+    const stageElement = document.getElementById("stage");
+    const logElement = document.getElementById("log");
     const resultLines = [];
     let finished = false;
     let getterHits = 0;
+    let seq = 0;
 
     function hardMark(message)
     {
@@ -58,7 +61,7 @@
             return;
         finished = true;
         try {
-            logElement.textContent = resultLines.join("\n");
+            logElement.textContent += "\n" + resultLines.join("\n");
         } catch (e) {
         }
         if (window.testRunner)
@@ -81,17 +84,36 @@
         };
     }
 
+    function heavyLoggingBeforeOffset()
+    {
+        hardMark("heavy logging entered");
+        for (let i = 0; i < 8; ++i) {
+            const line = "heavy logging line " + i + " seq=" + (++seq);
+            logElement.textContent += line + "\n";
+            stageElement.textContent = "Stage: heavy logging " + i;
+            try {
+                localStorage.setItem(storageKey + "-" + i, "[" + Date.now() + "] " + line);
+                localStorage.setItem(storageKey, line);
+            } catch (e) {
+            }
+            console.log("heavy logging step " + i);
+        }
+        hardMark("heavy logging exit");
+        console.log("heavy logging complete");
+        record("heavy logging complete");
+    }
+
     function run()
     {
-        hardMark("quiet run start");
-        record("POC STARTED: CSSFontFace quiet PS5 diagnostic");
+        hardMark("heavylog run start");
+        record("POC STARTED: CSSFontFace heavy logging pre-offset diagnostic");
 
         if (!window.FontFace)
             return fail("FontFace API missing");
         if (!document.fonts)
             return fail("document.fonts missing");
 
-        const family = "fface-quiet-ps5";
+        const family = "fface-heavylog-ps5";
         hardMark("css font-face present");
 
         hardMark("before js FontFace create");
@@ -143,18 +165,14 @@
             hardMark("MATCHED ORIGINAL CRASH STATE");
             record("MATCHED ORIGINAL CRASH STATE A=false B=true AB=false");
 
-            hardMark("before DOM mutation");
-            logElement.textContent += "pre-offsetTop-dom-mutation\n";
-            hardMark("after DOM mutation");
-            console.log("DOM mutation executed");
+            heavyLoggingBeforeOffset();
 
-            hardMark("before body.offsetTop after DOM mutation");
-            console.log("before body.offsetTop after DOM mutation");
+            hardMark("before body.offsetTop after heavy logging");
+            console.log("before body.offsetTop after heavy logging");
             const offset = document.body.offsetTop;
             hardMark("after body.offsetTop");
             console.log("after body.offsetTop value=" + offset);
-            record("DOM mutation executed");
-            record("before body.offsetTop after DOM mutation");
+            record("before body.offsetTop after heavy logging");
             record("after body.offsetTop value=" + offset);
         } else
             record("CHECK STATE DIFFERENT A=" + checkA + " B=" + checkB + " AB=" + checkAB);
