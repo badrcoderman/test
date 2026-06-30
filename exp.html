@@ -2,9 +2,23 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>CSSFontFace load getter delete diagnostic</title>
+<title>CSSprobevariant</title>
+<style>
+@font-face {
+  font-family: "fface-variant-descriptor-probe";
+  src: local("DejaVuSans"), local("DejaVu Sans"), local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New");
+  unicode-range: U+0042;
+}
+#probe {
+  font-family: "fface-variant-descriptor-probe";
+  position: absolute;
+  left: -10000px;
+  top: -10000px;
+}
+</style>
 </head>
 <body>
+<span id="probe">B</span>
 <pre id="result">running</pre>
 <script>
 (function () {
@@ -15,20 +29,16 @@
         testRunner.waitUntilDone();
     }
 
+    const family = "fface-variant-descriptor-probe";
     const resultElement = document.getElementById("result");
-    const resultLines = [];
-    let finished = false;
+    const lines = [];
     let getterHits = 0;
-    let deleteRuleExecuted = false;
-    let styleElement = null;
+    let finished = false;
 
     function record(message)
     {
-        resultLines.push(message);
-        try {
-            console.log(message);
-        } catch (e) {
-        }
+        lines.push(message);
+        console.log(message);
     }
 
     function finish()
@@ -36,10 +46,7 @@
         if (finished)
             return;
         finished = true;
-        try {
-            resultElement.textContent = resultLines.join("\n");
-        } catch (e) {
-        }
+        resultElement.textContent = lines.join("\n");
         if (window.testRunner)
             testRunner.notifyDone();
     }
@@ -48,98 +55,41 @@
     {
         return function () {
             ++getterHits;
-            try {
-                localStorage.setItem("fface-load-getter-delete", "getter fired " + getterHits);
-            } catch (e) {
-            }
-            console.log("getter fired");
-            if (!deleteRuleExecuted) {
-                deleteRuleExecuted = true;
-                try {
-                    if (styleElement && styleElement.sheet && styleElement.sheet.cssRules.length) {
-                        styleElement.sheet.deleteRule(0);
-                        console.log("deleteRule executed");
-                    } else
-                        console.log("deleteRule skipped");
-                } catch (e) {
-                    console.log("deleteRule threw: " + e.name + ": " + e.message);
-                }
-            }
             return undefined;
         };
     }
 
-    function fail(message)
-    {
-        record(message);
-        record("DONE");
-        setTimeout(finish, 0);
-    }
-
     function run()
     {
-        record("POC STARTED: CSSFontFace load getter delete diagnostic");
+        record("POC STARTED: descriptor probe variant");
+        const jsFace = new FontFace(family, 'local("DejaVuSans"), local("DejaVu Sans"), local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")', { unicodeRange: "U+0041" });
+        Object.defineProperty(jsFace, "then", { configurable: true, get: makeThenGetter() });
 
-        if (!window.FontFace)
-            return fail("FontFace API missing");
-        if (!document.fonts)
-            return fail("document.fonts missing");
+        console.log('"then" in jsFace=' + ("then" in jsFace));
+        console.log('own descriptor exists=' + !!Object.getOwnPropertyDescriptor(jsFace, "then"));
+        console.log('prototype descriptor exists=' + !!Object.getOwnPropertyDescriptor(FontFace.prototype, "then"));
 
-        styleElement = document.createElement("style");
-        styleElement.textContent =
-            '@font-face {\n' +
-            '  font-family: x;\n' +
-            '  src: local("DejaVuSans"), local("DejaVu Sans"), local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New");\n' +
-            '  unicode-range: U+0042;\n' +
-            '}\n';
-        document.head.appendChild(styleElement);
-        record("dynamic style appended");
-
-        const jsFace = new FontFace(
-            "trigger",
-            'local("DejaVuSans"), local("DejaVu Sans"), local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
-            { unicodeRange: "U+0041" }
-        );
-
-        Object.defineProperty(jsFace, "then", {
-            configurable: true,
-            get: makeThenGetter()
-        });
+        const loadedPromise = jsFace.loaded;
+        if (loadedPromise) {
+            loadedPromise.then(function () { }, function () { });
+        }
 
         document.fonts.add(jsFace);
-
-        const loadPromise = document.fonts.load("1em trigger, x", "AB");
-        loadPromise.then(function (faces) {
-            record("load resolved; faces.length=" + (faces ? faces.length : "null"));
-            record("getter hits=" + getterHits);
-            record("deleteRule executed=" + deleteRuleExecuted);
-            record("DONE");
-            setTimeout(finish, 0);
-        }, function (error) {
-            record("load rejected: " + error);
-            record("getter hits=" + getterHits);
-            record("deleteRule executed=" + deleteRuleExecuted);
-            record("DONE");
-            setTimeout(finish, 0);
-        });
-
-        setTimeout(function () {
-            if (finished)
-                return;
-            record("load timeout");
-            record("getter hits=" + getterHits);
-            record("deleteRule executed=" + deleteRuleExecuted);
-            record("DONE");
-            finish();
-        }, 5000);
-    }
-
-    window.onerror = function (message, source, line, column)
-    {
-        record("window.onerror: " + message + " at " + line + ":" + column);
+        const checkA = document.fonts.check('16px "' + family + '"', "A");
+        const checkB = document.fonts.check('16px "' + family + '"', "B");
+        const checkAB = document.fonts.check('16px "' + family + '"', "AB");
+        record("document.fonts.check A=" + checkA + " B=" + checkB + " AB=" + checkAB);
+        if (checkA === false && checkB === true && checkAB === false) {
+            record("MATCHED ORIGINAL CRASH STATE A=false B=true AB=false");
+            record("before body.offsetTop");
+            const offset = document.body.offsetTop;
+            record("after body.offsetTop value=" + offset);
+        }
+        record("getter hits=" + getterHits);
+        record("NO CRASH OBSERVED");
         record("DONE");
         setTimeout(finish, 0);
-    };
+    }
 
     setTimeout(run, 0);
 })();
