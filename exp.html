@@ -173,45 +173,6 @@ function result(type, success, msg) {
 // ---- Helpers ----
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
-// ============================================================
-//  1️⃣ SOP Bypass — Navigation API
-// ============================================================
-async function testSOPBypassNav() {
-  L('── 1️⃣ SOP Bypass (Navigation API) ──', 'sep');
-  L('[*] CVE-2026-20643 — تجاوز Same-Origin via Navigation API');
-  
-  try {
-    // محاولة فتح نافذة وقراءة location
-    let w = window.open('about:blank', '_blank', 'width=1,height=1');
-    if (w) {
-      w.location.href = 'https://example.com';
-      await wait(500);
-      
-      try {
-        let loc = w.location.href;
-        L(`[+] قرأنا location: ${loc}`, 'ok');
-        result('CRITICAL', true, 'SOP Bypass عبر Navigation API — يمكن القراءة');
-      } catch(e) {
-        // محاولة ثانية
-        try {
-          let win2 = window.open('https://example.com', 'test', 'width=1,height=1');
-          await wait(300);
-          win2.close();
-          L('[-] SOP محمي — ما تقدر تقرأ', 'warn');
-          result('CRITICAL', false, 'SOP محمي');
-        } catch(e2) {
-          result('CRITICAL', false, 'SOP محمي تماماً');
-        }
-      }
-      if (w && !w.closed) w.close();
-    } else {
-      L('[-] منع فتح النوافذ (popup blocker)', 'warn');
-      result('CRITICAL', false, 'Popup blocker منع الفتح');
-    }
-  } catch(e) {
-    result('CRITICAL', false, `خطأ: ${e.message}`);
-  }
-}
 
 // ============================================================
 //  2️⃣ SOP Bypass — postMessage
