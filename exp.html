@@ -238,7 +238,7 @@ async function exploitCache() {
   try {
     const c = await caches.open('ps5-pwn');
     await c.put('/ps5/exploit', new Response(
-      '<script>alert("PS5 CACHE POISONED")</script>',
+      'alert("PS5 CACHE POISONED")',
       { headers: { 'Content-Type': 'text/html' } }
     ));
     await c.put('/ps5/config', new Response(JSON.stringify({
