@@ -637,7 +637,6 @@ async function runTest(num) {
   logEl.innerHTML = `<div class="info">[*] جاري تشغيل الهجوم #${num}...</div>`;
   
   switch(num) {
-    case 1:  await testSOPBypassNav(); break;
     case 2:  await testSOPBypassPostMsg(); break;
     case 3:  await testDNSRebinding(); break;
     case 4:  await testSSRF(); break;
