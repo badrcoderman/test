@@ -1,228 +1,37 @@
-<!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
-<title>FontFaceSet matchingFaces lifetime validation</title>
-<style>
-body { font-family: sans-serif; }
-#probe { position: absolute; left: -9999px; top: -9999px; font-size: 16px; }
-</style>
+<script src="../../resources/gc.js"></script>
 <script>
 if (window.testRunner) {
     testRunner.dumpAsText();
     testRunner.waitUntilDone();
 }
+
+function load()
+{
+    style = document.createElement('style');
+    style.textContent = '@font-face { font-family: "A"; }';
+    document.head.appendChild(style);
+    rulestyle = document.styleSheets[0].cssRules[0].style;
+    document.head.removeChild(style);
+    style = null;
+    setTimeout(crash, 0);
+}
+
+function crash()
+{
+    gc();
+    obj = rulestyle.parentRule;
+    // If the gc() actually successfully reaps everything it can, then obj
+    // will end up null (post-fix). gc() is not guaranteed to reap the font-face
+    // rule, however, particularly in the browser context.
+    if (obj)
+        obj = obj.foo;
+    document.body.innerText = 'PASS';
+    if (window.testRunner)
+        testRunner.notifyDone()
+}
 </script>
 </head>
-<body>
-<pre id="log">POC STARTED: CSSFontFaceSet matchingFaces lifetime validation
-</pre>
-<div id="probe">AB</div>
-<script>
-(function () {
-    "use strict";
-
-    const logElement = document.getElementById("log");
-    const probe = document.getElementById("probe");
-    let finished = false;
-
-    function log(message) {
-        logElement.textContent += message + "\n";
-    }
-
-    function finish() {
-        if (finished)
-            return;
-        finished = true;
-        cleanupThenGetter();
-        log("DONE");
-        if (window.testRunner)
-            testRunner.notifyDone();
-    }
-
-    const originalThenDescriptor = Object.getOwnPropertyDescriptor(FontFace.prototype, "then");
-    let getterInstalled = false;
-    let getterFired = false;
-    let styleElement = null;
-
-    function cleanupThenGetter() {
-        if (!getterInstalled)
-            return;
-        getterInstalled = false;
-        try {
-            if (originalThenDescriptor)
-                Object.defineProperty(FontFace.prototype, "then", originalThenDescriptor);
-            else
-                delete FontFace.prototype.then;
-            log("cleanup: FontFace.prototype.then restored");
-        } catch (error) {
-            log("cleanup: restoring FontFace.prototype.then threw: " + error.name);
-        }
-    }
-
-    function forceStyleAndLayout(reason) {
-        log("force-style: " + reason);
-        try {
-            // A style/layout read is used to force pending stylesheet mutations through
-            // Document::updateStyleIfNeeded()/updateLayout() in WebKit.
-            void document.body.offsetWidth;
-            void probe.offsetHeight;
-            void getComputedStyle(probe).fontFamily;
-            log("force-style: completed");
-        } catch (error) {
-            log("force-style: threw " + error.name + ": " + error.message);
-        }
-    }
-
-    function mutateFontRulesSameStack() {
-        log("then-getter: entered same-stack mutation path");
-        if (!styleElement) {
-            log("then-getter: no style element available");
-            return;
-        }
-
-        const sheet = styleElement.sheet;
-        log("then-getter: sheet present = " + !!sheet);
-        if (sheet) {
-            try {
-                log("then-getter: cssRules before delete = " + sheet.cssRules.length);
-                while (sheet.cssRules.length)
-                    sheet.deleteRule(0);
-                log("then-getter: cssRules after delete = " + sheet.cssRules.length);
-            } catch (error) {
-                log("then-getter: deleteRule loop threw " + error.name + ": " + error.message);
-            }
-        }
-
-        try {
-            if (styleElement.parentNode) {
-                styleElement.remove();
-                log("then-getter: style element removed");
-            }
-        } catch (error) {
-            log("then-getter: style removal threw " + error.name + ": " + error.message);
-        }
-
-        forceStyleAndLayout("after @font-face removal from then getter");
-        cleanupThenGetter();
-        log("then-getter: leaving same-stack mutation path");
-    }
-
-    function installThenGetter() {
-        Object.defineProperty(FontFace.prototype, "then", {
-            configurable: true,
-            get() {
-                log("FontFace.prototype.then getter fired");
-                if (!getterFired) {
-                    getterFired = true;
-                    mutateFontRulesSameStack();
-                }
-                return undefined;
-            }
-        });
-        getterInstalled = true;
-        log("setup: FontFace.prototype.then getter installed");
-    }
-
-    async function run() {
-        log("phase: setup");
-        if (!document.fonts || typeof FontFace === "undefined") {
-            log("SKIP: CSS Font Loading API unavailable");
-            finish();
-            return;
-        }
-
-        const family = "FontFaceMatchingFacesLifetimeValidation";
-        styleElement = document.createElement("style");
-        styleElement.textContent = `
-            @font-face {
-                font-family: '${family}';
-                src: local('Ahem');
-                unicode-range: U+0041;
-            }
-            @font-face {
-                font-family: '${family}';
-                src: local('Ahem');
-                unicode-range: U+0042;
-            }
-            #probe { font-family: '${family}', sans-serif; }
-        `;
-        document.head.appendChild(styleElement);
-        log("setup: style element appended with two CSS-connected @font-face rules");
-        log("setup: uses local('Ahem') to prefer a synchronous local-font path under WTR");
-
-        forceStyleAndLayout("after initial @font-face insertion");
-
-        let observedFace = null;
-        try {
-            const iterator = document.fonts.values();
-            const first = iterator.next();
-            observedFace = first && first.value;
-            log("setup: first document.fonts wrapper observed = " + !!observedFace);
-            if (observedFace)
-                log("setup: observed FontFace status before load = " + observedFace.status);
-        } catch (error) {
-            log("setup: document.fonts iterator threw " + error.name + ": " + error.message);
-        }
-
-        if (!observedFace) {
-            log("FAIL: no CSS-connected FontFace wrapper was observable");
-            finish();
-            return;
-        }
-
-        // Accessing loadedForBindings makes the native FontFace.loaded promise observable.
-        observedFace.loaded.then(
-            () => log("loaded-promise: observed FontFace.loaded resolved"),
-            error => log("loaded-promise: observed FontFace.loaded rejected: " + (error && error.name ? error.name : error))
-        );
-        log("setup: observed FontFace.loaded promise path attached");
-
-        installThenGetter();
-
-        log("phase: call document.fonts.load with text requiring both unicode-range faces");
-        let loadPromise;
-        try {
-            loadPromise = document.fonts.load("16px '" + family + "'", "AB");
-            log("phase: document.fonts.load returned");
-        } catch (error) {
-            log("phase: document.fonts.load threw " + error.name + ": " + error.message);
-            finish();
-            return;
-        }
-
-        let settled = false;
-        try {
-            await Promise.race([
-                loadPromise.then(
-                    faces => {
-                        settled = true;
-                        log("load-promise: resolved with " + faces.length + " faces");
-                    },
-                    error => {
-                        settled = true;
-                        log("load-promise: rejected: " + (error && error.name ? error.name : error));
-                    }
-                ),
-                new Promise(resolve => setTimeout(resolve, 100))
-            ]);
-        } catch (error) {
-            log("load-promise: observation threw " + error.name + ": " + error.message);
-        }
-
-        log("result: then getter fired = " + getterFired);
-        log("result: load promise settled before timeout = " + settled);
-        log("result: if this is an unfixed ASan build, a lifetime error may occur before DONE");
-        finish();
-    }
-
-    try {
-        run();
-    } catch (error) {
-        log("UNCAUGHT: " + error.name + ": " + error.message);
-        finish();
-    }
-})();
-</script>
-</body>
+<body onload="load()"></body>
 </html>
