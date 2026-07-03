@@ -1,22 +1,51 @@
 <!DOCTYPE html>
 <html>
+<head>
+<meta charset="utf-8">
+<title>PS5 CSSParser Type Confusion Test</title>
+</head>
 <body>
-<pre id="log"></pre>
+<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
 const sheet = new CSSStyleSheet();
-try {
-    sheet.insertRule(`@font-face { font-family: "test"; src: local(3.544848e-304); }`);
-    L('[+] Rule accepted — parser confused!');
-    L('  cssRules: ' + sheet.cssRules.length);
-    if (sheet.cssRules.length > 0) {
-        L('  src: ' + sheet.cssRules[0].style.getPropertyValue('src'));
-    }
-} catch(e) {
-    L('[!] Rule REJECTED: ' + e.message);
-    L('[*] CSSParser correctly validates token types.');
-}
+
+// Test 1: Integer
+sheet.insertRule(`@font-face { font-family: test1; src: local(123); }`);
+L('Test 1: local(123)');
+L('  cssText: ' + sheet.cssRules[0].cssText);
+L('  src: ' + sheet.cssRules[0].style.getPropertyValue('src'));
+
+// Test 2: Quoted String (Control)
+sheet.insertRule(`@font-face { font-family: test2; src: local("123"); }`);
+L('\nTest 2: local("123")');
+L('  cssText: ' + sheet.cssRules[1].cssText);
+L('  src: ' + sheet.cssRules[1].style.getPropertyValue('src'));
+
+// Test 3: Float (The alleged confusion trigger)
+sheet.insertRule(`@font-face { font-family: test3; src: local(3.544848e-304); }`);
+L('\nTest 3: local(3.544848e-304)');
+L('  cssText: ' + sheet.cssRules[2].cssText);
+L('  src: ' + sheet.cssRules[2].style.getPropertyValue('src'));
+
+// Test 4: Ident (Control)
+sheet.insertRule(`@font-face { font-family: test4; src: local(Arial); }`);
+L('\nTest 4: local(Arial)');
+L('  cssText: ' + sheet.cssRules[3].cssText);
+L('  src: ' + sheet.cssRules[3].style.getPropertyValue('src'));
+
+// Test 5: Zero (Null pointer?)
+sheet.insertRule(`@font-face { font-family: test5; src: local(0); }`);
+L('\nTest 5: local(0)');
+L('  cssText: ' + sheet.cssRules[4].cssText);
+L('  src: ' + sheet.cssRules[4].style.getPropertyValue('src'));
+
+// Test 6: Large Float
+sheet.insertRule(`@font-face { font-family: test6; src: local(1.337e-308); }`);
+L('\nTest 6: local(1.337e-308)');
+L('  cssText: ' + sheet.cssRules[5].cssText);
+L('  src: ' + sheet.cssRules[5].style.getPropertyValue('src'));
 </script>
 </body>
 </html>
