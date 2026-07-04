@@ -2,104 +2,137 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 CVE-2025-46299 - normalize() Heap Spray Leak</title>
+<title>PS5 ICU Behavior Probe</title>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-L('[*] Starting CVE-2025-46299 normalize() Heap Spray Leak...');
+L('[*] Starting ICU Behavior Probe...');
 
-// Step 1: Groom the heap with 0x41414141 in 80-byte chunks
-// StringImpl for a 20-char string is around 80 bytes.
-L('[*] Grooming heap with 0x41414141 (80-byte chunks)...');
-let spray = [];
-for (let i = 0; i < 100000; i++) {
-    let ab = new ArrayBuffer(80);
-    let view = new Uint32Array(ab);
-    for (let j = 0; j < 20; j++) view[j] = 0x41414141;
-    spray.push(ab);
+// Probe 1: ICU version info
+L('\n--- ICU Version Info ---');
+try {
+    let dtf = new Intl.DateTimeFormat();
+    L('Locale: ' + dtf.resolvedOptions().locale);
+    L('Calendar: ' + dtf.resolvedOptions().calendar);
+    L('NumberingSystem: ' + dtf.resolvedOptions().numberingSystem);
+} catch(e) {
+    L('Error: ' + e.message);
 }
-spray = null; // Drop references, let GC claim them
 
-// Step 2: Trigger normalize() with strings that might cause ICU underwrite
-L('[*] Triggering normalize() with edge cases...');
+// Probe 2: Test normalization of strings that are "almost normalized"
+// If isNormalized returns true, we skip allocation entirely
+// We need isNormalized to return FALSE, but the two-pass normalize to have a size discrepancy
+L('\n--- Normalization Edge Cases ---');
 
-const testStrings = [
-    // Strings with bad surrogates mixed with expanders
-    'A\uD800\uFDFA',
-    '\uFB01\uDC00\uFB03',
-    '\u212B\uD800\uFDFA',
-    
-    // Long strings with a single bad surrogate at the end
-    '\uFDFA'.repeat(100) + '\uD800',
-    '\uFB03'.repeat(100) + '\uDC00',
-    
-    // Strings that might cause ICU buffer overflow on second pass
-    '\uFDFA'.repeat(1000),
-    
-    // Rapidly switching between valid and invalid
-    '\uFDFA\uD800\uFDFA\uD800\uFDFA\uD800',
-    
-    // Boundary conditions for ICU internal buffers (often 256 or 2048)
-    '\uFDFA'.repeat(14),  // ~252 bytes output
-    '\uFDFA'.repeat(15),  // ~270 bytes output
-    '\uFDFA'.repeat(113), // ~2034 bytes output
-    '\uFDFA'.repeat(114), // ~2052 bytes output
+// Hangul Jamo: these compose and decompose in complex ways
+const hangulTests = [
+    '\u1100\u1161',  // Jamo that compose to 가
+    '\u1100\u1161\u1100\u1161',  // Repeated Jamo
+    '\u1100\u1161'.repeat(100),  // Many Jamo
+    '\uAC00'.repeat(100),  // Precomposed Hangul
+    '\u1100\u1161\u11A8',  // Jamo with trailing consonant
+    '\u1100\u1161\u11A8'.repeat(100),  // Many with trailing consonant
 ];
 
-let realLeakFound = false;
-
-for (const str of testStrings) {
+for (const str of hangulTests) {
     for (const form of ['NFC', 'NFD', 'NFKC', 'NFKD']) {
         try {
             let res = str.normalize(form);
-            
-            // Convert to hex for analysis
-            let hex = [];
-            for (let i = 0; i < res.length; i++) {
-                hex.push(res.charCodeAt(i).toString(16).padStart(4, '0'));
+            let ratio = (res.length / str.length).toFixed(2);
+            if (res.length !== str.length) {
+                L(`Hangul ${form}: ${str.length} -> ${res.length} (ratio: ${ratio})`);
             }
-            let hexStr = hex.join(' ');
-            
-            // If we see a sequence of 0x4141 0x4141 0x4141 (our spray), that's a leak
-            if (hexStr.includes('4141 4141 4141')) {
-                L('[!] REAL LEAK DETECTED!');
-                L('    Input: ' + str.substring(0, 20));
-                L('    Form: ' + form);
-                L('    Length: ' + res.length);
-                L('    Hex: ' + hexStr.substring(0, 300) + '...');
-                realLeakFound = true;
-                break;
-            }
-            
-            // Also check for other obvious pointer patterns (0x7fxx or 0x0000)
-            // Pointers in x64 often look like 0x00007f... which as UChars is 0000 7fxx
-            if (hexStr.match(/0000 7f[0-9a-f]{2}/)) {
-                L('[!] POSSIBLE POINTER LEAK DETECTED!');
-                L('    Input: ' + str.substring(0, 20));
-                L('    Form: ' + form);
-                L('    Hex: ' + hexStr.substring(0, 300) + '...');
-                realLeakFound = true;
-                break;
-            }
-            
-        } catch (e) {
-            // Ignore exceptions
-        }
+        } catch(e) {}
     }
-    if (realLeakFound) break;
 }
 
-if (!realLeakFound) {
-    L('[*] No leak detected with 0x4141 pattern.');
-    L('[*] The bug may require a different heap layout or a different ICU trigger.');
-} else {
-    L('[+] LEAK CONFIRMED! We can now read memory addresses.');
+// Probe 3: Tibetan - notorious for ICU normalization bugs
+L('\n--- Tibetan Normalization ---');
+const tibetanTests = [
+    '\u0F73',  // Tibetan vowel I
+    '\u0F73'.repeat(100),
+    '\u0F71\u0F72',  // Tibetan subjoined vowel
+    '\u0F71\u0F72'.repeat(100),
+    '\u0F0B\u0F73',  // Tibetan tshek + vowel
+    '\u0F0B\u0F73'.repeat(100),
+];
+
+for (const str of tibetanTests) {
+    for (const form of ['NFC', 'NFD', 'NFKC', 'NFKD']) {
+        try {
+            let res = str.normalize(form);
+            if (res.length !== str.length) {
+                L(`Tibetan ${form}: ${str.length} -> ${res.length}`);
+            }
+        } catch(e) {}
+    }
 }
 
-L('[*] Test finished.');
+// Probe 4: CJK Compatibility Ideographs - these map to standard CJK
+// and can cause size discrepancies in some ICU versions
+L('\n--- CJK Compatibility Ideographs ---');
+const cjkCompatTests = [
+    '\uF900',  // CJK Compatibility Ideograph
+    '\uF900'.repeat(100),
+    '\uFA30',  // CJK Compatibility Ideograph Supplement
+    '\uFA30'.repeat(100),
+];
+
+for (const str of cjkCompatTests) {
+    for (const form of ['NFC', 'NFD', 'NFKC', 'NFKD']) {
+        try {
+            let res = str.normalize(form);
+            if (res.length !== str.length) {
+                L(`CJKCompat ${form}: ${str.length} -> ${res.length}`);
+            }
+        } catch(e) {}
+    }
+}
+
+// Probe 5: Strings that cause ICU to report U_STRING_NOT_TERMINATED_WARNING
+// This warning is > U_ZERO_ERROR, so U_SUCCESS returns false
+// BUT: the buffer might still be partially written
+L('\n--- Warning Behavior Test ---');
+// Try strings that might cause warnings but not errors
+const warningTests = [
+    '\uFDFA'.repeat(1),
+    '\uFDFA'.repeat(10),
+    '\uFDFA'.repeat(50),
+    '\uFDFA'.repeat(100),
+    '\uFDFA'.repeat(200),
+    '\uFDFA'.repeat(500),
+    '\uFDFA'.repeat(1000),
+];
+
+for (const str of warningTests) {
+    try {
+        let res = str.normalize('NFKC');
+        L(`FDFA x${str.length}: -> ${res.length} (ratio: ${(res.length/str.length).toFixed(2)})`);
+    } catch(e) {
+        L(`FDFA x${str.length}: threw ${e.name}`);
+    }
+}
+
+// Probe 6: Try to find the exact URL length limit
+L('\n--- URL Length Limit Probe ---');
+for (let len = 1000; len <= 1200; len += 5) {
+    try {
+        let domain = '';
+        for (let i = 0; i < len; i++) {
+            domain += String.fromCharCode(0x4E00 + (i % 100));
+        }
+        let url = new URL('http://' + domain + '.com');
+        L(`URL len=${len}: OK, hostname=${url.hostname.length}`);
+    } catch(e) {
+        L(`URL len=${len}: REJECTED`);
+        break;
+    }
+}
+
+L('\n[*] Probe finished.');
 </script>
 </body>
 </html>
