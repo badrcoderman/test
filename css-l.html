@@ -1,6 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>@import only control</title>
+<title>@import + @namespace checkpoint diagnostic</title>
 <style>
 body {
   background: #111;
@@ -10,41 +10,131 @@ body {
 }
 </style>
 <pre id="log"></pre>
+
 <script>
+const KEY = "import_namespace_checkpoint_v2";
 const logEl = document.getElementById("log");
-function L(s) { logEl.textContent += s + "\n"; }
+
+function saveCheckpoint(s) {
+  try {
+    localStorage.setItem(KEY, s);
+    localStorage.setItem(KEY + "_time", String(Date.now()));
+  } catch (_) {}
+}
+
+function L(s) {
+  logEl.textContent += s + "\n";
+  saveCheckpoint(s);
+  try { document.body.offsetTop; } catch (_) {}
+}
+
+function forceStyle(label) {
+  L("[*] before forceStyle: " + label);
+  try {
+    document.body.offsetTop;
+    getComputedStyle(document.body).color;
+    L("[+] after forceStyle: " + label);
+  } catch (e) {
+    L("[!] forceStyle exception: " + e.name + ": " + e.message);
+  }
+}
 
 async function delay(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
 async function run() {
-  L("[*] @import only control");
+  /*
+    غيّر mode يدويًا:
+
+    1 = one import + namespace, no force after namespace, no remove
+    2 = one import + namespace + forceStyle
+    3 = one import + namespace + forceStyle + remove
+    4 = three imports + namespace, no remove
+  */
+  const mode = 1;
+
+  const prev = localStorage.getItem(KEY) || "(none)";
+  const prevTime = localStorage.getItem(KEY + "_time") || "(none)";
+
+  L("[*] @import + @namespace checkpoint diagnostic");
+  L("[*] previous checkpoint: " + prev);
+  L("[*] previous checkpoint time: " + prevTime);
+  L("[*] mode=" + mode);
 
   const style = document.createElement("style");
-  document.head.appendChild(style);
-  const sheet = style.sheet;
 
-  for (let i = 0; i < 3; i++) {
-    L("[*] inserting @import at " + i);
+  L("[CP-01] before append style");
+  document.head.appendChild(style);
+  L("[CP-02] after append style");
+
+  const sheet = style.sheet;
+  if (!sheet) {
+    L("[FATAL] style.sheet is null");
+    return;
+  }
+
+  forceStyle("after empty style append");
+
+  const importCount = mode === 4 ? 3 : 1;
+
+  for (let i = 0; i < importCount; i++) {
+    L("[CP-10] before insert @import index=" + i);
     try {
       sheet.insertRule('@import url("data:text/css,body{}");', i);
-      L("[+] import inserted; cssRules.length=" + sheet.cssRules.length);
+      L("[CP-11] after insert @import index=" + i + "; cssRules.length=" + sheet.cssRules.length);
     } catch (e) {
-      L("[!] import threw: " + e.name + ": " + e.message);
+      L("[EXCEPTION] import insert: " + e.name + ": " + e.message);
       L("DONE import exception");
       return;
     }
   }
 
-  document.body.offsetTop;
-  getComputedStyle(document.body).color;
+  forceStyle("after imports");
 
-  L("[*] waiting 5000ms");
+  let namespaceIndex = -1;
+  try {
+    namespaceIndex = sheet.cssRules.length;
+    L("[CP-20] cssRules.length before namespace=" + namespaceIndex);
+  } catch (e) {
+    L("[EXCEPTION] reading cssRules before namespace: " + e.name + ": " + e.message);
+    return;
+  }
+
+  L("[CP-21] BEFORE namespace insertRule at global index=" + namespaceIndex);
+
+  try {
+    sheet.insertRule('@namespace diag "http://example.com/ns";', namespaceIndex);
+    L("[CP-22] AFTER namespace insertRule returned; cssRules.length=" + sheet.cssRules.length);
+  } catch (e) {
+    L("[EXCEPTION] namespace insert: " + e.name + ": " + e.message);
+    L("DONE namespace exception");
+    return;
+  }
+
+  if (mode >= 2) {
+    forceStyle("after namespace insert");
+  }
+
+  if (mode === 3) {
+    L("[CP-30] before style.remove");
+    try {
+      style.remove();
+      L("[CP-31] after style.remove returned");
+    } catch (e) {
+      L("[EXCEPTION] style.remove: " + e.name + ": " + e.message);
+    }
+
+    forceStyle("after remove");
+  }
+
+  L("[CP-40] waiting 5000ms after operation");
   await delay(5000);
 
-  L("DONE import-only safe");
+  L("DONE");
 }
 
-run().catch(e => L("[FATAL] " + e));
+run().catch(e => {
+  L("[FATAL] " + (e && e.stack || e));
+});
 </script>
