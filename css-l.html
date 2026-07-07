@@ -1,140 +1,62 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>@import + @namespace checkpoint diagnostic</title>
-<style>
-body {
-  background: #111;
-  color: #0f0;
-  font-family: monospace;
-  white-space: pre-wrap;
-}
-</style>
 <pre id="log"></pre>
-
 <script>
-const KEY = "import_namespace_checkpoint_v2";
-const logEl = document.getElementById("log");
+const out = document.getElementById("log");
 
-function saveCheckpoint(s) {
-  try {
-    localStorage.setItem(KEY, s);
-    localStorage.setItem(KEY + "_time", String(Date.now()));
-  } catch (_) {}
+function log(x) {
+  out.textContent += x + "\n";
 }
 
-function L(s) {
-  logEl.textContent += s + "\n";
-  saveCheckpoint(s);
-  try { document.body.offsetTop; } catch (_) {}
-}
-
-function forceStyle(label) {
-  L("[*] before forceStyle: " + label);
-  try {
-    document.body.offsetTop;
-    getComputedStyle(document.body).color;
-    L("[+] after forceStyle: " + label);
-  } catch (e) {
-    L("[!] forceStyle exception: " + e.name + ": " + e.message);
-  }
-}
-
-async function delay(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
-
-async function run() {
-  /*
-    غيّر mode يدويًا:
-
-    1 = one import + namespace, no force after namespace, no remove
-    2 = one import + namespace + forceStyle
-    3 = one import + namespace + forceStyle + remove
-    4 = three imports + namespace, no remove
-  */
-  const mode = 1;
-
-  const prev = localStorage.getItem(KEY) || "(none)";
-  const prevTime = localStorage.getItem(KEY + "_time") || "(none)";
-
-  L("[*] @import + @namespace checkpoint diagnostic");
-  L("[*] previous checkpoint: " + prev);
-  L("[*] previous checkpoint time: " + prevTime);
-  L("[*] mode=" + mode);
-
+function runCase(name, initialCSS, rule, index) {
+  log("==== " + name + " ====");
   const style = document.createElement("style");
-
-  L("[CP-01] before append style");
+  style.textContent = initialCSS;
   document.head.appendChild(style);
-  L("[CP-02] after append style");
 
   const sheet = style.sheet;
-  if (!sheet) {
-    L("[FATAL] style.sheet is null");
-    return;
-  }
-
-  forceStyle("after empty style append");
-
-  const importCount = mode === 4 ? 3 : 1;
-
-  for (let i = 0; i < importCount; i++) {
-    L("[CP-10] before insert @import index=" + i);
-    try {
-      sheet.insertRule('@import url("data:text/css,body{}");', i);
-      L("[CP-11] after insert @import index=" + i + "; cssRules.length=" + sheet.cssRules.length);
-    } catch (e) {
-      L("[EXCEPTION] import insert: " + e.name + ": " + e.message);
-      L("DONE import exception");
-      return;
-    }
-  }
-
-  forceStyle("after imports");
-
-  let namespaceIndex = -1;
-  try {
-    namespaceIndex = sheet.cssRules.length;
-    L("[CP-20] cssRules.length before namespace=" + namespaceIndex);
-  } catch (e) {
-    L("[EXCEPTION] reading cssRules before namespace: " + e.name + ": " + e.message);
-    return;
-  }
-
-  L("[CP-21] BEFORE namespace insertRule at global index=" + namespaceIndex);
+  log("before cssRules.length = " + sheet.cssRules.length);
 
   try {
-    sheet.insertRule('@namespace diag "http://example.com/ns";', namespaceIndex);
-    L("[CP-22] AFTER namespace insertRule returned; cssRules.length=" + sheet.cssRules.length);
+    log("calling insertRule at index " + index);
+    sheet.insertRule(rule, index);
+    log("OK: after cssRules.length = " + sheet.cssRules.length);
   } catch (e) {
-    L("[EXCEPTION] namespace insert: " + e.name + ": " + e.message);
-    L("DONE namespace exception");
-    return;
+    log("Exception: " + e.name + ": " + e.message);
   }
 
-  if (mode >= 2) {
-    forceStyle("after namespace insert");
-  }
-
-  if (mode === 3) {
-    L("[CP-30] before style.remove");
-    try {
-      style.remove();
-      L("[CP-31] after style.remove returned");
-    } catch (e) {
-      L("[EXCEPTION] style.remove: " + e.name + ": " + e.message);
-    }
-
-    forceStyle("after remove");
-  }
-
-  L("[CP-40] waiting 5000ms after operation");
-  await delay(5000);
-
-  L("DONE");
+  style.remove();
 }
 
-run().catch(e => {
-  L("[FATAL] " + (e && e.stack || e));
-});
+log("CSS insertRule namespace diagnostic start");
+
+runCase(
+  "baseline namespace at 0",
+  "",
+  "@namespace foo url(http://example.com);",
+  0
+);
+
+runCase(
+  "one import then namespace at 1",
+  '@import url("data:text/css,body{}");',
+  "@namespace foo url(http://example.com);",
+  1
+);
+
+runCase(
+  "five imports then namespace at 5",
+  Array.from({length: 5}, (_, i) => '@import url("data:text/css,body{}?' + i + '");').join("\n"),
+  "@namespace foo url(http://example.com);",
+  5
+);
+
+runCase(
+  "normal rule then namespace should fail safely",
+  "body { color: red; }",
+  "@namespace foo url(http://example.com);",
+  1
+);
+
+log("DONE");
 </script>
