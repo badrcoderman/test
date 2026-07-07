@@ -3,483 +3,1425 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>عارض LocalStorage</title>
+  <title>LocalStorage Sakura Inspector</title>
 
   <style>
     :root {
-      --ink: #2b2118;
-      --muted: #6e5a44;
-      --paper: #f7efe0;
-      --paper-2: #fff8ea;
-      --red: #9f2f2f;
-      --gold: #b68b3c;
-      --green: #345c45;
-      --shadow: rgba(43, 33, 24, 0.16);
-      --border: rgba(43, 33, 24, 0.22);
+      --ink: #251a15;
+      --ink-soft: #5e493d;
+      --paper: #fff4dd;
+      --paper-glass: rgba(255, 244, 221, 0.78);
+      --paper-strong: rgba(255, 248, 233, 0.94);
+      --red: #a93333;
+      --red-soft: rgba(169, 51, 51, 0.12);
+      --gold: #b99043;
+      --green: #2f6249;
+      --blue: #334b73;
+      --violet: #604b73;
+      --border: rgba(37, 26, 21, 0.18);
+      --shadow: rgba(37, 26, 21, 0.18);
+      --danger: #9b2631;
+      --ok: #2f6249;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --serif: "Noto Serif Arabic", "Amiri", Georgia, serif;
+    }
+
+    [data-theme="night"] {
+      --ink: #f6ead8;
+      --ink-soft: #d5c0a6;
+      --paper: #17131d;
+      --paper-glass: rgba(31, 25, 39, 0.78);
+      --paper-strong: rgba(36, 29, 46, 0.95);
+      --red: #e07171;
+      --red-soft: rgba(224, 113, 113, 0.14);
+      --gold: #dfbd69;
+      --green: #8fc2a2;
+      --blue: #a8bde6;
+      --violet: #d2b7f1;
+      --border: rgba(255, 244, 221, 0.16);
+      --shadow: rgba(0, 0, 0, 0.34);
+      --danger: #ff7d8b;
+      --ok: #9ad7b1;
     }
 
     * {
       box-sizing: border-box;
     }
 
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
       margin: 0;
       min-height: 100vh;
-      font-family:
-        "Noto Serif Arabic",
-        "Amiri",
-        "Georgia",
-        serif;
+      font-family: var(--serif);
       color: var(--ink);
       background:
-        radial-gradient(circle at top left, rgba(159, 47, 47, 0.14), transparent 28rem),
-        radial-gradient(circle at bottom right, rgba(52, 92, 69, 0.16), transparent 30rem),
-        linear-gradient(135deg, #efe0c4 0%, #f8efd9 48%, #e5d1a8 100%);
-      padding: 32px;
+        radial-gradient(circle at 12% 8%, rgba(169, 51, 51, 0.22), transparent 18rem),
+        radial-gradient(circle at 86% 18%, rgba(185, 144, 67, 0.22), transparent 21rem),
+        linear-gradient(135deg, #ead3a9 0%, var(--paper) 45%, #d9b983 100%);
+      overflow-x: hidden;
     }
 
-    .shell {
-      max-width: 1200px;
+    [data-theme="night"] body {
+      background:
+        radial-gradient(circle at 12% 8%, rgba(224, 113, 113, 0.15), transparent 18rem),
+        radial-gradient(circle at 86% 18%, rgba(223, 189, 105, 0.12), transparent 21rem),
+        linear-gradient(135deg, #0d0f19 0%, #181320 45%, #2a1a23 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background:
+        repeating-linear-gradient(
+          90deg,
+          transparent 0,
+          transparent 16px,
+          rgba(37, 26, 21, 0.025) 17px,
+          transparent 18px
+        ),
+        linear-gradient(
+          rgba(255, 255, 255, 0.06) 50%,
+          rgba(0, 0, 0, 0.025) 50%
+        );
+      background-size: auto, 100% 4px;
+      mix-blend-mode: multiply;
+      opacity: 0.75;
+    }
+
+    [data-theme="night"] body::before {
+      mix-blend-mode: screen;
+      opacity: 0.18;
+    }
+
+    .anime-bg {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    .sun {
+      position: absolute;
+      top: 72px;
+      left: 9vw;
+      width: 190px;
+      height: 190px;
+      border-radius: 999px;
+      background:
+        radial-gradient(circle, rgba(255, 241, 198, 0.98) 0 34%, rgba(185, 61, 61, 0.82) 35% 64%, rgba(185, 61, 61, 0.08) 65%);
+      box-shadow: 0 0 70px rgba(185, 61, 61, 0.28);
+      animation: pulseSun 6s ease-in-out infinite;
+    }
+
+    .mountain {
+      position: absolute;
+      bottom: 0;
+      left: -8vw;
+      width: 116vw;
+      height: 42vh;
+      background:
+        linear-gradient(135deg, transparent 0 42%, rgba(47, 98, 73, 0.22) 43% 58%, transparent 59%),
+        linear-gradient(45deg, transparent 0 45%, rgba(51, 75, 115, 0.22) 46% 61%, transparent 62%),
+        linear-gradient(180deg, transparent 0 20%, rgba(37, 26, 21, 0.08) 21%);
+      clip-path: polygon(0 100%, 0 52%, 13% 76%, 25% 36%, 38% 73%, 52% 24%, 68% 70%, 82% 43%, 100% 83%, 100% 100%);
+      opacity: 0.8;
+      animation: mountainDrift 16s ease-in-out infinite alternate;
+    }
+
+    .waves {
+      position: absolute;
+      bottom: -35px;
+      left: 0;
+      width: 200%;
+      height: 140px;
+      background:
+        radial-gradient(ellipse at 50% 0%, transparent 0 42%, rgba(51, 75, 115, 0.25) 43% 48%, transparent 49%) 0 0 / 120px 70px repeat-x,
+        radial-gradient(ellipse at 50% 0%, transparent 0 42%, rgba(169, 51, 51, 0.13) 43% 48%, transparent 49%) 60px 36px / 120px 70px repeat-x;
+      animation: waveSlide 18s linear infinite;
+      opacity: 0.75;
+    }
+
+    .cloud {
+      position: absolute;
+      width: 220px;
+      height: 72px;
+      border-radius: 999px;
+      background: rgba(255, 248, 233, 0.46);
+      filter: blur(1px);
+      animation: cloudMove 26s linear infinite;
+    }
+
+    .cloud::before,
+    .cloud::after {
+      content: "";
+      position: absolute;
+      border-radius: 999px;
+      background: inherit;
+    }
+
+    .cloud::before {
+      width: 92px;
+      height: 92px;
+      right: 28px;
+      top: -38px;
+    }
+
+    .cloud::after {
+      width: 120px;
+      height: 120px;
+      left: 32px;
+      top: -58px;
+    }
+
+    .cloud.one {
+      top: 132px;
+      right: -250px;
+      animation-duration: 36s;
+    }
+
+    .cloud.two {
+      top: 285px;
+      right: -360px;
+      transform: scale(0.72);
+      animation-duration: 48s;
+      animation-delay: -13s;
+    }
+
+    .petal {
+      position: fixed;
+      top: -24px;
+      width: 14px;
+      height: 9px;
+      border-radius: 90% 10% 90% 10%;
+      background: rgba(232, 125, 145, 0.74);
+      box-shadow: 0 0 10px rgba(232, 125, 145, 0.25);
+      z-index: 1;
+      pointer-events: none;
+      animation: petalFall linear forwards;
+    }
+
+    @keyframes pulseSun {
+      0%, 100% { transform: scale(1); opacity: 0.9; }
+      50% { transform: scale(1.035); opacity: 1; }
+    }
+
+    @keyframes mountainDrift {
+      from { transform: translateX(-1.5vw); }
+      to { transform: translateX(1.5vw); }
+    }
+
+    @keyframes waveSlide {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
+
+    @keyframes cloudMove {
+      from { transform: translateX(0); }
+      to { transform: translateX(-140vw); }
+    }
+
+    @keyframes petalFall {
+      from {
+        transform: translate3d(0, -30px, 0) rotate(0deg);
+        opacity: 0;
+      }
+      8% {
+        opacity: 1;
+      }
+      to {
+        transform: translate3d(var(--x-drift), 108vh, 0) rotate(var(--spin));
+        opacity: 0;
+      }
+    }
+
+    .page {
+      position: relative;
+      z-index: 2;
+      width: min(1320px, calc(100% - 34px));
       margin: 0 auto;
+      padding: 34px 0 56px;
     }
 
     .hero {
       position: relative;
       overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 34px;
       background:
-        linear-gradient(135deg, rgba(255, 248, 234, 0.94), rgba(247, 239, 224, 0.92)),
+        linear-gradient(135deg, var(--paper-strong), var(--paper-glass)),
         repeating-linear-gradient(
           90deg,
           transparent 0,
-          transparent 22px,
-          rgba(182, 139, 60, 0.08) 23px,
-          transparent 24px
+          transparent 24px,
+          rgba(185, 144, 67, 0.08) 25px,
+          transparent 26px
         );
-      border: 1px solid var(--border);
-      border-radius: 28px;
+      box-shadow: 0 28px 90px var(--shadow);
       padding: 34px;
-      box-shadow: 0 24px 70px var(--shadow);
+      backdrop-filter: blur(12px);
     }
 
     .hero::before {
-      content: "和";
+      content: "侍";
       position: absolute;
-      inset-inline-start: 28px;
-      top: -30px;
-      font-size: 160px;
-      line-height: 1;
-      color: rgba(159, 47, 47, 0.08);
-      pointer-events: none;
+      top: -44px;
+      inset-inline-start: 32px;
       font-family: Georgia, serif;
+      font-size: 190px;
+      color: var(--red-soft);
+      pointer-events: none;
+      line-height: 1;
+    }
+
+    .hero-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+      flex-wrap: wrap;
     }
 
     .kicker {
       display: inline-flex;
       align-items: center;
       gap: 10px;
-      color: var(--red);
-      border: 1px solid rgba(159, 47, 47, 0.22);
-      background: rgba(159, 47, 47, 0.06);
       padding: 8px 14px;
       border-radius: 999px;
-      font-weight: 700;
+      color: var(--red);
+      background: var(--red-soft);
+      border: 1px solid rgba(169, 51, 51, 0.24);
+      font-weight: 800;
       margin-bottom: 18px;
     }
 
     h1 {
       margin: 0;
-      font-size: clamp(2rem, 6vw, 4.5rem);
-      letter-spacing: -0.04em;
+      font-size: clamp(2.15rem, 6vw, 5rem);
       line-height: 1.05;
+      letter-spacing: -0.055em;
     }
 
     .subtitle {
+      max-width: 860px;
       margin: 18px 0 0;
-      max-width: 780px;
-      color: var(--muted);
-      font-size: 1.08rem;
+      color: var(--ink-soft);
       line-height: 1.9;
+      font-size: 1.05rem;
     }
 
-    .toolbar {
+    code {
+      direction: ltr;
+      display: inline-block;
+      font-family: var(--mono);
+      background: rgba(37, 26, 21, 0.07);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1px 6px;
+    }
+
+    .mode-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(47, 98, 73, 0.1);
+      border: 1px solid rgba(47, 98, 73, 0.22);
+      color: var(--green);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .dock {
+      margin: 22px 0;
       display: grid;
-      grid-template-columns: 1fr auto auto auto;
-      gap: 12px;
-      margin: 24px 0;
+      grid-template-columns: minmax(240px, 1fr) repeat(6, auto);
+      gap: 10px;
+      align-items: center;
     }
 
     input,
+    select,
+    textarea,
     button {
       font: inherit;
     }
 
-    input {
-      width: 100%;
+    input,
+    select,
+    textarea {
       border: 1px solid var(--border);
-      border-radius: 18px;
-      background: rgba(255, 248, 234, 0.82);
+      border-radius: 17px;
+      background: var(--paper-glass);
       color: var(--ink);
-      padding: 14px 16px;
       outline: none;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
     }
 
-    input:focus {
-      border-color: rgba(159, 47, 47, 0.55);
-      box-shadow: 0 0 0 4px rgba(159, 47, 47, 0.1);
+    input,
+    select {
+      min-height: 48px;
+      padding: 0 14px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 170px;
+      resize: vertical;
+      padding: 14px;
+      direction: ltr;
+      text-align: left;
+      font-family: var(--mono);
+      line-height: 1.65;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: rgba(169, 51, 51, 0.58);
+      box-shadow: 0 0 0 4px rgba(169, 51, 51, 0.1);
     }
 
     button {
-      border: 1px solid rgba(43, 33, 24, 0.2);
+      min-height: 48px;
+      padding: 0 15px;
+      border: 1px solid rgba(37, 26, 21, 0.18);
+      border-radius: 17px;
       background: var(--ink);
-      color: var(--paper-2);
-      border-radius: 18px;
-      padding: 13px 16px;
+      color: var(--paper);
       cursor: pointer;
-      transition: transform 160ms ease, opacity 160ms ease;
+      transition: transform 150ms ease, opacity 150ms ease, box-shadow 150ms ease;
       white-space: nowrap;
     }
 
     button:hover {
       transform: translateY(-1px);
-      opacity: 0.92;
+      opacity: 0.94;
+      box-shadow: 0 12px 24px rgba(37, 26, 21, 0.14);
     }
 
     button.secondary {
-      background: rgba(255, 248, 234, 0.8);
+      background: var(--paper-glass);
       color: var(--ink);
+    }
+
+    button.danger {
+      background: var(--danger);
+      color: #fff4f4;
+    }
+
+    button.ok {
+      background: var(--ok);
+      color: #fff;
     }
 
     .stats {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 14px;
-      margin-bottom: 24px;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
     }
 
     .stat {
-      background: rgba(255, 248, 234, 0.78);
+      position: relative;
+      overflow: hidden;
+      min-height: 112px;
       border: 1px solid var(--border);
-      border-radius: 22px;
+      border-radius: 24px;
+      background: var(--paper-glass);
+      box-shadow: 0 16px 42px rgba(37, 26, 21, 0.11);
       padding: 18px;
-      box-shadow: 0 12px 30px rgba(43, 33, 24, 0.09);
+      backdrop-filter: blur(10px);
+    }
+
+    .stat::after {
+      content: "";
+      position: absolute;
+      inset-inline-end: -30px;
+      bottom: -30px;
+      width: 90px;
+      height: 90px;
+      border-radius: 999px;
+      background: var(--red-soft);
     }
 
     .stat strong {
       display: block;
-      font-size: 1.9rem;
+      font-size: 1.78rem;
       color: var(--red);
-      margin-bottom: 4px;
+      margin-bottom: 5px;
+      direction: ltr;
+      text-align: right;
+      position: relative;
+      z-index: 1;
     }
 
     .stat span {
-      color: var(--muted);
+      color: var(--ink-soft);
+      position: relative;
+      z-index: 1;
     }
 
-    .grid {
-      display: grid;
-      gap: 16px;
-    }
-
-    .card {
-      background:
-        linear-gradient(180deg, rgba(255, 248, 234, 0.96), rgba(247, 239, 224, 0.92));
+    .panel {
       border: 1px solid var(--border);
-      border-inline-start: 6px solid var(--red);
-      border-radius: 24px;
-      padding: 20px;
-      box-shadow: 0 16px 40px rgba(43, 33, 24, 0.1);
+      border-radius: 28px;
+      background: var(--paper-glass);
+      box-shadow: 0 18px 54px rgba(37, 26, 21, 0.12);
+      backdrop-filter: blur(12px);
+      overflow: hidden;
+      margin-bottom: 18px;
     }
 
-    .card-head {
+    .panel-head {
+      padding: 18px 20px;
       display: flex;
-      align-items: flex-start;
       justify-content: space-between;
       gap: 12px;
-      margin-bottom: 14px;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .panel-head h2 {
+      margin: 0;
+      font-size: 1.15rem;
+    }
+
+    .panel-body {
+      padding: 18px;
+    }
+
+    .add-grid {
+      display: grid;
+      grid-template-columns: minmax(180px, 0.7fr) minmax(220px, 1fr) auto;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .cards {
+      display: grid;
+      gap: 14px;
+    }
+
+    details.storage-card {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-inline-start: 7px solid var(--red);
+      border-radius: 26px;
+      background:
+        linear-gradient(180deg, var(--paper-strong), var(--paper-glass));
+      box-shadow: 0 17px 44px rgba(37, 26, 21, 0.12);
+      backdrop-filter: blur(10px);
+      transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    }
+
+    details.storage-card[open] {
+      transform: translateY(-2px);
+      border-color: rgba(169, 51, 51, 0.36);
+      box-shadow: 0 24px 66px rgba(37, 26, 21, 0.17);
+    }
+
+    summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 18px 20px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: center;
+    }
+
+    summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .summary-main {
+      min-width: 0;
+    }
+
+    .key-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .chev {
+      display: inline-grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      background: var(--red-soft);
+      color: var(--red);
+      transition: transform 170ms ease;
+    }
+
+    details[open] .chev {
+      transform: rotate(-90deg);
     }
 
     .key {
+      font-size: 1.05rem;
+      font-weight: 900;
       overflow-wrap: anywhere;
-      font-weight: 800;
-      font-size: 1.08rem;
+    }
+
+    .mini {
+      margin-top: 7px;
+      color: var(--ink-soft);
+      direction: ltr;
+      text-align: right;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      overflow-wrap: anywhere;
+    }
+
+    .badges {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
 
     .badge {
-      color: var(--green);
-      background: rgba(52, 92, 69, 0.09);
-      border: 1px solid rgba(52, 92, 69, 0.22);
-      padding: 5px 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 28px;
+      padding: 4px 10px;
       border-radius: 999px;
-      font-size: 0.84rem;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.24);
+      color: var(--ink-soft);
+      font-size: 0.79rem;
+      font-weight: 800;
       white-space: nowrap;
     }
 
-    pre {
+    .badge.type-json,
+    .badge.type-object,
+    .badge.type-array {
+      color: var(--blue);
+      background: rgba(51, 75, 115, 0.09);
+      border-color: rgba(51, 75, 115, 0.22);
+    }
+
+    .badge.type-number,
+    .badge.type-boolean {
+      color: var(--violet);
+      background: rgba(96, 75, 115, 0.09);
+      border-color: rgba(96, 75, 115, 0.22);
+    }
+
+    .badge.warning {
+      color: var(--danger);
+      background: rgba(155, 38, 49, 0.09);
+      border-color: rgba(155, 38, 49, 0.24);
+    }
+
+    .card-body {
+      border-top: 1px solid var(--border);
+      padding: 18px 20px 20px;
+      animation: unfold 220ms ease both;
+    }
+
+    @keyframes unfold {
+      from {
+        opacity: 0;
+        transform: translateY(-5px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+      margin-bottom: 14px;
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .tab {
+      min-height: 38px;
+      padding: 0 12px;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--ink);
+    }
+
+    .tab.active {
+      background: var(--red);
+      color: #fff7ed;
+    }
+
+    .view {
+      display: none;
+    }
+
+    .view.active {
+      display: block;
+    }
+
+    pre.raw,
+    .tree-box {
       margin: 0;
       direction: ltr;
       text-align: left;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
-      background: rgba(43, 33, 24, 0.06);
-      border: 1px solid rgba(43, 33, 24, 0.12);
-      border-radius: 18px;
+      background: rgba(37, 26, 21, 0.06);
+      border: 1px solid var(--border);
+      border-radius: 19px;
       padding: 16px;
-      color: #241a13;
+      color: var(--ink);
       line-height: 1.65;
-      font-family:
-        "SFMono-Regular",
-        Consolas,
-        "Liberation Mono",
-        monospace;
-      font-size: 0.92rem;
+      font-family: var(--mono);
+      font-size: 0.91rem;
+      max-height: 420px;
+      overflow: auto;
+    }
+
+    .tree-node {
+      font-family: var(--mono);
+      direction: ltr;
+      text-align: left;
+      line-height: 1.7;
+    }
+
+    .tree-node details {
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .tree-node summary {
+      display: block;
+      padding: 0;
+      cursor: pointer;
+      color: var(--blue);
+    }
+
+    .tree-row {
+      padding-inline-start: 18px;
+    }
+
+    .tree-key {
+      color: var(--red);
+      font-weight: 800;
+    }
+
+    .tree-value {
+      color: var(--green);
+    }
+
+    .edit-box {
+      display: grid;
+      gap: 10px;
     }
 
     .empty {
+      border: 1px dashed var(--border);
+      border-radius: 26px;
+      background: var(--paper-glass);
       text-align: center;
-      padding: 42px 20px;
-      border: 1px dashed rgba(43, 33, 24, 0.3);
-      border-radius: 24px;
-      color: var(--muted);
-      background: rgba(255, 248, 234, 0.5);
-    }
-
-    .footer-note {
-      margin-top: 20px;
-      color: var(--muted);
+      padding: 46px 20px;
+      color: var(--ink-soft);
       line-height: 1.8;
-      font-size: 0.95rem;
     }
 
-    @media (max-width: 780px) {
-      body {
-        padding: 18px;
+    .log {
+      display: grid;
+      gap: 8px;
+      max-height: 220px;
+      overflow: auto;
+    }
+
+    .log-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.18);
+      padding: 10px 12px;
+      color: var(--ink-soft);
+      font-size: 0.92rem;
+    }
+
+    .log-item strong {
+      color: var(--ink);
+      overflow-wrap: anywhere;
+    }
+
+    .toast {
+      position: fixed;
+      z-index: 20;
+      left: 22px;
+      bottom: 22px;
+      max-width: min(420px, calc(100vw - 44px));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--paper-strong);
+      color: var(--ink);
+      box-shadow: 0 24px 70px rgba(37, 26, 21, 0.22);
+      padding: 13px 15px;
+      transform: translateY(20px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms ease, transform 160ms ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .hidden-file {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+      width: 1px;
+      height: 1px;
+    }
+
+    mark {
+      color: inherit;
+      background: rgba(185, 144, 67, 0.35);
+      border-radius: 5px;
+      padding: 0 2px;
+    }
+
+    @media (max-width: 1050px) {
+      .dock {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .add-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .page {
+        width: min(100% - 22px, 1320px);
+        padding-top: 18px;
       }
 
       .hero {
         padding: 24px;
+        border-radius: 26px;
       }
 
-      .toolbar {
-        grid-template-columns: 1fr;
-      }
-
+      .dock,
       .stats {
         grid-template-columns: 1fr;
       }
 
-      button {
+      summary {
+        grid-template-columns: 1fr;
+      }
+
+      .badges {
+        justify-content: flex-start;
+      }
+
+      button,
+      select {
         width: 100%;
+      }
+
+      .card-actions,
+      .tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .sun {
+        width: 135px;
+        height: 135px;
       }
     }
   </style>
 </head>
 
 <body>
-  <main class="shell">
+  <div class="anime-bg" aria-hidden="true">
+    <div class="sun"></div>
+    <div class="cloud one"></div>
+    <div class="cloud two"></div>
+    <div class="mountain"></div>
+    <div class="waves"></div>
+  </div>
+
+  <main class="page">
     <section class="hero">
-      <div class="kicker">🏯 LocalStorage Viewer</div>
-      <h1>عارض التخزين المحلي</h1>
-      <p class="subtitle">
-        يعرض كل مفاتيح وقيم <code>localStorage</code> المتاحة لهذا الـ origin.
-        أي صفحة تحت <code>badrcoderman.github.io/test</code> تشارك نفس التخزين مع باقي مسارات الدومين.
-      </p>
+      <div class="hero-top">
+        <div>
+          <div class="kicker">🏯 Sakura LocalStorage Inspector</div>
+          <h1>مخزن المتصفح، لكن بكرامة</h1>
+          <p class="subtitle">
+            يعرض كل عناصر <code>localStorage</code> لهذا الـ origin، مع بطاقات منسدلة،
+            قراءة JSON كشجرة، تعديل مباشر، حذف، تصدير، استيراد، ومراقبة live للتغييرات.
+            يعمل فقط من نفس الموقع: <code>badrcoderman.github.io</code>.
+          </p>
+        </div>
+
+        <div class="mode-pill" id="liveStatus">🟢 Live watch: off</div>
+      </div>
     </section>
 
-    <section class="toolbar" aria-label="أدوات التحكم">
-      <input id="searchInput" type="search" placeholder="ابحث بالمفتاح أو القيمة..." autocomplete="off" />
+    <section class="dock" aria-label="أدوات التحكم">
+      <input id="searchInput" type="search" placeholder="ابحث بالمفتاح أو القيمة أو النوع..." autocomplete="off" />
+
+      <select id="typeFilter" title="فلترة النوع">
+        <option value="all">كل الأنواع</option>
+        <option value="object">Object</option>
+        <option value="array">Array</option>
+        <option value="string">String</option>
+        <option value="number">Number</option>
+        <option value="boolean">Boolean</option>
+        <option value="empty">Empty</option>
+      </select>
+
+      <select id="sortMode" title="ترتيب">
+        <option value="key-asc">A → Z</option>
+        <option value="key-desc">Z → A</option>
+        <option value="size-desc">الأكبر أولاً</option>
+        <option value="size-asc">الأصغر أولاً</option>
+        <option value="type">حسب النوع</option>
+      </select>
+
       <button id="refreshBtn" type="button">تحديث</button>
-      <button id="copyBtn" class="secondary" type="button">نسخ JSON</button>
-      <button id="downloadBtn" class="secondary" type="button">تحميل JSON</button>
+      <button id="expandBtn" class="secondary" type="button">فتح الكل</button>
+      <button id="collapseBtn" class="secondary" type="button">إغلاق الكل</button>
+      <button id="themeBtn" class="secondary" type="button">ليل/نهار</button>
     </section>
 
-    <section class="stats">
+    <section class="stats" aria-label="إحصائيات">
       <div class="stat">
         <strong id="countStat">0</strong>
-        <span>عدد العناصر</span>
+        <span>العناصر الظاهرة</span>
       </div>
+
+      <div class="stat">
+        <strong id="totalStat">0</strong>
+        <span>إجمالي العناصر</span>
+      </div>
+
       <div class="stat">
         <strong id="sizeStat">0 B</strong>
         <span>الحجم التقريبي</span>
       </div>
+
+      <div class="stat">
+        <strong id="jsonStat">0</strong>
+        <span>قيم JSON قابلة للقراءة</span>
+      </div>
+
       <div class="stat">
         <strong id="originStat">—</strong>
-        <span>الـ origin الحالي</span>
+        <span>الـ origin</span>
       </div>
     </section>
 
-    <section id="storageGrid" class="grid" aria-live="polite"></section>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>⚙️ أدوات قوية</h2>
+        <div>
+          <button id="copyAllBtn" class="secondary" type="button">نسخ الكل JSON</button>
+          <button id="exportBtn" class="secondary" type="button">تصدير JSON</button>
+          <button id="importBtn" class="secondary" type="button">استيراد JSON</button>
+          <button id="snapshotBtn" class="secondary" type="button">لقطة مقارنة</button>
+          <button id="watchBtn" class="ok" type="button">تشغيل live</button>
+        </div>
+      </div>
 
-    <p class="footer-note">
-      ملاحظة: لا يمكن لهذا الملف قراءة <code>localStorage</code> الخاص بموقع آخر.
-      لو فتحته كملف محلي أو من دومين مختلف، سترى تخزين ذلك المكان فقط. تصميم أمني، وليس عناداً من المتصفح.
-    </p>
+      <div class="panel-body">
+        <div class="add-grid">
+          <input id="newKey" type="text" placeholder="اسم مفتاح جديد" />
+          <textarea id="newValue" placeholder='القيمة. مثال: {"rank":"samurai","level":7}'></textarea>
+          <button id="addBtn" class="ok" type="button">إضافة/تحديث</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>🧾 سجل التغييرات</h2>
+        <button id="clearLogBtn" class="secondary" type="button">مسح السجل</button>
+      </div>
+      <div class="panel-body">
+        <div id="changeLog" class="log">
+          <div class="empty">لا توجد تغييرات بعد. الهدوء جميل، لكنه غالباً مؤقت.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="cards" class="cards" aria-live="polite"></section>
+
+    <input id="importFile" class="hidden-file" type="file" accept="application/json,.json" />
   </main>
 
-  <script>
-    const searchInput = document.getElementById("searchInput");
-    const refreshBtn = document.getElementById("refreshBtn");
-    const copyBtn = document.getElementById("copyBtn");
-    const downloadBtn = document.getElementById("downloadBtn");
+  <div id="toast" class="toast" role="status"></div>
 
-    const storageGrid = document.getElementById("storageGrid");
-    const countStat = document.getElementById("countStat");
-    const sizeStat = document.getElementById("sizeStat");
-    const originStat = document.getElementById("originStat");
+  <script>
+    const $ = (selector, parent = document) => parent.querySelector(selector);
+    const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
+
+    const els = {
+      searchInput: $("#searchInput"),
+      typeFilter: $("#typeFilter"),
+      sortMode: $("#sortMode"),
+      refreshBtn: $("#refreshBtn"),
+      expandBtn: $("#expandBtn"),
+      collapseBtn: $("#collapseBtn"),
+      themeBtn: $("#themeBtn"),
+      countStat: $("#countStat"),
+      totalStat: $("#totalStat"),
+      sizeStat: $("#sizeStat"),
+      jsonStat: $("#jsonStat"),
+      originStat: $("#originStat"),
+      cards: $("#cards"),
+      copyAllBtn: $("#copyAllBtn"),
+      exportBtn: $("#exportBtn"),
+      importBtn: $("#importBtn"),
+      importFile: $("#importFile"),
+      snapshotBtn: $("#snapshotBtn"),
+      watchBtn: $("#watchBtn"),
+      liveStatus: $("#liveStatus"),
+      newKey: $("#newKey"),
+      newValue: $("#newValue"),
+      addBtn: $("#addBtn"),
+      changeLog: $("#changeLog"),
+      clearLogBtn: $("#clearLogBtn"),
+      toast: $("#toast")
+    };
 
     let storageSnapshot = [];
+    let baselineSnapshot = {};
+    let watchTimer = null;
+    let changeEvents = [];
 
-    function getStorageItems() {
-      const items = [];
+    function toast(message) {
+      els.toast.textContent = message;
+      els.toast.classList.add("show");
 
-      for (let i = 0; i < localStorage.length; i += 1) {
-        const key = localStorage.key(i);
-        const rawValue = localStorage.getItem(key);
-
-        items.push({
-          key,
-          value: rawValue,
-          type: detectType(rawValue),
-          parsedValue: formatValue(rawValue)
-        });
-      }
-
-      return items.sort((a, b) => a.key.localeCompare(b.key));
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => {
+        els.toast.classList.remove("show");
+      }, 1800);
     }
 
-    function detectType(value) {
-      if (value === null) return "null";
-
-      const trimmed = value.trim();
-
-      if (trimmed === "") return "empty string";
-      if (trimmed === "true" || trimmed === "false") return "boolean";
-      if (!Number.isNaN(Number(trimmed)) && trimmed !== "") return "number";
-
-      try {
-        const parsed = JSON.parse(trimmed);
-
-        if (Array.isArray(parsed)) return "array";
-        if (parsed === null) return "null";
-        return typeof parsed;
-      } catch {
-        return "string";
-      }
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
     }
 
-    function formatValue(value) {
-      if (value === null) return "";
+    function highlight(text, query) {
+      const safe = escapeHtml(text);
 
-      try {
-        return JSON.stringify(JSON.parse(value), null, 2);
-      } catch {
-        return value;
-      }
+      if (!query) return safe;
+
+      const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return safe.replace(new RegExp(escapedQuery, "gi"), (match) => `<mark>${match}</mark>`);
+    }
+
+    function approxBytes(text) {
+      return new Blob([String(text ?? "")]).size;
     }
 
     function bytesToHuman(bytes) {
       const units = ["B", "KB", "MB", "GB"];
       let size = bytes;
-      let unitIndex = 0;
+      let index = 0;
 
-      while (size >= 1024 && unitIndex < units.length - 1) {
+      while (size >= 1024 && index < units.length - 1) {
         size /= 1024;
-        unitIndex += 1;
+        index += 1;
       }
 
-      return `${size.toFixed(unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
+      return `${size.toFixed(index === 0 ? 0 : 2)} ${units[index]}`;
     }
 
-    function calculateApproxSize(items) {
-      const json = JSON.stringify(
-        Object.fromEntries(items.map((item) => [item.key, item.value]))
-      );
+    function tryParseJson(value) {
+      if (typeof value !== "string") {
+        return { ok: false, parsed: null };
+      }
 
-      return new Blob([json]).size;
+      const trimmed = value.trim();
+
+      if (!trimmed) {
+        return { ok: false, parsed: null };
+      }
+
+      if (!["{", "[", '"', "t", "f", "n", "-", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"].includes(trimmed[0])) {
+        return { ok: false, parsed: null };
+      }
+
+      try {
+        return { ok: true, parsed: JSON.parse(trimmed) };
+      } catch {
+        return { ok: false, parsed: null };
+      }
     }
 
-    function render() {
-      const query = searchInput.value.trim().toLowerCase();
+    function detectType(value) {
+      const trimmed = String(value ?? "").trim();
+
+      if (trimmed === "") return "empty";
+      if (trimmed === "true" || trimmed === "false") return "boolean";
+      if (!Number.isNaN(Number(trimmed)) && trimmed !== "") return "number";
+
+      const json = tryParseJson(trimmed);
+
+      if (json.ok) {
+        if (Array.isArray(json.parsed)) return "array";
+        if (json.parsed === null) return "null";
+        return typeof json.parsed;
+      }
+
+      return "string";
+    }
+
+    function detectWarnings(key, value) {
+      const joined = `${key} ${value}`.toLowerCase();
+      const warnings = [];
+
+      if (/(token|jwt|secret|password|passwd|auth|bearer|session)/i.test(joined)) {
+        warnings.push("حساس");
+      }
+
+      if (String(value).length > 5000) {
+        warnings.push("كبير");
+      }
+
+      if (/^eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\./.test(String(value))) {
+        warnings.push("JWT محتمل");
+      }
+
+      return warnings;
+    }
+
+    function makeItem(key, value) {
+      const type = detectType(value);
+      const json = tryParseJson(value);
+      const pretty = json.ok ? JSON.stringify(json.parsed, null, 2) : String(value ?? "");
+      const size = approxBytes(key) + approxBytes(value);
+
+      return {
+        key,
+        value,
+        type,
+        jsonOk: json.ok,
+        parsed: json.parsed,
+        pretty,
+        size,
+        warnings: detectWarnings(key, value)
+      };
+    }
+
+    function readStorage() {
+      const items = [];
+
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        items.push(makeItem(key, localStorage.getItem(key)));
+      }
+
+      return items;
+    }
+
+    function snapshotObject(items = storageSnapshot) {
+      return Object.fromEntries(items.map((item) => [item.key, item.value]));
+    }
+
+    function applySort(items) {
+      const mode = els.sortMode.value;
+      const sorted = [...items];
+
+      const byKey = (a, b) => a.key.localeCompare(b.key);
+      const bySize = (a, b) => a.size - b.size;
+
+      if (mode === "key-asc") sorted.sort(byKey);
+      if (mode === "key-desc") sorted.sort((a, b) => byKey(b, a));
+      if (mode === "size-asc") sorted.sort(bySize);
+      if (mode === "size-desc") sorted.sort((a, b) => bySize(b, a));
+      if (mode === "type") sorted.sort((a, b) => a.type.localeCompare(b.type) || byKey(a, b));
+
+      return sorted;
+    }
+
+    function getVisibleItems() {
+      const query = els.searchInput.value.trim().toLowerCase();
+      const type = els.typeFilter.value;
 
       const filtered = storageSnapshot.filter((item) => {
-        return (
+        const typePass = type === "all" || item.type === type;
+        const queryPass =
+          !query ||
           item.key.toLowerCase().includes(query) ||
-          String(item.value).toLowerCase().includes(query)
-        );
+          String(item.value).toLowerCase().includes(query) ||
+          item.type.toLowerCase().includes(query);
+
+        return typePass && queryPass;
       });
 
-      storageGrid.replaceChildren();
+      return applySort(filtered);
+    }
 
-      countStat.textContent = String(filtered.length);
-      sizeStat.textContent = bytesToHuman(calculateApproxSize(filtered));
-      originStat.textContent = window.location.origin;
+    function renderStats(visibleItems) {
+      const totalBytes = visibleItems.reduce((sum, item) => sum + item.size, 0);
+      const jsonCount = storageSnapshot.filter((item) => item.jsonOk).length;
 
-      if (filtered.length === 0) {
+      els.countStat.textContent = visibleItems.length;
+      els.totalStat.textContent = storageSnapshot.length;
+      els.sizeStat.textContent = bytesToHuman(totalBytes);
+      els.jsonStat.textContent = jsonCount;
+      els.originStat.textContent = window.location.origin.replace(/^https?:\/\//, "");
+    }
+
+    function makeTree(value) {
+      const root = document.createElement("div");
+      root.className = "tree-node";
+
+      function walk(node, keyName = "root", depth = 0) {
+        const row = document.createElement("div");
+        row.className = "tree-row";
+
+        const isArray = Array.isArray(node);
+        const isObject = node && typeof node === "object" && !isArray;
+
+        if (isArray || isObject) {
+          const details = document.createElement("details");
+          details.open = depth < 2;
+
+          const summary = document.createElement("summary");
+          const size = isArray ? node.length : Object.keys(node).length;
+          summary.innerHTML = `<span class="tree-key">${escapeHtml(keyName)}</span>: ${isArray ? "Array" : "Object"}(${size})`;
+
+          details.appendChild(summary);
+
+          const entries = isArray ? node.map((v, i) => [i, v]) : Object.entries(node);
+
+          for (const [childKey, childValue] of entries) {
+            details.appendChild(walk(childValue, childKey, depth + 1));
+          }
+
+          row.appendChild(details);
+          return row;
+        }
+
+        const formatted = typeof node === "string" ? `"${node}"` : String(node);
+        row.innerHTML = `<span class="tree-key">${escapeHtml(keyName)}</span>: <span class="tree-value">${escapeHtml(formatted)}</span>`;
+        return row;
+      }
+
+      root.appendChild(walk(value));
+      return root;
+    }
+
+    function renderCards() {
+      const visibleItems = getVisibleItems();
+      const query = els.searchInput.value.trim();
+
+      renderStats(visibleItems);
+      els.cards.replaceChildren();
+
+      if (visibleItems.length === 0) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = query
-          ? "لا توجد نتائج مطابقة. التخزين لا يخترع مفاتيح لإرضائنا."
+        empty.innerHTML = query
+          ? "لا توجد نتائج مطابقة. التخزين لا يساعدنا هنا."
           : "لا توجد بيانات في localStorage لهذا الـ origin.";
-        storageGrid.appendChild(empty);
+        els.cards.appendChild(empty);
         return;
       }
 
-      for (const item of filtered) {
-        const card = document.createElement("article");
-        card.className = "card";
+      for (const item of visibleItems) {
+        const card = document.createElement("details");
+        card.className = "storage-card";
+        card.dataset.key = item.key;
 
-        const head = document.createElement("div");
-        head.className = "card-head";
+        const warningBadges = item.warnings.map((warning) => `<span class="badge warning">⚠️ ${escapeHtml(warning)}</span>`).join("");
 
-        const key = document.createElement("div");
-        key.className = "key";
-        key.textContent = item.key;
+        card.innerHTML = `
+          <summary>
+            <div class="summary-main">
+              <div class="key-row">
+                <span class="chev">⌃</span>
+                <span class="key">${highlight(item.key, query)}</span>
+              </div>
+              <div class="mini">${escapeHtml(item.value).slice(0, 160)}${String(item.value).length > 160 ? "…" : ""}</div>
+            </div>
 
-        const badge = document.createElement("span");
-        badge.className = "badge";
-        badge.textContent = item.type;
+            <div class="badges">
+              <span class="badge type-${escapeHtml(item.type)}">${escapeHtml(item.type)}</span>
+              <span class="badge">${bytesToHuman(item.size)}</span>
+              ${item.jsonOk ? '<span class="badge type-json">JSON</span>' : ""}
+              ${warningBadges}
+            </div>
+          </summary>
 
-        const value = document.createElement("pre");
-        value.textContent = item.parsedValue;
+          <div class="card-body">
+            <div class="card-actions">
+              <button class="secondary copy-key" type="button">نسخ المفتاح</button>
+              <button class="secondary copy-value" type="button">نسخ القيمة</button>
+              <button class="secondary copy-entry" type="button">نسخ كـ JSON</button>
+              <button class="danger delete-entry" type="button">حذف</button>
+            </div>
 
-        head.append(key, badge);
-        card.append(head, value);
-        storageGrid.appendChild(card);
+            <div class="tabs">
+              <button class="tab active" type="button" data-view="pretty">عرض</button>
+              <button class="tab" type="button" data-view="tree">شجرة</button>
+              <button class="tab" type="button" data-view="edit">تعديل</button>
+              <button class="tab" type="button" data-view="meta">معلومات</button>
+            </div>
+
+            <div class="view active view-pretty">
+              <pre class="raw">${highlight(item.pretty, query)}</pre>
+            </div>
+
+            <div class="view view-tree">
+              <div class="tree-box"></div>
+            </div>
+
+            <div class="view view-edit">
+              <div class="edit-box">
+                <textarea class="editor">${escapeHtml(item.value ?? "")}</textarea>
+                <button class="ok save-entry" type="button">حفظ القيمة</button>
+              </div>
+            </div>
+
+            <div class="view view-meta">
+              <pre class="raw">${escapeHtml(JSON.stringify({
+                key: item.key,
+                type: item.type,
+                jsonReadable: item.jsonOk,
+                approxSize: bytesToHuman(item.size),
+                warnings: item.warnings,
+                origin: window.location.origin,
+                note: "localStorage is scoped by origin, not by path."
+              }, null, 2))}</pre>
+            </div>
+          </div>
+        `;
+
+        const treeBox = $(".tree-box", card);
+
+        if (item.jsonOk) {
+          treeBox.appendChild(makeTree(item.parsed));
+        } else {
+          treeBox.innerHTML = `<div class="empty">هذه القيمة ليست JSON قابلاً للشجرة. مجرد string. يحدث كثيراً.</div>`;
+        }
+
+        wireCard(card, item);
+        els.cards.appendChild(card);
       }
     }
 
-    function refreshStorage() {
-      storageSnapshot = getStorageItems();
-      render();
-    }
-
-    async function copyAsJson() {
-      const data = Object.fromEntries(
-        storageSnapshot.map((item) => [item.key, item.value])
-      );
-
-      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-
-      copyBtn.textContent = "تم النسخ";
-      setTimeout(() => {
-        copyBtn.textContent = "نسخ JSON";
-      }, 1200);
-    }
-
-    function downloadAsJson() {
-      const data = Object.fromEntries(
-        storageSnapshot.map((item) => [item.key, item.value])
-      );
-
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
-        type: "application/json;charset=utf-8"
+    function wireCard(card, item) {
+      $(".copy-key", card).addEventListener("click", async (event) => {
+        event.preventDefault();
+        await safeCopy(item.key);
+        toast("تم نسخ المفتاح");
       });
 
+      $(".copy-value", card).addEventListener("click", async (event) => {
+        event.preventDefault();
+        await safeCopy(item.value ?? "");
+        toast("تم نسخ القيمة");
+      });
+
+      $(".copy-entry", card).addEventListener("click", async (event) => {
+        event.preventDefault();
+        await safeCopy(JSON.stringify({ [item.key]: item.value }, null, 2));
+        toast("تم نسخ العنصر كـ JSON");
+      });
+
+      $(".delete-entry", card).addEventListener("click", (event) => {
+        event.preventDefault();
+
+        const confirmed = confirm(`حذف المفتاح؟\n\n${item.key}`);
+
+        if (!confirmed) return;
+
+        localStorage.removeItem(item.key);
+        logChange("delete", item.key);
+        refreshStorage();
+        toast("تم الحذف");
+      });
+
+      $(".save-entry", card).addEventListener("click", (event) => {
+        event.preventDefault();
+
+        const editor = $(".editor", card);
+        localStorage.setItem(item.key, editor.value);
+
+        logChange("update", item.key);
+        refreshStorage();
+        toast("تم الحفظ");
+      });
+
+      $$(".tab", card).forEach((tab) => {
+        tab.addEventListener("click", (event) => {
+          event.preventDefault();
+
+          $$(".tab", card).forEach((button) => button.classList.remove("active"));
+          $$(".view", card).forEach((view) => view.classList.remove("active"));
+
+          tab.classList.add("active");
+          $(`.view-${tab.dataset.view}`, card).classList.add("active");
+        });
+      });
+    }
+
+    async function safeCopy(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const area = document.createElement("textarea");
+        area.value = text;
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        area.remove();
+      }
+    }
+
+    function download(filename, text) {
+      const blob = new Blob([text], { type: "application/json;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
 
       anchor.href = url;
-      anchor.download = "localstorage-badrcoderman-github-io.json";
+      anchor.download = filename;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
@@ -487,14 +1429,272 @@
       URL.revokeObjectURL(url);
     }
 
-    searchInput.addEventListener("input", render);
-    refreshBtn.addEventListener("click", refreshStorage);
-    copyBtn.addEventListener("click", copyAsJson);
-    downloadBtn.addEventListener("click", downloadAsJson);
+    function refreshStorage() {
+      storageSnapshot = readStorage();
+      renderCards();
+    }
 
-    window.addEventListener("storage", refreshStorage);
+    function exportAll() {
+      const data = snapshotObject();
+      const stamp = new Date().toISOString().replaceAll(":", "-");
+      download(`localstorage-${location.hostname}-${stamp}.json`, JSON.stringify(data, null, 2));
+      toast("تم تصدير JSON");
+    }
+
+    function addOrUpdateKey() {
+      const key = els.newKey.value.trim();
+
+      if (!key) {
+        toast("اكتب اسم المفتاح أولاً");
+        return;
+      }
+
+      localStorage.setItem(key, els.newValue.value);
+      logChange("set", key);
+
+      els.newKey.value = "";
+      els.newValue.value = "";
+      refreshStorage();
+      toast("تمت الإضافة أو التحديث");
+    }
+
+    function importJsonFile(file) {
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(String(reader.result));
+
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            toast("ملف JSON يجب أن يكون object");
+            return;
+          }
+
+          const entries = Object.entries(parsed);
+
+          for (const [key, value] of entries) {
+            localStorage.setItem(key, typeof value === "string" ? value : JSON.stringify(value));
+            logChange("import", key);
+          }
+
+          refreshStorage();
+          toast(`تم استيراد ${entries.length} عنصر`);
+        } catch {
+          toast("ملف JSON غير صالح");
+        }
+      };
+
+      reader.readAsText(file);
+    }
+
+    function diffSnapshots(previous, current) {
+      const changes = [];
+      const keys = new Set([...Object.keys(previous), ...Object.keys(current)]);
+
+      for (const key of keys) {
+        if (!(key in previous)) {
+          changes.push({ type: "added", key });
+        } else if (!(key in current)) {
+          changes.push({ type: "removed", key });
+        } else if (previous[key] !== current[key]) {
+          changes.push({ type: "changed", key });
+        }
+      }
+
+      return changes;
+    }
+
+    function logChange(type, key) {
+      changeEvents.unshift({
+        type,
+        key,
+        time: new Date().toLocaleTimeString("ar-SA", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        })
+      });
+
+      changeEvents = changeEvents.slice(0, 40);
+      renderLog();
+    }
+
+    function renderLog() {
+      els.changeLog.replaceChildren();
+
+      if (changeEvents.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "لا توجد تغييرات بعد. الهدوء جميل، لكنه غالباً مؤقت.";
+        els.changeLog.appendChild(empty);
+        return;
+      }
+
+      for (const event of changeEvents) {
+        const row = document.createElement("div");
+        row.className = "log-item";
+        row.innerHTML = `
+          <span><strong>${escapeHtml(event.type)}</strong> — ${escapeHtml(event.key)}</span>
+          <span>${escapeHtml(event.time)}</span>
+        `;
+        els.changeLog.appendChild(row);
+      }
+    }
+
+    function compareWithBaseline() {
+      const current = snapshotObject(readStorage());
+      const changes = diffSnapshots(baselineSnapshot, current);
+
+      if (changes.length === 0) {
+        toast("لا توجد تغييرات مقارنة باللقطة السابقة");
+        return;
+      }
+
+      for (const change of changes) {
+        logChange(change.type, change.key);
+      }
+
+      baselineSnapshot = current;
+      refreshStorage();
+      toast(`تم رصد ${changes.length} تغيير`);
+    }
+
+    function toggleWatch() {
+      if (watchTimer) {
+        clearInterval(watchTimer);
+        watchTimer = null;
+        els.watchBtn.textContent = "تشغيل live";
+        els.liveStatus.textContent = "🟢 Live watch: off";
+        toast("تم إيقاف المراقبة");
+        return;
+      }
+
+      baselineSnapshot = snapshotObject(readStorage());
+
+      watchTimer = setInterval(() => {
+        const current = snapshotObject(readStorage());
+        const changes = diffSnapshots(baselineSnapshot, current);
+
+        if (changes.length > 0) {
+          for (const change of changes) {
+            logChange(change.type, change.key);
+          }
+
+          baselineSnapshot = current;
+          refreshStorage();
+        }
+      }, 800);
+
+      els.watchBtn.textContent = "إيقاف live";
+      els.liveStatus.textContent = "🔴 Live watch: on";
+      toast("تم تشغيل المراقبة");
+    }
+
+    function spawnPetal() {
+      const petal = document.createElement("span");
+      petal.className = "petal";
+
+      const start = Math.random() * window.innerWidth;
+      const drift = (Math.random() * 240 - 120).toFixed(0);
+      const duration = (7 + Math.random() * 7).toFixed(2);
+      const delay = (Math.random() * 1.4).toFixed(2);
+      const spin = `${Math.random() > 0.5 ? "" : "-"}${240 + Math.random() * 520}deg`;
+
+      petal.style.left = `${start}px`;
+      petal.style.animationDuration = `${duration}s`;
+      petal.style.animationDelay = `${delay}s`;
+      petal.style.setProperty("--x-drift", `${drift}px`);
+      petal.style.setProperty("--spin", spin);
+
+      document.body.appendChild(petal);
+
+      setTimeout(() => {
+        petal.remove();
+      }, (Number(duration) + Number(delay)) * 1000 + 300);
+    }
+
+    function startPetals() {
+      setInterval(() => {
+        if (document.hidden) return;
+
+        const amount = window.innerWidth < 700 ? 1 : 2;
+
+        for (let i = 0; i < amount; i += 1) {
+          spawnPetal();
+        }
+      }, 650);
+    }
+
+    els.searchInput.addEventListener("input", renderCards);
+    els.typeFilter.addEventListener("change", renderCards);
+    els.sortMode.addEventListener("change", renderCards);
+    els.refreshBtn.addEventListener("click", refreshStorage);
+
+    els.expandBtn.addEventListener("click", () => {
+      $$("details.storage-card").forEach((card) => {
+        card.open = true;
+      });
+    });
+
+    els.collapseBtn.addEventListener("click", () => {
+      $$("details.storage-card").forEach((card) => {
+        card.open = false;
+      });
+    });
+
+    els.themeBtn.addEventListener("click", () => {
+      const current = document.documentElement.dataset.theme;
+      document.documentElement.dataset.theme = current === "night" ? "day" : "night";
+      localStorage.setItem("__sakura_inspector_theme", document.documentElement.dataset.theme);
+    });
+
+    els.copyAllBtn.addEventListener("click", async () => {
+      await safeCopy(JSON.stringify(snapshotObject(), null, 2));
+      toast("تم نسخ كل localStorage");
+    });
+
+    els.exportBtn.addEventListener("click", exportAll);
+
+    els.importBtn.addEventListener("click", () => {
+      els.importFile.click();
+    });
+
+    els.importFile.addEventListener("change", () => {
+      const file = els.importFile.files?.[0];
+
+      if (file) {
+        importJsonFile(file);
+      }
+
+      els.importFile.value = "";
+    });
+
+    els.addBtn.addEventListener("click", addOrUpdateKey);
+
+    els.snapshotBtn.addEventListener("click", () => {
+      compareWithBaseline();
+    });
+
+    els.watchBtn.addEventListener("click", toggleWatch);
+
+    els.clearLogBtn.addEventListener("click", () => {
+      changeEvents = [];
+      renderLog();
+      toast("تم مسح السجل");
+    });
+
+    window.addEventListener("storage", () => {
+      logChange("external", "storage event");
+      refreshStorage();
+    });
+
+    const savedTheme = localStorage.getItem("__sakura_inspector_theme");
+    document.documentElement.dataset.theme = savedTheme || "day";
 
     refreshStorage();
+    baselineSnapshot = snapshotObject();
+    renderLog();
+    startPetals();
   </script>
 </body>
 </html>
