@@ -1,593 +1,779 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="ar" dir="rtl" data-theme="day">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <title>Sakura Ledger 2011 - LocalStorage Inspector</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sakura Hermes Storage Oracle</title>
 
   <style>
     :root {
-      --bg: #d7b77a;
-      --paper: #fff1cf;
-      --paper2: #f6dfaa;
-      --ink: #24170f;
-      --muted: #6b5336;
-      --red: #9e2e2e;
-      --red2: #6f1c1c;
-      --green: #315c3f;
-      --blue: #263f6b;
-      --gold: #b8872d;
-      --line: #6b4b24;
-      --soft: rgba(255, 244, 210, .78);
-      --shadow: rgba(45, 26, 10, .25);
-      --mono: Consolas, "Courier New", monospace;
-      --serif: Georgia, "Times New Roman", serif;
+      --bg-1: #f3ddad;
+      --bg-2: #fff2d4;
+      --bg-3: #cfad70;
+      --ink: #281a14;
+      --muted: #67503e;
+      --paper: rgba(255, 246, 225, 0.88);
+      --paper-strong: rgba(255, 249, 236, 0.96);
+      --border: rgba(40, 26, 20, 0.2);
+      --red: #a73535;
+      --gold: #b98b3e;
+      --green: #2f6549;
+      --blue: #334f7b;
+      --violet: #6d4f86;
+      --danger: #962837;
+      --shadow: rgba(40, 26, 20, 0.18);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      --serif: "Noto Serif Arabic", "Amiri", Georgia, serif;
+      --radius-xl: 34px;
+      --radius-lg: 24px;
+      --radius-md: 17px;
+      --motion: 1;
     }
 
     html[data-theme="night"] {
-      --bg: #151019;
-      --paper: #261c2f;
-      --paper2: #382846;
-      --ink: #f8e9c9;
-      --muted: #d4b887;
-      --red: #e06b6b;
-      --red2: #a64242;
-      --green: #91c79f;
-      --blue: #9cb4e6;
-      --gold: #d5ad56;
-      --line: #7e6640;
-      --soft: rgba(42, 31, 50, .86);
-      --shadow: rgba(0, 0, 0, .42);
+      --bg-1: #11101b;
+      --bg-2: #1d1727;
+      --bg-3: #2a1b24;
+      --ink: #f7ead4;
+      --muted: #d2bfa5;
+      --paper: rgba(33, 27, 42, 0.84);
+      --paper-strong: rgba(42, 34, 52, 0.96);
+      --border: rgba(255, 238, 210, 0.17);
+      --red: #df7373;
+      --gold: #dfbc6a;
+      --green: #91cfa6;
+      --blue: #a7bee8;
+      --violet: #d0b3ed;
+      --danger: #ff8291;
+      --shadow: rgba(0, 0, 0, 0.36);
     }
 
-    html[data-era="2008"] {
-      --paper: #fff7dc;
-      --paper2: #e8cb88;
-      --red: #8d2424;
-      --gold: #c79833;
-    }
-
-    html[data-era="2011"] {
-      --paper: #fff0c4;
-      --paper2: #e2bb70;
-      --red: #a7382f;
-      --gold: #b47a22;
+    html[data-perf="lite"] {
+      --motion: 0;
     }
 
     * {
       box-sizing: border-box;
     }
 
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
       margin: 0;
       min-height: 100vh;
       color: var(--ink);
-      font-family: "Tahoma", "Arial", sans-serif;
+      font-family: var(--serif);
       background:
-        radial-gradient(circle at 20% 10%, rgba(158, 46, 46, .25), transparent 230px),
-        radial-gradient(circle at 82% 22%, rgba(184, 135, 45, .26), transparent 260px),
-        linear-gradient(135deg, var(--bg), var(--paper2));
+        radial-gradient(circle at 12% 10%, rgba(167, 53, 53, 0.22), transparent 18rem),
+        radial-gradient(circle at 82% 16%, rgba(185, 139, 62, 0.22), transparent 22rem),
+        linear-gradient(135deg, var(--bg-1), var(--bg-2) 48%, var(--bg-3));
       overflow-x: hidden;
     }
 
-    body:before {
+    body::before {
       content: "";
       position: fixed;
-      left: 0;
-      right: 0;
-      top: 0;
-      bottom: 0;
+      inset: 0;
       pointer-events: none;
       z-index: 0;
       background:
-        repeating-linear-gradient(
-          0deg,
-          rgba(255,255,255,.08) 0,
-          rgba(255,255,255,.08) 1px,
-          transparent 1px,
-          transparent 4px
-        ),
         repeating-linear-gradient(
           90deg,
           transparent 0,
-          transparent 28px,
-          rgba(80,50,20,.05) 29px,
-          transparent 30px
-        );
-      opacity: .65;
+          transparent 18px,
+          rgba(40, 26, 20, 0.035) 19px,
+          transparent 20px
+        ),
+        linear-gradient(rgba(255,255,255,0.055) 50%, rgba(0,0,0,0.025) 50%);
+      background-size: auto, 100% 4px;
+      opacity: 0.72;
+      mix-blend-mode: multiply;
     }
 
-    .animated-bg {
-      position: fixed;
-      left: 0;
-      right: 0;
-      top: 0;
-      bottom: 0;
-      z-index: 0;
-      pointer-events: none;
-      overflow: hidden;
+    html[data-theme="night"] body::before {
+      mix-blend-mode: screen;
+      opacity: 0.16;
     }
 
-    .sun {
-      position: absolute;
-      left: 8%;
-      top: 70px;
-      width: 150px;
-      height: 150px;
-      border-radius: 150px;
-      background:
-        radial-gradient(circle, #fff3b8 0 34%, var(--red) 35% 61%, rgba(158,46,46,.08) 62%);
-      border: 3px double rgba(90, 30, 20, .35);
-      animation: oldPulse 7s ease-in-out infinite;
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
     }
 
-    .mount {
-      position: absolute;
-      left: -5%;
-      bottom: 0;
-      width: 110%;
-      height: 220px;
-      background:
-        linear-gradient(135deg, transparent 0 42%, rgba(49,92,63,.23) 43% 57%, transparent 58%),
-        linear-gradient(45deg, transparent 0 44%, rgba(38,63,107,.23) 45% 59%, transparent 60%);
-      border-bottom: 25px solid rgba(70, 47, 21, .14);
-      animation: tinyDrift 18s ease-in-out infinite alternate;
-    }
-
-    .waves {
-      position: absolute;
-      left: 0;
-      bottom: -20px;
-      width: 200%;
-      height: 100px;
-      background:
-        radial-gradient(ellipse at 50% 0%, transparent 0 40%, rgba(38,63,107,.28) 41% 47%, transparent 48%) 0 0 / 96px 48px repeat-x,
-        radial-gradient(ellipse at 50% 0%, transparent 0 40%, rgba(158,46,46,.16) 41% 47%, transparent 48%) 48px 24px / 96px 48px repeat-x;
-      animation: wave 22s linear infinite;
-    }
-
-    .petals {
-      position: fixed;
-      left: 0;
-      right: 0;
-      top: -20px;
-      height: 100vh;
-      z-index: 1;
-      pointer-events: none;
-    }
-
-    .petals i {
-      position: absolute;
-      top: -20px;
-      display: block;
-      width: 12px;
-      height: 8px;
-      border-radius: 12px 2px 12px 2px;
-      background: rgba(229, 116, 139, .75);
-      animation: petal 12s linear infinite;
-    }
-
-    .petals i:nth-child(1) { left: 8%; animation-delay: 0s; }
-    .petals i:nth-child(2) { left: 22%; animation-delay: 3s; }
-    .petals i:nth-child(3) { left: 41%; animation-delay: 6s; }
-    .petals i:nth-child(4) { left: 63%; animation-delay: 1s; }
-    .petals i:nth-child(5) { left: 79%; animation-delay: 5s; }
-    .petals i:nth-child(6) { left: 92%; animation-delay: 8s; }
-
-    @keyframes oldPulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.025); }
-    }
-
-    @keyframes tinyDrift {
-      from { transform: translateX(-8px); }
-      to { transform: translateX(8px); }
-    }
-
-    @keyframes wave {
-      from { transform: translateX(0); }
-      to { transform: translateX(-50%); }
-    }
-
-    @keyframes petal {
-      0% { transform: translate3d(0,-30px,0) rotate(0deg); opacity: 0; }
-      10% { opacity: 1; }
-      100% { transform: translate3d(70px,110vh,0) rotate(360deg); opacity: 0; }
-    }
-
-    html[data-power="low"] .sun,
-    html[data-power="low"] .mount,
-    html[data-power="low"] .waves,
-    html[data-power="low"] .petals i,
-    html[data-motion="off"] .sun,
-    html[data-motion="off"] .mount,
-    html[data-motion="off"] .waves,
-    html[data-motion="off"] .petals i {
-      animation: none !important;
-    }
-
-    html[data-power="low"] .petals,
-    html[data-motion="off"] .petals {
-      display: none;
-    }
-
-    .page {
-      position: relative;
-      z-index: 2;
-      width: 96%;
-      max-width: 1220px;
-      margin: 0 auto;
-      padding: 18px 0 50px;
-    }
-
-    .legacy-frame {
-      border: 4px double var(--line);
-      background: var(--soft);
-      box-shadow: 0 16px 40px var(--shadow);
-    }
-
-    .topbar {
-      padding: 8px 12px;
-      border-bottom: 2px solid var(--line);
-      background:
-        linear-gradient(#fff8d8, var(--paper2));
-      color: #321c0c;
-      font-family: var(--mono);
-      font-size: 13px;
-      text-align: left;
-      direction: ltr;
-      overflow: hidden;
+    button {
+      min-height: 46px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 0 14px;
+      background: var(--ink);
+      color: var(--bg-2);
+      cursor: pointer;
       white-space: nowrap;
+      transition: transform calc(150ms * var(--motion)) ease, box-shadow calc(150ms * var(--motion)) ease, opacity 150ms ease;
     }
 
-    html[data-theme="night"] .topbar {
-      background: linear-gradient(#3a2948, #211829);
+    button:hover {
+      transform: translateY(calc(-1px * var(--motion)));
+      box-shadow: 0 12px 26px rgba(40, 26, 20, calc(0.13 * var(--motion)));
+      opacity: 0.94;
+    }
+
+    button.secondary {
+      background: var(--paper);
       color: var(--ink);
     }
 
-    .hero {
-      position: relative;
-      padding: 22px;
-      border-bottom: 3px ridge var(--line);
-      background:
-        linear-gradient(90deg, rgba(255,255,255,.34), transparent),
-        repeating-linear-gradient(90deg, transparent 0, transparent 18px, rgba(110,70,20,.06) 19px);
-      overflow: hidden;
+    button.ok {
+      background: var(--green);
+      color: #fff7ed;
     }
 
-    .hero:before {
-      content: "和";
-      position: absolute;
-      left: 18px;
-      top: -30px;
-      font-size: 150px;
-      font-family: var(--serif);
-      color: rgba(158,46,46,.10);
-      line-height: 1;
+    button.danger {
+      background: var(--danger);
+      color: #fff3f4;
     }
 
-    h1 {
-      margin: 0;
-      font-family: var(--serif);
-      font-size: 42px;
-      line-height: 1.1;
-      color: var(--red2);
-      text-shadow: 1px 1px 0 rgba(255,255,255,.55);
-    }
-
-    html[data-theme="night"] h1 {
-      color: var(--red);
-      text-shadow: 1px 1px 0 #000;
-    }
-
-    .subtitle {
-      max-width: 900px;
-      margin: 12px 0 0;
-      color: var(--muted);
-      line-height: 1.9;
-      font-size: 15px;
-    }
-
-    .ascii {
-      margin-top: 12px;
-      padding: 10px;
-      border: 1px dashed var(--line);
-      background: rgba(0,0,0,.08);
-      direction: ltr;
-      text-align: left;
-      font-family: var(--mono);
-      color: var(--green);
-      overflow: auto;
-    }
-
-    .tools,
-    .stats,
-    .feature-grid,
-    .action-row,
-    .pager {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .tools {
-      padding: 12px;
-      border-bottom: 2px solid var(--line);
-      background: rgba(255,255,255,.20);
-    }
-
-    input,
-    select,
-    textarea,
-    button {
-      font-family: "Tahoma", "Arial", sans-serif;
-      font-size: 14px;
+    button.ghost {
+      background: transparent;
+      color: var(--ink);
     }
 
     input,
     select,
     textarea {
-      color: var(--ink);
+      min-height: 46px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
       background: var(--paper);
-      border: 2px inset var(--line);
-      padding: 8px;
+      color: var(--ink);
       outline: none;
+      padding: 0 13px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 160px;
+      resize: vertical;
+      direction: ltr;
+      text-align: left;
+      padding: 14px;
+      font-family: var(--mono);
+      line-height: 1.65;
     }
 
     input:focus,
     select:focus,
     textarea:focus {
-      border-color: var(--red);
-      box-shadow: 0 0 0 2px rgba(158,46,46,.18);
+      border-color: rgba(167, 53, 53, 0.58);
+      box-shadow: 0 0 0 4px rgba(167, 53, 53, 0.1);
     }
 
-    #search {
-      min-width: 260px;
-      flex: 1 1 320px;
+    code {
+      direction: ltr;
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: rgba(40, 26, 20, 0.07);
+      font-family: var(--mono);
     }
 
-    button {
-      border: 2px outset var(--line);
-      background: linear-gradient(#fff5d2, #d4aa58);
-      color: #261608;
-      padding: 8px 10px;
-      cursor: pointer;
-      min-height: 36px;
+    .anime-world {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      overflow: hidden;
+      pointer-events: none;
     }
 
-    button:hover {
-      filter: brightness(1.04);
+    html[data-perf="lite"] .anime-world {
+      display: none;
     }
 
-    button:active {
-      border-style: inset;
-      transform: translateY(1px);
-    }
-
-    button.red {
-      background: linear-gradient(#d66f6f, #8e2929);
-      color: #fff7ee;
-    }
-
-    button.green {
-      background: linear-gradient(#93c99c, #315c3f);
-      color: #fff7ee;
-    }
-
-    button.blue {
-      background: linear-gradient(#9bb2df, #263f6b);
-      color: #fff7ee;
-    }
-
-    .panel {
-      margin-top: 14px;
-      border: 3px double var(--line);
-      background: var(--soft);
-      box-shadow: 0 10px 22px rgba(40, 20, 5, .14);
-    }
-
-    .panel-title {
-      padding: 8px 12px;
-      font-weight: bold;
-      color: var(--paper);
+    .rising-sun {
+      position: absolute;
+      top: 68px;
+      left: 8vw;
+      width: 190px;
+      height: 190px;
+      border-radius: 50%;
       background:
-        linear-gradient(90deg, var(--red2), var(--red), var(--gold));
-      border-bottom: 2px solid var(--line);
-      font-family: var(--serif);
-      letter-spacing: .3px;
+        radial-gradient(circle, rgba(255,244,205,0.98) 0 32%, rgba(167,53,53,0.88) 33% 62%, rgba(167,53,53,0.08) 63%);
+      box-shadow: 0 0 80px rgba(167, 53, 53, 0.24);
+      animation: pulseSun 7s ease-in-out infinite;
     }
 
-    .panel-body {
-      padding: 12px;
+    .moon-arc {
+      position: absolute;
+      top: 82px;
+      right: 9vw;
+      width: 150px;
+      height: 150px;
+      border-radius: 999px;
+      border: 2px solid rgba(185, 139, 62, 0.32);
+      opacity: 0.74;
+      animation: slowSpin 36s linear infinite;
+    }
+
+    .cloud {
+      position: absolute;
+      width: 230px;
+      height: 74px;
+      border-radius: 999px;
+      background: rgba(255, 249, 236, 0.5);
+      filter: blur(1px);
+      animation: cloudMove 42s linear infinite;
+    }
+
+    .cloud::before,
+    .cloud::after {
+      content: "";
+      position: absolute;
+      background: inherit;
+      border-radius: 999px;
+    }
+
+    .cloud::before {
+      width: 95px;
+      height: 95px;
+      right: 30px;
+      top: -40px;
+    }
+
+    .cloud::after {
+      width: 125px;
+      height: 125px;
+      left: 34px;
+      top: -60px;
+    }
+
+    .cloud.one {
+      top: 140px;
+      right: -260px;
+    }
+
+    .cloud.two {
+      top: 294px;
+      right: -380px;
+      transform: scale(0.72);
+      animation-delay: -17s;
+      animation-duration: 54s;
+    }
+
+    .fuji {
+      position: absolute;
+      bottom: 0;
+      left: -6vw;
+      width: 112vw;
+      height: 42vh;
+      opacity: 0.78;
+      clip-path: polygon(0 100%, 0 60%, 12% 75%, 26% 34%, 38% 72%, 52% 22%, 68% 72%, 83% 42%, 100% 84%, 100% 100%);
+      background:
+        linear-gradient(135deg, transparent 0 42%, rgba(47,101,73,0.22) 43% 58%, transparent 59%),
+        linear-gradient(45deg, transparent 0 45%, rgba(51,79,123,0.21) 46% 61%, transparent 62%),
+        linear-gradient(180deg, transparent 0 18%, rgba(40,26,20,0.09) 19%);
+      animation: mountainDrift 16s ease-in-out infinite alternate;
+    }
+
+    .waves {
+      position: absolute;
+      bottom: -34px;
+      left: 0;
+      width: 200%;
+      height: 136px;
+      background:
+        radial-gradient(ellipse at 50% 0%, transparent 0 42%, rgba(51,79,123,0.25) 43% 48%, transparent 49%) 0 0 / 118px 68px repeat-x,
+        radial-gradient(ellipse at 50% 0%, transparent 0 42%, rgba(167,53,53,0.13) 43% 48%, transparent 49%) 59px 34px / 118px 68px repeat-x;
+      animation: waveSlide 20s linear infinite;
+      opacity: 0.74;
+    }
+
+    .petal {
+      position: fixed;
+      top: -28px;
+      z-index: 2;
+      width: 14px;
+      height: 9px;
+      border-radius: 90% 10% 90% 10%;
+      background: rgba(229, 125, 145, 0.78);
+      pointer-events: none;
+      animation: petalFall linear forwards;
+    }
+
+    @keyframes pulseSun {
+      0%, 100% { transform: scale(1); opacity: 0.91; }
+      50% { transform: scale(1.035); opacity: 1; }
+    }
+
+    @keyframes slowSpin {
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes cloudMove {
+      from { transform: translateX(0); }
+      to { transform: translateX(-145vw); }
+    }
+
+    @keyframes mountainDrift {
+      from { transform: translateX(-1.4vw); }
+      to { transform: translateX(1.4vw); }
+    }
+
+    @keyframes waveSlide {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
+
+    @keyframes petalFall {
+      from {
+        transform: translate3d(0, -30px, 0) rotate(0deg);
+        opacity: 0;
+      }
+      9% { opacity: 1; }
+      to {
+        transform: translate3d(var(--drift), 108vh, 0) rotate(var(--spin));
+        opacity: 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      :root {
+        --motion: 0;
+      }
+
+      .anime-world,
+      .petal {
+        display: none;
+      }
+    }
+
+    .page {
+      position: relative;
+      z-index: 3;
+      width: min(1380px, calc(100% - 34px));
+      margin: 0 auto;
+      padding: 34px 0 58px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      background:
+        linear-gradient(135deg, var(--paper-strong), var(--paper)),
+        repeating-linear-gradient(90deg, transparent 0, transparent 24px, rgba(185,139,62,0.08) 25px, transparent 26px);
+      box-shadow: 0 28px 90px var(--shadow);
+      backdrop-filter: blur(14px);
+      padding: 32px;
+    }
+
+    html[data-perf="lite"] .hero,
+    html[data-perf="lite"] .panel,
+    html[data-perf="lite"] .card,
+    html[data-perf="lite"] .stat {
+      backdrop-filter: none;
+      box-shadow: 0 10px 24px rgba(40, 26, 20, 0.11);
+    }
+
+    .hero::before {
+      content: "侍";
+      position: absolute;
+      top: -48px;
+      inset-inline-start: 28px;
+      font-size: 190px;
+      line-height: 1;
+      color: rgba(167,53,53,0.11);
+      font-family: Georgia, serif;
+      pointer-events: none;
+    }
+
+    .hero-grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      color: var(--red);
+      background: rgba(167,53,53,0.11);
+      border: 1px solid rgba(167,53,53,0.22);
+      font-weight: 900;
+      margin-bottom: 17px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2.25rem, 6vw, 5.1rem);
+      line-height: 1.05;
+      letter-spacing: -0.055em;
+    }
+
+    .subtitle {
+      max-width: 880px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      line-height: 1.9;
+      font-size: 1.05rem;
+    }
+
+    .terminal {
+      position: relative;
+      min-height: 280px;
+      direction: ltr;
+      text-align: left;
+      border: 1px solid var(--border);
+      border-radius: 26px;
+      background:
+        linear-gradient(180deg, rgba(26, 22, 19, 0.94), rgba(15, 14, 18, 0.94));
+      color: #f7e7c9;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+      padding: 16px;
+      font-family: var(--mono);
+      overflow: hidden;
+    }
+
+    .terminal-top {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 13px;
+    }
+
+    .dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 999px;
+      background: #d95c5c;
+    }
+
+    .dot:nth-child(2) { background: #d5ad52; }
+    .dot:nth-child(3) { background: #71b77a; }
+
+    .terminal pre {
+      margin: 0;
+      white-space: pre-wrap;
+      line-height: 1.65;
+      color: #f7e7c9;
+    }
+
+    .terminal .green {
+      color: #9ee1a8;
+    }
+
+    .terminal .gold {
+      color: #e4c76d;
+    }
+
+    .terminal .red {
+      color: #ff8b8b;
+    }
+
+    .mural {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .mural-card {
+      min-height: 96px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background:
+        linear-gradient(135deg, rgba(185,139,62,0.12), rgba(167,53,53,0.08)),
+        var(--paper);
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+
+    .mural svg {
+      width: 86%;
+      height: 86%;
+      stroke: var(--ink);
+      fill: none;
+      opacity: 0.72;
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .toolbar {
+      margin: 22px 0;
+      display: grid;
+      grid-template-columns: minmax(220px, 1.2fr) repeat(7, auto);
+      gap: 10px;
+      align-items: center;
     }
 
     .stats {
-      padding: 12px;
-      border-bottom: 2px solid var(--line);
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
     }
 
     .stat {
-      flex: 1 1 150px;
-      min-height: 76px;
-      border: 2px ridge var(--line);
-      background:
-        linear-gradient(#fff8dc, var(--paper));
-      padding: 10px;
-      color: #28170b;
+      position: relative;
+      overflow: hidden;
+      min-height: 112px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--paper);
+      box-shadow: 0 15px 40px rgba(40,26,20,0.1);
+      backdrop-filter: blur(10px);
+      padding: 17px;
     }
 
-    html[data-theme="night"] .stat {
-      background: linear-gradient(#382846, #261c2f);
-      color: var(--ink);
+    .stat::after {
+      content: "";
+      position: absolute;
+      inset-inline-end: -36px;
+      bottom: -36px;
+      width: 98px;
+      height: 98px;
+      border-radius: 999px;
+      background: rgba(167, 53, 53, 0.1);
     }
 
-    .stat b {
+    .stat strong {
+      position: relative;
+      z-index: 1;
       display: block;
-      font-size: 24px;
+      margin-bottom: 5px;
       color: var(--red);
+      font-size: 1.62rem;
       direction: ltr;
       text-align: right;
-      font-family: var(--mono);
     }
 
     .stat span {
+      position: relative;
+      z-index: 1;
       color: var(--muted);
-      font-size: 13px;
+    }
+
+    .panel {
+      margin-bottom: 18px;
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      background: var(--paper);
+      box-shadow: 0 18px 56px rgba(40,26,20,0.12);
+      backdrop-filter: blur(12px);
+      overflow: hidden;
+    }
+
+    .panel-head {
+      padding: 17px 19px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .panel-head h2 {
+      margin: 0;
+      font-size: 1.13rem;
+    }
+
+    .panel-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .panel-body {
+      padding: 18px;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
     }
 
     .feature {
-      flex: 1 1 185px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,.20);
-      padding: 8px;
-      min-height: 70px;
-      font-size: 13px;
-      line-height: 1.55;
-    }
-
-    .feature b {
-      display: block;
-      color: var(--red);
-      font-family: var(--mono);
-      direction: ltr;
-      text-align: left;
-    }
-
-    .add-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    .add-table td {
-      padding: 6px;
-      vertical-align: top;
-    }
-
-    .add-table label {
-      display: block;
-      font-weight: bold;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 12px;
+      background: rgba(255,255,255,0.16);
       color: var(--muted);
-      margin-bottom: 5px;
+      line-height: 1.55;
+      min-height: 92px;
     }
 
-    .add-table input,
-    .add-table textarea {
-      width: 100%;
+    .feature strong {
+      display: block;
+      color: var(--ink);
+      margin-bottom: 4px;
     }
 
-    .add-table textarea {
-      min-height: 120px;
-      direction: ltr;
-      text-align: left;
-      font-family: var(--mono);
-      resize: vertical;
+    .add-grid {
+      display: grid;
+      grid-template-columns: minmax(170px, 0.7fr) minmax(220px, 1fr) auto;
+      gap: 10px;
+      align-items: start;
     }
 
     .cards {
-      margin-top: 14px;
+      display: grid;
+      gap: 13px;
     }
 
     .card {
-      margin-bottom: 10px;
-      border: 3px double var(--line);
-      background: var(--paper);
-      box-shadow: 0 8px 20px rgba(40,20,5,.14);
+      border: 1px solid var(--border);
+      border-inline-start: 7px solid var(--red);
+      border-radius: 26px;
+      background: linear-gradient(180deg, var(--paper-strong), var(--paper));
+      box-shadow: 0 16px 42px rgba(40,26,20,0.12);
+      overflow: hidden;
+      backdrop-filter: blur(10px);
     }
 
-    .card.favorite {
-      border-color: var(--gold);
-      box-shadow: 0 0 0 3px rgba(184,135,45,.18), 0 8px 20px rgba(40,20,5,.14);
+    .card[open] {
+      border-color: rgba(167, 53, 53, 0.38);
     }
 
-    .card-head {
-      width: 100%;
-      border: 0;
-      border-bottom: 1px solid var(--line);
-      background:
-        linear-gradient(#fff9df, #e6c77f);
-      padding: 0;
+    .card summary {
+      list-style: none;
       cursor: pointer;
-      text-align: inherit;
-      color: #261608;
-    }
-
-    html[data-theme="night"] .card-head {
-      background: linear-gradient(#3a2948, #24192f);
-      color: var(--ink);
-    }
-
-    .card-head-inner {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
+      padding: 17px 19px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 14px;
       align-items: center;
-      justify-content: space-between;
-      padding: 10px;
     }
 
-    .key-title {
-      flex: 1 1 260px;
-      font-weight: bold;
+    .card summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .key-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+
+    .chev {
+      display: inline-grid;
+      place-items: center;
+      width: 31px;
+      height: 31px;
+      border-radius: 999px;
+      color: var(--red);
+      background: rgba(167, 53, 53, 0.11);
+      transition: transform calc(170ms * var(--motion)) ease;
+    }
+
+    .card[open] .chev {
+      transform: rotate(-90deg);
+    }
+
+    .star {
+      min-width: 31px;
+      width: 31px;
+      height: 31px;
+      min-height: 31px;
+      padding: 0;
+      border-radius: 999px;
+      background: rgba(185,139,62,0.14);
+      color: var(--gold);
+    }
+
+    .star.active {
+      background: var(--gold);
+      color: #1f160f;
+    }
+
+    .key {
+      font-weight: 950;
+      font-size: 1.04rem;
       overflow-wrap: anywhere;
-      font-family: var(--mono);
+    }
+
+    .preview {
+      margin-top: 7px;
       direction: ltr;
-      text-align: left;
+      text-align: right;
+      font-family: var(--mono);
+      color: var(--muted);
+      font-size: 0.82rem;
+      overflow-wrap: anywhere;
     }
 
     .badges {
       display: flex;
       flex-wrap: wrap;
-      gap: 5px;
       justify-content: flex-end;
+      gap: 7px;
     }
 
     .badge {
-      display: inline-block;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,.35);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 27px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.16);
       color: var(--muted);
-      padding: 3px 7px;
-      font-size: 12px;
-      font-family: var(--mono);
+      padding: 3px 9px;
+      font-size: 0.79rem;
+      font-weight: 850;
+      white-space: nowrap;
     }
 
-    .badge.warn {
-      color: #fff;
-      background: var(--red);
-    }
-
-    .badge.ok {
-      color: #fff;
-      background: var(--green);
-    }
+    .badge.json { color: var(--blue); background: rgba(51,79,123,0.1); border-color: rgba(51,79,123,0.22); }
+    .badge.warn { color: var(--danger); background: rgba(150,40,55,0.1); border-color: rgba(150,40,55,0.24); }
+    .badge.good { color: var(--green); background: rgba(47,101,73,0.1); border-color: rgba(47,101,73,0.24); }
 
     .card-body {
-      display: none;
-      padding: 12px;
-      background:
-        repeating-linear-gradient(
-          0deg,
-          rgba(255,255,255,.18) 0,
-          rgba(255,255,255,.18) 26px,
-          rgba(0,0,0,.02) 27px
-        );
+      border-top: 1px solid var(--border);
+      padding: 18px 19px 20px;
+      animation: unfold calc(210ms * var(--motion)) ease both;
     }
 
-    .card.open .card-body {
-      display: block;
+    @keyframes unfold {
+      from { opacity: 0; transform: translateY(-5px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
-    .tabs {
+    .tabs,
+    .card-actions {
       display: flex;
       flex-wrap: wrap;
-      gap: 6px;
-      margin: 8px 0;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .tab {
+      min-height: 38px;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--ink);
+      padding: 0 12px;
     }
 
     .tab.active {
-      border-style: inset;
-      background: linear-gradient(var(--red), var(--red2));
-      color: #fff7ee;
+      background: var(--red);
+      color: #fff7ed;
     }
 
     .view {
@@ -598,1461 +784,1493 @@
       display: block;
     }
 
-    pre,
-    .tree {
+    pre.raw,
+    .tree-box,
+    .meta-box {
       margin: 0;
-      padding: 12px;
-      border: 2px inset var(--line);
-      background: rgba(255,255,255,.28);
-      color: var(--ink);
       direction: ltr;
       text-align: left;
-      font-family: var(--mono);
-      font-size: 13px;
-      line-height: 1.65;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
-      max-height: 360px;
+      max-height: 430px;
       overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 19px;
+      background: rgba(40, 26, 20, 0.06);
+      color: var(--ink);
+      padding: 15px;
+      font-family: var(--mono);
+      line-height: 1.65;
+      font-size: 0.91rem;
     }
 
-    .tree div {
-      margin-left: 16px;
+    .tree-node {
+      font-family: var(--mono);
+      direction: ltr;
+      text-align: left;
+      line-height: 1.72;
     }
 
-    .tree .k {
+    .tree-node details {
+      border: 0;
+      box-shadow: none;
+      background: transparent;
+    }
+
+    .tree-node summary {
+      display: block;
+      padding: 0;
+      cursor: pointer;
+      color: var(--blue);
+    }
+
+    .tree-row {
+      padding-inline-start: 18px;
+    }
+
+    .tree-key {
       color: var(--red);
-      font-weight: bold;
+      font-weight: 900;
     }
 
-    .tree .v {
+    .tree-value {
       color: var(--green);
     }
 
-    .editor {
-      width: 100%;
-      min-height: 180px;
-      direction: ltr;
-      text-align: left;
-      font-family: var(--mono);
+    .diff-added { color: var(--green); }
+    .diff-removed { color: var(--danger); }
+    .diff-changed { color: var(--gold); }
+
+    .log {
+      display: grid;
+      gap: 8px;
+      max-height: 230px;
+      overflow: auto;
     }
 
-    .mini {
+    .log-item {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.15);
       color: var(--muted);
-      font-size: 12px;
-      direction: ltr;
-      text-align: left;
-      font-family: var(--mono);
-      margin-top: 6px;
+      padding: 10px 12px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .log-item strong {
+      color: var(--ink);
       overflow-wrap: anywhere;
     }
 
-    .log {
-      max-height: 190px;
-      overflow: auto;
-      border: 2px inset var(--line);
-      background: rgba(255,255,255,.20);
-      padding: 8px;
-      font-family: var(--mono);
-      direction: ltr;
-      text-align: left;
-      font-size: 13px;
-    }
-
-    .log-row {
-      border-bottom: 1px dotted var(--line);
-      padding: 5px 0;
-    }
-
     .empty {
-      padding: 24px;
-      text-align: center;
+      border: 1px dashed var(--border);
+      border-radius: 24px;
+      background: rgba(255,255,255,0.13);
+      padding: 38px 18px;
       color: var(--muted);
-      border: 2px dashed var(--line);
-      background: rgba(255,255,255,.16);
-      line-height: 1.9;
+      text-align: center;
+      line-height: 1.8;
     }
 
-    .pager {
-      margin-top: 12px;
-      align-items: center;
+    .load-more {
+      margin-top: 14px;
+      display: flex;
       justify-content: center;
-    }
-
-    .map {
-      direction: ltr;
-      text-align: left;
-      font-family: var(--mono);
-      font-size: 12px;
-      line-height: 1.6;
-      max-height: 180px;
-      overflow: auto;
-      border: 2px inset var(--line);
-      padding: 8px;
-      background: rgba(255,255,255,.18);
     }
 
     .toast {
       position: fixed;
-      left: 12px;
-      bottom: 12px;
-      z-index: 50;
-      max-width: 420px;
-      border: 3px double var(--line);
-      background: var(--paper);
+      z-index: 30;
+      left: 22px;
+      bottom: 22px;
+      max-width: min(430px, calc(100vw - 44px));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--paper-strong);
       color: var(--ink);
-      padding: 10px 12px;
-      box-shadow: 0 10px 24px var(--shadow);
-      display: none;
-      font-size: 14px;
+      box-shadow: 0 24px 72px rgba(40,26,20,0.23);
+      padding: 13px 15px;
+      opacity: 0;
+      transform: translateY(18px);
+      pointer-events: none;
+      transition: opacity 160ms ease, transform 160ms ease;
     }
 
     .toast.show {
-      display: block;
-    }
-
-    mark {
-      background: #ffe071;
-      color: #221000;
-      padding: 0 2px;
+      opacity: 1;
+      transform: translateY(0);
     }
 
     .hidden-file {
       position: absolute;
-      left: -9999px;
+      opacity: 0;
+      pointer-events: none;
       width: 1px;
       height: 1px;
-      opacity: 0;
     }
 
-    @media (max-width: 620px) {
-      .page {
-        width: 98%;
-        padding-top: 8px;
+    mark {
+      background: rgba(185,139,62,0.38);
+      color: inherit;
+      border-radius: 5px;
+      padding: 0 2px;
+    }
+
+    .palette {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: none;
+      place-items: start center;
+      padding-top: 12vh;
+      background: rgba(0,0,0,0.34);
+    }
+
+    .palette.show {
+      display: grid;
+    }
+
+    .palette-card {
+      width: min(720px, calc(100% - 28px));
+      border: 1px solid var(--border);
+      border-radius: 26px;
+      background: var(--paper-strong);
+      box-shadow: 0 28px 90px rgba(0,0,0,0.32);
+      padding: 16px;
+    }
+
+    .palette-grid {
+      margin-top: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .palette-grid button {
+      justify-content: flex-start;
+      text-align: start;
+      background: var(--paper);
+      color: var(--ink);
+    }
+
+    @media (max-width: 1120px) {
+      .hero-grid {
+        grid-template-columns: 1fr;
       }
 
-      h1 {
-        font-size: 29px;
+      .toolbar {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .feature-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .add-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .page {
+        width: min(100% - 22px, 1380px);
+        padding-top: 18px;
       }
 
       .hero {
-        padding: 14px;
+        padding: 23px;
+        border-radius: 26px;
       }
 
-      .tools > *,
-      .action-row > *,
-      .tabs > *,
-      .pager > * {
-        flex: 1 1 100%;
+      .toolbar,
+      .stats,
+      .feature-grid {
+        grid-template-columns: 1fr;
       }
 
-      .sun {
-        width: 90px;
-        height: 90px;
-        top: 40px;
-      }
-
-      .mount {
-        height: 150px;
-      }
-
-      .card-head-inner {
-        display: block;
+      .card summary {
+        grid-template-columns: 1fr;
       }
 
       .badges {
         justify-content: flex-start;
-        margin-top: 7px;
       }
 
-      .add-table,
-      .add-table tbody,
-      .add-table tr,
-      .add-table td {
-        display: block;
+      .tabs,
+      .card-actions,
+      .panel-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+
+      button,
+      select {
         width: 100%;
+      }
+
+      .mural {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
   </style>
 </head>
 
 <body>
-  <div class="animated-bg" aria-hidden="true">
-    <div class="sun"></div>
-    <div class="mount"></div>
+  <div class="anime-world" aria-hidden="true">
+    <div class="rising-sun"></div>
+    <div class="moon-arc"></div>
+    <div class="cloud one"></div>
+    <div class="cloud two"></div>
+    <div class="fuji"></div>
     <div class="waves"></div>
   </div>
 
-  <div class="petals" aria-hidden="true">
-    <i></i><i></i><i></i><i></i><i></i><i></i>
-  </div>
-
   <main class="page">
-    <section class="legacy-frame">
-      <div class="topbar" id="topbar">
-        SAKURA_LEDGER://LOCALSTORAGE &nbsp; | &nbsp; NO_NETWORK_MODE=TRUE &nbsp; | &nbsp; ERA=2011
-      </div>
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="kicker">🏯 Sakura Hermes Storage Oracle</div>
+          <h1>مخزن المتصفح صار لوحة أثرية حية</h1>
+          <p class="subtitle">
+            عارض <code>localStorage</code> متكامل لنفس الـ origin:
+            بطاقات منسدلة، JSON tree، تعديل، حذف، استيراد، تصدير، مراقبة live،
+            وضع أداء للسوني ٥، ورسومات يابانية/إغريقية/agent terminal في واجهة واحدة.
+          </p>
 
-      <header class="hero">
-        <h1>سجل الساكورا المحلي</h1>
-        <p class="subtitle">
-          عارض LocalStorage كلاسيكي، حي، خفيف، وعملي. يعمل من نفس الموقع فقط.
-          صُمم حتى لا يخنق المتصفحات الضعيفة. شيء نادر: واجهة جميلة لا تتصرف كأنها تعدين عملات.
-        </p>
-
-        <div class="ascii">
-          /- SAKURA LEDGER 2011 -\ 
-          <br>
-          [ connect ] [ remember ] [ inspect ] [ repair ] [ archive ]
-        </div>
-      </header>
-
-      <section class="tools" aria-label="أدوات">
-        <input id="search" type="search" placeholder="ابحث في المفتاح أو القيمة أو النوع...">
-
-        <select id="typeFilter" title="فلترة النوع">
-          <option value="all">كل الأنواع</option>
-          <option value="object">object</option>
-          <option value="array">array</option>
-          <option value="string">string</option>
-          <option value="number">number</option>
-          <option value="boolean">boolean</option>
-          <option value="empty">empty</option>
-          <option value="null">null</option>
-        </select>
-
-        <select id="namespaceFilter" title="تجميع">
-          <option value="all">كل المجموعات</option>
-        </select>
-
-        <select id="sortMode" title="ترتيب">
-          <option value="keyAsc">A → Z</option>
-          <option value="keyDesc">Z → A</option>
-          <option value="sizeDesc">الأكبر أولاً</option>
-          <option value="sizeAsc">الأصغر أولاً</option>
-          <option value="type">حسب النوع</option>
-          <option value="fav">المفضلة أولاً</option>
-        </select>
-
-        <select id="eraMode" title="ستايل">
-          <option value="2011">2011</option>
-          <option value="2008">2008</option>
-        </select>
-
-        <button id="refreshBtn">تحديث</button>
-        <button id="expandBtn">فتح الصفحة</button>
-        <button id="collapseBtn">إغلاق الصفحة</button>
-      </section>
-
-      <section class="stats" aria-label="إحصائيات">
-        <div class="stat"><b id="shownStat">0</b><span>ظاهر</span></div>
-        <div class="stat"><b id="totalStat">0</b><span>إجمالي</span></div>
-        <div class="stat"><b id="sizeStat">0 B</b><span>حجم تقريبي</span></div>
-        <div class="stat"><b id="jsonStat">0</b><span>JSON صالح</span></div>
-        <div class="stat"><b id="perfStat">OK</b><span>الأداء</span></div>
-        <div class="stat"><b id="originStat">—</b><span>Origin</span></div>
-      </section>
-    </section>
-
-    <section class="panel">
-      <div class="panel-title">لوحة الميزات — 25 قطعة. نعم، عددتها. لم يكن ممتعاً.</div>
-      <div class="panel-body">
-        <div id="featureGrid" class="feature-grid"></div>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-title">أدوات الأرشيف والتحكم</div>
-      <div class="panel-body">
-        <div class="action-row">
-          <button id="copyAllBtn" class="blue">نسخ الكل</button>
-          <button id="exportBtn" class="blue">تصدير JSON</button>
-          <button id="importBtn" class="blue">استيراد JSON</button>
-          <button id="snapshotBtn">لقطة مقارنة</button>
-          <button id="diffBtn">قارن الآن</button>
-          <button id="watchBtn" class="green">تشغيل Live</button>
-          <button id="undoBtn">تراجع حذف</button>
-          <button id="redactBtn">ستر الحساس</button>
-          <button id="themeBtn">ليل/نهار</button>
-          <button id="motionBtn">إيقاف الحركة</button>
-          <button id="powerBtn" class="green">توفير الطاقة</button>
+          <div class="mural" aria-label="رسومات تاريخية زخرفية">
+            <div class="mural-card">
+              <svg viewBox="0 0 100 100" aria-hidden="true">
+                <path d="M18 82h64M26 82V35M74 82V35M18 35h64M25 29c10-10 40-10 50 0M34 35v47M50 35v47M66 35v47" />
+              </svg>
+            </div>
+            <div class="mural-card">
+              <svg viewBox="0 0 100 100" aria-hidden="true">
+                <path d="M38 16h24M40 16c-5 12-5 19 0 28-13 6-17 31-3 42h26c14-11 10-36-3-42 5-9 5-16 0-28M34 48c-10 0-14 16-1 21M66 48c10 0 14 16 1 21M41 58h18M39 68h22" />
+              </svg>
+            </div>
+            <div class="mural-card">
+              <svg viewBox="0 0 100 100" aria-hidden="true">
+                <path d="M18 70c18-26 46-26 64 0M20 70c14 14 46 14 60 0M50 22v56M34 38c10-8 22-8 32 0M30 50c13-10 27-10 40 0" />
+              </svg>
+            </div>
+            <div class="mural-card">
+              <svg viewBox="0 0 100 100" aria-hidden="true">
+                <path d="M20 78h60M28 72c8-22 36-22 44 0M31 55c8-12 30-12 38 0M50 18v54M42 27h16M35 38h30" />
+              </svg>
+            </div>
+          </div>
         </div>
 
-        <input id="importFile" class="hidden-file" type="file" accept="application/json,.json">
+        <aside class="terminal" aria-label="Agent terminal">
+          <div class="terminal-top">
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+          </div>
+          <pre id="agentTerminal"></pre>
+        </aside>
       </div>
     </section>
 
-    <section class="panel">
-      <div class="panel-title">إضافة أو تحديث مفتاح</div>
-      <div class="panel-body">
-        <table class="add-table">
-          <tr>
-            <td style="width:32%">
-              <label for="newKey">المفتاح</label>
-              <input id="newKey" type="text" placeholder="example:key">
-            </td>
-            <td>
-              <label for="newValue">القيمة</label>
-              <textarea id="newValue" placeholder='{"style":"classic","year":2011}'></textarea>
-            </td>
-            <td style="width:130px">
-              <label>&nbsp;</label>
-              <button id="saveNewBtn" class="green" style="width:100%">حفظ</button>
-            </td>
-          </tr>
-        </table>
-      </div>
-    </section>
+    <section class="toolbar" aria-label="أدوات البحث والتحكم">
+      <input id="searchInput" type="search" placeholder="ابحث في المفاتيح، القيم، الأنواع، التحذيرات..." autocomplete="off" />
 
-    <section class="panel">
-      <div class="panel-title">خريطة المفاتيح</div>
-      <div class="panel-body">
-        <div id="keyMap" class="map">—</div>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-title">سجل التغييرات</div>
-      <div class="panel-body">
-        <div class="action-row" style="margin-bottom:8px">
-          <button id="clearLogBtn">مسح السجل</button>
-        </div>
-        <div id="log" class="log"></div>
-      </div>
-    </section>
-
-    <section id="cards" class="cards"></section>
-
-    <div class="pager">
-      <button id="prevPage">السابق</button>
-      <span id="pageInfo">صفحة 1 / 1</span>
-      <button id="nextPage">التالي</button>
-      <select id="perPage">
-        <option value="10">10 لكل صفحة</option>
-        <option value="20" selected>20 لكل صفحة</option>
-        <option value="40">40 لكل صفحة</option>
-        <option value="80">80 لكل صفحة</option>
+      <select id="typeFilter" title="فلترة حسب النوع">
+        <option value="all">كل الأنواع</option>
+        <option value="object">Object</option>
+        <option value="array">Array</option>
+        <option value="string">String</option>
+        <option value="number">Number</option>
+        <option value="boolean">Boolean</option>
+        <option value="empty">Empty</option>
+        <option value="null">Null</option>
+        <option value="favorite">المفضلة</option>
+        <option value="warning">تحذيرات</option>
       </select>
-    </div>
+
+      <select id="namespaceFilter" title="فلترة حسب المجموعة">
+        <option value="all">كل المجموعات</option>
+      </select>
+
+      <select id="sortMode" title="ترتيب">
+        <option value="key-asc">A → Z</option>
+        <option value="key-desc">Z → A</option>
+        <option value="size-desc">الأكبر أولاً</option>
+        <option value="size-asc">الأصغر أولاً</option>
+        <option value="type">حسب النوع</option>
+        <option value="warning">التحذيرات أولاً</option>
+      </select>
+
+      <button id="refreshBtn" type="button">تحديث</button>
+      <button id="expandBtn" class="secondary" type="button">فتح الكل</button>
+      <button id="collapseBtn" class="secondary" type="button">إغلاق الكل</button>
+      <button id="paletteBtn" class="secondary" type="button">⌘ أوامر</button>
+    </section>
+
+    <section class="stats" aria-label="إحصائيات التخزين">
+      <div class="stat"><strong id="shownStat">0</strong><span>العناصر الظاهرة</span></div>
+      <div class="stat"><strong id="totalStat">0</strong><span>إجمالي العناصر</span></div>
+      <div class="stat"><strong id="sizeStat">0 B</strong><span>حجم النتائج</span></div>
+      <div class="stat"><strong id="jsonStat">0</strong><span>JSON مقروء</span></div>
+      <div class="stat"><strong id="warningStat">0</strong><span>تحذيرات حساسة</span></div>
+      <div class="stat"><strong id="healthStat">—</strong><span>صحة التخزين</span></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>🧰 أدوات أساسية وثورية. كلمة ثورية هنا تحت المراقبة</h2>
+        <div class="panel-actions">
+          <button id="copyAllBtn" class="secondary" type="button">نسخ الكل</button>
+          <button id="exportBtn" class="secondary" type="button">تصدير JSON</button>
+          <button id="importBtn" class="secondary" type="button">استيراد JSON</button>
+          <button id="snapshotBtn" class="secondary" type="button">مقارنة لقطة</button>
+          <button id="watchBtn" class="ok" type="button">تشغيل live</button>
+          <button id="perfBtn" class="secondary" type="button">وضع الأداء</button>
+          <button id="themeBtn" class="secondary" type="button">ليل/نهار</button>
+        </div>
+      </div>
+
+      <div class="panel-body">
+        <div class="add-grid">
+          <input id="newKey" type="text" placeholder="اسم مفتاح جديد" />
+          <textarea id="newValue" placeholder='القيمة. مثال: {"hero":"samurai","rank":7}'></textarea>
+          <button id="addBtn" class="ok" type="button">إضافة/تحديث</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>✨ 24 ميزة مدمجة</h2>
+      </div>
+      <div class="panel-body">
+        <div class="feature-grid">
+          <div class="feature"><strong>1. PS5 safe mode</strong>يشتغل تلقائياً للأجهزة الضعيفة.</div>
+          <div class="feature"><strong>2. Lazy cards</strong>لا يبني التفاصيل إلا عند فتح البطاقة.</div>
+          <div class="feature"><strong>3. Batch rendering</strong>يعرض دفعات بدل شلال DOM.</div>
+          <div class="feature"><strong>4. JSON tree</strong>شجرة قابلة للفتح والإغلاق.</div>
+          <div class="feature"><strong>5. تعديل مباشر</strong>تغيير القيمة من الصفحة.</div>
+          <div class="feature"><strong>6. استيراد</strong>إدخال JSON إلى التخزين.</div>
+          <div class="feature"><strong>7. تصدير</strong>تحميل نسخة كاملة.</div>
+          <div class="feature"><strong>8. Live watch</strong>يرصد التغييرات كل ثانية.</div>
+          <div class="feature"><strong>9. Snapshot diff</strong>مقارنة لقطة سابقة.</div>
+          <div class="feature"><strong>10. تحذير أسرار</strong>token/password/session/JWT.</div>
+          <div class="feature"><strong>11. Mask sensitive</strong>إخفاء القيم الحساسة.</div>
+          <div class="feature"><strong>12. Favorites</strong>تثبيت مفاتيح مهمة.</div>
+          <div class="feature"><strong>13. Namespace filter</strong>تجميع حسب بادئة المفتاح.</div>
+          <div class="feature"><strong>14. Command palette</strong>أوامر سريعة من لوحة واحدة.</div>
+          <div class="feature"><strong>15. Health meter</strong>مؤشر استخدام التخزين.</div>
+          <div class="feature"><strong>16. Greek mural</strong>رسومات تاريخية داخل التصميم.</div>
+          <div class="feature"><strong>17. Sakura world</strong>أنميشن ياباني حي.</div>
+          <div class="feature"><strong>18. Hermes terminal</strong>لوحة agent/ASCII.</div>
+          <div class="feature"><strong>19. Meta view</strong>معلومات تقنية لكل مفتاح.</div>
+          <div class="feature"><strong>20. Copy tools</strong>نسخ المفتاح، القيمة، أو entry.</div>
+          <div class="feature"><strong>21. Delete safe</strong>تأكيد قبل الحذف.</div>
+          <div class="feature"><strong>22. Type filters</strong>فلترة حسب نوع القيمة.</div>
+          <div class="feature"><strong>23. Sorting</strong>ترتيب حسب الحجم، الاسم، النوع.</div>
+          <div class="feature"><strong>24. Reduced motion</strong>يحترم إعداد تقليل الحركة.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>🧾 سجل التغييرات</h2>
+        <div class="panel-actions">
+          <button id="maskBtn" class="secondary" type="button">إخفاء الحساس</button>
+          <button id="clearLogBtn" class="secondary" type="button">مسح السجل</button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div id="changeLog" class="log">
+          <div class="empty">لا توجد تغييرات بعد. الهدوء حالة نادرة، لا نثق بها.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="cards" class="cards" aria-live="polite"></section>
+    <div id="loadMoreWrap" class="load-more"></div>
+
+    <input id="importFile" class="hidden-file" type="file" accept="application/json,.json" />
   </main>
 
-  <div id="toast" class="toast"></div>
+  <section id="palette" class="palette" aria-label="لوحة الأوامر">
+    <div class="palette-card">
+      <input id="paletteSearch" type="search" placeholder="اكتب أمر: export, import, perf, theme, watch..." />
+      <div id="paletteCommands" class="palette-grid"></div>
+    </div>
+  </section>
+
+  <div id="toast" class="toast" role="status"></div>
 
   <script>
-    (function () {
-      var d = document;
-      var root = d.documentElement;
+    const $ = (selector, parent = document) => parent.querySelector(selector);
+    const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 
-      var state = {
-        items: [],
-        filtered: [],
-        open: {},
-        view: {},
-        page: 1,
-        perPage: 20,
-        baseline: {},
-        watchTimer: null,
-        log: [],
-        lastDeleted: null,
-        redact: false,
-        favorites: loadSessionJson("sakuraLedgerFavorites", {}),
-        lowPower: false,
-        motionOff: false,
-        searchTimer: null
+    const INTERNAL_KEY = "__sakura_hermes_storage_oracle_prefs";
+    const PS_USER_AGENT = /playstation|ps4|ps5/i.test(navigator.userAgent);
+    const LOW_HARDWARE =
+      (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
+      (navigator.deviceMemory && navigator.deviceMemory <= 2);
+
+    const els = {
+      agentTerminal: $("#agentTerminal"),
+      searchInput: $("#searchInput"),
+      typeFilter: $("#typeFilter"),
+      namespaceFilter: $("#namespaceFilter"),
+      sortMode: $("#sortMode"),
+      refreshBtn: $("#refreshBtn"),
+      expandBtn: $("#expandBtn"),
+      collapseBtn: $("#collapseBtn"),
+      paletteBtn: $("#paletteBtn"),
+      shownStat: $("#shownStat"),
+      totalStat: $("#totalStat"),
+      sizeStat: $("#sizeStat"),
+      jsonStat: $("#jsonStat"),
+      warningStat: $("#warningStat"),
+      healthStat: $("#healthStat"),
+      copyAllBtn: $("#copyAllBtn"),
+      exportBtn: $("#exportBtn"),
+      importBtn: $("#importBtn"),
+      importFile: $("#importFile"),
+      snapshotBtn: $("#snapshotBtn"),
+      watchBtn: $("#watchBtn"),
+      perfBtn: $("#perfBtn"),
+      themeBtn: $("#themeBtn"),
+      newKey: $("#newKey"),
+      newValue: $("#newValue"),
+      addBtn: $("#addBtn"),
+      maskBtn: $("#maskBtn"),
+      clearLogBtn: $("#clearLogBtn"),
+      changeLog: $("#changeLog"),
+      cards: $("#cards"),
+      loadMoreWrap: $("#loadMoreWrap"),
+      toast: $("#toast"),
+      palette: $("#palette"),
+      paletteSearch: $("#paletteSearch"),
+      paletteCommands: $("#paletteCommands")
+    };
+
+    const state = {
+      items: [],
+      visibleItems: [],
+      renderLimit: PS_USER_AGENT || LOW_HARDWARE ? 24 : 60,
+      batchSize: PS_USER_AGENT || LOW_HARDWARE ? 24 : 60,
+      baseline: {},
+      watchTimer: null,
+      log: [],
+      maskSensitive: false,
+      prefs: {
+        theme: "day",
+        perfLite: PS_USER_AGENT || LOW_HARDWARE,
+        favorites: []
+      }
+    };
+
+    const commands = [
+      { id: "refresh", label: "تحديث التخزين", run: refreshStorage },
+      { id: "export", label: "تصدير JSON", run: exportAll },
+      { id: "import", label: "استيراد JSON", run: () => els.importFile.click() },
+      { id: "copy", label: "نسخ كل localStorage", run: copyAll },
+      { id: "watch", label: "تشغيل/إيقاف live watch", run: toggleWatch },
+      { id: "snapshot", label: "مقارنة مع لقطة سابقة", run: compareWithBaseline },
+      { id: "perf", label: "تشغيل/إيقاف وضع الأداء", run: togglePerf },
+      { id: "theme", label: "تبديل الليل والنهار", run: toggleTheme },
+      { id: "expand", label: "فتح كل البطاقات المعروضة", run: expandAll },
+      { id: "collapse", label: "إغلاق كل البطاقات", run: collapseAll },
+      { id: "mask", label: "إخفاء/إظهار القيم الحساسة", run: toggleMask },
+      { id: "clear", label: "مسح سجل التغييرات", run: clearLog }
+    ];
+
+    function loadPrefs() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(INTERNAL_KEY) || "{}");
+        state.prefs = {
+          ...state.prefs,
+          ...saved,
+          favorites: Array.isArray(saved.favorites) ? saved.favorites : []
+        };
+      } catch {
+        savePrefs();
+      }
+
+      document.documentElement.dataset.theme = state.prefs.theme;
+      document.documentElement.dataset.perf = state.prefs.perfLite ? "lite" : "full";
+    }
+
+    function savePrefs() {
+      localStorage.setItem(INTERNAL_KEY, JSON.stringify(state.prefs));
+    }
+
+    function toast(message) {
+      els.toast.textContent = message;
+      els.toast.classList.add("show");
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => els.toast.classList.remove("show"), 1800);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function highlight(text, query) {
+      const safe = escapeHtml(text);
+      if (!query) return safe;
+      const pattern = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return safe.replace(new RegExp(pattern, "gi"), match => `<mark>${match}</mark>`);
+    }
+
+    function approxBytes(value) {
+      return new Blob([String(value ?? "")]).size;
+    }
+
+    function bytesToHuman(bytes) {
+      const units = ["B", "KB", "MB", "GB"];
+      let size = bytes;
+      let index = 0;
+
+      while (size >= 1024 && index < units.length - 1) {
+        size /= 1024;
+        index += 1;
+      }
+
+      return `${size.toFixed(index === 0 ? 0 : 2)} ${units[index]}`;
+    }
+
+    function tryParseJson(value) {
+      if (typeof value !== "string") return { ok: false, parsed: null };
+      const trimmed = value.trim();
+      if (!trimmed) return { ok: false, parsed: null };
+
+      const first = trimmed[0];
+      const possibleJsonStart = ["{", "[", "\"", "t", "f", "n", "-", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+
+      if (!possibleJsonStart.includes(first)) return { ok: false, parsed: null };
+
+      try {
+        return { ok: true, parsed: JSON.parse(trimmed) };
+      } catch {
+        return { ok: false, parsed: null };
+      }
+    }
+
+    function detectType(value) {
+      const trimmed = String(value ?? "").trim();
+
+      if (trimmed === "") return "empty";
+      if (trimmed === "true" || trimmed === "false") return "boolean";
+      if (!Number.isNaN(Number(trimmed)) && trimmed !== "") return "number";
+
+      const json = tryParseJson(trimmed);
+
+      if (json.ok) {
+        if (Array.isArray(json.parsed)) return "array";
+        if (json.parsed === null) return "null";
+        return typeof json.parsed;
+      }
+
+      return "string";
+    }
+
+    function detectNamespace(key) {
+      const parts = String(key).split(/[:._\-\/]/).filter(Boolean);
+      return parts[0] || "root";
+    }
+
+    function detectWarnings(key, value) {
+      const joined = `${key} ${value}`.toLowerCase();
+      const warnings = [];
+
+      if (/(token|jwt|secret|password|passwd|auth|bearer|session|cookie|credential|api[_-]?key)/i.test(joined)) {
+        warnings.push("sensitive");
+      }
+
+      if (/^eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\./.test(String(value))) {
+        warnings.push("jwt-like");
+      }
+
+      if (String(value).length > 8000) {
+        warnings.push("large");
+      }
+
+      return warnings;
+    }
+
+    function maskValue(value) {
+      const text = String(value ?? "");
+      if (text.length <= 10) return "••••••";
+      return `${text.slice(0, 4)}••••••${text.slice(-4)}`;
+    }
+
+    function makeItem(key, value) {
+      const json = tryParseJson(value);
+      const type = detectType(value);
+      const pretty = json.ok ? JSON.stringify(json.parsed, null, 2) : String(value ?? "");
+      const warnings = detectWarnings(key, value);
+
+      return {
+        key,
+        value,
+        type,
+        jsonOk: json.ok,
+        parsed: json.parsed,
+        pretty,
+        namespace: detectNamespace(key),
+        size: approxBytes(key) + approxBytes(value),
+        warnings,
+        favorite: state.prefs.favorites.includes(key)
+      };
+    }
+
+    function readStorage() {
+      const items = [];
+
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+
+        if (!key) continue;
+        if (key === INTERNAL_KEY) continue;
+
+        items.push(makeItem(key, localStorage.getItem(key)));
+      }
+
+      return items;
+    }
+
+    function snapshotObject(items = state.items) {
+      return Object.fromEntries(items.map(item => [item.key, item.value]));
+    }
+
+    function updateNamespaceFilter() {
+      const current = els.namespaceFilter.value;
+      const namespaces = [...new Set(state.items.map(item => item.namespace))].sort((a, b) => a.localeCompare(b));
+
+      els.namespaceFilter.innerHTML = `<option value="all">كل المجموعات</option>`;
+
+      for (const namespace of namespaces) {
+        const option = document.createElement("option");
+        option.value = namespace;
+        option.textContent = namespace;
+        els.namespaceFilter.appendChild(option);
+      }
+
+      els.namespaceFilter.value = namespaces.includes(current) ? current : "all";
+    }
+
+    function applyFilters() {
+      const query = els.searchInput.value.trim().toLowerCase();
+      const type = els.typeFilter.value;
+      const namespace = els.namespaceFilter.value;
+
+      let items = state.items.filter(item => {
+        const valueForSearch = String(item.value ?? "");
+        const matchesQuery =
+          !query ||
+          item.key.toLowerCase().includes(query) ||
+          valueForSearch.toLowerCase().includes(query) ||
+          item.type.toLowerCase().includes(query) ||
+          item.namespace.toLowerCase().includes(query) ||
+          item.warnings.join(" ").toLowerCase().includes(query);
+
+        const matchesType =
+          type === "all" ||
+          item.type === type ||
+          (type === "favorite" && item.favorite) ||
+          (type === "warning" && item.warnings.length > 0);
+
+        const matchesNamespace = namespace === "all" || item.namespace === namespace;
+
+        return matchesQuery && matchesType && matchesNamespace;
+      });
+
+      const mode = els.sortMode.value;
+      const byKey = (a, b) => a.key.localeCompare(b.key);
+      const bySize = (a, b) => a.size - b.size;
+
+      if (mode === "key-asc") items.sort(byKey);
+      if (mode === "key-desc") items.sort((a, b) => byKey(b, a));
+      if (mode === "size-asc") items.sort(bySize);
+      if (mode === "size-desc") items.sort((a, b) => bySize(b, a));
+      if (mode === "type") items.sort((a, b) => a.type.localeCompare(b.type) || byKey(a, b));
+      if (mode === "warning") items.sort((a, b) => b.warnings.length - a.warnings.length || byKey(a, b));
+
+      state.visibleItems = items;
+    }
+
+    async function updateHealthStat() {
+      const visibleBytes = state.visibleItems.reduce((sum, item) => sum + item.size, 0);
+
+      if (!navigator.storage || !navigator.storage.estimate) {
+        els.healthStat.textContent = bytesToHuman(visibleBytes);
+        return;
+      }
+
+      try {
+        const estimate = await navigator.storage.estimate();
+        const usage = estimate.usage || 0;
+        const quota = estimate.quota || 0;
+
+        if (!quota) {
+          els.healthStat.textContent = bytesToHuman(visibleBytes);
+          return;
+        }
+
+        const percent = Math.min(100, Math.round((usage / quota) * 100));
+        els.healthStat.textContent = `${percent}%`;
+      } catch {
+        els.healthStat.textContent = bytesToHuman(visibleBytes);
+      }
+    }
+
+    function updateStats() {
+      els.shownStat.textContent = state.visibleItems.length;
+      els.totalStat.textContent = state.items.length;
+      els.sizeStat.textContent = bytesToHuman(state.visibleItems.reduce((sum, item) => sum + item.size, 0));
+      els.jsonStat.textContent = state.items.filter(item => item.jsonOk).length;
+      els.warningStat.textContent = state.items.filter(item => item.warnings.length > 0).length;
+      updateHealthStat();
+    }
+
+    function renderCards() {
+      applyFilters();
+      updateStats();
+
+      const query = els.searchInput.value.trim();
+      const itemsToRender = state.visibleItems.slice(0, state.renderLimit);
+
+      els.cards.replaceChildren();
+      els.loadMoreWrap.replaceChildren();
+
+      if (itemsToRender.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = query
+          ? "لا توجد نتائج مطابقة. التخزين لم يتعاون."
+          : "لا توجد بيانات في localStorage لهذا الـ origin.";
+        els.cards.appendChild(empty);
+        return;
+      }
+
+      const fragment = document.createDocumentFragment();
+
+      for (const item of itemsToRender) {
+        fragment.appendChild(createCardShell(item, query));
+      }
+
+      els.cards.appendChild(fragment);
+
+      if (state.visibleItems.length > state.renderLimit) {
+        const button = document.createElement("button");
+        button.className = "secondary";
+        button.type = "button";
+        button.textContent = `عرض المزيد (${state.visibleItems.length - state.renderLimit})`;
+        button.addEventListener("click", () => {
+          state.renderLimit += state.batchSize;
+          renderCards();
+        });
+        els.loadMoreWrap.appendChild(button);
+      }
+    }
+
+    function createCardShell(item, query) {
+      const card = document.createElement("details");
+      card.className = "card";
+      card.dataset.key = encodeURIComponent(item.key);
+
+      const previewValue = state.maskSensitive && item.warnings.length > 0
+        ? maskValue(item.value)
+        : String(item.value ?? "");
+
+      const warningBadges = item.warnings.map(warning => `<span class="badge warn">⚠ ${escapeHtml(warning)}</span>`).join("");
+
+      card.innerHTML = `
+        <summary>
+          <div>
+            <div class="key-row">
+              <span class="chev">⌃</span>
+              <button class="star ${item.favorite ? "active" : ""}" type="button" data-action="favorite" title="تثبيت">★</button>
+              <span class="key">${highlight(item.key, query)}</span>
+            </div>
+            <div class="preview">${escapeHtml(previewValue).slice(0, 190)}${previewValue.length > 190 ? "…" : ""}</div>
+          </div>
+
+          <div class="badges">
+            <span class="badge">${escapeHtml(item.namespace)}</span>
+            <span class="badge ${item.jsonOk ? "json" : ""}">${escapeHtml(item.type)}</span>
+            <span class="badge">${bytesToHuman(item.size)}</span>
+            ${item.jsonOk ? '<span class="badge json">JSON</span>' : ""}
+            ${item.favorite ? '<span class="badge good">Pinned</span>' : ""}
+            ${warningBadges}
+          </div>
+        </summary>
+      `;
+
+      card.addEventListener("toggle", () => {
+        if (card.open && !card.dataset.hydrated) {
+          hydrateCard(card, item);
+          card.dataset.hydrated = "true";
+        }
+      });
+
+      return card;
+    }
+
+    function hydrateCard(card, item) {
+      const query = els.searchInput.value.trim();
+      const displayValue = state.maskSensitive && item.warnings.length > 0
+        ? maskValue(item.value)
+        : item.value;
+
+      const body = document.createElement("div");
+      body.className = "card-body";
+
+      body.innerHTML = `
+        <div class="card-actions">
+          <button class="secondary" type="button" data-action="copy-key">نسخ المفتاح</button>
+          <button class="secondary" type="button" data-action="copy-value">نسخ القيمة</button>
+          <button class="secondary" type="button" data-action="copy-entry">نسخ entry</button>
+          <button class="secondary" type="button" data-action="duplicate">نسخ كمفتاح جديد</button>
+          <button class="danger" type="button" data-action="delete">حذف</button>
+        </div>
+
+        <div class="tabs">
+          <button class="tab active" type="button" data-tab="pretty">عرض</button>
+          <button class="tab" type="button" data-tab="tree">شجرة</button>
+          <button class="tab" type="button" data-tab="edit">تعديل</button>
+          <button class="tab" type="button" data-tab="diff">Diff</button>
+          <button class="tab" type="button" data-tab="meta">Meta</button>
+        </div>
+
+        <div class="view view-pretty active">
+          <pre class="raw">${highlight(item.jsonOk ? item.pretty : displayValue, query)}</pre>
+        </div>
+
+        <div class="view view-tree">
+          <div class="tree-box"></div>
+        </div>
+
+        <div class="view view-edit">
+          <textarea data-editor>${escapeHtml(item.value ?? "")}</textarea>
+          <button class="ok" type="button" data-action="save">حفظ القيمة</button>
+        </div>
+
+        <div class="view view-diff">
+          <pre class="raw">${escapeHtml(renderItemDiff(item))}</pre>
+        </div>
+
+        <div class="view view-meta">
+          <pre class="meta-box">${escapeHtml(JSON.stringify({
+            key: item.key,
+            namespace: item.namespace,
+            type: item.type,
+            jsonReadable: item.jsonOk,
+            approxSize: bytesToHuman(item.size),
+            warnings: item.warnings,
+            origin: location.origin,
+            path: location.pathname,
+            browser: navigator.userAgent,
+            performanceMode: document.documentElement.dataset.perf
+          }, null, 2))}</pre>
+        </div>
+      `;
+
+      const treeBox = $(".tree-box", body);
+
+      if (item.jsonOk) {
+        treeBox.appendChild(makeTree(item.parsed));
+      } else {
+        treeBox.innerHTML = `<div class="empty">ليست JSON قابلة للشجرة. مجرد string. مؤسف، لكنه قانوني.</div>`;
+      }
+
+      card.appendChild(body);
+    }
+
+    function makeTree(value) {
+      const root = document.createElement("div");
+      root.className = "tree-node";
+
+      const maxNodes = document.documentElement.dataset.perf === "lite" ? 180 : 700;
+      const maxDepth = document.documentElement.dataset.perf === "lite" ? 7 : 12;
+      let count = 0;
+
+      function walk(node, keyName = "root", depth = 0) {
+        count += 1;
+
+        const row = document.createElement("div");
+        row.className = "tree-row";
+
+        if (count > maxNodes) {
+          row.innerHTML = `<span class="tree-value">تم اختصار الشجرة لحماية الأداء.</span>`;
+          return row;
+        }
+
+        if (depth > maxDepth) {
+          row.innerHTML = `<span class="tree-key">${escapeHtml(keyName)}</span>: <span class="tree-value">[max depth]</span>`;
+          return row;
+        }
+
+        const isArray = Array.isArray(node);
+        const isObject = node && typeof node === "object" && !isArray;
+
+        if (isArray || isObject) {
+          const details = document.createElement("details");
+          details.open = depth < 2;
+
+          const size = isArray ? node.length : Object.keys(node).length;
+          const summary = document.createElement("summary");
+          summary.innerHTML = `<span class="tree-key">${escapeHtml(keyName)}</span>: ${isArray ? "Array" : "Object"}(${size})`;
+
+          details.appendChild(summary);
+
+          const entries = isArray ? node.map((value, index) => [index, value]) : Object.entries(node);
+
+          for (const [childKey, childValue] of entries) {
+            details.appendChild(walk(childValue, childKey, depth + 1));
+          }
+
+          row.appendChild(details);
+          return row;
+        }
+
+        const formatted = typeof node === "string" ? `"${node}"` : String(node);
+        row.innerHTML = `<span class="tree-key">${escapeHtml(keyName)}</span>: <span class="tree-value">${escapeHtml(formatted)}</span>`;
+        return row;
+      }
+
+      root.appendChild(walk(value));
+      return root;
+    }
+
+    function renderItemDiff(item) {
+      const oldValue = state.baseline[item.key];
+
+      if (oldValue === undefined) {
+        return `+ added: ${item.key}\n\n${item.value}`;
+      }
+
+      if (oldValue === item.value) {
+        return `لا يوجد فرق لهذا المفتاح مقارنة باللقطة الحالية.`;
+      }
+
+      return [
+        `~ changed: ${item.key}`,
+        "",
+        "--- previous",
+        String(oldValue).slice(0, 5000),
+        "",
+        "+++ current",
+        String(item.value).slice(0, 5000)
+      ].join("\n");
+    }
+
+    function refreshStorage() {
+      state.items = readStorage();
+      updateNamespaceFilter();
+      state.renderLimit = state.batchSize;
+      renderCards();
+      renderTerminal();
+    }
+
+    function renderTerminal() {
+      const total = state.items.length;
+      const json = state.items.filter(item => item.jsonOk).length;
+      const warnings = state.items.filter(item => item.warnings.length > 0).length;
+      const perf = document.documentElement.dataset.perf === "lite" ? "lite" : "full";
+
+      els.agentTerminal.innerHTML = [
+        `<span class="green">$ oracle scan --origin ${escapeHtml(location.origin)}</span>`,
+        `<span class="gold">storage.items</span> = ${total}`,
+        `<span class="gold">json.readable</span> = ${json}`,
+        `<span class="${warnings ? "red" : "green"}">warnings</span> = ${warnings}`,
+        `<span class="gold">render.mode</span> = ${perf}`,
+        "",
+        "/\\-_=+|< -/= ~:*-/",
+        "",
+        "agent: ready",
+        "note: localStorage is scoped by origin, not path."
+      ].join("\n");
+    }
+
+    function renderLog() {
+      els.changeLog.replaceChildren();
+
+      if (state.log.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "لا توجد تغييرات بعد. الهدوء حالة نادرة، لا نثق بها.";
+        els.changeLog.appendChild(empty);
+        return;
+      }
+
+      for (const entry of state.log.slice(0, 60)) {
+        const row = document.createElement("div");
+        row.className = "log-item";
+        row.innerHTML = `
+          <span><strong>${escapeHtml(entry.type)}</strong> — ${escapeHtml(entry.key)}</span>
+          <span>${escapeHtml(entry.time)}</span>
+        `;
+        els.changeLog.appendChild(row);
+      }
+    }
+
+    function logChange(type, key) {
+      state.log.unshift({
+        type,
+        key,
+        time: new Date().toLocaleTimeString("ar-SA", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        })
+      });
+
+      renderLog();
+    }
+
+    async function safeCopy(text) {
+      try {
+        await navigator.clipboard.writeText(String(text ?? ""));
+      } catch {
+        const area = document.createElement("textarea");
+        area.value = String(text ?? "");
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        area.remove();
+      }
+    }
+
+    function download(filename, text) {
+      const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+
+      URL.revokeObjectURL(url);
+    }
+
+    async function copyAll() {
+      await safeCopy(JSON.stringify(snapshotObject(), null, 2));
+      toast("تم نسخ كل التخزين");
+    }
+
+    function exportAll() {
+      const stamp = new Date().toISOString().replaceAll(":", "-");
+      download(`localstorage-${location.hostname}-${stamp}.json`, JSON.stringify(snapshotObject(), null, 2));
+      toast("تم تصدير JSON");
+    }
+
+    function importJsonFile(file) {
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(String(reader.result));
+
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            toast("ملف JSON يجب أن يكون object");
+            return;
+          }
+
+          const entries = Object.entries(parsed);
+
+          for (const [key, value] of entries) {
+            localStorage.setItem(key, typeof value === "string" ? value : JSON.stringify(value));
+            logChange("import", key);
+          }
+
+          refreshStorage();
+          toast(`تم استيراد ${entries.length} عنصر`);
+        } catch {
+          toast("ملف JSON غير صالح");
+        }
       };
 
-      var el = {
-        search: byId("search"),
-        typeFilter: byId("typeFilter"),
-        namespaceFilter: byId("namespaceFilter"),
-        sortMode: byId("sortMode"),
-        eraMode: byId("eraMode"),
-        refreshBtn: byId("refreshBtn"),
-        expandBtn: byId("expandBtn"),
-        collapseBtn: byId("collapseBtn"),
-        shownStat: byId("shownStat"),
-        totalStat: byId("totalStat"),
-        sizeStat: byId("sizeStat"),
-        jsonStat: byId("jsonStat"),
-        perfStat: byId("perfStat"),
-        originStat: byId("originStat"),
-        featureGrid: byId("featureGrid"),
-        copyAllBtn: byId("copyAllBtn"),
-        exportBtn: byId("exportBtn"),
-        importBtn: byId("importBtn"),
-        importFile: byId("importFile"),
-        snapshotBtn: byId("snapshotBtn"),
-        diffBtn: byId("diffBtn"),
-        watchBtn: byId("watchBtn"),
-        undoBtn: byId("undoBtn"),
-        redactBtn: byId("redactBtn"),
-        themeBtn: byId("themeBtn"),
-        motionBtn: byId("motionBtn"),
-        powerBtn: byId("powerBtn"),
-        newKey: byId("newKey"),
-        newValue: byId("newValue"),
-        saveNewBtn: byId("saveNewBtn"),
-        keyMap: byId("keyMap"),
-        clearLogBtn: byId("clearLogBtn"),
-        log: byId("log"),
-        cards: byId("cards"),
-        prevPage: byId("prevPage"),
-        nextPage: byId("nextPage"),
-        pageInfo: byId("pageInfo"),
-        perPage: byId("perPage"),
-        toast: byId("toast"),
-        topbar: byId("topbar")
+      reader.readAsText(file);
+    }
+
+    function addOrUpdateKey() {
+      const key = els.newKey.value.trim();
+
+      if (!key) {
+        toast("اكتب اسم المفتاح أولاً");
+        return;
+      }
+
+      localStorage.setItem(key, els.newValue.value);
+      logChange("set", key);
+
+      els.newKey.value = "";
+      els.newValue.value = "";
+
+      refreshStorage();
+      toast("تمت الإضافة أو التحديث");
+    }
+
+    function diffSnapshots(previous, current) {
+      const changes = [];
+      const keys = new Set([...Object.keys(previous), ...Object.keys(current)]);
+
+      for (const key of keys) {
+        if (!(key in previous)) changes.push({ type: "added", key });
+        else if (!(key in current)) changes.push({ type: "removed", key });
+        else if (previous[key] !== current[key]) changes.push({ type: "changed", key });
+      }
+
+      return changes;
+    }
+
+    function compareWithBaseline() {
+      const current = snapshotObject(readStorage());
+      const changes = diffSnapshots(state.baseline, current);
+
+      if (changes.length === 0) {
+        toast("لا توجد تغييرات مقارنة باللقطة");
+        return;
+      }
+
+      for (const change of changes) {
+        logChange(change.type, change.key);
+      }
+
+      state.baseline = current;
+      refreshStorage();
+      toast(`تم رصد ${changes.length} تغيير`);
+    }
+
+    function toggleWatch() {
+      if (state.watchTimer) {
+        clearInterval(state.watchTimer);
+        state.watchTimer = null;
+        els.watchBtn.textContent = "تشغيل live";
+        toast("تم إيقاف live watch");
+        return;
+      }
+
+      state.baseline = snapshotObject(readStorage());
+
+      state.watchTimer = setInterval(() => {
+        const current = snapshotObject(readStorage());
+        const changes = diffSnapshots(state.baseline, current);
+
+        if (changes.length > 0) {
+          for (const change of changes) logChange(change.type, change.key);
+          state.baseline = current;
+          refreshStorage();
+        }
+      }, document.documentElement.dataset.perf === "lite" ? 1500 : 850);
+
+      els.watchBtn.textContent = "إيقاف live";
+      toast("تم تشغيل live watch");
+    }
+
+    function togglePerf() {
+      state.prefs.perfLite = !state.prefs.perfLite;
+      document.documentElement.dataset.perf = state.prefs.perfLite ? "lite" : "full";
+      state.batchSize = state.prefs.perfLite ? 24 : 60;
+      state.renderLimit = state.batchSize;
+      savePrefs();
+      refreshStorage();
+      toast(state.prefs.perfLite ? "تم تشغيل وضع الأداء" : "تم إيقاف وضع الأداء");
+    }
+
+    function toggleTheme() {
+      state.prefs.theme = state.prefs.theme === "night" ? "day" : "night";
+      document.documentElement.dataset.theme = state.prefs.theme;
+      savePrefs();
+      toast(`الوضع: ${state.prefs.theme}`);
+    }
+
+    function toggleMask() {
+      state.maskSensitive = !state.maskSensitive;
+      els.maskBtn.textContent = state.maskSensitive ? "إظهار الحساس" : "إخفاء الحساس";
+      renderCards();
+      toast(state.maskSensitive ? "تم إخفاء القيم الحساسة" : "تم إظهار القيم");
+    }
+
+    function clearLog() {
+      state.log = [];
+      renderLog();
+      toast("تم مسح السجل");
+    }
+
+    function expandAll() {
+      $$("details.card").forEach(card => {
+        card.open = true;
+      });
+    }
+
+    function collapseAll() {
+      $$("details.card").forEach(card => {
+        card.open = false;
+      });
+    }
+
+    function toggleFavorite(key) {
+      const set = new Set(state.prefs.favorites);
+
+      if (set.has(key)) set.delete(key);
+      else set.add(key);
+
+      state.prefs.favorites = [...set];
+      savePrefs();
+      refreshStorage();
+    }
+
+    function duplicateKey(key) {
+      const value = localStorage.getItem(key);
+      const newKey = `${key}__copy_${Date.now()}`;
+
+      localStorage.setItem(newKey, value ?? "");
+      logChange("duplicate", newKey);
+      refreshStorage();
+      toast("تم إنشاء نسخة");
+    }
+
+    function getCardKey(target) {
+      const card = target.closest(".card");
+      return card ? decodeURIComponent(card.dataset.key) : "";
+    }
+
+    function handleCardClick(event) {
+      const actionButton = event.target.closest("[data-action]");
+      const tabButton = event.target.closest("[data-tab]");
+
+      if (tabButton) {
+        event.preventDefault();
+
+        const body = tabButton.closest(".card-body");
+        const tab = tabButton.dataset.tab;
+
+        $$(".tab", body).forEach(button => button.classList.remove("active"));
+        $$(".view", body).forEach(view => view.classList.remove("active"));
+
+        tabButton.classList.add("active");
+        $(`.view-${tab}`, body).classList.add("active");
+        return;
+      }
+
+      if (!actionButton) return;
+
+      event.preventDefault();
+
+      const key = getCardKey(actionButton);
+      const value = localStorage.getItem(key);
+      const action = actionButton.dataset.action;
+
+      if (action === "favorite") {
+        toggleFavorite(key);
+        return;
+      }
+
+      if (action === "copy-key") {
+        safeCopy(key);
+        toast("تم نسخ المفتاح");
+        return;
+      }
+
+      if (action === "copy-value") {
+        safeCopy(value ?? "");
+        toast("تم نسخ القيمة");
+        return;
+      }
+
+      if (action === "copy-entry") {
+        safeCopy(JSON.stringify({ [key]: value }, null, 2));
+        toast("تم نسخ entry");
+        return;
+      }
+
+      if (action === "duplicate") {
+        duplicateKey(key);
+        return;
+      }
+
+      if (action === "delete") {
+        const confirmed = confirm(`حذف المفتاح؟\n\n${key}`);
+
+        if (!confirmed) return;
+
+        localStorage.removeItem(key);
+        logChange("delete", key);
+        refreshStorage();
+        toast("تم الحذف");
+        return;
+      }
+
+      if (action === "save") {
+        const card = actionButton.closest(".card");
+        const editor = $("[data-editor]", card);
+
+        localStorage.setItem(key, editor.value);
+        logChange("update", key);
+        refreshStorage();
+        toast("تم الحفظ");
+      }
+    }
+
+    function debounce(fn, delay = 180) {
+      let timer = null;
+
+      return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), delay);
       };
-
-      var features = [
-        "Accordion خفيف بدون details لتوافق أوسع",
-        "Pagination بدل رندر كل شيء مرة واحدة",
-        "Low Power Mode للمتصفحات الضعيفة",
-        "إيقاف الأنيميشن بالكامل",
-        "بحث مؤجل debounce",
-        "فلترة حسب النوع",
-        "ترتيب حسب الاسم والحجم والنوع",
-        "تجميع namespaces من أسماء المفاتيح",
-        "JSON Tree بدون مكتبات",
-        "Raw View للقيمة الأصلية",
-        "Editor مباشر لكل مفتاح",
-        "تنسيق JSON داخل المحرر",
-        "تحقق JSON سريع",
-        "نسخ مفتاح أو قيمة أو عنصر",
-        "حذف مفتاح مع تراجع",
-        "إضافة أو تحديث مفتاح جديد",
-        "تصدير كامل كـ JSON",
-        "استيراد JSON ودمجه",
-        "Snapshot baseline",
-        "Diff بين اللقطة والحالة الحالية",
-        "Live Watch للتغييرات",
-        "سجل تغييرات داخلي",
-        "تحذير كلمات حساسة",
-        "ستر القيم الحساسة بصرياً",
-        "خريطة مفاتيح صغيرة",
-        "مفضلة للمفاتيح المهمة",
-        "ثيم نهار/ليل",
-        "ستايل 2008/2011",
-        "مؤشر أداء تقريبي",
-        "لا اتصال خارجي ولا صور خارجية"
-      ];
-
-      init();
-
-      function init() {
-        autoLowPower();
-        renderFeatures();
-        wireEvents();
-        setTheme(loadSession("sakuraLedgerTheme", "day"));
-        setEra(loadSession("sakuraLedgerEra", "2011"));
-        refresh();
-        state.baseline = makeSnapshot(readStorage());
-        log("boot", "Sakura Ledger initialized");
-      }
-
-      function byId(id) {
-        return d.getElementById(id);
-      }
-
-      function html(s) {
-        return String(s == null ? "" : s)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#039;");
-      }
-
-      function loadSession(key, fallback) {
-        try {
-          var v = sessionStorage.getItem(key);
-          return v == null ? fallback : v;
-        } catch (e) {
-          return fallback;
-        }
-      }
-
-      function saveSession(key, value) {
-        try {
-          sessionStorage.setItem(key, value);
-        } catch (e) {}
-      }
-
-      function loadSessionJson(key, fallback) {
-        try {
-          var raw = sessionStorage.getItem(key);
-          return raw ? JSON.parse(raw) : fallback;
-        } catch (e) {
-          return fallback;
-        }
-      }
-
-      function saveSessionJson(key, value) {
-        try {
-          sessionStorage.setItem(key, JSON.stringify(value));
-        } catch (e) {}
-      }
-
-      function autoLowPower() {
-        var ua = navigator.userAgent || "";
-        var weakWidth = window.innerWidth && window.innerWidth < 430;
-        var oldIos = /OS 9_|OS 10_|OS 11_/.test(ua);
-        var ps = /PlayStation|PS4|PS5/.test(ua);
-
-        if (weakWidth || oldIos || ps) {
-          state.lowPower = true;
-          root.setAttribute("data-power", "low");
-        }
-      }
-
-      function wireEvents() {
-        el.search.oninput = function () {
-          clearTimeout(state.searchTimer);
-          state.searchTimer = setTimeout(function () {
-            state.page = 1;
-            render();
-          }, 180);
-        };
-
-        el.typeFilter.onchange = resetAndRender;
-        el.namespaceFilter.onchange = resetAndRender;
-        el.sortMode.onchange = resetAndRender;
-
-        el.eraMode.onchange = function () {
-          setEra(el.eraMode.value);
-        };
-
-        el.refreshBtn.onclick = refresh;
-
-        el.expandBtn.onclick = function () {
-          var pageItems = getPageItems();
-          for (var i = 0; i < pageItems.length; i++) {
-            state.open[pageItems[i].key] = true;
-          }
-          renderCards();
-        };
-
-        el.collapseBtn.onclick = function () {
-          var pageItems = getPageItems();
-          for (var i = 0; i < pageItems.length; i++) {
-            delete state.open[pageItems[i].key];
-          }
-          renderCards();
-        };
-
-        el.copyAllBtn.onclick = function () {
-          copyText(JSON.stringify(makeSnapshot(state.items), null, 2));
-          toast("تم نسخ كل localStorage");
-        };
-
-        el.exportBtn.onclick = exportJson;
-
-        el.importBtn.onclick = function () {
-          el.importFile.click();
-        };
-
-        el.importFile.onchange = function () {
-          if (el.importFile.files && el.importFile.files[0]) {
-            importJson(el.importFile.files[0]);
-          }
-          el.importFile.value = "";
-        };
-
-        el.snapshotBtn.onclick = function () {
-          state.baseline = makeSnapshot(readStorage());
-          log("snapshot", "baseline updated");
-          toast("تم حفظ لقطة مقارنة");
-        };
-
-        el.diffBtn.onclick = function () {
-          diffNow(true);
-        };
-
-        el.watchBtn.onclick = toggleWatch;
-
-        el.undoBtn.onclick = undoDelete;
-
-        el.redactBtn.onclick = function () {
-          state.redact = !state.redact;
-          el.redactBtn.innerHTML = state.redact ? "إظهار الحساس" : "ستر الحساس";
-          renderCards();
-        };
-
-        el.themeBtn.onclick = function () {
-          var next = root.getAttribute("data-theme") === "night" ? "day" : "night";
-          setTheme(next);
-        };
-
-        el.motionBtn.onclick = function () {
-          state.motionOff = !state.motionOff;
-          root.setAttribute("data-motion", state.motionOff ? "off" : "on");
-          el.motionBtn.innerHTML = state.motionOff ? "تشغيل الحركة" : "إيقاف الحركة";
-          saveSession("sakuraLedgerMotion", state.motionOff ? "off" : "on");
-        };
-
-        el.powerBtn.onclick = function () {
-          state.lowPower = !state.lowPower;
-          root.setAttribute("data-power", state.lowPower ? "low" : "normal");
-          el.powerBtn.innerHTML = state.lowPower ? "إلغاء توفير الطاقة" : "توفير الطاقة";
-          toast(state.lowPower ? "توفير الطاقة يعمل" : "توفير الطاقة متوقف");
-        };
-
-        el.saveNewBtn.onclick = saveNewKey;
-
-        el.clearLogBtn.onclick = function () {
-          state.log = [];
-          renderLog();
-        };
-
-        el.prevPage.onclick = function () {
-          if (state.page > 1) {
-            state.page--;
-            renderCards();
-          }
-        };
-
-        el.nextPage.onclick = function () {
-          var pages = getPageCount();
-          if (state.page < pages) {
-            state.page++;
-            renderCards();
-          }
-        };
-
-        el.perPage.onchange = function () {
-          state.perPage = parseInt(el.perPage.value, 10) || 20;
-          state.page = 1;
-          renderCards();
-        };
-
-        el.cards.onclick = cardClick;
-
-        window.addEventListener("storage", function () {
-          log("external", "storage event from another tab");
-          refresh();
-        });
-      }
-
-      function resetAndRender() {
-        state.page = 1;
-        render();
-      }
-
-      function setTheme(theme) {
-        root.setAttribute("data-theme", theme);
-        saveSession("sakuraLedgerTheme", theme);
-      }
-
-      function setEra(era) {
-        root.setAttribute("data-era", era);
-        el.eraMode.value = era;
-        saveSession("sakuraLedgerEra", era);
-        el.topbar.innerHTML = "SAKURA_LEDGER://LOCALSTORAGE &nbsp; | &nbsp; NO_NETWORK_MODE=TRUE &nbsp; | &nbsp; ERA=" + html(era);
-      }
-
-      function renderFeatures() {
-        var out = "";
-        for (var i = 0; i < features.length; i++) {
-          out += '<div class="feature"><b>#' + pad(i + 1) + '</b>' + html(features[i]) + '</div>';
-        }
-        el.featureGrid.innerHTML = out;
-      }
-
-      function pad(n) {
-        return n < 10 ? "0" + n : String(n);
-      }
-
-      function refresh() {
-        var started = now();
-        state.items = readStorage();
-        renderNamespaceOptions();
-        render();
-        var elapsed = now() - started;
-        el.perfStat.innerHTML = elapsed > 120 ? "SLOW" : "OK";
-      }
-
-      function now() {
-        return Date.now ? Date.now() : new Date().getTime();
-      }
-
-      function readStorage() {
-        var arr = [];
-
-        try {
-          for (var i = 0; i < localStorage.length; i++) {
-            var key = localStorage.key(i);
-            var value = localStorage.getItem(key);
-            arr.push(makeItem(key, value));
-          }
-        } catch (e) {
-          toast("المتصفح منع قراءة localStorage");
-        }
-
-        return arr;
-      }
-
-      function makeItem(key, value) {
-        var parsed = parseValue(value);
-        var type = detectType(value, parsed);
-        var size = byteSize(key) + byteSize(value);
-
-        return {
-          key: key,
-          value: value == null ? "" : String(value),
-          parsed: parsed.value,
-          jsonOk: parsed.ok,
-          type: type,
-          size: size,
-          namespace: namespaceOf(key),
-          warnings: warningsFor(key, value),
-          favorite: !!state.favorites[key]
-        };
-      }
-
-      function parseValue(value) {
-        var raw = value == null ? "" : String(value);
-        var trim = trimText(raw);
-
-        if (!trim) {
-          return { ok: false, value: null };
-        }
-
-        try {
-          return { ok: true, value: JSON.parse(trim) };
-        } catch (e) {
-          return { ok: false, value: null };
-        }
-      }
-
-      function detectType(value, parsed) {
-        var raw = value == null ? "" : String(value);
-        var trim = trimText(raw);
-
-        if (trim === "") return "empty";
-        if (parsed.ok) {
-          if (parsed.value === null) return "null";
-          if (isArray(parsed.value)) return "array";
-          return typeof parsed.value;
-        }
-        if (trim === "true" || trim === "false") return "boolean";
-        if (!isNaN(Number(trim))) return "number";
-        return "string";
-      }
-
-      function isArray(v) {
-        return Object.prototype.toString.call(v) === "[object Array]";
-      }
-
-      function trimText(s) {
-        return String(s).replace(/^\s+|\s+$/g, "");
-      }
-
-      function byteSize(s) {
-        s = String(s == null ? "" : s);
-        try {
-          return new Blob([s]).size;
-        } catch (e) {
-          return s.length;
-        }
-      }
-
-      function prettyBytes(bytes) {
-        var units = ["B", "KB", "MB", "GB"];
-        var size = bytes;
-        var i = 0;
-        while (size >= 1024 && i < units.length - 1) {
-          size = size / 1024;
-          i++;
-        }
-        return (i === 0 ? Math.round(size) : size.toFixed(2)) + " " + units[i];
-      }
-
-      function namespaceOf(key) {
-        var k = String(key);
-        var parts = k.split(/[:._\/-]/);
-        return parts[0] || "(root)";
-      }
-
-      function warningsFor(key, value) {
-        var text = String(key + " " + value).toLowerCase();
-        var list = [];
-
-        if (/token|secret|password|passwd|session|jwt|bearer|auth|key/.test(text)) {
-          list.push("sensitive?");
-        }
-
-        if (String(value).length > 5000) {
-          list.push("large");
-        }
-
-        if (/^eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\./.test(String(value))) {
-          list.push("jwt?");
-        }
-
-        return list;
-      }
-
-      function renderNamespaceOptions() {
-        var seen = {};
-        var current = el.namespaceFilter.value || "all";
-        var out = '<option value="all">كل المجموعات</option>';
-
-        for (var i = 0; i < state.items.length; i++) {
-          seen[state.items[i].namespace] = true;
-        }
-
-        var keys = [];
-        for (var k in seen) {
-          if (seen.hasOwnProperty(k)) keys.push(k);
-        }
-
-        keys.sort();
-
-        for (var j = 0; j < keys.length; j++) {
-          out += '<option value="' + html(keys[j]) + '">' + html(keys[j]) + '</option>';
-        }
-
-        el.namespaceFilter.innerHTML = out;
-        el.namespaceFilter.value = seen[current] ? current : "all";
-      }
-
-      function render() {
-        state.filtered = filterAndSort();
-        if (state.page > getPageCount()) state.page = getPageCount();
-        renderStats();
-        renderKeyMap();
-        renderCards();
-        renderLog();
-      }
-
-      function filterAndSort() {
-        var q = trimText(el.search.value).toLowerCase();
-        var type = el.typeFilter.value;
-        var ns = el.namespaceFilter.value;
-        var arr = [];
-
-        for (var i = 0; i < state.items.length; i++) {
-          var item = state.items[i];
-
-          if (type !== "all" && item.type !== type) continue;
-          if (ns !== "all" && item.namespace !== ns) continue;
-
-          if (q) {
-            var hay = (item.key + " " + item.value + " " + item.type + " " + item.namespace).toLowerCase();
-            if (hay.indexOf(q) === -1) continue;
-          }
-
-          arr.push(item);
-        }
-
-        var mode = el.sortMode.value;
-
-        arr.sort(function (a, b) {
-          if (mode === "keyAsc") return a.key.localeCompare(b.key);
-          if (mode === "keyDesc") return b.key.localeCompare(a.key);
-          if (mode === "sizeDesc") return b.size - a.size;
-          if (mode === "sizeAsc") return a.size - b.size;
-          if (mode === "type") return a.type.localeCompare(b.type) || a.key.localeCompare(b.key);
-          if (mode === "fav") return (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) || a.key.localeCompare(b.key);
-          return a.key.localeCompare(b.key);
+    }
+
+    function openPalette() {
+      renderPaletteCommands();
+      els.palette.classList.add("show");
+      els.paletteSearch.value = "";
+      els.paletteSearch.focus();
+    }
+
+    function closePalette() {
+      els.palette.classList.remove("show");
+    }
+
+    function renderPaletteCommands() {
+      const query = els.paletteSearch.value.trim().toLowerCase();
+      const visible = commands.filter(command => {
+        return command.id.includes(query) || command.label.toLowerCase().includes(query);
+      });
+
+      els.paletteCommands.replaceChildren();
+
+      for (const command of visible) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = command.label;
+        button.addEventListener("click", () => {
+          closePalette();
+          command.run();
         });
 
-        return arr;
+        els.paletteCommands.appendChild(button);
+      }
+    }
+
+    function spawnPetal() {
+      if (document.documentElement.dataset.perf === "lite") return;
+      if (document.hidden) return;
+
+      const petal = document.createElement("span");
+      petal.className = "petal";
+
+      const duration = 7 + Math.random() * 7;
+      const delay = Math.random() * 1.2;
+
+      petal.style.left = `${Math.random() * window.innerWidth}px`;
+      petal.style.animationDuration = `${duration}s`;
+      petal.style.animationDelay = `${delay}s`;
+      petal.style.setProperty("--drift", `${Math.random() * 240 - 120}px`);
+      petal.style.setProperty("--spin", `${Math.random() > 0.5 ? "" : "-"}${260 + Math.random() * 540}deg`);
+
+      document.body.appendChild(petal);
+
+      setTimeout(() => petal.remove(), (duration + delay) * 1000 + 400);
+    }
+
+    function startPetals() {
+      setInterval(() => {
+        const amount = window.innerWidth < 700 ? 1 : 2;
+        for (let index = 0; index < amount; index += 1) spawnPetal();
+      }, 780);
+    }
+
+    els.refreshBtn.addEventListener("click", refreshStorage);
+    els.expandBtn.addEventListener("click", expandAll);
+    els.collapseBtn.addEventListener("click", collapseAll);
+    els.paletteBtn.addEventListener("click", openPalette);
+
+    els.searchInput.addEventListener("input", debounce(() => {
+      state.renderLimit = state.batchSize;
+      renderCards();
+    }, PS_USER_AGENT ? 340 : 160));
+
+    els.typeFilter.addEventListener("change", () => {
+      state.renderLimit = state.batchSize;
+      renderCards();
+    });
+
+    els.namespaceFilter.addEventListener("change", () => {
+      state.renderLimit = state.batchSize;
+      renderCards();
+    });
+
+    els.sortMode.addEventListener("change", () => {
+      state.renderLimit = state.batchSize;
+      renderCards();
+    });
+
+    els.copyAllBtn.addEventListener("click", copyAll);
+    els.exportBtn.addEventListener("click", exportAll);
+    els.importBtn.addEventListener("click", () => els.importFile.click());
+    els.snapshotBtn.addEventListener("click", compareWithBaseline);
+    els.watchBtn.addEventListener("click", toggleWatch);
+    els.perfBtn.addEventListener("click", togglePerf);
+    els.themeBtn.addEventListener("click", toggleTheme);
+    els.addBtn.addEventListener("click", addOrUpdateKey);
+    els.maskBtn.addEventListener("click", toggleMask);
+    els.clearLogBtn.addEventListener("click", clearLog);
+    els.cards.addEventListener("click", handleCardClick);
+
+    els.importFile.addEventListener("change", () => {
+      const file = els.importFile.files && els.importFile.files[0];
+      if (file) importJsonFile(file);
+      els.importFile.value = "";
+    });
+
+    els.palette.addEventListener("click", event => {
+      if (event.target === els.palette) closePalette();
+    });
+
+    els.paletteSearch.addEventListener("input", renderPaletteCommands);
+
+    document.addEventListener("keydown", event => {
+      const key = event.key.toLowerCase();
+
+      if ((event.ctrlKey || event.metaKey) && key === "k") {
+        event.preventDefault();
+        openPalette();
       }
 
-      function renderStats() {
-        var totalSize = 0;
-        var jsonCount = 0;
-
-        for (var i = 0; i < state.filtered.length; i++) {
-          totalSize += state.filtered[i].size;
-        }
-
-        for (var j = 0; j < state.items.length; j++) {
-          if (state.items[j].jsonOk) jsonCount++;
-        }
-
-        el.shownStat.innerHTML = state.filtered.length;
-        el.totalStat.innerHTML = state.items.length;
-        el.sizeStat.innerHTML = prettyBytes(totalSize);
-        el.jsonStat.innerHTML = jsonCount;
-        el.originStat.innerHTML = html(location.origin.replace(/^https?:\/\//, ""));
+      if (event.key === "Escape") {
+        closePalette();
       }
-
-      function renderKeyMap() {
-        if (!state.items.length) {
-          el.keyMap.innerHTML = "empty";
-          return;
-        }
-
-        var groups = {};
-        for (var i = 0; i < state.items.length; i++) {
-          var ns = state.items[i].namespace;
-          groups[ns] = groups[ns] || [];
-          groups[ns].push(state.items[i].key);
-        }
-
-        var out = "";
-        for (var k in groups) {
-          if (!groups.hasOwnProperty(k)) continue;
-          out += "[" + k + "] " + groups[k].length + " keys\n";
-          for (var j = 0; j < groups[k].length && j < 8; j++) {
-            out += "  - " + groups[k][j] + "\n";
-          }
-          if (groups[k].length > 8) out += "  ... +" + (groups[k].length - 8) + "\n";
-        }
-
-        el.keyMap.textContent = out;
-      }
-
-      function getPageCount() {
-        var pages = Math.ceil(state.filtered.length / state.perPage);
-        return pages || 1;
-      }
-
-      function getPageItems() {
-        var start = (state.page - 1) * state.perPage;
-        return state.filtered.slice(start, start + state.perPage);
-      }
-
-      function renderCards() {
-        var pageItems = getPageItems();
-        var startIndex = (state.page - 1) * state.perPage;
-        var out = "";
-
-        if (!state.filtered.length) {
-          el.cards.innerHTML = '<div class="empty">لا توجد نتائج. المخزن فارغ أو البحث متحمس أكثر من اللازم.</div>';
-          renderPager();
-          return;
-        }
-
-        for (var i = 0; i < pageItems.length; i++) {
-          out += cardHtml(pageItems[i], startIndex + i);
-        }
-
-        el.cards.innerHTML = out;
-        renderPager();
-      }
-
-      function cardHtml(item, index) {
-        var open = !!state.open[item.key];
-        var cls = "card" + (open ? " open" : "") + (item.favorite ? " favorite" : "");
-        var q = trimText(el.search.value);
-        var displayValue = state.redact && item.warnings.length ? mask(item.value) : item.value;
-        var preview = displayValue.length > 180 ? displayValue.substring(0, 180) + "..." : displayValue;
-        var badges = "";
-
-        badges += badge(item.type, item.jsonOk ? "ok" : "");
-        badges += badge(prettyBytes(item.size), "");
-        badges += badge(item.namespace, "");
-
-        if (item.favorite) badges += badge("★ fav", "ok");
-
-        for (var w = 0; w < item.warnings.length; w++) {
-          badges += badge(item.warnings[w], "warn");
-        }
-
-        var body = open ? cardBodyHtml(item, index, displayValue) : "";
-
-        return '' +
-          '<article class="' + cls + '" data-index="' + index + '">' +
-            '<button class="card-head" data-action="toggle" data-index="' + index + '">' +
-              '<div class="card-head-inner">' +
-                '<div>' +
-                  '<div class="key-title">' + highlight(item.key, q) + '</div>' +
-                  '<div class="mini">' + html(preview) + '</div>' +
-                '</div>' +
-                '<div class="badges">' + badges + '</div>' +
-              '</div>' +
-            '</button>' +
-            '<div class="card-body">' + body + '</div>' +
-          '</article>';
-      }
-
-      function badge(text, cls) {
-        return '<span class="badge ' + html(cls || "") + '">' + html(text) + '</span>';
-      }
-
-      function cardBodyHtml(item, index, displayValue) {
-        var currentView = state.view[item.key] || "pretty";
-        var pretty = item.jsonOk ? JSON.stringify(item.parsed, null, 2) : displayValue;
-
-        return '' +
-          '<div class="action-row">' +
-            '<button data-action="copyKey" data-index="' + index + '">نسخ المفتاح</button>' +
-            '<button data-action="copyValue" data-index="' + index + '">نسخ القيمة</button>' +
-            '<button data-action="copyEntry" data-index="' + index + '">نسخ العنصر</button>' +
-            '<button data-action="favorite" data-index="' + index + '">' + (item.favorite ? "إزالة المفضلة" : "مفضلة") + '</button>' +
-            '<button class="red" data-action="delete" data-index="' + index + '">حذف</button>' +
-          '</div>' +
-
-          '<div class="tabs">' +
-            tab("pretty", "عرض", currentView) +
-            tab("tree", "شجرة", currentView) +
-            tab("edit", "تعديل", currentView) +
-            tab("meta", "معلومات", currentView) +
-          '</div>' +
-
-          '<div class="view ' + (currentView === "pretty" ? "active" : "") + '" data-view="pretty">' +
-            '<pre>' + highlight(pretty, trimText(el.search.value)) + '</pre>' +
-          '</div>' +
-
-          '<div class="view ' + (currentView === "tree" ? "active" : "") + '" data-view="tree">' +
-            '<div class="tree">' + (item.jsonOk ? treeHtml(item.parsed, "root", 0) : '<div>ليست JSON. مجرد string. Happens.</div>') + '</div>' +
-          '</div>' +
-
-          '<div class="view ' + (currentView === "edit" ? "active" : "") + '" data-view="edit">' +
-            '<textarea class="editor" data-editor="' + index + '">' + html(item.value) + '</textarea>' +
-            '<div class="action-row" style="margin-top:8px">' +
-              '<button class="green" data-action="save" data-index="' + index + '">حفظ</button>' +
-              '<button data-action="formatJson" data-index="' + index + '">تنسيق JSON</button>' +
-              '<button data-action="validateJson" data-index="' + index + '">تحقق JSON</button>' +
-            '</div>' +
-          '</div>' +
-
-          '<div class="view ' + (currentView === "meta" ? "active" : "") + '" data-view="meta">' +
-            '<pre>' + html(JSON.stringify({
-              key: item.key,
-              namespace: item.namespace,
-              type: item.type,
-              jsonReadable: item.jsonOk,
-              approxSize: prettyBytes(item.size),
-              warnings: item.warnings,
-              favorite: item.favorite,
-              origin: location.origin
-            }, null, 2)) + '</pre>' +
-          '</div>';
-      }
-
-      function tab(name, label, active) {
-        return '<button class="tab ' + (active === name ? "active" : "") + '" data-action="view" data-view="' + name + '">' + label + '</button>';
-      }
-
-      function treeHtml(value, key, depth) {
-        if (depth > 7) {
-          return '<div><span class="k">' + html(key) + '</span>: <span class="v">[max depth]</span></div>';
-        }
-
-        if (value && typeof value === "object") {
-          var arr = isArray(value);
-          var keys = arr ? null : Object.keys(value);
-          var len = arr ? value.length : keys.length;
-          var out = '<div><span class="k">' + html(key) + '</span>: ' + (arr ? "Array" : "Object") + '(' + len + ')';
-
-          if (arr) {
-            for (var i = 0; i < value.length; i++) {
-              out += treeHtml(value[i], String(i), depth + 1);
-            }
-          } else {
-            for (var j = 0; j < keys.length; j++) {
-              out += treeHtml(value[keys[j]], keys[j], depth + 1);
-            }
-          }
-
-          out += '</div>';
-          return out;
-        }
-
-        return '<div><span class="k">' + html(key) + '</span>: <span class="v">' + html(JSON.stringify(value)) + '</span></div>';
-      }
-
-      function highlight(text, query) {
-        var safe = html(text);
-        query = trimText(query || "");
-
-        if (!query) return safe;
-
-        var escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        try {
-          return safe.replace(new RegExp(escaped, "gi"), function (m) {
-            return "<mark>" + m + "</mark>";
-          });
-        } catch (e) {
-          return safe;
-        }
-      }
-
-      function mask(value) {
-        var s = String(value);
-        if (s.length <= 8) return "********";
-        return s.substring(0, 4) + "********" + s.substring(s.length - 4);
-      }
-
-      function cardClick(ev) {
-        var target = ev.target;
-        while (target && target !== el.cards && !target.getAttribute("data-action")) {
-          target = target.parentNode;
-        }
-
-        if (!target || target === el.cards) return;
-
-        var action = target.getAttribute("data-action");
-        var index = parseInt(target.getAttribute("data-index"), 10);
-        var item = state.filtered[index];
-
-        if (!item && action !== "view") return;
-
-        if (action === "toggle") {
-          if (state.open[item.key]) delete state.open[item.key];
-          else state.open[item.key] = true;
-          renderCards();
-          return;
-        }
-
-        if (action === "view") {
-          var card = findParent(target, "card");
-          var idx = parseInt(card.getAttribute("data-index"), 10);
-          var viewItem = state.filtered[idx];
-          state.view[viewItem.key] = target.getAttribute("data-view");
-          renderCards();
-          return;
-        }
-
-        if (action === "copyKey") {
-          copyText(item.key);
-          toast("تم نسخ المفتاح");
-          return;
-        }
-
-        if (action === "copyValue") {
-          copyText(item.value);
-          toast("تم نسخ القيمة");
-          return;
-        }
-
-        if (action === "copyEntry") {
-          copyText(JSON.stringify(makeEntryObject(item), null, 2));
-          toast("تم نسخ العنصر");
-          return;
-        }
-
-        if (action === "favorite") {
-          if (state.favorites[item.key]) delete state.favorites[item.key];
-          else state.favorites[item.key] = true;
-          saveSessionJson("sakuraLedgerFavorites", state.favorites);
-          refresh();
-          return;
-        }
-
-        if (action === "delete") {
-          removeItem(item);
-          return;
-        }
-
-        if (action === "save") {
-          saveEdited(index);
-          return;
-        }
-
-        if (action === "formatJson") {
-          formatEditor(index);
-          return;
-        }
-
-        if (action === "validateJson") {
-          validateEditor(index);
-          return;
-        }
-      }
-
-      function findParent(node, cls) {
-        while (node && node !== d) {
-          if ((" " + node.className + " ").indexOf(" " + cls + " ") !== -1) return node;
-          node = node.parentNode;
-        }
-        return null;
-      }
-
-      function makeEntryObject(item) {
-        var obj = {};
-        obj[item.key] = item.value;
-        return obj;
-      }
-
-      function getEditor(index) {
-        return el.cards.querySelector('textarea[data-editor="' + index + '"]');
-      }
-
-      function saveEdited(index) {
-        var item = state.filtered[index];
-        var editor = getEditor(index);
-        if (!item || !editor) return;
-
-        try {
-          localStorage.setItem(item.key, editor.value);
-          log("update", item.key);
-          refresh();
-          toast("تم الحفظ");
-        } catch (e) {
-          toast("فشل الحفظ. ربما الحصة ممتلئة.");
-        }
-      }
-
-      function formatEditor(index) {
-        var editor = getEditor(index);
-        if (!editor) return;
-
-        try {
-          editor.value = JSON.stringify(JSON.parse(editor.value), null, 2);
-          toast("تم تنسيق JSON");
-        } catch (e) {
-          toast("ليست JSON صالحة. المحرر ليس ساحراً.");
-        }
-      }
-
-      function validateEditor(index) {
-        var editor = getEditor(index);
-        if (!editor) return;
-
-        try {
-          JSON.parse(editor.value);
-          toast("JSON صالح");
-        } catch (e) {
-          toast("JSON غير صالح: " + e.message);
-        }
-      }
-
-      function removeItem(item) {
-        var ok = confirm("حذف المفتاح؟\n\n" + item.key);
-        if (!ok) return;
-
-        try {
-          state.lastDeleted = { key: item.key, value: item.value };
-          localStorage.removeItem(item.key);
-          log("delete", item.key);
-          refresh();
-          toast("تم الحذف. يوجد تراجع.");
-        } catch (e) {
-          toast("فشل الحذف");
-        }
-      }
-
-      function undoDelete() {
-        if (!state.lastDeleted) {
-          toast("لا يوجد حذف للتراجع عنه");
-          return;
-        }
-
-        try {
-          localStorage.setItem(state.lastDeleted.key, state.lastDeleted.value);
-          log("undo-delete", state.lastDeleted.key);
-          state.lastDeleted = null;
-          refresh();
-          toast("تم التراجع عن الحذف");
-        } catch (e) {
-          toast("فشل التراجع");
-        }
-      }
-
-      function saveNewKey() {
-        var key = trimText(el.newKey.value);
-        var value = el.newValue.value;
-
-        if (!key) {
-          toast("اكتب اسم المفتاح");
-          return;
-        }
-
-        try {
-          localStorage.setItem(key, value);
-          log("set", key);
-          el.newKey.value = "";
-          el.newValue.value = "";
-          refresh();
-          toast("تم الحفظ");
-        } catch (e) {
-          toast("فشل الحفظ. غالباً المساحة ممتلئة.");
-        }
-      }
-
-      function exportJson() {
-        var data = JSON.stringify(makeSnapshot(state.items), null, 2);
-        var name = "localstorage-" + location.hostname + "-" + safeDate() + ".json";
-        download(name, data);
-        log("export", name);
-      }
-
-      function importJson(file) {
-        var reader = new FileReader();
-
-        reader.onload = function () {
-          try {
-            var obj = JSON.parse(String(reader.result));
-
-            if (!obj || typeof obj !== "object" || isArray(obj)) {
-              toast("ملف JSON يجب أن يكون object");
-              return;
-            }
-
-            var count = 0;
-
-            for (var k in obj) {
-              if (obj.hasOwnProperty(k)) {
-                var v = typeof obj[k] === "string" ? obj[k] : JSON.stringify(obj[k]);
-                localStorage.setItem(k, v);
-                count++;
-              }
-            }
-
-            log("import", count + " keys");
-            refresh();
-            toast("تم استيراد " + count + " مفتاح");
-          } catch (e) {
-            toast("JSON غير صالح");
-          }
-        };
-
-        reader.readAsText(file);
-      }
-
-      function safeDate() {
-        return new Date().toISOString().replace(/:/g, "-").replace(/\..+/, "");
-      }
-
-      function download(filename, text) {
-        var blob = new Blob([text], { type: "application/json;charset=utf-8" });
-        var url = URL.createObjectURL(blob);
-        var a = d.createElement("a");
-
-        a.href = url;
-        a.download = filename;
-        d.body.appendChild(a);
-        a.click();
-        d.body.removeChild(a);
-
-        setTimeout(function () {
-          URL.revokeObjectURL(url);
-        }, 250);
-      }
-
-      function copyText(text) {
-        text = String(text == null ? "" : text);
-
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(text).catch(function () {
-            fallbackCopy(text);
-          });
-        } else {
-          fallbackCopy(text);
-        }
-      }
-
-      function fallbackCopy(text) {
-        var ta = d.createElement("textarea");
-        ta.value = text;
-        ta.style.position = "fixed";
-        ta.style.left = "-9999px";
-        d.body.appendChild(ta);
-        ta.select();
-
-        try {
-          d.execCommand("copy");
-        } catch (e) {}
-
-        d.body.removeChild(ta);
-      }
-
-      function makeSnapshot(items) {
-        var obj = {};
-        for (var i = 0; i < items.length; i++) {
-          obj[items[i].key] = items[i].value;
-        }
-        return obj;
-      }
-
-      function diffNow(showToast) {
-        var current = makeSnapshot(readStorage());
-        var changes = diffObjects(state.baseline, current);
-
-        for (var i = 0; i < changes.length; i++) {
-          log(changes[i].type, changes[i].key);
-        }
-
-        state.baseline = current;
-        refresh();
-
-        if (showToast) {
-          toast(changes.length ? "تم رصد " + changes.length + " تغيير" : "لا توجد تغييرات");
-        }
-      }
-
-      function diffObjects(a, b) {
-        var keys = {};
-        var out = [];
-        var k;
-
-        for (k in a) if (a.hasOwnProperty(k)) keys[k] = true;
-        for (k in b) if (b.hasOwnProperty(k)) keys[k] = true;
-
-        for (k in keys) {
-          if (!keys.hasOwnProperty(k)) continue;
-          if (!a.hasOwnProperty(k)) out.push({ type: "added", key: k });
-          else if (!b.hasOwnProperty(k)) out.push({ type: "removed", key: k });
-          else if (a[k] !== b[k]) out.push({ type: "changed", key: k });
-        }
-
-        return out;
-      }
-
-      function toggleWatch() {
-        if (state.watchTimer) {
-          clearInterval(state.watchTimer);
-          state.watchTimer = null;
-          el.watchBtn.innerHTML = "تشغيل Live";
-          toast("تم إيقاف Live");
-          return;
-        }
-
-        state.baseline = makeSnapshot(readStorage());
-
-        state.watchTimer = setInterval(function () {
-          diffNow(false);
-        }, state.lowPower ? 4000 : 1600);
-
-        el.watchBtn.innerHTML = "إيقاف Live";
-        toast("Live يعمل");
-      }
-
-      function log(type, key) {
-        var t = new Date().toLocaleTimeString("ar-SA");
-        state.log.unshift("[" + t + "] " + type + " :: " + key);
-        if (state.log.length > 80) state.log.length = 80;
-        renderLog();
-      }
-
-      function renderLog() {
-        if (!state.log.length) {
-          el.log.innerHTML = '<div class="log-row">no events</div>';
-          return;
-        }
-
-        var out = "";
-        for (var i = 0; i < state.log.length; i++) {
-          out += '<div class="log-row">' + html(state.log[i]) + '</div>';
-        }
-        el.log.innerHTML = out;
-      }
-
-      function renderPager() {
-        var pages = getPageCount();
-        if (state.page < 1) state.page = 1;
-        if (state.page > pages) state.page = pages;
-
-        el.pageInfo.innerHTML = "صفحة " + state.page + " / " + pages;
-        el.prevPage.disabled = state.page <= 1;
-        el.nextPage.disabled = state.page >= pages;
-      }
-
-      function toast(message) {
-        el.toast.innerHTML = html(message);
-        el.toast.className = "toast show";
-
-        clearTimeout(toast.timer);
-        toast.timer = setTimeout(function () {
-          el.toast.className = "toast";
-        }, 1800);
-      }
-    })();
+    });
+
+    window.addEventListener("storage", () => {
+      logChange("external", "storage event");
+      refreshStorage();
+    });
+
+    loadPrefs();
+    refreshStorage();
+    state.baseline = snapshotObject();
+    renderLog();
+    startPetals();
+
+    if (PS_USER_AGENT) {
+      toast("تم تفعيل وضع الأداء للسوني تلقائياً");
+    }
   </script>
 </body>
 </html>
