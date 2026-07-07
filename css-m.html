@@ -1,152 +1,500 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>Checkpoint Viewer</title>
-<style>
-body {
-  background: #111;
-  color: #0f0;
-  font-family: monospace;
-  white-space: pre-wrap;
-  padding: 12px;
-}
-button {
-  background: #222;
-  color: #0f0;
-  border: 1px solid #0f0;
-  padding: 8px;
-  margin: 4px;
-  font-family: monospace;
-}
-.box {
-  border: 1px solid #0f0;
-  padding: 8px;
-  margin-top: 10px;
-}
-.bad {
-  color: #ff5555;
-}
-.good {
-  color: #55ff55;
-}
-.warn {
-  color: #ffff55;
-}
-</style>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>عارض LocalStorage</title>
 
-<h2>Checkpoint Viewer</h2>
+  <style>
+    :root {
+      --ink: #2b2118;
+      --muted: #6e5a44;
+      --paper: #f7efe0;
+      --paper-2: #fff8ea;
+      --red: #9f2f2f;
+      --gold: #b68b3c;
+      --green: #345c45;
+      --shadow: rgba(43, 33, 24, 0.16);
+      --border: rgba(43, 33, 24, 0.22);
+    }
 
-<button onclick="refresh()">Refresh</button>
-<button onclick="clearCheckpoints()">Clear checkpoint keys</button>
+    * {
+      box-sizing: border-box;
+    }
 
-<div id="out" class="box"></div>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family:
+        "Noto Serif Arabic",
+        "Amiri",
+        "Georgia",
+        serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(159, 47, 47, 0.14), transparent 28rem),
+        radial-gradient(circle at bottom right, rgba(52, 92, 69, 0.16), transparent 30rem),
+        linear-gradient(135deg, #efe0c4 0%, #f8efd9 48%, #e5d1a8 100%);
+      padding: 32px;
+    }
 
-<script>
-const out = document.getElementById("out");
+    .shell {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
 
-const interestingPrefixes = [
-  "import_namespace",
-  "namespace_isolation",
-  "namespace_insert",
-  "cssfontface",
-  "fontface",
-  "checkpoint"
-];
+    .hero {
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(135deg, rgba(255, 248, 234, 0.94), rgba(247, 239, 224, 0.92)),
+        repeating-linear-gradient(
+          90deg,
+          transparent 0,
+          transparent 22px,
+          rgba(182, 139, 60, 0.08) 23px,
+          transparent 24px
+        );
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      padding: 34px;
+      box-shadow: 0 24px 70px var(--shadow);
+    }
 
-function line(s, cls = "") {
-  const div = document.createElement("div");
-  if (cls) div.className = cls;
-  div.textContent = s;
-  out.appendChild(div);
-}
+    .hero::before {
+      content: "和";
+      position: absolute;
+      inset-inline-start: 28px;
+      top: -30px;
+      font-size: 160px;
+      line-height: 1;
+      color: rgba(159, 47, 47, 0.08);
+      pointer-events: none;
+      font-family: Georgia, serif;
+    }
 
-function isInterestingKey(k) {
-  return interestingPrefixes.some(p => k.toLowerCase().includes(p));
-}
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--red);
+      border: 1px solid rgba(159, 47, 47, 0.22);
+      background: rgba(159, 47, 47, 0.06);
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-weight: 700;
+      margin-bottom: 18px;
+    }
 
-function refresh() {
-  out.textContent = "";
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 6vw, 4.5rem);
+      letter-spacing: -0.04em;
+      line-height: 1.05;
+    }
 
-  line("[*] Checkpoint Viewer");
-  line("[*] origin: " + location.origin);
-  line("[*] time: " + new Date().toISOString());
-  line("");
+    .subtitle {
+      margin: 18px 0 0;
+      max-width: 780px;
+      color: var(--muted);
+      font-size: 1.08rem;
+      line-height: 1.9;
+    }
 
-  const keys = [];
-  for (let i = 0; i < localStorage.length; i++)
-    keys.push(localStorage.key(i));
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      gap: 12px;
+      margin: 24px 0;
+    }
 
-  const interesting = keys.filter(isInterestingKey).sort();
+    input,
+    button {
+      font: inherit;
+    }
 
-  if (!interesting.length) {
-    line("[!] No diagnostic checkpoint keys found.", "warn");
-    line("[!] Make sure this page is on the SAME origin as the crash page:", "warn");
-    line("    same protocol + same domain + same port", "warn");
-    return;
-  }
+    input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: rgba(255, 248, 234, 0.82);
+      color: var(--ink);
+      padding: 14px 16px;
+      outline: none;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+    }
 
-  line("[+] Found diagnostic keys:", "good");
-  line("");
+    input:focus {
+      border-color: rgba(159, 47, 47, 0.55);
+      box-shadow: 0 0 0 4px rgba(159, 47, 47, 0.1);
+    }
 
-  for (const k of interesting) {
-    let v = "";
-    try { v = localStorage.getItem(k); }
-    catch (e) { v = "[read failed: " + e + "]"; }
+    button {
+      border: 1px solid rgba(43, 33, 24, 0.2);
+      background: var(--ink);
+      color: var(--paper-2);
+      border-radius: 18px;
+      padding: 13px 16px;
+      cursor: pointer;
+      transition: transform 160ms ease, opacity 160ms ease;
+      white-space: nowrap;
+    }
 
-    line(k + " = " + v);
-  }
+    button:hover {
+      transform: translateY(-1px);
+      opacity: 0.92;
+    }
 
-  line("");
-  interpret();
-}
+    button.secondary {
+      background: rgba(255, 248, 234, 0.8);
+      color: var(--ink);
+    }
 
-function get(k) {
-  try { return localStorage.getItem(k); }
-  catch (_) { return null; }
-}
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
 
-function interpret() {
-  const cp =
-    get("import_namespace_checkpoint_v2") ||
-    get("import_namespace_last_checkpoint") ||
-    get("namespace_isolation_last_checkpoint") ||
-    get("namespace_insert_diagnostic_last_checkpoint");
+    .stat {
+      background: rgba(255, 248, 234, 0.78);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 18px;
+      box-shadow: 0 12px 30px rgba(43, 33, 24, 0.09);
+    }
 
-  if (!cp) {
-    line("[?] No known primary checkpoint value found.", "warn");
-    return;
-  }
+    .stat strong {
+      display: block;
+      font-size: 1.9rem;
+      color: var(--red);
+      margin-bottom: 4px;
+    }
 
-  line("=== Interpretation ===");
+    .stat span {
+      color: var(--muted);
+    }
 
-  if (cp.includes("CP-21")) {
-    line("[!] Last checkpoint was BEFORE namespace insertRule.", "bad");
-    line("[!] Strong signal: crash likely happens inside sheet.insertRule('@namespace...', index).", "bad");
-  } else if (cp.includes("CP-22")) {
-    line("[!] namespace insertRule returned, then crash happened later.", "warn");
-    line("[!] Signal: delayed corruption / style update / cleanup after insert.");
-  } else if (cp.includes("forceStyle")) {
-    line("[!] Crash likely around forced style/layout flush.", "warn");
-  } else if (cp.includes("CP-30") || cp.includes("CP-31")) {
-    line("[!] Crash likely around style.remove() / stylesheet cleanup.", "warn");
-  } else if (cp.includes("DONE")) {
-    line("[+] Last run reached DONE. That mode did not reproduce crash.", "good");
-  } else {
-    line("[*] Last checkpoint: " + cp);
-  }
-}
+    .grid {
+      display: grid;
+      gap: 16px;
+    }
 
-function clearCheckpoints() {
-  const keys = [];
-  for (let i = 0; i < localStorage.length; i++)
-    keys.push(localStorage.key(i));
+    .card {
+      background:
+        linear-gradient(180deg, rgba(255, 248, 234, 0.96), rgba(247, 239, 224, 0.92));
+      border: 1px solid var(--border);
+      border-inline-start: 6px solid var(--red);
+      border-radius: 24px;
+      padding: 20px;
+      box-shadow: 0 16px 40px rgba(43, 33, 24, 0.1);
+    }
 
-  for (const k of keys) {
-    if (isInterestingKey(k))
-      localStorage.removeItem(k);
-  }
+    .card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
 
-  refresh();
-}
+    .key {
+      overflow-wrap: anywhere;
+      font-weight: 800;
+      font-size: 1.08rem;
+    }
 
-refresh();
-</script>
+    .badge {
+      color: var(--green);
+      background: rgba(52, 92, 69, 0.09);
+      border: 1px solid rgba(52, 92, 69, 0.22);
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 0.84rem;
+      white-space: nowrap;
+    }
+
+    pre {
+      margin: 0;
+      direction: ltr;
+      text-align: left;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      background: rgba(43, 33, 24, 0.06);
+      border: 1px solid rgba(43, 33, 24, 0.12);
+      border-radius: 18px;
+      padding: 16px;
+      color: #241a13;
+      line-height: 1.65;
+      font-family:
+        "SFMono-Regular",
+        Consolas,
+        "Liberation Mono",
+        monospace;
+      font-size: 0.92rem;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 42px 20px;
+      border: 1px dashed rgba(43, 33, 24, 0.3);
+      border-radius: 24px;
+      color: var(--muted);
+      background: rgba(255, 248, 234, 0.5);
+    }
+
+    .footer-note {
+      margin-top: 20px;
+      color: var(--muted);
+      line-height: 1.8;
+      font-size: 0.95rem;
+    }
+
+    @media (max-width: 780px) {
+      body {
+        padding: 18px;
+      }
+
+      .hero {
+        padding: 24px;
+      }
+
+      .toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .stats {
+        grid-template-columns: 1fr;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="kicker">🏯 LocalStorage Viewer</div>
+      <h1>عارض التخزين المحلي</h1>
+      <p class="subtitle">
+        يعرض كل مفاتيح وقيم <code>localStorage</code> المتاحة لهذا الـ origin.
+        أي صفحة تحت <code>badrcoderman.github.io/test</code> تشارك نفس التخزين مع باقي مسارات الدومين.
+      </p>
+    </section>
+
+    <section class="toolbar" aria-label="أدوات التحكم">
+      <input id="searchInput" type="search" placeholder="ابحث بالمفتاح أو القيمة..." autocomplete="off" />
+      <button id="refreshBtn" type="button">تحديث</button>
+      <button id="copyBtn" class="secondary" type="button">نسخ JSON</button>
+      <button id="downloadBtn" class="secondary" type="button">تحميل JSON</button>
+    </section>
+
+    <section class="stats">
+      <div class="stat">
+        <strong id="countStat">0</strong>
+        <span>عدد العناصر</span>
+      </div>
+      <div class="stat">
+        <strong id="sizeStat">0 B</strong>
+        <span>الحجم التقريبي</span>
+      </div>
+      <div class="stat">
+        <strong id="originStat">—</strong>
+        <span>الـ origin الحالي</span>
+      </div>
+    </section>
+
+    <section id="storageGrid" class="grid" aria-live="polite"></section>
+
+    <p class="footer-note">
+      ملاحظة: لا يمكن لهذا الملف قراءة <code>localStorage</code> الخاص بموقع آخر.
+      لو فتحته كملف محلي أو من دومين مختلف، سترى تخزين ذلك المكان فقط. تصميم أمني، وليس عناداً من المتصفح.
+    </p>
+  </main>
+
+  <script>
+    const searchInput = document.getElementById("searchInput");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const copyBtn = document.getElementById("copyBtn");
+    const downloadBtn = document.getElementById("downloadBtn");
+
+    const storageGrid = document.getElementById("storageGrid");
+    const countStat = document.getElementById("countStat");
+    const sizeStat = document.getElementById("sizeStat");
+    const originStat = document.getElementById("originStat");
+
+    let storageSnapshot = [];
+
+    function getStorageItems() {
+      const items = [];
+
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        const rawValue = localStorage.getItem(key);
+
+        items.push({
+          key,
+          value: rawValue,
+          type: detectType(rawValue),
+          parsedValue: formatValue(rawValue)
+        });
+      }
+
+      return items.sort((a, b) => a.key.localeCompare(b.key));
+    }
+
+    function detectType(value) {
+      if (value === null) return "null";
+
+      const trimmed = value.trim();
+
+      if (trimmed === "") return "empty string";
+      if (trimmed === "true" || trimmed === "false") return "boolean";
+      if (!Number.isNaN(Number(trimmed)) && trimmed !== "") return "number";
+
+      try {
+        const parsed = JSON.parse(trimmed);
+
+        if (Array.isArray(parsed)) return "array";
+        if (parsed === null) return "null";
+        return typeof parsed;
+      } catch {
+        return "string";
+      }
+    }
+
+    function formatValue(value) {
+      if (value === null) return "";
+
+      try {
+        return JSON.stringify(JSON.parse(value), null, 2);
+      } catch {
+        return value;
+      }
+    }
+
+    function bytesToHuman(bytes) {
+      const units = ["B", "KB", "MB", "GB"];
+      let size = bytes;
+      let unitIndex = 0;
+
+      while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex += 1;
+      }
+
+      return `${size.toFixed(unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
+    }
+
+    function calculateApproxSize(items) {
+      const json = JSON.stringify(
+        Object.fromEntries(items.map((item) => [item.key, item.value]))
+      );
+
+      return new Blob([json]).size;
+    }
+
+    function render() {
+      const query = searchInput.value.trim().toLowerCase();
+
+      const filtered = storageSnapshot.filter((item) => {
+        return (
+          item.key.toLowerCase().includes(query) ||
+          String(item.value).toLowerCase().includes(query)
+        );
+      });
+
+      storageGrid.replaceChildren();
+
+      countStat.textContent = String(filtered.length);
+      sizeStat.textContent = bytesToHuman(calculateApproxSize(filtered));
+      originStat.textContent = window.location.origin;
+
+      if (filtered.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = query
+          ? "لا توجد نتائج مطابقة. التخزين لا يخترع مفاتيح لإرضائنا."
+          : "لا توجد بيانات في localStorage لهذا الـ origin.";
+        storageGrid.appendChild(empty);
+        return;
+      }
+
+      for (const item of filtered) {
+        const card = document.createElement("article");
+        card.className = "card";
+
+        const head = document.createElement("div");
+        head.className = "card-head";
+
+        const key = document.createElement("div");
+        key.className = "key";
+        key.textContent = item.key;
+
+        const badge = document.createElement("span");
+        badge.className = "badge";
+        badge.textContent = item.type;
+
+        const value = document.createElement("pre");
+        value.textContent = item.parsedValue;
+
+        head.append(key, badge);
+        card.append(head, value);
+        storageGrid.appendChild(card);
+      }
+    }
+
+    function refreshStorage() {
+      storageSnapshot = getStorageItems();
+      render();
+    }
+
+    async function copyAsJson() {
+      const data = Object.fromEntries(
+        storageSnapshot.map((item) => [item.key, item.value])
+      );
+
+      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+
+      copyBtn.textContent = "تم النسخ";
+      setTimeout(() => {
+        copyBtn.textContent = "نسخ JSON";
+      }, 1200);
+    }
+
+    function downloadAsJson() {
+      const data = Object.fromEntries(
+        storageSnapshot.map((item) => [item.key, item.value])
+      );
+
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json;charset=utf-8"
+      });
+
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+
+      anchor.href = url;
+      anchor.download = "localstorage-badrcoderman-github-io.json";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+
+      URL.revokeObjectURL(url);
+    }
+
+    searchInput.addEventListener("input", render);
+    refreshBtn.addEventListener("click", refreshStorage);
+    copyBtn.addEventListener("click", copyAsJson);
+    downloadBtn.addEventListener("click", downloadAsJson);
+
+    window.addEventListener("storage", refreshStorage);
+
+    refreshStorage();
+  </script>
+</body>
+</html>
