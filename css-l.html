@@ -1,6 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>@import + @namespace insertRule diagnostic</title>
+<title>@import only control</title>
 <style>
 body {
   background: #111;
@@ -10,104 +10,41 @@ body {
 }
 </style>
 <pre id="log"></pre>
-
 <script>
 const logEl = document.getElementById("log");
-const KEY = "import_namespace_last_checkpoint";
-
-function L(s) {
-  logEl.textContent += s + "\n";
-  try { localStorage.setItem(KEY, s); } catch (_) {}
-}
-
-function forceStyle(label) {
-  try {
-    document.body.offsetTop;
-    getComputedStyle(document.body).color;
-    L("[+] forced style: " + label);
-  } catch (e) {
-    L("[!] force style failed: " + e.name + ": " + e.message);
-  }
-}
-
-function makeStyle() {
-  const style = document.createElement("style");
-  document.head.appendChild(style);
-  forceStyle("after append empty style");
-  return style;
-}
+function L(s) { logEl.textContent += s + "\n"; }
 
 async function delay(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
 async function run() {
-  /*
-    غيّر mode يدويًا:
+  L("[*] @import only control");
 
-    1 = one @import, insert @namespace at index 1, no remove
-    2 = one @import, insert @namespace at index 1, then remove
-    3 = three @imports, insert @namespace at cssRules.length, no remove
-    4 = three @imports, insert @namespace at cssRules.length, then remove
-  */
-  const mode = 4;
-
-  L("[*] @import + @namespace diagnostic");
-  L("[*] previous checkpoint: " + (localStorage.getItem(KEY) || "(none)"));
-  L("[*] mode=" + mode);
-
-  const style = makeStyle();
+  const style = document.createElement("style");
+  document.head.appendChild(style);
   const sheet = style.sheet;
 
-  const importCount = (mode === 1 || mode === 2) ? 1 : 3;
-
-  for (let i = 0; i < importCount; i++) {
+  for (let i = 0; i < 3; i++) {
     L("[*] inserting @import at " + i);
     try {
       sheet.insertRule('@import url("data:text/css,body{}");', i);
       L("[+] import inserted; cssRules.length=" + sheet.cssRules.length);
     } catch (e) {
-      L("[!] import insert threw: " + e.name + ": " + e.message);
-      L("DONE import failed");
+      L("[!] import threw: " + e.name + ": " + e.message);
+      L("DONE import exception");
       return;
     }
   }
 
-  forceStyle("after imports");
+  document.body.offsetTop;
+  getComputedStyle(document.body).color;
 
-  const insertIndex = sheet.cssRules.length;
-  L("[*] inserting @namespace at global index " + insertIndex);
+  L("[*] waiting 5000ms");
+  await delay(5000);
 
-  try {
-    sheet.insertRule('@namespace diag "http://example.com/ns";', insertIndex);
-    L("[+] namespace insert returned; cssRules.length=" + sheet.cssRules.length);
-  } catch (e) {
-    L("[!] namespace insert threw: " + e.name + ": " + e.message);
-    L("DONE namespace exception");
-    return;
-  }
-
-  forceStyle("after namespace insert");
-
-  if (mode === 2 || mode === 4) {
-    L("[*] removing style element");
-    try {
-      style.remove();
-      L("[+] style.remove returned");
-    } catch (e) {
-      L("[!] style.remove threw: " + e.name + ": " + e.message);
-    }
-
-    forceStyle("after remove");
-  }
-
-  L("[*] waiting 3000ms after operation");
-  await delay(3000);
-
-  L("DONE");
+  L("DONE import-only safe");
 }
 
-run().catch(e => {
-  L("[FATAL] " + (e && e.stack || e));
-});
+run().catch(e => L("[FATAL] " + e));
 </script>
