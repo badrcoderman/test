@@ -1,53 +1,58 @@
 <!DOCTYPE html>
 <html>
 <body>
-<button onclick="test()">اختبار: Sort Reentrancy</button>
+<button onclick="test()">اختبار: FontFaceSet forEach Reentrancy</button>
 <pre id="log"></pre>
 <script>
 function log(m) { document.getElementById('log').textContent += m + '\n'; }
 
 function test() {
-    log('=== Array.sort Reentrancy Test ===');
+    log('=== FontFaceSet.forEach Reentrancy Test ===');
 
-    // أنشئ مصفوفة كبيرة
-    var arr = [];
-    for (var i = 0; i < 1000; i++) arr.push(i);
+    // أنشئ FontFaces كثيرة
+    var faces = [];
+    for (var i = 0; i < 100; i++) {
+        var f = new FontFace('test' + i, 'local(Arial)', { unicodeRange: 'U+0041' });
+        document.fonts.add(f);
+        faces.push(f);
+    }
+    log('[*] تم إنشاء ' + faces.length + ' FontFace');
 
     var callCount = 0;
     var leaked = [];
 
-    arr.sort(function(a, b) {
+    document.fonts.forEach(function(face, key, set) {
         callCount++;
-        if (callCount === 500) {
-            // في منتصف الـ sort: عدّل المصفوفة
-            log('[*] تعديل المصفوفة أثناء sort (call #' + callCount + ')');
 
-            // احذف نصف العناصر
-            arr.length = 500;
-            log('[*] arr.length = ' + arr.length);
-
-            // أضف عناصر جديدة
-            for (var i = 0; i < 500; i++) arr.push(Math.random());
-            log('[*] arr.length بعد الإضافة = ' + arr.length);
+        if (callCount === 50) {
+            log('[*] حذف FontFaces أثناء forEach...');
+            // احذف نصف الـ FontFaces
+            for (var i = 0; i < 50; i++) {
+                document.fonts.delete(faces[i]);
+            }
+            log('[*] تم حذف 50 FontFace');
         }
 
-        if (callCount === 501 || callCount === 502) {
-            // سجلّ القيم بعد التعديل — هل نقرأ ذاكرة محررة؟
-            leaked.push({ call: callCount, a: a, b: b });
-            log('[!] call=' + callCount + ' a=' + a + ' b=' + b);
+        if (callCount >= 50 && callCount <= 55) {
+            // سجّل ما نقرأ بعد الحذف
+            log('[!] call=' + callCount + ' family=' + face.family + ' weight=' + face.weight);
+            leaked.push({ call: callCount, face: face });
         }
-
-        return a - b;
     });
 
     log('[*] إجمالي الاستدعاءات: ' + callCount);
-    log('[*] القيم المسربة بعد التعديل:');
+    log('[*] القيم بعد الحذف:');
     leaked.forEach(function(l) {
-        log('  call=' + l.call + ' a=' + l.a + ' b=' + l.b);
-        // لو a أو b = NaN أو رقم ضخم أو سالب → 可能 مسرب ذاكرة
-        if (isNaN(l.a) || isNaN(l.b)) log('  *** NaN DETECTED — possible leak! ***');
-        if (Math.abs(l.a) > 1e15 || Math.abs(l.b) > 1e15) log('  *** LARGE VALUE — possible pointer! ***');
+        try {
+            log('  call=' + l.call + ' family=' + l.face.family + ' status=' + l.face.status);
+        } catch(e) {
+            log('  call=' + l.call + ' ERROR: ' + e.message);
+            log('  *** UAF DETECTED — Face已被freed! ***');
+        }
     });
+
+    // تنظيف
+    faces.forEach(function(f) { try { document.fonts.delete(f); } catch(e) {} });
 
     log('=== انتهى ===');
 }
