@@ -1,355 +1,73 @@
--- ========== PS5 System Explorer ==========
--- يستخدم syscall و memory و native لاستكشاف النظام
+-- ========== Binary Dumper ==========
+-- يقرأ eboot.bin و libc.prx ويرسلهما عبر الشبكة
 
--- 1. معلومات أساسية
-print("=== SYSTEM INFO ===")
-print("FW: "..tostring(FW_VERSION))
-print("PLAT: "..tostring(PLATFORM))
-print("GAME: "..tostring(game_name))
-print("LIBC: "..tostring(libc_base))
-print("EBOOT: "..tostring(eboot_base))
-print("LIBKERNEL: "..tostring(libkernel_base))
+local target_ip = "192.168.8.1"  -- ضع IP كمبيوترك هنا
+local port = 9027
 
--- 2. PID و UID
-local ok, pid = pcall(syscall.getpid)
-if ok then print("PID: "..tostring(pid)) end
-
-local ok2, uid = pcall(syscall.getuid)
-if ok2 then print("UID: "..tostring(uid)) end
-
--- 3. فحص الساندبوكس
-local ok3, sandbox = pcall(syscall.is_in_sandbox)
-if ok3 then print("Sandbox: "..tostring(sandbox)) end
-print("Jailbroken: "..tostring(is_jailbroken()))
-
--- 4. قراءة ذاكرة libc (أول 64 بايت)
-print("\n=== LIBC DUMP ===")
-local ok4, libc_data = pcall(memory.read_buffer, libc_base, 64)
-if ok4 and libc_data then
-    print(memory.hex_dump(libc_base, 64))
-else
-    print("Cannot read libc memory")
-end
-
--- 5. قراءة ذاكرة eboot (أول 64 بايت)
-print("\n=== EBOOT DUMP ===")
-local ok5, eboot_data = pcall(memory.read_buffer, eboot_base, 64)
-if ok5 and eboot_data then
-    print(memory.hex_dump(eboot_base, 64))
-else
-    print("Cannot read eboot memory")
-end
-
--- 6. محاولة قراءة ملفات النظام
-print("\n=== FILE ACCESS TEST ===")
-local test_files = {
-    "/proc/self/maps",
-    "/proc/self/status",
-    "/proc/self/cmdline",
-    "/etc/passwd",
-    "/etc/group",
-    "/etc/hosts",
-    "/etc/resolv.conf",
-    "/system_ex/common/conf/param.sfo",
-    "/system_ex/common/conf/auth",
-    "/app0/eboot.bin",
-    "/app0/sce_module/libc.prx",
-    "/app0/sce_module/libkernel.prx",
-    "/data/idps",
-    "/data/active.dat",
-    "/mnt/sandbox/"..tostring(game_name).."_000/",
-    WRITABLE_PATH,
+local files = {
+    {"/app0/eboot.bin", "eboot.bin"},
+    {"/app0/sce_module/libc.prx", "libc.prx"},
 }
 
-for _, fpath in ipairs(test_files) do
-    local ok6, data = pcall(file_read, fpath)
-    if ok6 and data and #data > 0 then
-        print("READ OK: "..fpath.." ("..#data.." bytes)")
+local sock = syscall.socket(AF_INET, SOCK_STREAM, 0):tonumber()
+if sock < 0 then
+    print("socket() error")
+    return
+end
+
+local addr = memory.alloc(16)
+memory.write_byte(addr + 1, AF_INET)
+memory.write_word(addr + 2, bit32.bor(bit32.lshift(port, 8), bit32.rshift(port, 8)))
+-- ضع IP هنا (192.168.8.1 = 0xC0A80801)
+memory.write_dword(addr + 4, 0x0108A8C0)  -- 192.168.8.1 معكوس
+
+local ret = syscall.connect(sock, addr, 16):tonumber()
+if ret < 0 then
+    print("connect() error: "..ret)
+    syscall.close(sock)
+    return
+end
+
+print("Connected to "..target_ip..":"..port)
+
+for _, file_info in ipairs(files) do
+    local src_path, dst_name = file_info[1], file_info[2]
+    
+    local fd = syscall.open(src_path, 0):tonumber()
+    if fd < 0 then
+        print("Cannot open "..src_path)
     else
-        print("DENIED: "..fpath)
-    end
-end
-
--- 7. قراءة محتويات WRITABLE_PATH
-print("\n=== WRITABLE PATH ===")
-print("Path: "..tostring(WRITABLE_PATH))
-local ok7, dir_data = pcall(file_read, WRITABLE_PATH)
-if ok7 then
-    print("Contents: "..tostring(dir_data))
-end
-
--- 8. محاولة كتابة ملف
-print("\n=== WRITE TEST ===")
-local test_data = "PS5 Lua RCE Test - "..tostring(os.time())
-local ok8, werr = pcall(file_write, WRITABLE_PATH.."test.txt", test_data)
-if ok8 then
-    print("Write OK: "..WRITABLE_PATH.."test.txt")
-    local ok8b, rdata = pcall(file_read, WRITABLE_PATH.."test.txt")
-    if ok8b and rdata then
-        print("Readback: "..tostring(rdata))
-    end
-else
-    print("Write failed: "..tostring(werr))
-end
-
--- 9. sysctl - معلومات النظام
-print("\n=== SYSCTL INFO ===")
-
-local sysctl_tests = {
-    "kern.sdk_version",
-    "kern.hostname",
-    "kern.osrelease",
-    "kern.version",
-    "hw.machine",
-    "hw.model",
-    "hw.ncpu",
-    "hw.physmem",
-    "hw.usermem",
-    "hw.sce_main_socid",
-    "kern.proc.pid",
-    "kern.ostype",
-}
-
-for _, sname in ipairs(sysctl_tests) do
-    local buf = memory.alloc(0x100)
-    local size = memory.alloc(8)
-    memory.write_qword(size, 0x100)
-    local ok9 = pcall(sysctlbyname, sname, buf, size, 0, 0)
-    if ok9 then
-        local sz = memory.read_qword(size):tonumber()
-        if sz > 0 and sz <= 0x100 then
-            local data = memory.read_buffer(buf, math.min(sz, 64))
-            local ascii = ""
-            for i = 1, #data do
-                local b = string.byte(data, i)
-                if b >= 32 and b <= 126 then
-                    ascii = ascii .. string.char(b)
-                elseif b == 0 then
-                    break
-                else
-                    ascii = ascii .. "."
-                end
+        -- إرسال اسم الملف
+        syscall.write(sock, dst_name.."\n", #dst_name + 1)
+        
+        local total = 0
+        local buf = memory.alloc(0x10000)  -- 64KB buffer
+        
+        while true do
+            local n = syscall.read(fd, buf, 0x10000):tonumber()
+            if n <= 0 then break end
+            
+            local sent = 0
+            while sent < n do
+                local s = syscall.write(sock, buf + sent, n - sent):tonumber()
+                if s <= 0 then break end
+                sent = sent + s
             end
-            print(sname..": "..ascii)
-        end
-    else
-        print(sname..": N/A")
-    end
-end
-
--- 10. قراءة وحدات النظام (Modules)
-print("\n=== LOADED MODULES ===")
-local ok10, mod_info = pcall(function()
-    local sceKernelGetModuleListInternal = fcall(dlsym(LIBKERNEL_HANDLE, "sceKernelGetModuleListInternal"))
-    local sceKernelGetModuleInfo = fcall(dlsym(LIBKERNEL_HANDLE, "sceKernelGetModuleInfo"))
-    
-    local mem = memory.alloc(4 * 0x300)
-    local actual_num = memory.alloc(8)
-    
-    sceKernelGetModuleListInternal(mem, 0x300, actual_num)
-    local num = memory.read_qword(actual_num):tonumber()
-    
-    local modules = {}
-    for i = 0, math.min(num - 1, 19) do
-        local handle = memory.read_dword(mem + i * 4)
-        local info = memory.alloc(0x160)
-        memory.write_qword(info, 0x160)
-        sceKernelGetModuleInfo(handle, info)
-        local mod_name = memory.read_null_terminated_string(info + 8)
-        local base_addr = memory.read_qword(info + 0x108)
-        table.insert(modules, string.format("[%d] %s @ %s", i, mod_name, hex(base_addr)))
-    end
-    return modules
-end)
-
-if ok10 and type(mod_info) == "table" then
-    for _, m in ipairs(mod_info) do print(m) end
-else
-    print("Cannot enumerate modules: "..tostring(mod_info))
-end
-
--- 11. واجهات الشبكة
-print("\n=== NETWORK INTERFACES ===")
-local ok11, ifaces = pcall(get_network_interface_addr)
-if ok11 and ifaces then
-    for name, ip in pairs(ifaces) do
-        print(name..": "..ip)
-    end
-else
-    print("Cannot get network interfaces")
-end
-
--- 12. قراءة ذاكرة libc عند offsets معروفة
-print("\n=== LIBC SYMBOLS ===")
-local ok12, libc_syms = pcall(function()
-    local strerror_addr = memory.read_qword(eboot_addrofs.strerror_import)
-    local libc_calc = strerror_addr - libc_addrofs.strerror
-    local results = {}
-    
-    local symbols = {
-        {"calloc", libc_addrofs.calloc},
-        {"memcpy", libc_addrofs.memcpy},
-        {"setjmp", libc_addrofs.setjmp},
-        {"longjmp", libc_addrofs.longjmp},
-        {"strerror", libc_addrofs.strerror},
-    }
-    
-    for _, sym in ipairs(symbols) do
-        local name, offset = sym[1], sym[2]
-        local addr = libc_base + offset
-        local first_bytes = memory.read_buffer(addr, 8)
-        local hex_str = ""
-        for i = 1, #first_bytes do
-            hex_str = hex_str .. string.format("%02x", string.byte(first_bytes, i))
-        end
-        table.insert(results, string.format("%s @ %s: %s", name, hex(addr), hex_str))
-    end
-    return results
-end)
-
-if ok12 and type(libc_syms) == "table" then
-    for _, s in ipairs(libc_syms) do print(s) end
-else
-    print("Cannot read libc symbols: "..tostring(libc_syms))
-end
-
--- 13. فحص Stack (محاولة قراءة return addresses)
-print("\n=== STACK INFO ===")
-local ok13, stack_info = pcall(function()
-    local co = coroutine.create(function() end)
-    local co_addr = lua.addrof(co)
-    local results = {}
-    table.insert(results, "Coroutine addr: "..hex(co_addr))
-    
-    -- قراءة بعض الحقول حول الـ coroutine
-    for offset = 0, 0x80, 8 do
-        local val = memory.read_qword(co_addr + offset)
-        if val then
-            table.insert(results, string.format("  +0x%02x: %s", offset, hex(val)))
-        end
-    end
-    return results
-end)
-
-if ok13 and type(stack_info) == "table" then
-    for _, s in ipairs(stack_info) do print(s) end
-else
-    print("Cannot read stack info")
-end
-
--- 14. محاولة استدعاء dlsym لرموز مختلفة
-print("\n=== DLSYM TEST ===")
-local dlsym_targets = {
-    {"sceKernelGetThreadId", LIBKERNEL_HANDLE},
-    {"sceKernelGetProcessId", LIBKERNEL_HANDLE},
-    {"sceKernelGetSdkVersion", LIBKERNEL_HANDLE},
-    {"sceSysmoduleLoadModule", LIBKERNEL_HANDLE},
-    {"sceKernelGetModuleInfo", LIBKERNEL_HANDLE},
-}
-
-for _, target in ipairs(dlsym_targets) do
-    local sym_name, handle = target[1], target[2]
-    local ok14, addr = pcall(dlsym, handle, sym_name)
-    if ok14 and addr then
-        print(sym_name..": "..hex(addr))
-    else
-        print(sym_name..": FAILED ("..tostring(addr)..")")
-    end
-end
-
--- 15. معلومات الـ Console Model
-print("\n=== CONSOLE MODEL ===")
-local ok15, model = pcall(get_console_model)
-if ok15 and model then
-    print("Model: "..model)
-end
-
-local ok15b, ps5_model = pcall(get_ps5_model)
-if ok15b and ps5_model then
-    print("PS5 Model: "..ps5_model)
-end
-
-local ok15c, socid = pcall(read_main_socid)
-if ok15c and socid then
-    print("SoC ID: "..hex(socid))
-end
-
--- 16. Title ID
-print("\n=== TITLE ID ===")
-local ok16, title_id = pcall(get_title_id)
-if ok16 and title_id then
-    print("Title ID: "..title_id)
-end
-
--- 17. قراءة محتوى مجلد اللعبة
-print("\n=== GAME DIRECTORY ===")
-local ok17 = pcall(function()
-    local game_files = {
-        "/app0/eboot.bin",
-        "/app0/sce_module/libc.prx",
-        "/app0/sce_module/libkernel.prx",
-        "/app0/sce_sys/param.sfo",
-        "/app0/sce_sys/icon0.png",
-    }
-    
-    for _, fpath in ipairs(game_files) do
-        local fd = syscall.open(fpath, 0):tonumber()
-        if fd >= 0 then
-            local buf = memory.alloc(64)
-            local n = syscall.read(fd, buf, 64):tonumber()
-            if n > 0 then
-                local data = memory.read_buffer(buf, n)
-                local hex_str = ""
-                for i = 1, math.min(n, 16) do
-                    hex_str = hex_str .. string.format("%02x", string.byte(data, i))
-                end
-                print(fpath..": "..n.." bytes ["..hex_str.."]")
+            
+            total = total + n
+            if total % 0x100000 == 0 then
+                print(dst_name..": "..total.." bytes...")
             end
-            syscall.close(fd)
-        else
-            print(fpath..": cannot open (fd="..fd..")")
         end
+        
+        syscall.close(fd)
+        print(dst_name..": DONE ("..total.." bytes)")
+        
+        -- إرسال marker للملف التالي
+        syscall.write(sock, "==END==\n", 8)
     end
-end)
-
-if not ok17 then
-    print("Game directory scan failed")
 end
 
--- 18. فحص الجدار الناري (Sandbox boundaries)
-print("\n=== SANDBOX BOUNDARIES ===")
-local ok18 = pcall(function()
-    -- محاولة قراءة ملفات خارج الساندبوكس
-    local escape_paths = {
-        "/",
-        "/data/",
-        "/data/bd/",
-        "/data/active.dat",
-        "/system/",
-        "/system_ex/",
-        "/system_ex/common/",
-        "/system_ex/common/conf/",
-        "/mnt/",
-        "/mnt/usb0/",
-        "/mnt/disc/",
-        "/user/",
-        "/user/home/",
-    }
-    
-    for _, epath in ipairs(escape_paths) do
-        local fd = syscall.open(epath, 0):tonumber()
-        if fd >= 0 then
-            print("ACCESS: "..epath.." (fd="..fd..")")
-            syscall.close(fd)
-        else
-            print("BLOCKED: "..epath)
-        end
-    end
-end)
-
-if not ok18 then
-    print("Sandbox boundary test failed")
-end
-
-print("\n=== EXPLORATION COMPLETE ===")
-notify("System Explorer Complete!\nCheck output for details.")
+syscall.close(sock)
+print("Dump complete!")
+notify("Binary dump complete!")
