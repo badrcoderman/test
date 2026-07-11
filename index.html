@@ -1,39 +1,73 @@
--- ========== File Reader (No Network) ==========
--- يقرأ eboot.bin ويطبع أول 256 بايت
+import socket
+import sys
+import time
 
-local data = file_read("/app0/eboot.bin")
-if data and #data > 0 then
-    print("eboot.bin size: "..#data)
-    print("First 256 bytes:")
-    print(memory.hex_dump(eboot_base, 256))
-    
-    -- طباعة ELF header
-    local elf_magic = string.byte(data, 1)..string.byte(data, 2)..string.byte(data, 3)..string.byte(data, 4)
-    print("ELF Magic: "..string.format("%02x %02x %02x %02x", 
-        string.byte(data, 1), string.byte(data, 2), 
-        string.byte(data, 3), string.byte(data, 4)))
-    
-    -- طباعة entry point
-    local entry = struct.unpack("<I", data:sub(24, 31))
-    print("Entry point: "..hex(entry))
-    
-    -- طباعة program headers
-    local phoff = struct.unpack("<I", data:sub(32, 39))
-    local phnum = struct.unpack("<H", data:sub(56, 57))
-    print("Program headers: "..phnum.." at offset "..hex(phoff))
-else
-    print("Cannot read eboot.bin")
-end
+HOST = '192.168.8.100'  # IP الخاص بـ PS5
+PORT = 9026
 
--- قراءة libc.prx
-local data2 = file_read("/app0/sce_module/libc.prx")
-if data2 and #data2 > 0 then
-    print("\nlibc.prx size: "..#data2)
-    print("First 128 bytes:")
-    local libc_bytes = ""
-    for i = 1, math.min(128, #data2) do
-        libc_bytes = libc_bytes .. string.format("%02x", string.byte(data2, i))
-        if i % 32 == 0 then libc_bytes = libc_bytes .. "\n" end
+def dump_file(sock, filename):
+    with open(filename, 'wb') as f:
+        print(f"[*] Receiving {filename}...")
+        buffer = b""
+        while True:
+            data = sock.recv(65536)
+            if not data:
+                break
+            
+            # تحقق من وصول علامة النهاية
+            if b"==END==" in data:
+                part = data.split(b"==END==")[0]
+                f.write(part)
+                print(f"[+] Saved {filename} ({len(buffer) + len(part)} bytes)")
+                break
+            
+            f.write(data)
+            buffer = b"" # reset buffer
+            
+            # اطبع التقدم
+            sys.stdout.write(f"\r[*] Received: {f.tell()} bytes")
+            sys.stdout.flush()
+        print("")
+
+print(f"[*] Connecting to {HOST}:{PORT}...")
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.connect((HOST, PORT))
+print("[+] Connected!")
+
+# كود Lua الذي سيقوم بقراءة الملفات وإرسالها
+lua_code = """
+local files = {
+    {"/app0/eboot.bin", "eboot.bin"},
+    {"/app0/sce_module/libc.prx", "libc.prx"}
+}
+
+for _, file_info in ipairs(files) do
+    local path, name = file_info[1], file_info[2]
+    local fd = syscall.open(path, 0):tonumber()
+    if fd >= 0 then
+        local buf = memory.alloc(0x10000)
+        while true do
+            local n = syscall.read(fd, buf, 0x10000):tonumber()
+            if n <= 0 then break end
+            syscall.write(client_fd, buf, n)
+        end
+        syscall.close(fd)
+        syscall.write(client_fd, "==END==", 7)
+    else
+        syscall.write(client_fd, "ERROR\\n", 6)
+        syscall.write(client_fd, "==END==", 7)
     end
-    print(libc_bytes)
 end
+"""
+
+# إرسال حجم الكود ثم الكود
+size = len(lua_code)
+s.send(size.to_bytes(8, 'little'))
+s.send(lua_code.encode())
+
+# استقبال الملفات
+dump_file(s, "eboot.bin")
+dump_file(s, "libc.prx")
+
+s.close()
+print("[*] Done! Check the files in this folder.")
