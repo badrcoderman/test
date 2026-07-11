@@ -1,9 +1,24 @@
-print("FW:"..tostring(FW_VERSION))
-print("PLAT:"..tostring(PLATFORM))
-print("GAME:"..tostring(game_name))
-print("JAIL:"..tostring(is_jailbroken()))
-print("KRW:"..tostring(is_kernel_rw_available()))
-print("LIBC:"..tostring(libc_base))
-print("EBOOT:"..tostring(eboot_base))
-print("IP:"..tostring(get_current_ip()))
-print("PID:"..tostring(find_proc_by_name(game_name)))
+-- 1. فحص قدرة الـ Syscall
+local ok, err = pcall(function()
+    -- getpid is syscall 20 on FreeBSD
+    local pid = syscall(20)
+    print("PID: " .. tostring(pid))
+end)
+if not ok then print("Syscall Err: " .. tostring(err)) end
+
+-- 2. فحص دالة dlsym
+local ok2, libc_func = pcall(function()
+    return dlsym(LIBKERNEL_HANDLE, "sceKernelGetThreadId")
+end)
+if ok2 then print("dlsym: " .. tostring(libc_func)) end
+
+-- 3. محاولة قراءة ملف حساس من نظام PS5
+local ok3, data = pcall(file_read, "/system_ex/common/conf/param.sfo")
+if ok3 and data then
+    print("Read param.sfo: " .. #data .. " bytes")
+else
+    print("Cannot read param.sfo")
+end
+
+-- 4. طباعة عنوان libc للتأكيد
+print("LIBC_ADDR: " .. tostring(libc_base))
