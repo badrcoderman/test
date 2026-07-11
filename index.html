@@ -1,65 +1,111 @@
-<!DOCTYPE html>
-<html>
-<body>
-<button onclick="test()">اختبار: LLInt Addrof via Structure Spray</button>
-<pre id="log" style="font-size:11px;"></pre>
-<script>
-function log(m) { document.getElementById('log').textContent += m + '\n'; }
+-- ========== PS5 Lua Environment Scanner ==========
 
-function test() {
-    log('=== LLInt Addrof Test (No JIT) ===\n');
+-- 1. اطبع كل الدوال المتاحة
+print("=== GLOBAL FUNCTIONS ===")
+for k, v in pairs(_G) do
+    print(k .. " = " .. type(v))
+end
 
-    // 1. أنشئ آلاف المصفوفات من نوع Double
-    var doubles = [];
-    for (var i = 0; i < 10000; i++) {
-        doubles.push([1.1, 2.2, 3.3]);
-    }
+-- 2. ابحث عن FFI
+local ok, ffi = pcall(require, "ffi")
+if ok then
+    print("=== FFI AVAILABLE ===")
+    print("ARCH: " .. ffi.arch)
+    print("OS: " .. ffi.os)
+    
+    -- جرب استدعاء libc مباشرة
+    ffi.cdef[[
+        int printf(const char *fmt, ...);
+        int open(const char *path, int flags);
+        int read(int fd, void *buf, int count);
+        int write(int fd, const void *buf, int count);
+        int close(int fd);
+        void *malloc(int size);
+        void free(void *ptr);
+        int system(const char *cmd);
+        char *getcwd(char *buf, int size);
+    ]]
+    
+    -- اطبع المسار الحالي
+    local buf = ffi.new("char[256]")
+    ffi.C.getcwd(buf, 256)
+    ffi.C.printf("CWD: %s\n", buf)
+    
+    -- جرب قراءة /app0
+    local fd = ffi.C.open("/app0/eboot.bin", 0)
+    if fd >= 0 then
+        print("Opened /app0/eboot.bin! fd=" .. fd)
+        local data = ffi.C.malloc(64)
+        if data ~= nil then
+            ffi.C.read(fd, data, 64)
+            ffi.C.printf("First bytes: ")
+            for i = 0, 63 do
+                ffi.C.printf("%02x ", ffi.cast("unsigned char*", data)[i])
+            end
+            ffi.C.printf("\n")
+            ffi.C.free(data)
+        end
+        ffi.C.close(fd)
+    else
+        print("Cannot open /app0/eboot.bin")
+    end
+    
+    -- جرب قراءة /proc/self/maps
+    local fd2 = ffi.C.open("/proc/self/maps", 0)
+    if fd2 >= 0 then
+        print("Opened /proc/self/maps!")
+        local mapbuf = ffi.C.malloc(4096)
+        if mapbuf ~= nil then
+            local n = ffi.C.read(fd2, mapbuf, 4095)
+            if n > 0 then
+                ffi.cast("char*", mapbuf)[n] = 0
+                ffi.C.printf("%s\n", mapbuf)
+            end
+            ffi.C.free(mapbuf)
+        end
+        ffi.C.close(fd2)
+    else
+        print("Cannot open /proc/self/maps")
+    end
+    
+    -- اطبع عنوان دالة (للتأكد من ASLR)
+    local printf_addr = ffi.cast("void*", ffi.C.printf)
+    print("printf address: " .. tostring(printf_addr))
+    local open_addr = ffi.cast("void*", ffi.C.open)
+    print("open address: " .. tostring(open_addr))
+    
+else
+    print("=== NO FFI ===")
+    print("Need alternative method")
+end
 
-    // 2. أنشئ كائنات عادية (Objects)
-    var objects = [];
-    for (var i = 0; i < 10000; i++) {
-        objects.push({ a: 1, b: 2, c: 3 });
-    }
+-- 3. ابحث عن io library
+local ok2, io = pcall(require, "io")
+if ok2 then
+    print("=== IO AVAILABLE ===")
+    -- جرب قراءة ملف
+    local f = io.open("/app0/eboot.bin", "rb")
+    if f then
+        local data = f:read(64)
+        if data then
+            print("Read " .. #data .. " bytes from eboot.bin")
+        end
+        f:close()
+    end
+end
 
-    // 3. حاول قراءة عنوان كائن عبر إجبار LLInt على الخلط
-    // في JIT، نستخدم Phi Node. في LLInt، نحاول إجبار Inline Cache على الفشل.
-    var target = { secret: "I am an object" };
-    var leaked_addr = null;
+-- 4. ابحث عن os library
+local ok3, os = pcall(require, "os")
+if ok3 then
+    print("=== OS AVAILABLE ===")
+    print("OS time: " .. tostring(os.time()))
+    -- os.execute عادة محذوف لكن جرّب
+    local ok4, result = pcall(os.execute, "id")
+    if ok4 then
+        print("os.execute works! result: " .. tostring(result))
+    else
+        print("os.execute blocked")
+    end
+end
 
-    // دالة تعيد تارة Double وتارة Object
-    function confuse(x) {
-        if (x === 0) return doubles[0]; // Double Array
-        return target; // Object
-    }
-
-    // سخّن الـ Inline Cache لي توقع Double
-    for (var i = 0; i < 100; i++) confuse(0);
-
-    // الآن مرر قيمة غير متوقعة (1)
-    // LLInt سيفحص StructureID، لكن لو كان هناك تعارض...
-    try {
-        var result = confuse(1);
-        // إذا حدث Type Confusion، سيتعامل مع الكائن كأنه Double
-        var d = result[0];
-        
-        if (typeof d === 'number' && !isNaN(d) && d > 1e10) {
-            log('[!!!] LEAKED DOUBLE VALUE: ' + d);
-            // تحويل Double إلى Hex (عنوان الذاكرة)
-            var buf = new ArrayBuffer(8);
-            new Float64Array(buf)[0] = d;
-            var view = new DataView(buf);
-            var low = view.getUint32(0, true);
-            var high = view.getUint32(4, true);
-            log('[!!!] HEX ADDR: 0x' + high.toString(16) + low.toString(16));
-        } else {
-            log('[-] No leak. Value is: ' + d);
-        }
-    } catch(e) {
-        log('Error: ' + e);
-    }
-
-    log('=== Test Finished ===');
-}
-</script>
-</body>
-</html>
+print("=== SCAN COMPLETE ===")
