@@ -1,13 +1,9 @@
-local r=""
-for k,v in pairs(_G) do
-r=r..k.."("..type(v)..") "
-end
-print(r)
-local ok,ffi=pcall(require,"ffi")
-print("FFI:"..tostring(ok))
-if ok then
-print("ARCH:"..ffi.arch.." OS:"..ffi.os)
-local p=ffi.cast("void*",ffi.C.printf)
-print("printf:"..tostring(p))
-end
-print("DONE")
+print("FW:"..tostring(FW_VERSION))
+print("PLAT:"..tostring(PLATFORM))
+print("GAME:"..tostring(game_name))
+print("JAIL:"..tostring(is_jailbroken()))
+print("KRW:"..tostring(is_kernel_rw_available()))
+print("LIBC:"..tostring(libc_base))
+print("EBOOT:"..tostring(eboot_base))
+print("IP:"..tostring(get_current_ip()))
+print("PID:"..tostring(find_proc_by_name(game_name)))
