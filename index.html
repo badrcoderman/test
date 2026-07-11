@@ -1,60 +1,65 @@
 <!DOCTYPE html>
 <html>
-<head>
-<meta charset="utf-8">
-<title>PS5  Info </title>
-</head>
 <body>
-<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
+<button onclick="test()">اختبار: LLInt Addrof via Structure Spray</button>
+<pre id="log" style="font-size:11px;"></pre>
 <script>
-// انسخ هذا الكود والصقه في أي حقل نصي أو console
+function log(m) { document.getElementById('log').textContent += m + '\n'; }
 
-// 1. معلومات النظام
-var info = [];
-info.push('UA: ' + navigator.userAgent);
-info.push('Platform: ' + navigator.platform);
-info.push('Screen: ' + screen.width + 'x' + screen.height);
+function test() {
+    log('=== LLInt Addrof Test (No JIT) ===\n');
 
-// 2. فحص WebKit
-info.push('WebKit: ' + (function(){
-    var v = document.createElement('div');
-    v.style.cssText = '-webkit-line-clamp: 2; -webkit-box-orient: vertical';
-    return v.style.webkitLineClamp;
-})());
+    // 1. أنشئ آلاف المصفوفات من نوع Double
+    var doubles = [];
+    for (var i = 0; i < 10000; i++) {
+        doubles.push([1.1, 2.2, 3.3]);
+    }
 
-// 3. فحص JIT
-var t0 = performance.now();
-var s = 0;
-for (var i = 0; i < 1e8; i++) s += i;
-var t1 = performance.now();
-info.push('JIT test: ' + (t1-t0).toFixed(0) + 'ms (sum=' + s + ')');
-// لو < 1000ms → JIT مفعل!
-// لو > 5000ms → LLInt فقط
+    // 2. أنشئ كائنات عادية (Objects)
+    var objects = [];
+    for (var i = 0; i < 10000; i++) {
+        objects.push({ a: 1, b: 2, c: 3 });
+    }
 
-// 4. فحص APIs
-info.push('WASM: ' + typeof WebAssembly);
-info.push('SharedAB: ' + typeof SharedArrayBuffer);
-info.push('USB: ' + typeof navigator.usb);
-info.push('Bluetooth: ' + typeof navigator.bluetooth);
+    // 3. حاول قراءة عنوان كائن عبر إجبار LLInt على الخلط
+    // في JIT، نستخدم Phi Node. في LLInt، نحاول إجبار Inline Cache على الفشل.
+    var target = { secret: "I am an object" };
+    var leaked_addr = null;
 
-// 5. فحص CVE-2021-38003
-try {
-    var m = new Map();
-    for (var i = 0; i < 100; i++) m.set(i, i);
-    m.delete(0);
-    var leak = m.get(0);
-    info.push('Map leak: ' + leak);
-} catch(e) {
-    info.push('Map leak: ' + e.message);
+    // دالة تعيد تارة Double وتارة Object
+    function confuse(x) {
+        if (x === 0) return doubles[0]; // Double Array
+        return target; // Object
+    }
+
+    // سخّن الـ Inline Cache لي توقع Double
+    for (var i = 0; i < 100; i++) confuse(0);
+
+    // الآن مرر قيمة غير متوقعة (1)
+    // LLInt سيفحص StructureID، لكن لو كان هناك تعارض...
+    try {
+        var result = confuse(1);
+        // إذا حدث Type Confusion، سيتعامل مع الكائن كأنه Double
+        var d = result[0];
+        
+        if (typeof d === 'number' && !isNaN(d) && d > 1e10) {
+            log('[!!!] LEAKED DOUBLE VALUE: ' + d);
+            // تحويل Double إلى Hex (عنوان الذاكرة)
+            var buf = new ArrayBuffer(8);
+            new Float64Array(buf)[0] = d;
+            var view = new DataView(buf);
+            var low = view.getUint32(0, true);
+            var high = view.getUint32(4, true);
+            log('[!!!] HEX ADDR: 0x' + high.toString(16) + low.toString(16));
+        } else {
+            log('[-] No leak. Value is: ' + d);
+        }
+    } catch(e) {
+        log('Error: ' + e);
+    }
+
+    log('=== Test Finished ===');
 }
-
-// 6. فحص PS5 native APIs
-info.push('sceVideoOut: ' + typeof window.sceVideoOutOpen);
-info.push('sceSysmodule: ' + typeof window.sceSysmoduleLoad);
-
-// عرض النتائج
-document.title = info.join(' | ');
-alert(info.join('\n'));
 </script>
 </body>
 </html>
