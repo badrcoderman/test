@@ -1,24 +1,60 @@
--- 1. فحص قدرة الـ Syscall
-local ok, err = pcall(function()
-    -- getpid is syscall 20 on FreeBSD
-    local pid = syscall(20)
-    print("PID: " .. tostring(pid))
-end)
-if not ok then print("Syscall Err: " .. tostring(err)) end
-
--- 2. فحص دالة dlsym
-local ok2, libc_func = pcall(function()
-    return dlsym(LIBKERNEL_HANDLE, "sceKernelGetThreadId")
-end)
-if ok2 then print("dlsym: " .. tostring(libc_func)) end
-
--- 3. محاولة قراءة ملف حساس من نظام PS5
-local ok3, data = pcall(file_read, "/system_ex/common/conf/param.sfo")
-if ok3 and data then
-    print("Read param.sfo: " .. #data .. " bytes")
-else
-    print("Cannot read param.sfo")
+-- 1. عرض إشعار على شاشة PS5
+print("notify type: "..type(notify))
+if type(notify)=="function" then
+  notify("PS5 Lua Active!")
 end
 
--- 4. طباعة عنوان libc للتأكيد
-print("LIBC_ADDR: " .. tostring(libc_base))
+-- 2. فحص syscall table
+print("syscall type: "..type(syscall))
+if type(syscall)=="table" then
+  local c=0
+  for k,v in pairs(syscall) do
+    print("sys["..tostring(k).."]="..type(v))
+    c=c+1
+    if c>15 then break end
+  end
+end
+
+-- 3. فحص native
+print("native type: "..type(native))
+if type(native)=="table" then
+  for k,v in pairs(native) do
+    print("native."..tostring(k).."="..type(v))
+  end
+end
+
+-- 4. فحص dlsym
+print("dlsym type: "..type(dlsym))
+print("LIBKERNEL: "..tostring(LIBKERNEL_HANDLE))
+local ok,r=pcall(dlsym,LIBKERNEL_HANDLE,"sceKernelGetThreadId")
+print("dlsym: "..tostring(ok).." "..tostring(r))
+
+-- 5. فحص memory
+print("memory type: "..type(memory))
+if type(memory)=="table" then
+  for k,v in pairs(memory) do
+    print("memory."..tostring(k).."="..type(v))
+  end
+end
+
+-- 6. فحص file ops
+print("file_read: "..type(file_read))
+print("file_write: "..type(file_write))
+print("WRITABLE_PATH: "..tostring(WRITABLE_PATH))
+
+-- 7. فحص kernel table
+print("kernel type: "..type(kernel))
+if type(kernel)=="table" then
+  for k,v in pairs(kernel) do
+    print("kernel."..tostring(k).."="..type(v))
+  end
+end
+
+-- 8. معلومات النظام
+print("FW: "..tostring(FW_VERSION))
+print("PLAT: "..tostring(PLATFORM))
+print("GAME: "..tostring(game_name))
+print("LIBC: "..tostring(libc_base))
+print("EBOOT: "..tostring(eboot_base))
+
+print("SCAN DONE")
