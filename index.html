@@ -1,111 +1,13 @@
--- ========== PS5 Lua Environment Scanner ==========
-
--- 1. اطبع كل الدوال المتاحة
-print("=== GLOBAL FUNCTIONS ===")
-for k, v in pairs(_G) do
-    print(k .. " = " .. type(v))
+local r=""
+for k,v in pairs(_G) do
+r=r..k.."("..type(v)..") "
 end
-
--- 2. ابحث عن FFI
-local ok, ffi = pcall(require, "ffi")
+print(r)
+local ok,ffi=pcall(require,"ffi")
+print("FFI:"..tostring(ok))
 if ok then
-    print("=== FFI AVAILABLE ===")
-    print("ARCH: " .. ffi.arch)
-    print("OS: " .. ffi.os)
-    
-    -- جرب استدعاء libc مباشرة
-    ffi.cdef[[
-        int printf(const char *fmt, ...);
-        int open(const char *path, int flags);
-        int read(int fd, void *buf, int count);
-        int write(int fd, const void *buf, int count);
-        int close(int fd);
-        void *malloc(int size);
-        void free(void *ptr);
-        int system(const char *cmd);
-        char *getcwd(char *buf, int size);
-    ]]
-    
-    -- اطبع المسار الحالي
-    local buf = ffi.new("char[256]")
-    ffi.C.getcwd(buf, 256)
-    ffi.C.printf("CWD: %s\n", buf)
-    
-    -- جرب قراءة /app0
-    local fd = ffi.C.open("/app0/eboot.bin", 0)
-    if fd >= 0 then
-        print("Opened /app0/eboot.bin! fd=" .. fd)
-        local data = ffi.C.malloc(64)
-        if data ~= nil then
-            ffi.C.read(fd, data, 64)
-            ffi.C.printf("First bytes: ")
-            for i = 0, 63 do
-                ffi.C.printf("%02x ", ffi.cast("unsigned char*", data)[i])
-            end
-            ffi.C.printf("\n")
-            ffi.C.free(data)
-        end
-        ffi.C.close(fd)
-    else
-        print("Cannot open /app0/eboot.bin")
-    end
-    
-    -- جرب قراءة /proc/self/maps
-    local fd2 = ffi.C.open("/proc/self/maps", 0)
-    if fd2 >= 0 then
-        print("Opened /proc/self/maps!")
-        local mapbuf = ffi.C.malloc(4096)
-        if mapbuf ~= nil then
-            local n = ffi.C.read(fd2, mapbuf, 4095)
-            if n > 0 then
-                ffi.cast("char*", mapbuf)[n] = 0
-                ffi.C.printf("%s\n", mapbuf)
-            end
-            ffi.C.free(mapbuf)
-        end
-        ffi.C.close(fd2)
-    else
-        print("Cannot open /proc/self/maps")
-    end
-    
-    -- اطبع عنوان دالة (للتأكد من ASLR)
-    local printf_addr = ffi.cast("void*", ffi.C.printf)
-    print("printf address: " .. tostring(printf_addr))
-    local open_addr = ffi.cast("void*", ffi.C.open)
-    print("open address: " .. tostring(open_addr))
-    
-else
-    print("=== NO FFI ===")
-    print("Need alternative method")
+print("ARCH:"..ffi.arch.." OS:"..ffi.os)
+local p=ffi.cast("void*",ffi.C.printf)
+print("printf:"..tostring(p))
 end
-
--- 3. ابحث عن io library
-local ok2, io = pcall(require, "io")
-if ok2 then
-    print("=== IO AVAILABLE ===")
-    -- جرب قراءة ملف
-    local f = io.open("/app0/eboot.bin", "rb")
-    if f then
-        local data = f:read(64)
-        if data then
-            print("Read " .. #data .. " bytes from eboot.bin")
-        end
-        f:close()
-    end
-end
-
--- 4. ابحث عن os library
-local ok3, os = pcall(require, "os")
-if ok3 then
-    print("=== OS AVAILABLE ===")
-    print("OS time: " .. tostring(os.time()))
-    -- os.execute عادة محذوف لكن جرّب
-    local ok4, result = pcall(os.execute, "id")
-    if ok4 then
-        print("os.execute works! result: " .. tostring(result))
-    else
-        print("os.execute blocked")
-    end
-end
-
-print("=== SCAN COMPLETE ===")
+print("DONE")
