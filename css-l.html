@@ -3,54 +3,41 @@
 <body>
 <div id="s">Running...</div>
 <script>
-localStorage.removeItem('leak_test');
+let props = ['size', 'highWaterMark', 'start', 'pull', 'cancel', 'type', 'length', 'name', 'buffer', 'byteLength', 'byteOffset', 'constructor', 'prototype'];
 
-// مصفوفة لنخزن فيها القيم المسربة
-let leaked_array = new Float64Array(4);
-leaked_array[0] = 1.1;
-leaked_array[1] = 2.2;
-
-// دالة سيستدعيها المحرك، وستقوم بتخزين قيمة في leaked_array
-let trap = function() {
-    // حاول قراءة this أو أي معلومة داخلية
+for (let i = 0; i < props.length; i++) {
+    let p = props[i];
+    // سجل اسم الخاصية التي سنختبرها
+    localStorage.setItem('current_test', p);
+    
     try {
-        leaked_array[2] = this + 0; // قد يسبب خطأ但不crash
-    } catch(e) {
-        leaked_array[2] = 3.3;
-    }
-};
-
-try {
-    Array.prototype[Symbol.iterator] = function() {
-        const a = this;
-        let i = 0;
-        return {
-            next() {
-                if (i >= a.length) return { done: true };
-                let v = a[i];
-                if (a.length === 3 && i >= 1) {
-                    v = trap;
+        Array.prototype[Symbol.iterator] = function() {
+            const a = this;
+            let idx = 0;
+            return {
+                next() {
+                    if (idx >= a.length) return { done: true };
+                    let v = a[idx];
+                    if (a.length === 3 && idx >= 1) {
+                        let obj = {};
+                        obj[p] = 0x41414141; // ضع القيمة في الخاصية
+                        v = obj;
+                    }
+                    idx++;
+                    return { value: v, done: false };
                 }
-                i++;
-                return { value: v, done: false };
-            }
+            };
         };
-    };
-
-    new TransformStream();
-    
-    // إذا وصلنا هنا، trap تم استدعاؤه
-    let result = "";
-    for (let j = 0; j < 4; j++) {
-        result += leaked_array[j] + " | ";
+        new TransformStream();
+        // إذا لم يكرش، استعد المكرر واكمل
+        Array.prototype[Symbol.iterator] = [][Symbol.iterator];
+    } catch(e) {
+        // إذا تم التقاط الخطأ، استعد المكرر واكمل
+        Array.prototype[Symbol.iterator] = [][Symbol.iterator];
     }
-    localStorage.setItem('leak_test', 'SUCCESS: ' + result);
-    
-} catch(e) {
-    localStorage.setItem('leak_test', 'CAUGHT: ' + e.message);
 }
-
-Array.prototype[Symbol.iterator] = [][Symbol.iterator];
+// إذا وصلنا هنا، لم تسبب أي خاصية Crash
+localStorage.setItem('current_test', 'ALL_DONE_NO_CRASH');
 document.getElementById("s").textContent = "Done.";
 </script>
 </body>
