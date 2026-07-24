@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>خزانة Local Storage</title>
+  <style>
+    :root {
+      --ink: #15212c;
+      --muted: #5b6b7c;
+      --paper: #edf3f8;
+      --panel: #ffffff;
+      --blue: #1d5cdb;
+      --blue-dark: #123f99;
+      --blue-soft: #e8f0ff;
+      --amber: #ffb100;
+      --amber-soft: #fff4d6;
+      --red: #c83636;
+      --red-soft: #fff0f0;
+      --green: #117451;
+      --green-soft: #e8f8f0;
+      --line: #c8d5e2;
+      --focus: #7b4dff;
+      --shadow: 0 16px 38px rgba(33, 58, 84, .12);
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Tahoma, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(29, 92, 219, .055) 1px, transparent 1px) 0 0 / 24px 24px,
+        linear-gradient(rgba(29, 92, 219, .055) 1px, transparent 1px) 0 0 / 24px 24px,
+        var(--paper);
+      font-family: var(--sans);
+    }
+
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+
+    button:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible,
+    label.file-button:focus-within {
+      outline: 3px solid var(--focus);
+      outline-offset: 3px;
+    }
+
+    .shell { max-width: 1280px; margin: 0 auto; padding: 28px 20px 44px; }
+
+    .masthead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 20px 22px;
+      color: #fff;
+      background: var(--blue-dark);
+      border: 4px solid var(--ink);
+      box-shadow: 8px 8px 0 var(--amber);
+    }
+
+    .eyebrow {
+      display: block;
+      margin-bottom: 5px;
+      color: #bad0ff;
+      font: 700 .73rem/1.1 var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    h1 { margin: 0; font-size: clamp(1.7rem, 4vw, 2.65rem); line-height: 1.05; }
+    .masthead p { margin: 9px 0 0; color: #dce8ff; font-size: .98rem; }
+
+    .origin-card {
+      min-width: min(100%, 365px);
+      padding: 12px 14px;
+      color: var(--ink);
+      background: #fff;
+      border: 2px solid #a8c1ee;
+    }
+
+    .origin-card span { display: block; color: var(--muted); font-size: .74rem; font-weight: 700; }
+    .origin-card code { display: block; margin-top: 4px; direction: ltr; overflow-wrap: anywhere; font: 700 .8rem/1.4 var(--mono); }
+
+    .notice {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      margin: 28px 0 18px;
+      padding: 14px 16px;
+      background: var(--amber-soft);
+      border-inline-start: 5px solid var(--amber);
+      color: #594000;
+      font-size: .91rem;
+      line-height: 1.55;
+    }
+
+    .notice strong { color: #352600; }
+    .notice .symbol { font: 900 1.2rem/1 var(--mono); }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      margin: 18px 0;
+    }
+
+    .search-wrap { position: relative; }
+    .search-wrap input { width: 100%; padding-inline: 42px 14px; }
+    .search-mark { position: absolute; inset-inline-start: 14px; top: 50%; translate: 0 -50%; color: var(--muted); }
+
+    input, textarea {
+      width: 100%;
+      border: 2px solid var(--line);
+      border-radius: 0;
+      color: var(--ink);
+      background: #fff;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+
+    input { min-height: 47px; padding: 10px 12px; }
+    textarea { min-height: 150px; resize: vertical; padding: 12px; line-height: 1.55; }
+    input:focus, textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); outline: none; }
+
+    .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .button {
+      min-height: 42px;
+      padding: 9px 13px;
+      border: 2px solid var(--ink);
+      color: var(--ink);
+      background: #fff;
+      font-size: .9rem;
+      font-weight: 800;
+      transition: translate .12s ease, box-shadow .12s ease, background .12s ease;
+    }
+
+    .button:hover { translate: 2px -2px; box-shadow: -3px 3px 0 var(--ink); }
+    .button:active { translate: 0; box-shadow: none; }
+    .button.primary { color: #fff; background: var(--blue); border-color: var(--blue-dark); }
+    .button.danger { color: var(--red); background: var(--red-soft); border-color: var(--red); }
+    .button[disabled] { cursor: not-allowed; opacity: .48; translate: 0; box-shadow: none; }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(300px, .7fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .panel { background: var(--panel); border: 2px solid var(--ink); box-shadow: var(--shadow); }
+    .panel-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 15px;
+      color: #fff;
+      background: var(--ink);
+    }
+
+    .panel-heading h2 { margin: 0; font-size: 1rem; }
+    .count-badge { padding: 4px 8px; background: var(--amber); color: var(--ink); font: 800 .78rem/1 var(--mono); }
+
+    .items { max-height: 500px; overflow: auto; }
+    .item {
+      display: grid;
+      grid-template-columns: minmax(110px, .72fr) minmax(130px, 1.55fr) auto;
+      width: 100%;
+      gap: 14px;
+      align-items: center;
+      padding: 12px 15px;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      color: var(--ink);
+      background: transparent;
+      text-align: start;
+    }
+
+    .item:hover { background: #f5f8fc; }
+    .item.is-selected { background: var(--blue-soft); box-shadow: inset 5px 0 0 var(--blue); }
+    .item-key, .item-value { min-width: 0; direction: ltr; unicode-bidi: plaintext; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); text-align: left; }
+    .item-key { font-size: .83rem; font-weight: 800; }
+    .item-value { color: var(--muted); font-size: .8rem; }
+    .item-size { color: var(--muted); direction: ltr; font: .7rem/1 var(--mono); white-space: nowrap; }
+
+    .empty { padding: 46px 24px; text-align: center; color: var(--muted); }
+    .empty strong { display: block; margin-bottom: 8px; color: var(--ink); font-size: 1.1rem; }
+
+    .editor { padding: 16px; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: .82rem; font-weight: 800; }
+    .data-field { direction: ltr; text-align: left; font-family: var(--mono); font-size: .85rem; }
+    .editor-help { margin: 0 0 14px; color: var(--muted); font-size: .82rem; line-height: 1.5; }
+    .separator { height: 1px; margin: 18px 0; background: var(--line); }
+    .small-label { color: var(--muted); font: 800 .71rem/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+
+    .footer-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      padding: 16px;
+      border-top: 1px solid var(--line);
+      background: #f7faff;
+    }
+
+    .file-button { display: inline-flex; align-items: center; }
+    .file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+    .status-line { min-height: 1.3em; margin-inline-start: auto; color: var(--muted); font-size: .78rem; }
+    .toast {
+      position: fixed;
+      inset-inline: 18px auto;
+      bottom: 18px;
+      z-index: 10;
+      max-width: min(420px, calc(100vw - 36px));
+      padding: 12px 14px;
+      color: #fff;
+      background: var(--green);
+      border: 2px solid var(--ink);
+      box-shadow: 5px 5px 0 var(--ink);
+      opacity: 0;
+      pointer-events: none;
+      translate: 0 18px;
+      transition: opacity .18s ease, translate .18s ease;
+    }
+
+    .toast.show { opacity: 1; translate: 0; }
+    .toast.error { background: var(--red); }
+
+    @media (max-width: 820px) {
+      .masthead { align-items: stretch; flex-direction: column; }
+      .workspace { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 560px) {
+      .shell { padding: 16px 13px 34px; }
+      .masthead { padding: 16px; border-width: 3px; box-shadow: 5px 5px 0 var(--amber); }
+      .toolbar { grid-template-columns: 1fr; }
+      .toolbar .button-row { justify-content: stretch; }
+      .toolbar .button { flex: 1; }
+      .item { grid-template-columns: 1fr auto; gap: 6px 12px; }
+      .item-value { grid-column: 1 / -1; }
+      .item-size { grid-column: 2; grid-row: 1; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div>
+        <span class="eyebrow">Browser storage inspector</span>
+        <h1>خزانة <span dir="ltr">Local Storage</span></h1>
+        <p>اقرأ وعدّل البيانات المخزّنة محليًا في هذا الأصل فقط.</p>
+      </div>
+      <div class="origin-card">
+        <span>الأصل الحالي</span>
+        <code id="origin">…</code>
+      </div>
+    </header>
+
+    <aside class="notice" aria-label="معلومة مهمة">
+      <span class="symbol" aria-hidden="true">!</span>
+      <div><strong>حدود المتصفح:</strong> لا يمكن للصفحة قراءة <code dir="ltr">localStorage</code> لموقع آخر. افتح هذا الملف من نفس النطاق الذي تريد فحص بياناته، مثل <code dir="ltr">https://example.com/tool.html</code>.</div>
+    </aside>
+
+    <section class="toolbar" aria-label="أدوات القائمة">
+      <label class="search-wrap">
+        <span class="search-mark" aria-hidden="true">⌕</span>
+        <input id="search" type="search" autocomplete="off" placeholder="ابحث باسم المفتاح أو القيمة…" aria-label="البحث في Local Storage" />
+      </label>
+      <div class="button-row">
+        <button class="button" id="refresh" type="button">تحديث القائمة</button>
+        <button class="button danger" id="clearAll" type="button">مسح الكل</button>
+      </div>
+    </section>
+
+    <div class="workspace">
+      <section class="panel" aria-labelledby="items-title">
+        <div class="panel-heading">
+          <h2 id="items-title">المفاتيح المخزّنة</h2>
+          <span class="count-badge" id="count">0 عناصر</span>
+        </div>
+        <div class="items" id="items" aria-live="polite"></div>
+        <div class="footer-tools">
+          <button class="button" id="exportBtn" type="button">تصدير JSON</button>
+          <label class="file-button button" for="importFile">استيراد JSON<input id="importFile" type="file" accept="application/json,.json" /></label>
+          <span class="status-line" id="status" aria-live="polite"></span>
+        </div>
+      </section>
+
+      <aside class="panel" aria-labelledby="editor-title">
+        <div class="panel-heading"><h2 id="editor-title">المحرّر</h2></div>
+        <form class="editor" id="editorForm">
+          <p class="editor-help">اختر عنصرًا لتعديله، أو أضف مفتاحًا وقيمةً جديدين.</p>
+          <div class="field">
+            <label for="keyInput">المفتاح</label>
+            <input class="data-field" id="keyInput" type="text" autocomplete="off" spellcheck="false" placeholder="settings.theme" required />
+          </div>
+          <div class="field">
+            <label for="valueInput">القيمة النصية</label>
+            <textarea class="data-field" id="valueInput" spellcheck="false" placeholder='{"darkMode":true}' required></textarea>
+          </div>
+          <div class="button-row">
+            <button class="button primary" id="saveBtn" type="submit">حفظ القيمة</button>
+            <button class="button" id="newBtn" type="button">عنصر جديد</button>
+          </div>
+          <div class="separator"></div>
+          <span class="small-label">العنصر المحدد</span>
+          <div class="button-row" style="margin-top: 9px">
+            <button class="button" id="copyBtn" type="button" disabled>نسخ القيمة</button>
+            <button class="button danger" id="deleteBtn" type="button" disabled>حذف العنصر</button>
+          </div>
+        </form>
+      </aside>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const $ = (selector) => document.querySelector(selector);
+      const elements = {
+        origin: $("#origin"),
+        search: $("#search"),
+        items: $("#items"),
+        count: $("#count"),
+        status: $("#status"),
+        form: $("#editorForm"),
+        key: $("#keyInput"),
+        value: $("#valueInput"),
+        refresh: $("#refresh"),
+        newItem: $("#newBtn"),
+        save: $("#saveBtn"),
+        copy: $("#copyBtn"),
+        remove: $("#deleteBtn"),
+        clear: $("#clearAll"),
+        export: $("#exportBtn"),
+        import: $("#importFile"),
+        toast: $("#toast")
+      };
+
+      let selectedKey = null;
+      let toastTimer = null;
+
+      const storage = {
+        get available() {
+          try {
+            return window.localStorage !== null;
+          } catch (_) {
+            return false;
+          }
+        },
+        entries() {
+          const entries = [];
+          for (let index = 0; index < window.localStorage.length; index += 1) {
+            const key = window.localStorage.key(index);
+            if (key !== null) entries.push([key, window.localStorage.getItem(key) ?? ""]);
+          }
+          return entries.sort(([a], [b]) => a.localeCompare(b));
+        }
+      };
+
+      function showToast(message, type = "success") {
+        window.clearTimeout(toastTimer);
+        elements.toast.textContent = message;
+        elements.toast.className = `toast ${type === "error" ? "error" : ""}`;
+        requestAnimationFrame(() => elements.toast.classList.add("show"));
+        toastTimer = window.setTimeout(() => elements.toast.classList.remove("show"), 3400);
+      }
+
+      function updateActionState() {
+        const hasSelection = selectedKey !== null;
+        elements.copy.disabled = !hasSelection;
+        elements.remove.disabled = !hasSelection;
+      }
+
+      function bytes(value) {
+        const size = new Blob([value]).size;
+        return size < 1024 ? `${size} B` : `${(size / 1024).toFixed(1)} KB`;
+      }
+
+      function preview(value) {
+        return value.length > 175 ? `${value.slice(0, 175)}…` : value || "(قيمة فارغة)";
+      }
+
+      function selectedRecord() {
+        if (selectedKey === null) return null;
+        const value = window.localStorage.getItem(selectedKey);
+        return value === null ? null : { key: selectedKey, value };
+      }
+
+      function setEditor(key, value) {
+        selectedKey = key;
+        elements.key.value = key ?? "";
+        elements.value.value = value ?? "";
+        updateActionState();
+        render();
+      }
+
+      function clearEditor(focusKey = false) {
+        selectedKey = null;
+        elements.form.reset();
+        updateActionState();
+        render();
+        if (focusKey) elements.key.focus();
+      }
+
+      function makeEmpty(message, isFilter) {
+        const box = document.createElement("div");
+        box.className = "empty";
+        const title = document.createElement("strong");
+        title.textContent = isFilter ? "لا توجد نتيجة مطابقة" : "الخزانة فارغة";
+        const copy = document.createElement("span");
+        copy.textContent = message;
+        box.append(title, copy);
+        return box;
+      }
+
+      function render() {
+        if (!storage.available) {
+          elements.items.replaceChildren(makeEmpty("المتصفح منع الوصول إلى Local Storage في هذا السياق.", false));
+          elements.count.textContent = "غير متاح";
+          elements.status.textContent = "تحقق من إعدادات الخصوصية أو افتح الصفحة من خادم محلي.";
+          return;
+        }
+
+        let records;
+        try {
+          records = storage.entries();
+        } catch (error) {
+          elements.items.replaceChildren(makeEmpty("تعذر قراءة البيانات المخزّنة.", false));
+          elements.status.textContent = error.message;
+          return;
+        }
+
+        const query = elements.search.value.trim().toLocaleLowerCase();
+        const visible = records.filter(([key, value]) => `${key}\n${value}`.toLocaleLowerCase().includes(query));
+        if (selectedKey !== null && !records.some(([key]) => key === selectedKey)) {
+          selectedKey = null;
+          elements.form.reset();
+          updateActionState();
+        }
+
+        const fragment = document.createDocumentFragment();
+        if (visible.length === 0) {
+          fragment.append(makeEmpty(query ? "جرّب كلمة مختلفة أو امسح البحث." : "أضف أول مفتاح من المحرّر.", Boolean(query)));
+        } else {
+          visible.forEach(([key, value]) => {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = `item${key === selectedKey ? " is-selected" : ""}`;
+            item.title = `فتح ${key}`;
+
+            const keyNode = document.createElement("span");
+            keyNode.className = "item-key";
+            keyNode.textContent = key;
+            const valueNode = document.createElement("span");
+            valueNode.className = "item-value";
+            valueNode.textContent = preview(value);
+            const sizeNode = document.createElement("span");
+            sizeNode.className = "item-size";
+            sizeNode.textContent = bytes(value);
+
+            item.append(keyNode, valueNode, sizeNode);
+            item.addEventListener("click", () => setEditor(key, value));
+            fragment.append(item);
+          });
+        }
+        elements.items.replaceChildren(fragment);
+        elements.count.textContent = `${records.length} ${records.length === 1 ? "عنصر" : "عناصر"}`;
+        elements.status.textContent = query ? `${visible.length} نتيجة من ${records.length}` : `إجمالي الحجم: ${bytes(records.map(([, value]) => value).join(""))}`;
+      }
+
+      function save(event) {
+        event.preventDefault();
+        const newKey = elements.key.value;
+        const newValue = elements.value.value;
+        if (!newKey) {
+          showToast("اكتب اسمًا للمفتاح أولًا.", "error");
+          elements.key.focus();
+          return;
+        }
+        try {
+          if (selectedKey !== null && selectedKey !== newKey) window.localStorage.removeItem(selectedKey);
+          const isNew = window.localStorage.getItem(newKey) === null;
+          window.localStorage.setItem(newKey, newValue);
+          selectedKey = newKey;
+          updateActionState();
+          render();
+          showToast(isNew ? "تمت إضافة المفتاح." : "تم حفظ التعديل.");
+        } catch (error) {
+          showToast(`تعذر الحفظ: ${error.message}`, "error");
+        }
+      }
+
+      async function copySelected() {
+        const record = selectedRecord();
+        if (!record) return;
+        try {
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(record.value);
+          } else {
+            elements.value.focus();
+            elements.value.select();
+            if (!document.execCommand("copy")) throw new Error("النسخ غير مدعوم هنا");
+          }
+          showToast("تم نسخ القيمة إلى الحافظة.");
+        } catch (error) {
+          showToast(`تعذر النسخ: ${error.message}`, "error");
+        }
+      }
+
+      function deleteSelected() {
+        const record = selectedRecord();
+        if (!record) return;
+        if (!window.confirm(`حذف المفتاح “${record.key}”؟`)) return;
+        try {
+          window.localStorage.removeItem(record.key);
+          clearEditor();
+          showToast("تم حذف المفتاح.");
+        } catch (error) {
+          showToast(`تعذر الحذف: ${error.message}`, "error");
+        }
+      }
+
+      function clearAll() {
+        if (!storage.available || window.localStorage.length === 0) return;
+        if (!window.confirm("سيُحذف كل Local Storage لهذا الأصل فقط. هل تريد المتابعة؟")) return;
+        try {
+          window.localStorage.clear();
+          clearEditor();
+          showToast("تم مسح كل البيانات المحلية لهذا الأصل.");
+        } catch (error) {
+          showToast(`تعذر المسح: ${error.message}`, "error");
+        }
+      }
+
+      function exportData() {
+        try {
+          const data = Object.fromEntries(storage.entries());
+          const file = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(file);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `local-storage-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+          document.body.append(link);
+          link.click();
+          link.remove();
+          window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+          showToast("تم تصدير نسخة JSON.");
+        } catch (error) {
+          showToast(`تعذر التصدير: ${error.message}`, "error");
+        }
+      }
+
+      async function importData(event) {
+        const [file] = event.target.files;
+        event.target.value = "";
+        if (!file) return;
+        try {
+          const parsed = JSON.parse(await file.text());
+          if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error("يلزم أن يكون JSON كائنًا من مفاتيح وقيم");
+          const pairs = Object.entries(parsed);
+          if (!pairs.every(([key, value]) => typeof key === "string" && typeof value === "string")) {
+            throw new Error("كل قيمة يجب أن تكون نصًا؛ Local Storage لا يحفظ أنواع JSON مباشرة");
+          }
+          if (!pairs.length) {
+            showToast("ملف JSON لا يحتوي مفاتيح للاستيراد.", "error");
+            return;
+          }
+          if (!window.confirm(`سيتم إضافة أو استبدال ${pairs.length} مفتاحًا. متابعة؟`)) return;
+          pairs.forEach(([key, value]) => window.localStorage.setItem(key, value));
+          clearEditor();
+          showToast(`تم استيراد ${pairs.length} مفتاحًا.`);
+        } catch (error) {
+          showToast(`تعذر الاستيراد: ${error.message}`, "error");
+        }
+      }
+
+      function initialise() {
+        elements.origin.textContent = window.location.origin === "null" ? "file:// (قد يختلف الدعم بين المتصفحات)" : window.location.origin;
+        elements.search.addEventListener("input", render);
+        elements.refresh.addEventListener("click", () => { render(); showToast("تم تحديث القائمة."); });
+        elements.form.addEventListener("submit", save);
+        elements.newItem.addEventListener("click", () => clearEditor(true));
+        elements.copy.addEventListener("click", copySelected);
+        elements.remove.addEventListener("click", deleteSelected);
+        elements.clear.addEventListener("click", clearAll);
+        elements.export.addEventListener("click", exportData);
+        elements.import.addEventListener("change", importData);
+        updateActionState();
+        render();
+      }
+
+      initialise();
+    })();
+  </script>
+</body>
+</html>
