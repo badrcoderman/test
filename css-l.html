@@ -1,80 +1,65 @@
-
 <!DOCTYPE html>
 <html>
 <head>
 <style>
-body { background:#000; color:#0f0; font-family:monospace; font-size:13px; padding:8px; }
-.log { white-space:pre-wrap; word-break:break-all; }
-.ok { color:#0f0; } .err { color:#f00; } .warn { color:#ff0; }
-.info { color:#0ff; } .hit { color:#f0f; font-weight:bold; }
+body{background:#000;color:#0f0;font-family:monospace;font-size:13px;padding:8px}
+.log{white-space:pre-wrap;word-break:break-all}
+.ok{color:#0f0}.err{color:#f00}.warn{color:#ff0}.info{color:#0ff}.hit{color:#f0f;font-weight:bold}
 </style>
 </head>
 <body>
 <div id="log"></div>
 <script>
-function log(m,c){var d=document.createElement("div");d.className=c||'log';d.textContent=m;document.getElementById("log").appendChild(d);}
+function log(m,c){var d=document.createElement("div");d.className=c||'log';d.textContent=m;document.getElementById("log").appendChild(d)}
 
-log("=== ARRAYBUFFER WRITE TEST ===","info");
+log("=== GETTER TRAP TEST ===","info");
 log("");
 
-let buf = new ArrayBuffer(64);
-let view = new DataView(buf);
+let phase=0;
+let buf=new ArrayBuffer(64);
+let view=new DataView(buf);
+let calls=[];
 
-// املأ الـ ArrayBuffer بنمط معروف (0x41)
-for (let i=0; i<64; i++) view.setUint8(i, 0x41);
+// كائن مع getter - عند قراءة أي خاصية، يسجل الاستدعاء
+let trap=new Proxy({},{
+    get:function(target,prop,receiver){
+        calls.push(prop.toString());
+        // أعد قيمة 0 - لا تسبب crash
+        return 0;
+    }
+});
 
-log("[1] buf before: byteLength=" + buf.byteLength, "ok");
-
-try {
-    Array.prototype[Symbol.iterator] = function() {
-        const a = this;
-        let i = 0;
-        return {
-            next() {
-                if (i >= a.length) return { done: true };
-                let v = a[i];
-                if (a.length === 3 && i >= 1) {
-                    log("[iter] Returning buf at index " + i, "warn");
-                    v = buf; // تمرير الـ ArrayBuffer نفسه!
+try{
+    Array.prototype[Symbol.iterator]=function(){
+        const a=this;
+        let i=0;
+        return{
+            next(){
+                if(i>=a.length)return{done:true};
+                let v=a[i];
+                if(a.length===3&&i>=1){
+                    v=trap;
                 }
                 i++;
-                return { value: v, done: false };
+                return{value:v,done:false};
             }
-        };
+        }
     };
 
     new TransformStream();
-    log("[2] TransformStream created! NO CRASH!", "ok");
+    log("NO CRASH!","ok");
+    log("Properties read: "+calls.join(", "),"warn");
+    log("Count: "+calls.length,"warn");
 
-    // تحقق مما إذا تم تعديل الـ ArrayBuffer
-    log("[3] buf after: byteLength=" + buf.byteLength, "ok");
-
-    let hex = "";
-    for (let i=0; i<64; i++) {
-        hex += view.getUint8(i).toString(16).padStart(2,'0') + " ";
-        if ((i+1) % 16 === 0) {
-            log("  " + hex, "ok");
-            hex = "";
-        }
-    }
-
-    // حاول القراءة خارج الحدود (OOB)
-    log("[4] Trying OOB read...", "warn");
-    let u8 = new Uint8Array(buf);
-    try {
-        let oob = u8[100]; // حاول القراءة بعيداً
-        log("  OOB read: " + oob, "hit");
-    } catch(e) {
-        log("  OOB read error: " + e.message, "err");
-    }
-
-} catch(e) {
-    log("Error: " + e.message, "err");
+}catch(e){
+    log("CAUGHT: "+e.message,"warn");
+    log("Properties read before crash: "+calls.join(", "),"warn");
+    log("Count: "+calls.length,"warn");
 }
 
-Array.prototype[Symbol.iterator] = [][Symbol.iterator];
-log("", "info");
-log("=== DONE ===", "info");
+Array.prototype[Symbol.iterator]=[][Symbol.iterator];
+log("","info");
+log("=== DONE ===","info");
 </script>
 </body>
 </html>
