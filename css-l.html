@@ -1,36 +1,30 @@
 <!DOCTYPE html>
 <html>
 <body>
-<div id="status">Running...</div>
 <script>
-localStorage.removeItem('crash_result');
-
+localStorage.setItem('r', 'START_PAD_0x41414141');
 try {
     Array.prototype[Symbol.iterator] = function() {
-        const arr = this;
+        const a = this;
         let i = 0;
         return {
             next() {
-                if (i >= arr.length)
-                    return { done: true };
-                let val = arr[i];
-                if (arr.length === 3 && i >= 1) {
-                    localStorage.setItem('crash_result', 'CRASH_AT_INDEX_' + i);
-                    // غيّرنا القيمة إلى 0x42424242
-                    val = { fake: true, pad: 0x42424242 };
+                if (i >= a.length) return { done: true };
+                let v = a[i];
+                if (a.length === 3 && i >= 1) {
+                    localStorage.setItem('r', 'IDX_' + i + '_PAD_4141');
+                    v = { x: 0x41414141 };
                 }
                 i++;
-                return { value: val, done: false };
+                return { value: v, done: false };
             }
         };
     };
-
     new TransformStream();
-    
+    localStorage.setItem('r', 'NO_CRASH');
 } catch(e) {
-    localStorage.setItem('crash_result', 'CAUGHT: ' + e.message);
+    localStorage.setItem('r', 'CAUGHT');
 }
-Array.prototype[Symbol.iterator] = [][Symbol.iterator];
 </script>
 </body>
 </html>
