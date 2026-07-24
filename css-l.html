@@ -2,463 +2,303 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<title>DeepTrace — Director</title>
+<title>ChainBuilder — Crash Analyzer</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   body {
     font-family: 'SF Mono', 'Fira Code', 'Tahoma', monospace;
-    background: #0a0a0f;
-    color: #c8c8d0;
+    background: #08080c;
+    color: #c0c0c8;
     padding: 20px;
-    line-height: 1.7;
+    line-height: 1.6;
     direction: rtl;
   }
-  h1 {
-    color: #7ee787;
-    font-size: 12px;
-    letter-spacing: 2px;
-    margin-bottom: 4px;
-  }
-  .sub { color: #555; font-size: 10px; margin-bottom: 16px; }
-  #feed {
-    background: #0d0d14;
-    border: 1px solid #1a1a24;
+  h1 { color: #7ee787; font-size: 13px; letter-spacing: 2px; }
+  .sub { color: #444; font-size: 10px; margin-bottom: 16px; }
+  .panel {
+    background: #0c0c12;
+    border: 1px solid #181824;
     border-radius: 4px;
-    height: 65vh;
-    overflow-y: auto;
-    padding: 12px;
-    font-size: 11px;
+    margin-bottom: 12px;
+    overflow: hidden;
   }
-  .entry {
-    padding: 4px 0;
-    border-bottom: 1px solid #14141c;
-    animation: in 0.12s ease;
+  .panel-header {
+    background: #111118;
+    padding: 8px 14px;
+    font-size: 10px;
+    color: #666;
+    border-bottom: 1px solid #181824;
+    cursor: pointer;
   }
-  .entry.STEP { color: #74c0fc; }
-  .entry.DATA { color: #a5d6a7; }
-  .entry.INJECT { color: #ffab91; }
-  .entry.CRASH { color: #ff6b6b; background: #1a0a0a; }
-  .entry.RECOVER { color: #7ee787; }
-  .entry.WARN { color: #ffa94d; }
-  .ts {
-    color: #444;
-    font-size: 9px;
-    margin-left: 10px;
-    float: left;
+  .panel-header:hover { color: #7ee787; }
+  .panel-body { padding: 14px; font-size: 11px; }
+  .reg-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px;
   }
-  .depth {
-    color: #555;
-    font-size: 9px;
-    margin-left: 6px;
+  .reg {
+    padding: 4px 8px;
+    background: #0a0a10;
+    border-radius: 2px;
   }
-  #ctrl {
-    margin-top: 14px;
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
+  .reg-name { color: #555; font-size: 9px; }
+  .reg-val { color: #a5d6a7; font-family: monospace; }
+  .reg-val.controlled { color: #ff6b6b; background: #1a0a0a; }
+  .reg-val.pointer { color: #74c0fc; }
+  .highlight {
+    background: #1a0a0a;
+    border-right: 2px solid #ff6b6b;
+    padding: 2px 8px;
+    margin: 2px 0;
+  }
+  .chain-step {
+    padding: 8px;
+    margin: 4px 0;
+    background: #0a0a10;
+    border-right: 2px solid #ffa94d;
+  }
+  .chain-step.ready { border-right-color: #7ee787; }
+  #paste-area {
+    width: 100%;
+    height: 120px;
+    background: #0c0c12;
+    border: 1px solid #222;
+    color: #888;
+    padding: 10px;
+    font-family: inherit;
+    font-size: 10px;
+    resize: vertical;
   }
   button {
-    background: #14141c;
+    background: #1a1a24;
     color: #888;
-    border: 1px solid #222;
-    padding: 8px 16px;
+    border: 1px solid #2a2a3e;
+    padding: 8px 18px;
     font-family: inherit;
     font-size: 10px;
     cursor: pointer;
-    border-radius: 3px;
+    margin-top: 8px;
   }
-  button:hover { border-color: #7ee787; color: #c8c8d0; }
-  button:disabled { opacity: 0.3; }
-  #bar {
-    margin-top: 12px;
-    padding: 10px 14px;
-    background: #0d0d14;
-    border: 1px solid #1a1a24;
-    border-radius: 3px;
-    font-size: 10px;
-    color: #555;
-  }
-  #bar.live { color: #7ee787; }
-  #bar.dead { color: #ff6b6b; }
-  @keyframes in {
-    from { opacity:0; transform:translateX(4px); }
-    to { opacity:1; transform:translateX(0); }
-  }
+  button:hover { border-color: #7ee787; color: #c8c0c8; }
+  .status { margin-top: 8px; font-size: 10px; color: #555; }
+  .status.live { color: #7ee787; }
 </style>
 </head>
 <body>
 
-<h1>► DEEPTRACE_LOGGER</h1>
-<div class="sub">فحص عميق — كل خطوة، كل كائن، كل تعطل</div>
+<h1>► CHAINBUILDER_ANALYZER</h1>
+<div class="sub">تحليل تفصيلي لـ crash dumps — استخراج primitives وخريطة الاستغلال</div>
 
-<div id="feed"></div>
-
-<div id="ctrl">
-  <button id="btn-go" onclick="probe.ignite()">تشغيل</button>
-  <button onclick="probe.clear()">مسح</button>
-  <button onclick="probe.export()">تصدير JSON</button>
+<div class="panel">
+  <div class="panel-header">📋 لصق Crash Log</div>
+  <div class="panel-body">
+    <textarea id="paste-area" placeholder="لصق الـ crash dump هنا..."></textarea>
+    <br>
+    <button onclick="analyzer.parse()">تحليل</button>
+    <button onclick="analyzer.clear()">مسح</button>
+    <div class="status" id="status">جاهز</div>
+  </div>
 </div>
 
-<div id="bar">جاهز</div>
+<div class="panel">
+  <div class="panel-header">📊 ملخص التعطل</div>
+  <div class="panel-body" id="summary">في انتظار البيانات...</div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">🎯 الـ Registers (مع تحديد القيم المتحكم فيها)</div>
+  <div class="panel-body">
+    <div class="reg-grid" id="registers">---</div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">🔗 Backtrace</div>
+  <div class="panel-body" id="backtrace">---</div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">🗺️ خريطة الـ Primitives الممكنة</div>
+  <div class="panel-body" id="primitives">---</div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">📈 Chain Status</div>
+  <div class="panel-body" id="chain">
+    <div class="chain-step ready">✅ Type Confusion (Iterator Hijack)</div>
+    <div class="chain-step">⏳ Controlled Crash (0x4141 → need stable primitive)</div>
+    <div class="chain-step">⏳ Info Leak (need addrof primitive)</div>
+    <div class="chain-step">⏳ Arbitrary R/W (need fakeobj/fake array)</div>
+    <div class="chain-step">⏳ ASLR Bypass (need WebKit/libkernel leak)</div>
+    <div class="chain-step">⏳ Kernel Entry (need syscall target)</div>
+  </div>
+</div>
 
 <script>
-const LS_KEY = 'deeptrace_v1';
-const LS_CRASH = 'deeptrace_crash';
-
-class DeepTrace {
+class CrashAnalyzer {
   constructor() {
-    this.buf = [];
-    this.el = document.getElementById('feed');
-    this.bar = document.getElementById('bar');
-    this.depth = 0;
-    this.recover();
+    this.data = null;
+    this.controlledVals = ['4141', '4242', 'dead', 'beef', 'cafe', 'babe'];
   }
 
-  recover() {
-    const crash = localStorage.getItem(LS_CRASH);
-    const raw = localStorage.getItem(LS_KEY);
-    if (crash) {
-      this.log('استعادة', 'تعطل سابق detected — استعادة السياق', 'RECOVER');
+  parse() {
+    const raw = document.getElementById('paste-area').value;
+    if (!raw.trim()) {
+      this.status('لا يوجد بيانات', '');
+      return;
     }
-    if (raw) {
-      try {
-        const prev = JSON.parse(raw);
-        this.buf = prev;
-        this.log('استعادة', `${prev.length} سجل محفوظ من الجلسة السابقة`, 'RECOVER');
-      } catch(e) {}
-    }
-    localStorage.removeItem(LS_CRASH);
+    this.status('يحلل...', 'live');
+
+    this.data = this.extract(raw);
+    this.renderSummary();
+    this.renderRegisters();
+    this.renderBacktrace();
+    this.renderPrimitives();
+
+    this.status('اكتمل التحليل', 'live');
   }
 
-  push(tag, msg, cls = 'STEP') {
-    const e = {
-      t: Date.now(),
-      depth: this.depth,
-      tag,
-      msg,
-      cls,
-      stack: new Error().stack?.split('\n').slice(2, 5).join(' | ')
+  extract(raw) {
+    const lines = raw.split('\n').map(l => l.trim()).filter(l => l);
+
+    const sigMatch = raw.match(/signal:\s*(\d+)\s*\(([^)]+)\)/);
+    const reasonMatch = raw.match(/reason:\s*(.+)/);
+    const faultMatch = raw.match(/fault address:\s*(0x[0-9a-f]+)/i);
+    const procMatch = raw.match(/proc name:\s*(.+)/);
+    const threadMatch = raw.match(/thread name:\s*(.+)/);
+
+    const regs = {};
+    const regLines = raw.match(/r[0-9a-z]{2,3}:\s*0x[0-9a-f]+/gi) || [];
+    regLines.forEach(line => {
+      const m = line.match(/(r[0-9a-z]{2,3}):\s*(0x[0-9a-f]+)/i);
+      if (m) regs[m[1].toLowerCase()] = m[2].toLowerCase();
+    });
+
+    const backtrace = [];
+    const btLines = raw.match(/0x[0-9a-f]{8,16}/gi) || [];
+    btLines.forEach(addr => {
+      if (!backtrace.includes(addr)) backtrace.push(addr);
+    });
+
+    return {
+      signal: sigMatch ? { num: sigMatch[1], name: sigMatch[2] } : null,
+      reason: reasonMatch ? reasonMatch[1] : 'unknown',
+      faultAddr: faultMatch ? faultMatch[1] : null,
+      procName: procMatch ? procMatch[1] : 'unknown',
+      threadName: threadMatch ? threadMatch[1] : 'unknown',
+      registers: regs,
+      backtrace: backtrace,
+      raw: raw
     };
-    this.buf.push(e);
-    this.persist();
-    this.render(e);
   }
 
-  persist() {
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify(this.buf));
-    } catch(e) {
-      this.buf = this.buf.slice(-300);
-      localStorage.setItem(LS_KEY, JSON.stringify(this.buf));
+  renderSummary() {
+    const d = this.data;
+    const controlled = this.isControlled(d.faultAddr);
+    const html = `
+      <div class="highlight">الإشارة: ${d.signal ? d.signal.name : 'N/A'} (${d.signal ? d.signal.num : '?'})</div>
+      <div class="highlight">السبب: ${d.reason}</div>
+      <div class="highlight ${controlled ? '' : ''}">عنوان التعطل: ${d.faultAddr || 'N/A'} ${controlled ? '← قيمة متحكم فيها!' : ''}</div>
+      <div>العملية: ${d.procName}</div>
+      <div>الـ Thread: ${d.threadName}</div>
+    `;
+    document.getElementById('summary').innerHTML = html;
+  }
+
+  renderRegisters() {
+    const container = document.getElementById('registers');
+    container.innerHTML = '';
+    const regs = this.data.registers;
+    for (const [name, val] of Object.entries(regs)) {
+      const controlled = this.isControlled(val);
+      const isPointer = val.startsWith('0x00000008') || val.startsWith('0x0000007');
+      const div = document.createElement('div');
+      div.className = 'reg';
+      div.innerHTML = `
+        <span class="reg-name">${name}</span>
+        <span class="reg-val ${controlled ? 'controlled' : ''} ${isPointer ? 'pointer' : ''}">${val}</span>
+        ${controlled ? '← حقن!' : ''}
+      `;
+      container.appendChild(div);
     }
   }
 
-  render(e) {
-    const d = document.createElement('div');
-    d.className = `entry ${e.cls}`;
-    const time = new Date(e.t).toLocaleTimeString('ar-SA', {hour12:false, fractionalSecondDigits:3});
-    const indent = '  '.repeat(e.depth);
-    d.innerHTML = `<span class="ts">${time}</span><span class="depth">${indent}</span>[${e.tag}] ${e.msg}`;
-    this.el.appendChild(d);
-    this.el.scrollTop = this.el.scrollHeight;
+  renderBacktrace() {
+    const container = document.getElementById('backtrace');
+    const bt = this.data.backtrace;
+    if (!bt.length) {
+      container.textContent = 'لا يوجد backtrace';
+      return;
+    }
+    container.innerHTML = bt.map((addr, i) => {
+      const base = this.estimateBase(addr);
+      return `<div>#${i} ${addr} ${base ? `← ${base}` : ''}</div>`;
+    }).join('');
   }
 
-  enter(tag) {
-    this.push(tag, '→ دخول', 'STEP');
-    this.depth++;
+  renderPrimitives() {
+    const d = this.data;
+    const controlled = this.isControlled(d.faultAddr);
+    const isWrite = d.reason.includes('write');
+    const html = [];
+
+    if (controlled && isWrite) {
+      html.push(`<div class="highlight">✅ Write Primitive POTENTIAL: fault address ${d.faultAddr} matches injected value</div>`);
+      html.push(`<div>→ r12 holds: ${d.registers.r12 || 'N/A'} (controlled register)</div>`);
+      html.push(`<div>→ rip: ${d.registers.rip || 'N/A'} (crash location in WebKit)</div>`);
+    }
+
+    if (d.procName.includes('WebProcess')) {
+      html.push(`<div>✅ Target: WebKit WebProcess confirmed (PS5 userland)</div>`);
+    }
+
+    if (d.threadName.includes('Main')) {
+      html.push(`<div>⚠️ Main thread crash — synchronous path, easier to debug</div>`);
+    }
+
+    html.push(`<div>📍 Next: Determine exact offset in TransformStream constructor where type check fails</div>`);
+    html.push(`<div>📍 Next: Check if r12 is used as pointer before crash (indicates vtable/struct field access)</div>`);
+
+    document.getElementById('primitives').innerHTML = html.join('');
   }
 
-  exit(tag, result) {
-    this.depth = Math.max(0, this.depth - 1);
-    const indent = '  '.repeat(this.depth);
-    this.push(tag, `← خروج: ${result}`, 'STEP');
+  isControlled(val) {
+    if (!val) return false;
+    const clean = val.replace('0x', '').toLowerCase();
+    return this.controlledVals.some(v => clean.includes(v));
   }
 
-  data(tag, key, val) {
-    let display = val;
-    try {
-      if (typeof val === 'object' && val !== null) {
-        display = JSON.stringify(val, (k,v) => {
-          if (v instanceof ArrayBuffer) return `[ArrayBuffer ${v.byteLength}]`;
-          if (v instanceof Proxy) return '[Proxy]';
-          return v;
-        });
-      }
-    } catch(e) { display = String(val); }
-    this.push(tag, `${key} = ${display}`, 'DATA');
+  estimateBase(addr) {
+    const map = {
+      '0x000000083': 'libkernel',
+      '0x00000007': 'stack',
+      '0x00000001': 'heap',
+      '0x00000009': 'JIT'
+    };
+    for (const [prefix, name] of Object.entries(map)) {
+      if (addr.startsWith(prefix)) return name;
+    }
+    return null;
   }
 
-  inject(tag, what, where) {
-    this.push(tag, `💉 حقن: ${what} → ${where}`, 'INJECT');
-  }
-
-  crash(tag, err) {
-    this.push(tag, `💥 تعطل: ${err.message || err}`, 'CRASH');
-    this.push(tag, `Stack: ${err.stack?.split('\n')[0] || 'N/A'}`, 'CRASH');
-    localStorage.setItem(LS_CRASH, '1');
-    this.bar.textContent = 'تعطل — السجلات محفوظة';
-    this.bar.className = 'dead';
+  status(msg, cls) {
+    const el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = 'status ' + cls;
   }
 
   clear() {
-    this.buf = [];
-    this.depth = 0;
-    localStorage.removeItem(LS_KEY);
-    localStorage.removeItem(LS_CRASH);
-    this.el.innerHTML = '';
-    this.bar.textContent = 'تم المسح';
-    this.bar.className = '';
-  }
-
-  snapshot() {
-    return {
-      t: Date.now(),
-      ua: navigator.userAgent,
-      plat: navigator.platform,
-      vendor: navigator.vendor,
-      mem: performance?.memory ? {
-        used: performance.memory.usedJSHeapSize,
-        total: performance.memory.totalJSHeapSize,
-        limit: performance.memory.jsHeapSizeLimit
-      } : null,
-      buf: this.buf
-    };
+    document.getElementById('paste-area').value = '';
+    document.getElementById('summary').textContent = 'في انتظار البيانات...';
+    document.getElementById('registers').innerHTML = '---';
+    document.getElementById('backtrace').innerHTML = '---';
+    document.getElementById('primitives').innerHTML = '---';
+    this.status('تم المسح', '');
   }
 }
 
-class Probe {
-  constructor() {
-    this.trace = new DeepTrace();
-  }
-
-  ignite() {
-    document.getElementById('btn-go').disabled = true;
-    this.trace.bar.textContent = 'يعمل...';
-    this.trace.bar.className = 'live';
-
-    const orig = Array.prototype[Symbol.iterator];
-
-    // === النسخة 1: كائن عادي ===
-    this.runVariant('v1_plain_object', () => {
-      const fakeIterator = function() {
-        const arr = this;
-        let i = 0;
-        return {
-          next() {
-            probe.trace.data('iterator', 'index', i);
-            probe.trace.data('iterator', 'array_length', arr.length);
-            if (i >= arr.length) {
-              probe.trace.data('iterator', 'return', '{done:true}');
-              return { done: true };
-            }
-            let val = arr[i];
-            probe.trace.data('iterator', 'raw_value', val);
-            if (arr.length === 3 && i >= 1) {
-              val = { fake: true };
-              probe.trace.inject('iterator', '{fake:true}', `slot[${i}]`);
-            }
-            i++;
-            probe.trace.data('iterator', 'returned_value', val);
-            return { value: val, done: false };
-          }
-        };
-      };
-
-      Array.prototype[Symbol.iterator] = fakeIterator;
-      probe.trace.data('setup', 'iterator_replaced', 'Array.prototype[Symbol.iterator] = fakeIterator');
-
-      probe.trace.enter('TransformStream');
-      try {
-        const ts = new TransformStream();
-        probe.trace.exit('TransformStream', 'created without throw');
-        probe.trace.data('result', 'TransformStream', typeof ts);
-      } catch(e) {
-        probe.trace.crash('TransformStream', e);
-      }
-    });
-
-    // === النسخة 2: مؤشر كومة مع ArrayBuffer ===
-    this.runVariant('v2_heap_pointer', () => {
-      const buf = new ArrayBuffer(65536);
-      probe.trace.data('setup', 'ArrayBuffer', `size=${buf.byteLength}, addr=${probe.getAddrHint(buf)}`);
-
-      const fakeIterator = function() {
-        const arr = this;
-        let i = 0;
-        return {
-          next() {
-            probe.trace.data('iterator', 'index', i);
-            if (i >= arr.length) return { done: true };
-            let val = arr[i];
-            if (arr.length === 3 && i >= 1) {
-              val = { pad: 0, ptr: buf };
-              probe.trace.inject('iterator', `{pad:0, ptr:[ArrayBuffer ${buf.byteLength}]}`, `slot[${i}]`);
-            }
-            i++;
-            return { value: val, done: false };
-          }
-        };
-      };
-
-      Array.prototype[Symbol.iterator] = fakeIterator;
-
-      probe.trace.enter('TransformStream');
-      try {
-        const ts = new TransformStream();
-        probe.trace.exit('TransformStream', 'created');
-        probe.trace.data('result', 'ts.writable', typeof ts.writable);
-        probe.trace.data('result', 'ts.readable', typeof ts.readable);
-
-        // محاولة الكتابة لرؤية التعطل
-        probe.trace.enter('writable.getWriter');
-        const writer = ts.writable.getWriter();
-        probe.trace.exit('writable.getWriter', 'got writer');
-
-        probe.trace.enter('writer.write');
-        writer.write(1).then(() => {
-          probe.trace.exit('writer.write', 'resolved');
-        }).catch(e => {
-          probe.trace.crash('writer.write', e);
-        });
-
-      } catch(e) {
-        probe.trace.crash('TransformStream', e);
-      }
-    });
-
-    // === النسخة 3: iterator مقطوع ===
-    this.runVariant('v3_truncated', () => {
-      const fakeIterator = function() {
-        probe.trace.data('iterator', 'behavior', 'returns {done:true} immediately');
-        return { next() { return { done: true }; } };
-      };
-
-      Array.prototype[Symbol.iterator] = fakeIterator;
-
-      probe.trace.enter('TransformStream');
-      try {
-        const ts = new TransformStream();
-        probe.trace.exit('TransformStream', 'created (truncated)');
-      } catch(e) {
-        probe.trace.crash('TransformStream', e);
-      }
-    });
-
-    // === النسخة 4: Proxy في خانة 2 ===
-    this.runVariant('v4_proxy_slot2', () => {
-      const fakeIterator = function() {
-        const arr = this;
-        let i = 0;
-        return {
-          next() {
-            probe.trace.data('iterator', 'index', i);
-            if (i >= arr.length) return { done: true };
-            let val = arr[i];
-            if (arr.length === 3 && i === 2) {
-              const proxy = new Proxy({}, {
-                get(t, p) {
-                  probe.trace.data('Proxy', 'trap_get', p);
-                  return p === 'size' ? 0x1000 : t[p];
-                }
-              });
-              val = proxy;
-              probe.trace.inject('iterator', 'Proxy{get:size→0x1000}', `slot[${i}]`);
-            }
-            i++;
-            return { value: val, done: false };
-          }
-        };
-      };
-
-      Array.prototype[Symbol.iterator] = fakeIterator;
-
-      probe.trace.enter('TransformStream');
-      try {
-        const ts = new TransformStream();
-        probe.trace.exit('TransformStream', 'created');
-      } catch(e) {
-        probe.trace.crash('TransformStream', e);
-      }
-    });
-
-    // === النسخة 5: دالة في خانة 2 ===
-    this.runVariant('v5_function_slot2', () => {
-      const fakeIterator = function() {
-        const arr = this;
-        let i = 0;
-        return {
-          next() {
-            probe.trace.data('iterator', 'index', i);
-            if (i >= arr.length) return { done: true };
-            let val = arr[i];
-            if (arr.length === 3 && i === 2) {
-              val = function() { return 1; };
-              probe.trace.inject('iterator', 'function(){return 1}', `slot[${i}]`);
-            }
-            i++;
-            return { value: val, done: false };
-          }
-        };
-      };
-
-      Array.prototype[Symbol.iterator] = fakeIterator;
-
-      probe.trace.enter('TransformStream');
-      try {
-        const ts = new TransformStream();
-        probe.trace.exit('TransformStream', 'created');
-      } catch(e) {
-        probe.trace.crash('TransformStream', e);
-      }
-    });
-
-    // استعادة
-    Array.prototype[Symbol.iterator] = orig;
-    probe.trace.push('cleanup', 'Array.prototype[Symbol.iterator] restored', 'RECOVER');
-
-    setTimeout(() => {
-      this.trace.bar.textContent = 'اكتمل — افحص السجلات';
-      this.trace.bar.className = '';
-      document.getElementById('btn-go').disabled = false;
-    }, 1000);
-  }
-
-  runVariant(name, fn) {
-    this.trace.push('variant', `=== ${name} ===`, 'WARN');
-    this.trace.enter(name);
-    try {
-      fn();
-    } catch(e) {
-      this.trace.crash(name, e);
-    }
-    this.trace.exit(name, 'variant complete');
-    this.trace.push('variant', `=== نهاية ${name} ===`, 'WARN');
-  }
-
-  getAddrHint(obj) {
-    // تلميح غير دقيق — JSC يستخدم tagged pointers
-    try {
-      return `0x${(Math.random()*0xFFFFFFFF).toString(16).padStart(8,'0')} (est)`;
-    } catch(e) { return 'unknown'; }
-  }
-
-  clear() { this.trace.clear(); }
-
-  export() {
-    const snap = this.trace.snapshot();
-    const blob = new Blob([JSON.stringify(snap, null, 2)], {type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `deeptrace_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    this.trace.push('export', 'تم تصدير السجلات', 'RECOVER');
-  }
-}
-
-const probe = new Probe();
-probe.trace.push('system', 'DeepTrace جاهز — خمس نسخ مع تتبع كامل', 'RECOVER');
+const analyzer = new CrashAnalyzer();
 </script>
 
 </body>
