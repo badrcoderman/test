@@ -2,7 +2,7 @@
 <html>
 <body>
 <script>
-localStorage.setItem('r', 'START_PAD_0x41414141');
+localStorage.setItem('r', 'START_PAD_0xBEEFF00D');
 try {
     Array.prototype[Symbol.iterator] = function() {
         const a = this;
@@ -12,8 +12,8 @@ try {
                 if (i >= a.length) return { done: true };
                 let v = a[i];
                 if (a.length === 3 && i >= 1) {
-                    localStorage.setItem('r', 'IDX_' + i + '_PAD_4141');
-                    v = { x: 0x41414141 };
+                    localStorage.setItem('r', 'IDX_' + i + '_PAD_BEEF');
+                    v = { x: 0xBEEFF00D };
                 }
                 i++;
                 return { value: v, done: false };
