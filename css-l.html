@@ -1,420 +1,358 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>StreamProbe — Director</title>
+<title>StreamHijack Probe — Director</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  * { margin:0; padding:0; box-sizing:border-box; }
   body {
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    background: #0a0a0f;
-    color: #c0c0c8;
-    line-height: 1.5;
-    padding: 20px;
+    font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+    background: #0c0c12;
+    color: #c8c8d0;
+    padding: 24px;
+    line-height: 1.6;
   }
   h1 {
     color: #7ee787;
-    font-size: 14px;
-    margin-bottom: 8px;
-    letter-spacing: 1px;
+    font-size: 13px;
+    letter-spacing: 2px;
+    margin-bottom: 4px;
   }
-  .subtitle {
+  .sub {
     color: #555;
-    font-size: 11px;
+    font-size: 10px;
     margin-bottom: 20px;
   }
-  #log-container {
+  #feed {
     background: #111118;
     border: 1px solid #1e1e2e;
     border-radius: 4px;
-    height: 60vh;
+    height: 55vh;
     overflow-y: auto;
-    padding: 12px;
-    font-size: 12px;
+    padding: 14px;
+    font-size: 11px;
   }
-  .log-entry {
-    padding: 2px 0;
+  .entry {
+    padding: 3px 0;
     border-bottom: 1px solid #16161f;
-    animation: fadeIn 0.2s ease;
+    animation: in 0.15s ease;
   }
-  .log-entry.crash { color: #ff6b6b; }
-  .log-entry.error { color: #ffa94d; }
-  .log-entry.success { color: #7ee787; }
-  .log-entry.info { color: #74c0fc; }
-  .timestamp {
+  .entry.PASS { color: #7ee787; }
+  .entry.FAIL { color: #ff6b6b; }
+  .entry.INFO { color: #74c0fc; }
+  .entry.WARN { color: #ffa94d; }
+  .ts {
     color: #444;
-    font-size: 10px;
+    font-size: 9px;
     margin-right: 8px;
   }
-  .label {
-    color: #888;
-    font-size: 10px;
+  .tag {
+    color: #666;
+    font-size: 9px;
     margin-right: 6px;
   }
-  #controls {
+  #ctrl {
     margin-top: 16px;
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
   }
   button {
-    background: #1e1e2e;
-    color: #c0c0c8;
+    background: #1a1a24;
+    color: #aaa;
     border: 1px solid #2a2a3e;
-    padding: 8px 16px;
+    padding: 8px 18px;
     font-family: inherit;
-    font-size: 11px;
+    font-size: 10px;
     cursor: pointer;
     border-radius: 3px;
-    transition: all 0.15s;
+    letter-spacing: 0.5px;
   }
   button:hover {
-    background: #2a2a3e;
     border-color: #7ee787;
+    color: #c8c8d0;
   }
-  button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-  #status-bar {
-    margin-top: 12px;
-    padding: 8px 12px;
+  button:disabled { opacity: 0.3; cursor: not-allowed; }
+  #bar {
+    margin-top: 14px;
+    padding: 10px 14px;
     background: #111118;
     border: 1px solid #1e1e2e;
     border-radius: 3px;
-    font-size: 11px;
-    color: #666;
+    font-size: 10px;
+    color: #555;
     display: flex;
     justify-content: space-between;
   }
-  #status-bar.active { color: #7ee787; }
-  #status-bar.crashed { color: #ff6b6b; }
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateX(-4px); }
-    to { opacity: 1; transform: translateX(0); }
+  #bar.live { color: #7ee787; }
+  #bar.dead { color: #ff6b6b; }
+  @keyframes in {
+    from { opacity:0; transform:translateX(-6px); }
+    to { opacity:1; transform:translateX(0); }
   }
-  .report-box {
-    margin-top: 12px;
-    padding: 12px;
-    background: #0d0d14;
+  .dump {
+    margin-top: 14px;
+    padding: 14px;
+    background: #0a0a10;
     border: 1px solid #1e1e2e;
     border-radius: 3px;
-    font-size: 11px;
+    font-size: 10px;
     white-space: pre-wrap;
     max-height: 200px;
     overflow-y: auto;
     display: none;
+    color: #888;
   }
-  .report-box.visible { display: block; }
+  .dump.on { display: block; }
 </style>
 </head>
 <body>
 
-<h1>► STREAM_PROBE_V2</h1>
-<div class="subtitle">Diagnostic probe — TransformStream behavior analysis</div>
+<h1>► STREAMHIJACK_PROBE</h1>
+<div class="sub">Iterator hijack diagnostic — TransformStream type confusion surface</div>
 
-<div id="log-container"></div>
+<div id="feed"></div>
 
-<div id="controls">
-  <button id="btn-run" onclick="probe.runAll()">RUN ALL TESTS</button>
-  <button id="btn-clear" onclick="probe.clear()">CLEAR LOGS</button>
-  <button id="btn-report" onclick="probe.showReport()">SHOW REPORT</button>
-  <button id="btn-export" onclick="probe.exportLogs()">EXPORT JSON</button>
+<div id="ctrl">
+  <button id="btn-go" onclick="probe.ignite()">IGNITE</button>
+  <button onclick="probe.clear()">CLEAR</button>
+  <button onclick="probe.dump()">DUMP LOGS</button>
+  <button onclick="probe.export()">EXPORT JSON</button>
 </div>
 
-<div id="status-bar">Ready — waiting for Director</div>
-<div id="report-box" class="report-box"></div>
+<div id="bar">Idle — waiting for Director</div>
+<div id="dump" class="dump"></div>
 
 <script>
-/**
- * StreamProbe v2
- * Dual logging: DOM + localStorage (crash recovery)
- */
+const LS_KEY = 'hijack_probe_v1';
+const LS_CRASH = 'hijack_probe_crash';
 
-const LS_KEY = 'stream_probe_logs_v2';
-const LS_CRASH = 'stream_probe_crash_flag';
-
-class Logger {
+class Feed {
   constructor() {
-    this.entries = [];
-    this.container = document.getElementById('log-container');
-    this.status = document.getElementById('status-bar');
-    this.recoverFromCrash();
+    this.buf = [];
+    this.el = document.getElementById('feed');
+    this.bar = document.getElementById('bar');
+    this.recover();
   }
 
-  recoverFromCrash() {
-    const crashFlag = localStorage.getItem(LS_CRASH);
-    const saved = localStorage.getItem(LS_KEY);
-    if (crashFlag || saved) {
-      this.write('SYSTEM', 'Recovered logs from previous session', 'info');
-      if (saved) {
+  recover() {
+    const raw = localStorage.getItem(LS_KEY);
+    const crash = localStorage.getItem(LS_CRASH);
+    if (crash || raw) {
+      this.write('SYSTEM', 'Recovered from previous session', 'INFO');
+      if (raw) {
         try {
-          const prev = JSON.parse(saved);
+          const prev = JSON.parse(raw);
           prev.forEach(e => this.render(e));
-          this.entries = prev;
+          this.buf = prev;
         } catch(e) {}
       }
       localStorage.removeItem(LS_CRASH);
     }
   }
 
-  write(label, data, type = 'info') {
-    const entry = {
-      t: Date.now(),
-      label,
-      data: typeof data === 'string' ? data : JSON.stringify(data),
-      type
-    };
-    this.entries.push(entry);
+  write(tag, msg, cls = 'INFO') {
+    const e = { t: Date.now(), tag, msg, cls };
+    this.buf.push(e);
     this.persist();
-    this.render(entry);
+    this.render(e);
   }
 
   persist() {
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify(this.entries));
+      localStorage.setItem(LS_KEY, JSON.stringify(this.buf));
     } catch(e) {
-      // Storage full — trim old entries
-      this.entries = this.entries.slice(-500);
-      localStorage.setItem(LS_KEY, JSON.stringify(this.entries));
+      this.buf = this.buf.slice(-400);
+      localStorage.setItem(LS_KEY, JSON.stringify(this.buf));
     }
   }
 
-  render(entry) {
-    const div = document.createElement('div');
-    div.className = `log-entry ${entry.type}`;
-    const time = new Date(entry.t).toLocaleTimeString('en-US', {hour12:false});
-    div.innerHTML = `<span class="timestamp">${time}</span><span class="label">[${entry.label}]</span> ${entry.data}`;
-    this.container.appendChild(div);
-    this.container.scrollTop = this.container.scrollHeight;
+  render(e) {
+    const d = document.createElement('div');
+    d.className = `entry ${e.cls}`;
+    const time = new Date(e.t).toLocaleTimeString('en-US',{hour12:false});
+    d.innerHTML = `<span class="ts">${time}</span><span class="tag">[${e.tag}]</span>${e.msg}`;
+    this.el.appendChild(d);
+    this.el.scrollTop = this.el.scrollHeight;
   }
 
   clear() {
-    this.entries = [];
+    this.buf = [];
     localStorage.removeItem(LS_KEY);
     localStorage.removeItem(LS_CRASH);
-    this.container.innerHTML = '';
-    this.status('Ready — cleared', 'active');
+    this.el.innerHTML = '';
+    this.status('Cleared — fresh slate', '');
   }
 
-  status(msg, cls = '') {
-    this.statusBar = this.statusBar || document.getElementById('status-bar');
-    this.statusBar.textContent = msg;
-    this.statusBar.className = cls;
+  status(msg, cls) {
+    this.bar.textContent = msg;
+    this.bar.className = cls;
   }
 
-  crashGuard(fn, label) {
+  guard(fn, tag) {
     try {
       localStorage.setItem(LS_CRASH, '1');
-      const result = fn();
+      const r = fn();
       localStorage.removeItem(LS_CRASH);
-      return result;
+      return r;
     } catch(e) {
-      this.write(label, e.message || e, 'crash');
-      this.status('CRASH DETECTED — logs preserved', 'crashed');
+      this.write(tag, e.message || String(e), 'FAIL');
+      this.status('CRASH — logs preserved', 'dead');
       throw e;
     }
   }
 
-  getReport() {
+  snapshot() {
     return {
-      timestamp: Date.now(),
-      userAgent: navigator.userAgent,
-      platform: navigator.platform,
+      t: Date.now(),
+      ua: navigator.userAgent,
+      plat: navigator.platform,
       vendor: navigator.vendor,
-      total: this.entries.length,
-      crashes: this.entries.filter(e => e.type === 'crash').length,
-      errors: this.entries.filter(e => e.type === 'error').length,
-      success: this.entries.filter(e => e.type === 'success').length,
-      logs: this.entries
+      lang: navigator.language,
+      mem: performance?.memory ? {
+        used: performance.memory.usedJSHeapSize,
+        total: performance.memory.totalJSHeapSize
+      } : null,
+      buf: this.buf
     };
   }
 }
 
-class StreamProbe {
+class Probe {
   constructor() {
-    this.logger = new Logger();
-    this.running = false;
+    this.feed = new Feed();
   }
 
-  log(label, data, type) {
-    this.logger.write(label, data, type);
-  }
+  log(t, m, c) { this.feed.write(t, m, c); }
+  status(m, c) { this.feed.status(m, c); }
 
-  status(msg, cls) {
-    this.logger.status(msg, cls);
-  }
-
-  // === TESTS ===
-
-  testNormal() {
-    return this.logger.crashGuard(() => {
-      const ts = new TransformStream({
-        start: (c) => this.log('start', 'fired', 'success'),
-        transform: (chunk, controller) => {
-          this.log('transform', String(chunk), 'info');
-          controller.enqueue(chunk);
-        },
-        flush: (c) => this.log('flush', 'fired', 'success')
-      });
-      this.log('normal_create', 'success', 'success');
-      return ts;
-    }, 'normal_create');
-  }
-
-  testTypeConfusion() {
-    const payloads = [
-      { label: 'number_size', size: 0x41414141 },
-      { label: 'bigint_size', size: typeof BigInt !== 'undefined' ? BigInt(0x41414141) : 0 },
-      { label: 'object_size', size: { value: 0x1000 } },
-      { label: 'array_size', size: [0x1000] },
-      { label: 'null_size', size: null },
-      { label: 'undefined_size', size: undefined },
-      { label: 'string_size', size: "0x1000" },
-      { label: 'proxy_size', size: new Proxy(function(){}, { apply: () => 0x1000 }) },
-      { label: 'obj_with_pad', size: 0x41414141, pad: 0x42424242 },
-      { label: 'nested_obj', size: { nested: { deep: 0x1000 } } }
-    ];
-
-    payloads.forEach(p => {
-      const label = p.label;
-      delete p.label;
-      this.logger.crashGuard(() => {
-        const ts = new TransformStream({
-          start: () => {},
-          transform: () => {},
-          ...p
-        }, {}, p);
-        this.log(`type_${label}`, 'no_crash — created', 'success');
-
-        const writer = ts.writable.getWriter();
-        writer.write(1).then(() => {
-          this.log(`type_${label}_write`, 'resolved', 'success');
-          writer.close();
-        }).catch(e => {
-          this.log(`type_${label}_write_err`, e.message, 'error');
-        });
-      }, `type_${label}`);
-    });
-  }
-
-  testWritableStrategy() {
-    const strategies = [
-      { label: 'num_high', highWaterMark: 0x41414141 },
-      { label: 'num_size', size: (c) => 1 },
-      { label: 'bad_size', size: 0x41414141 },
-      { label: 'obj_size', size: { x: 0x1000 } },
-      { label: 'proxy_size', size: new Proxy({}, { get: (t, p) => p === 'call' ? 0x1000 : t[p] }) },
-      { label: 'null_size', size: null },
-      { label: 'arr_size', size: [1, 2, 3] }
-    ];
-
-    strategies.forEach(s => {
-      const label = s.label;
-      delete s.label;
-      this.logger.crashGuard(() => {
-        const ts = new TransformStream({}, s);
-        this.log(`ws_${label}`, 'created', 'success');
-        const writer = ts.writable.getWriter();
-        writer.write(1).catch(e => {
-          this.log(`ws_${label}_err`, e.message, 'error');
-        });
-      }, `ws_${label}`);
-    });
-  }
-
-  testUAFScenario() {
-    this.logger.crashGuard(() => {
-      let writerRef = null;
-      const ts = new TransformStream({
-        start: (c) => {},
-        transform: (chunk, c) => {
-          if (writerRef) {
-            writerRef.close().catch(e => {
-              this.log('uaf_close_during_transform', e.message, 'error');
-            });
-          }
-          c.enqueue(chunk);
-        }
-      });
-      writerRef = ts.writable.getWriter();
-      writerRef.write(1).then(() => {
-        this.log('uaf_write_complete', 'done', 'success');
-      }).catch(e => {
-        this.log('uaf_write_err', e.message, 'error');
-      });
-    }, 'uaf_test');
-  }
-
-  testMemoryLayout() {
-    this.logger.crashGuard(() => {
-      const spray = [];
-      for (let i = 0; i < 100; i++) {
-        spray.push(new TransformStream());
+  check(label, fn) {
+    return this.feed.guard(() => {
+      try {
+        fn();
+        this.log(label, 'did not throw — FAIL', 'FAIL');
+      } catch (e) {
+        if (e instanceof TypeError)
+          this.log(label, 'threw TypeError — PASS', 'PASS');
+        else
+          this.log(label, `threw ${e} — FAIL`, 'FAIL');
       }
-      this.log('spray_100', 'allocated', 'success');
-      setTimeout(() => {
-        this.log('spray_post_gc', `survivors: ${spray.length}`, 'info');
-      }, 100);
-    }, 'spray_test');
+    }, label);
   }
 
-  // === CONTROL ===
+  ignite() {
+    document.getElementById('btn-go').disabled = true;
+    this.status('Running — watch the feed', 'live');
 
-  async runAll() {
-    if (this.running) return;
-    this.running = true;
-    document.getElementById('btn-run').disabled = true;
-    this.status('Running — watch the logs', 'active');
+    const orig = Array.prototype[Symbol.iterator];
 
-    this.testNormal();
-    await this.sleep(50);
-    this.testTypeConfusion();
-    await this.sleep(50);
-    this.testWritableStrategy();
-    await this.sleep(50);
-    this.testUAFScenario();
-    await this.sleep(50);
-    this.testMemoryLayout();
+    // Variant 1: plain object substitution
+    Array.prototype[Symbol.iterator] = function() {
+      const arr = this;
+      let i = 0;
+      return {
+        next() {
+          if (i >= arr.length) return { done: true };
+          let val = arr[i];
+          if (arr.length === 3 && i >= 1) val = { fake: true };
+          i++;
+          return { value: val, done: false };
+        }
+      };
+    };
+    this.check('v1_plain_object', () => new TransformStream());
+
+    // Variant 2: object with heap pointer
+    const buf = new ArrayBuffer(65536);
+    Array.prototype[Symbol.iterator] = function() {
+      const arr = this;
+      let i = 0;
+      return {
+        next() {
+          if (i >= arr.length) return { done: true };
+          let val = arr[i];
+          if (arr.length === 3 && i >= 1) val = { pad: 0, ptr: buf };
+          i++;
+          return { value: val, done: false };
+        }
+      };
+    };
+    this.check('v2_heap_pointer', () => new TransformStream());
+
+    // Variant 3: truncated iterator
+    Array.prototype[Symbol.iterator] = function() {
+      return { next() { return { done: true }; } };
+    };
+    this.check('v3_truncated', () => new TransformStream());
+
+    // Variant 4: custom — return Proxy at slot 2
+    Array.prototype[Symbol.iterator] = function() {
+      const arr = this;
+      let i = 0;
+      return {
+        next() {
+          if (i >= arr.length) return { done: true };
+          let val = arr[i];
+          if (arr.length === 3 && i === 2)
+            val = new Proxy({}, {
+              get(t, p) { return p === 'size' ? 0x1000 : t[p]; }
+            });
+          i++;
+          return { value: val, done: false };
+        }
+      };
+    };
+    this.check('v4_proxy_slot2', () => new TransformStream());
+
+    // Variant 5: custom — return function object at slot 2
+    Array.prototype[Symbol.iterator] = function() {
+      const arr = this;
+      let i = 0;
+      return {
+        next() {
+          if (i >= arr.length) return { done: true };
+          let val = arr[i];
+          if (arr.length === 3 && i === 2)
+            val = function() { return 1; };
+          i++;
+          return { value: val, done: false };
+        }
+      };
+    };
+    this.check('v5_function_slot2', () => new TransformStream());
+
+    Array.prototype[Symbol.iterator] = orig;
 
     setTimeout(() => {
-      this.status('Complete — logs preserved in localStorage', 'active');
-      this.running = false;
-      document.getElementById('btn-run').disabled = false;
-    }, 1200);
+      this.status('Complete — check the feed', '');
+      document.getElementById('btn-go').disabled = false;
+    }, 800);
   }
 
-  sleep(ms) {
-    return new Promise(r => setTimeout(r, ms));
+  clear() { this.feed.clear(); }
+
+  dump() {
+    const box = document.getElementById('dump');
+    const snap = this.feed.snapshot();
+    box.textContent = JSON.stringify(snap, null, 2);
+    box.classList.toggle('on');
   }
 
-  clear() {
-    this.logger.clear();
-  }
-
-  showReport() {
-    const box = document.getElementById('report-box');
-    const report = this.logger.getReport();
-    box.textContent = JSON.stringify(report, null, 2);
-    box.classList.add('visible');
-  }
-
-  exportLogs() {
-    const report = this.logger.getReport();
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+  export() {
+    const snap = this.feed.snapshot();
+    const blob = new Blob([JSON.stringify(snap, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `stream_probe_${Date.now()}.json`;
+    a.download = `hijack_probe_${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    this.log('export', 'saved to disk', 'success');
+    this.log('SYSTEM', 'Exported to disk', 'PASS');
   }
 }
 
-const probe = new StreamProbe();
-probe.log('SYSTEM', 'Probe loaded — waiting for Director', 'info');
+const probe = new Probe();
+probe.log('SYSTEM', 'Probe loaded — five variants ready', 'INFO');
 </script>
 
 </body>
