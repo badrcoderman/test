@@ -1,208 +1,47 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>ImageData PixelFormat Mismatch PoC</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: #0d0d0d;
-      color: #e0e0e0;
-      font-family: 'Courier New', monospace;
-      padding: 2rem;
-    }
-    h1 { font-size: 1.2rem; color: #fff; margin-bottom: 0.4rem; }
-    .sub { font-size: 0.75rem; color: #555; margin-bottom: 2rem; }
-    .card {
-      background: #161616;
-      border: 1px solid #222;
-      border-radius: 8px;
-      padding: 1.2rem 1.4rem;
-      margin-bottom: 1rem;
-      max-width: 700px;
-    }
-    .card-title { font-size: 0.7rem; color: #666; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.6rem; }
-    .code { font-size: 0.82rem; color: #aaa; background: #111; padding: 0.5rem 0.8rem; border-radius: 4px; margin-bottom: 0.8rem; border-left: 2px solid #333; word-break: break-all; }
-    .result { font-size: 0.85rem; font-weight: bold; padding: 0.4rem 0.8rem; border-radius: 4px; display: inline-block; }
-    .pass  { background: #0f2d1a; color: #3ddc84; border: 1px solid #1e5c36; }
-    .fail  { background: #2d0f0f; color: #ff5555; border: 1px solid #5c1e1e; }
-    .warn  { background: #2d2100; color: #ffcc44; border: 1px solid #5c4400; }
-    .skip  { background: #1a1a2d; color: #8888ff; border: 1px solid #33336a; }
-    .detail { font-size: 0.75rem; color: #555; margin-top: 0.5rem; }
-    .summary {
-      max-width: 700px;
-      margin-top: 1.5rem;
-      padding: 1rem 1.4rem;
-      border-radius: 8px;
-      border: 1px solid #333;
-      background: #111;
-      font-size: 0.9rem;
-    }
-    .summary-title { color: #888; font-size: 0.7rem; text-transform: uppercase; margin-bottom: 0.5rem; }
-    .env-box {
-      max-width: 700px;
-      margin-bottom: 1.5rem;
-      padding: 0.8rem 1.2rem;
-      border-radius: 6px;
-      background: #111;
-      border: 1px solid #2a2a2a;
-      font-size: 0.75rem;
-      color: #666;
-      line-height: 1.8;
-    }
-    .env-box span { color: #aaa; }
-  </style>
+    <title>CVE-2026-XXXX - ImageData Type Confusion Test</title>
 </head>
-<body>
+<body style="background-color: #1e1e1e; color: white; font-family: monospace;">
+    <h1>WebKit ImageData Vulnerability Check</h1>
+    <div id="log"></div>
 
-<h1>ImageData PixelFormat Mismatch — PoC</h1>
-<p class="sub">WebKit commit e9fc18b · Bug 320519 · Tests both mismatch directions</p>
-
-<div class="env-box" id="env-box">Checking environment...</div>
-<div id="results"></div>
-<div class="summary">
-  <div class="summary-title">Verdict</div>
-  <div id="summary-text">Running...</div>
-</div>
-
-<script>
-  // --- environment probe ---
-  const hasFloat16Array  = typeof Float16Array !== "undefined";
-  const hasFloat16Format = (() => {
-    try {
-      new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" });
-      return true;
-    } catch (e) {
-      return e.name !== "TypeError"; // TypeError = unknown format; anything else = known
-    }
-  })();
-
-  document.getElementById("env-box").innerHTML =
-    `Float16Array API: <span>${hasFloat16Array ? "✓ available" : "✗ not available"}</span> &nbsp;|&nbsp; ` +
-    `rgba-float16 pixelFormat: <span>${hasFloat16Format ? "✓ supported" : "✗ not supported"}</span> &nbsp;|&nbsp; ` +
-    `UA: <span>${navigator.userAgent.substring(0, 80)}</span>`;
-
-  // --- test definitions ---
-  const tests = [
-    {
-      label: "Uint8ClampedArray + pixelFormat: rgba-float16",
-      description: "Should throw InvalidStateError — uint8 data with float16 format setting",
-      code: `new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" })`,
-      requiresFloat16Format: true,
-      requiresFloat16Array: false,
-      run: () => new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" }),
-      expectThrow: true,
-      expectCode: "InvalidStateError"
-    },
-    {
-      label: "Float16Array + pixelFormat: rgba-unorm8",
-      description: "Should throw InvalidStateError — float16 data with unorm8 format setting",
-      code: `new ImageData(new Float16Array(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-unorm8" })`,
-      requiresFloat16Format: false,
-      requiresFloat16Array: true,
-      run: () => new ImageData(new Float16Array(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-unorm8" }),
-      expectThrow: true,
-      expectCode: "InvalidStateError"
-    },
-    {
-      label: "Uint8ClampedArray + pixelFormat: rgba-unorm8 (valid)",
-      description: "Should NOT throw — types match, baseline test",
-      code: `new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-unorm8" })`,
-      requiresFloat16Format: false,
-      requiresFloat16Array: false,
-      run: () => new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-unorm8" }),
-      expectThrow: false
-    },
-    {
-      label: "Float16Array + pixelFormat: rgba-float16 (valid)",
-      description: "Should NOT throw — types match",
-      code: `new ImageData(new Float16Array(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" })`,
-      requiresFloat16Format: true,
-      requiresFloat16Array: true,
-      run: () => new ImageData(new Float16Array(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" }),
-      expectThrow: false
-    }
-  ];
-
-  const container = document.getElementById("results");
-  let passed = 0, failed = 0, skipped = 0;
-
-  tests.forEach((t, i) => {
-    const card = document.createElement("div");
-    card.className = "card";
-
-    let resultHTML = "";
-    let detailText = "";
-
-    // skip if the browser is missing a required API
-    const missingFloat16Array  = t.requiresFloat16Array  && !hasFloat16Array;
-    const missingFloat16Format = t.requiresFloat16Format && !hasFloat16Format;
-
-    if (missingFloat16Array || missingFloat16Format) {
-      const missing = [];
-      if (missingFloat16Array)  missing.push("Float16Array");
-      if (missingFloat16Format) missing.push("rgba-float16 pixelFormat");
-      resultHTML = `<span class="result skip">⊘ SKIPPED — ${missing.join(" + ")} not available in this browser</span>`;
-      detailText = "Cannot test this case. Requires a browser with HDR canvas support (Safari 18+ / WebKit TP with the patch).";
-      skipped++;
-    } else {
-      try {
-        t.run();
-        if (t.expectThrow) {
-          resultHTML = `<span class="result fail">✗ FAIL — No exception thrown. Patch not applied.</span>`;
-          detailText = `Expected ${t.expectCode} but constructor succeeded silently.`;
-          failed++;
-        } else {
-          resultHTML = `<span class="result pass">✓ PASS — No exception (correct)</span>`;
-          detailText = "Matched types, constructor succeeded as expected.";
-          passed++;
+    <script>
+        function logMessage(msg, color) {
+            const logDiv = document.getElementById("log");
+            logDiv.innerHTML += `<p style="color: ${color}; font-size: 18px;">${msg}</p>`;
         }
-      } catch (e) {
-        if (t.expectThrow) {
-          if (e.name === t.expectCode) {
-            resultHTML = `<span class="result pass">✓ PASS — ${e.name} thrown correctly</span>`;
-            detailText = `Message: "${e.message}"`;
-            passed++;
-          } else {
-            resultHTML = `<span class="result fail">✗ FAIL — Wrong error: got ${e.name}, expected ${t.expectCode}</span>`;
-            detailText = `Message: "${e.message}"`;
-            failed++;
-          }
-        } else {
-          resultHTML = `<span class="result fail">✗ FAIL — Unexpected ${e.name} on valid input</span>`;
-          detailText = `Message: "${e.message}"`;
-          failed++;
+
+        function checkImageDataVulnerability() {
+            logMessage("[*] Initializing test payload...", "yellow");
+            
+            try {
+                // 1. إنشاء مصفوفة بحجم صغير (Uint8ClampedArray)
+                let testArray = new Uint8ClampedArray(4); // 4 bytes total
+                
+                // 2. محاولة دمجها مع إعدادات تتطلب حجم أكبر (rgba-float16)
+                // في النسخ المصابة، سيمر هذا السطر دون أخطاء.
+                let img = new ImageData(testArray, 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" });
+                
+                // 3. إذا وصلنا إلى هنا، فهذا يعني أن المتصفح قبل التناقض!
+                logMessage("[!] VULNERABLE: The browser accepted mismatched pixel formats (No exception thrown).", "red");
+                logMessage("[!] You can proceed to build the OOB Read/Write primitive.", "red");
+                
+            } catch (e) {
+                // 4. في النسخ المحدثة، سيتم إيقاف العملية هنا
+                if (e.name === "InvalidStateError") {
+                    logMessage("[+] PATCHED: The browser threw 'InvalidStateError' as expected.", "green");
+                } else if (e.name === "TypeError" || e.name === "NotSupportedError") {
+                    logMessage("[-] INCONCLUSIVE: The browser threw '" + e.name + "'. Float16 or pixelFormat dictionary might not be supported on this firmware version.", "orange");
+                } else {
+                    logMessage("[?] UNKNOWN ERROR: " + e.name + " - " + e.message, "orange");
+                }
+            }
         }
-      }
-    }
 
-    card.innerHTML = `
-      <div class="card-title">Test ${i + 1} — ${t.label}</div>
-      <div class="code">${t.code}</div>
-      <div class="detail" style="margin-bottom:0.6rem;color:#555;">${t.description}</div>
-      ${resultHTML}
-      <div class="detail">${detailText}</div>
-    `;
-
-    container.appendChild(card);
-  });
-
-  const summaryEl = document.getElementById("summary-text");
-  const total = tests.length;
-
-  if (skipped === total) {
-    summaryEl.innerHTML = `All ${total} tests skipped — this browser has no Float16Array or rgba-float16 support. Run in Safari 18+ or WebKit nightly with the patch.`;
-    summaryEl.style.color = "#8888ff";
-  } else if (failed === 0 && skipped === 0) {
-    summaryEl.innerHTML = `${passed}/${total} passed · Patch confirmed active — mismatches throw correctly, valid pairs succeed.`;
-    summaryEl.style.color = "#3ddc84";
-  } else if (failed === 0 && skipped > 0) {
-    summaryEl.innerHTML = `${passed} passed · ${skipped} skipped (missing APIs) · No failures on runnable tests.`;
-    summaryEl.style.color = "#ffcc44";
-  } else {
-    summaryEl.innerHTML = `${passed} passed · ${failed} failed · ${skipped} skipped · Patch not applied or regression detected.`;
-    summaryEl.style.color = "#ff5555";
-  }
-</script>
+        // تشغيل الفحص
+        setTimeout(checkImageDataVulnerability, 1000);
+    </script>
 </body>
 </html>
