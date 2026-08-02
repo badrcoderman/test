@@ -1,59 +1,46 @@
-
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
-<title>PS5 FW 13.42 — Lightweight Exploitation PoC</title>
+<title>PS5 FW 13.42 — MSE + Worker Fuzzing PoC</title>
 <style>
-body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:10px;font-size:13px}
-button{background:#1a1a1a;color:#0f0;border:1px solid #0f0;padding:8px 14px;margin:4px;cursor:pointer;font-family:monospace}
+body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:10px;font-size:12px}
+button{background:#1a1a1a;color:#0f0;border:1px solid #0f0;padding:6px 12px;margin:3px;cursor:pointer;font-family:monospace;font-size:11px}
 button:hover{background:#0f0;color:#000}
-.panel{border:1px solid #333;padding:10px;margin:8px 0;background:#111;border-radius:6px}
-.log{background:#000;border:1px solid #222;padding:8px;height:250px;overflow-y:auto;white-space:pre-wrap;font-size:11px}
+.panel{border:1px solid #333;padding:8px;margin:6px 0;background:#111;border-radius:4px}
+.log{background:#000;border:1px solid #222;padding:6px;height:200px;overflow-y:auto;white-space:pre-wrap;font-size:10px}
 .ok{color:#0f0}.err{color:#f44}.warn{color:#fa0}.info{color:#0cf}
-h2{color:#ff0055;margin:4px 0;font-size:14px}
+h2{color:#ff0055;margin:3px 0;font-size:13px}
+video{width:240px;height:135px;background:#000;border:1px solid #333;display:block;margin:5px 0}
 </style>
 </head>
 <body>
 
-<h2>🎯 PS5 FW 13.42 — Lightweight PoC Suite</h2>
-<p style="color:#888;font-size:11px">No MSE. No complex video. Direct browser surface testing.</p>
+<h2>🎯 PS5 FW 13.42 — MSE + Worker Fuzzing</h2>
 
 <div class="panel">
-<h2>1️⃣ TransformStream Type Confusion (Confirmed)</h2>
-<button onclick="testTransformStream()">Crash via TransformStream</button>
-<button onclick="testTransformStreamLeak()">Hunt Info Leak</button>
-<button onclick="testTransformStreamMerge()">Merge with ArrayBuffer</button>
+<h2>1️⃣ MSE Simple Test</h2>
+<video id="v" muted></video>
+<button onclick="testMSESimple()">Simple MSE appendBuffer</button>
+<button onclick="testMSECorrupt()">Corrupt MP4 append</button>
+<button onclick="testMSERace()">Race: seek + append</button>
 </div>
 
 <div class="panel">
-<h2>2️⃣ URL.parse() — New Jun 2025 (DOMURL)</h2>
-<button onclick="testURLParse()">Test URL.parse()</button>
-<button onclick="testURLParseFuzz()">Fuzz URL.parse()</button>
+<h2>2️⃣ Worker Fuzzing</h2>
+<button onclick="startWorkerFuzz()">Start Worker Fuzz</button>
+<button onclick="stopWorkerFuzz()">Stop Worker</button>
 </div>
 
 <div class="panel">
-<h2>3️⃣ CSS Style Builder Type Confusion</h2>
-<button onclick="testCSSStyle()">CSS Style Confusion</button>
-<button onclick="testCSSComputed()">Computed Style Leak</button>
+<h2>3️⃣ Canvas 2D Fuzzing</h2>
+<button onclick="testCanvasFuzz()">Canvas 2D Fuzz</button>
+<button onclick="testCanvasImage()">Canvas Image Data</button>
 </div>
 
 <div class="panel">
-<h2>4️⃣ Blob IPC Cross-Origin</h2>
-<button onclick="testBlobIPC()">Cross-Origin Blob Access</button>
-<button onclick="testBlobTiming()">Blob Timing Oracle</button>
-</div>
-
-<div class="panel">
-<h2>5️⃣ Structure / Memory Probes</h2>
-<button onclick="probeStructureIDs()">Probe Structure IDs</button>
-<button onclick="probeHeapLayout()">Heap Layout Oracle</button>
-<button onclick="probeJSCell()">JSCell Header Read</button>
-</div>
-
-<div class="panel">
-<h2>6️⃣ System Capability Check</h2>
-<button onclick="runCapabilityCheck()">Run Full Check</button>
+<h2>4️⃣ Atomics Probe (no SAB)</h2>
+<button onclick="probeAtomics()">Probe Atomics</button>
 </div>
 
 <div class="panel">
@@ -64,6 +51,9 @@ h2{color:#ff0055;margin:4px 0;font-size:14px}
 
 <script>
 const L = document.getElementById('log');
+let worker = null;
+let fuzzRunning = false;
+
 function log(msg, cls='info') {
   const d = new Date().toLocaleTimeString('en-GB');
   L.innerHTML += '<div class="'+cls+'">['+d+'] '+msg+'</div>';
@@ -72,513 +62,333 @@ function log(msg, cls='info') {
 }
 
 // ============================================================
-// 1. TransformStream Type Confusion
+// 1. MSE Simple Tests
 // ============================================================
-function testTransformStream() {
-  log('=== TransformStream Crash Test ===', 'ok');
+async function testMSESimple() {
+  log('=== MSE Simple Test ===', 'ok');
+  const v = document.getElementById('v');
+  
   try {
-    const ts = new TransformStream();
-    const reader = ts.readable.getReader();
-    const writer = ts.writable.getWriter();
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    v.src = url;
     
-    // Confuse the stream by writing then immediately closing
-    writer.write(new Uint8Array(0x1000));
-    writer.close();
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    log('MediaSource opened', 'ok');
     
-    // Force read
-    reader.read().then(() => {
-      log('TransformStream: read completed', 'ok');
-    }).catch(e => {
-      log('TransformStream: read error — '+e.name+': '+e.message, 'err');
+    const mime = 'video/mp4; codecs="avc1.42E01E"';
+    const supported = MediaSource.isTypeSupported(mime);
+    log('isTypeSupported('+mime+'): '+supported, supported?'ok':'warn');
+    
+    if (!supported) {
+      // Try without codecs
+      const mime2 = 'video/mp4';
+      const supported2 = MediaSource.isTypeSupported(mime2);
+      log('isTypeSupported('+mime2+'): '+supported2, supported2?'ok':'warn');
+      if (!supported2) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+    }
+    
+    const sb = ms.addSourceBuffer(supported ? mime : 'video/mp4');
+    log('SourceBuffer created', 'ok');
+    
+    // Build minimal valid MP4 (ftyp + moov + mdat)
+    const ftyp = new Uint8Array([
+      0x00,0x00,0x00,0x20, 0x66,0x74,0x79,0x70,
+      0x69,0x73,0x6f,0x6d, 0x00,0x00,0x02,0x00,
+      0x69,0x73,0x6f,0x6d, 0x6d,0x70,0x34,0x31,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
+    ]);
+    
+    // Minimal moov
+    const moov = new Uint8Array([
+      0x00,0x00,0x00,0x6c, 0x6d,0x6f,0x6f,0x76,
+      0x00,0x00,0x00,0x5c, 0x6d,0x76,0x68,0x64,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x03,0xe8,
+      0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00,
+      0x01,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x40,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
+    ]);
+    
+    const mdat = new Uint8Array([0x00,0x00,0x00,0x08, 0x6d,0x64,0x61,0x74]);
+    
+    const data = new Uint8Array(ftyp.length + moov.length + mdat.length);
+    data.set(ftyp, 0);
+    data.set(moov, ftyp.length);
+    data.set(mdat, ftyp.length + moov.length);
+    
+    log('Appending '+data.length+' bytes...', 'info');
+    sb.appendBuffer(data);
+    
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => { sb.removeEventListener('updateend', onUp); reject('timeout'); }, 5000);
+      const onUp = () => { clearTimeout(t); sb.removeEventListener('error', onErr); resolve(); };
+      const onErr = (e) => { clearTimeout(t); sb.removeEventListener('updateend', onUp); reject(e); };
+      sb.addEventListener('updateend', onUp);
+      sb.addEventListener('error', onErr);
     });
     
-    // Try to access internal properties
-    try { log('ts.readable = '+typeof ts.readable, 'info'); } catch(e){}
-    try { log('ts.writable = '+typeof ts.writable, 'info'); } catch(e){}
+    log('appendBuffer completed', 'ok');
     
-    // Crash trigger: access locked getter
-    setTimeout(() => {
-      try {
-        const r = ts.readable.getReader();
-        log('Second getReader: succeeded (unexpected)', 'warn');
-      } catch(e) {
-        log('Second getReader: '+e.name+' — '+e.message, 'err');
-      }
-    }, 100);
-    
-  } catch(e) {
-    log('TransformStream exception: '+e.name+': '+e.message, 'err');
-  }
-}
-
-function testTransformStreamLeak() {
-  log('=== TransformStream Info Leak Hunt ===', 'ok');
-  try {
-    const ts = new TransformStream();
-    
-    // Try to leak via error messages
-    const props = ['readable','writable','locked','getReader','getWriter','pipeTo','pipeThrough','tee'];
-    for (const p of props) {
-      try {
-        const v = ts[p];
-        log('ts.'+p+' = '+typeof v + (v!==null&&v!==undefined?' ('+v.toString()+')':''), 'info');
-      } catch(e) {
-        log('ts.'+p+' ERROR: '+e.name+': '+e.message, 'err');
-      }
+    if (ms.readyState !== 'closed') {
+      ms.endOfStream();
+      log('endOfStream called', 'ok');
     }
     
-    // Try JSON.stringify
-    try {
-      const s = JSON.stringify(ts);
-      log('JSON.stringify(ts) = '+s, 'info');
-    } catch(e) {
-      log('JSON.stringify ERROR: '+e.name+': '+e.message, 'err');
-    }
-    
-    // Try Object.keys
-    try {
-      const keys = Object.keys(ts);
-      log('Object.keys(ts) = ['+keys.join(', ')+']', 'info');
-    } catch(e) {
-      log('Object.keys ERROR: '+e.name+': '+e.message, 'err');
-    }
-    
-    // Try Reflect.ownKeys
-    try {
-      const keys = Reflect.ownKeys(ts);
-      log('Reflect.ownKeys(ts) = ['+keys.join(', ')+']', 'info');
-    } catch(e) {
-      log('Reflect.ownKeys ERROR: '+e.name+': '+e.message, 'err');
-    }
-    
-    // Try Symbol.toStringTag
-    try {
-      const tag = Object.prototype.toString.call(ts);
-      log('toString.call(ts) = '+tag, 'info');
-    } catch(e) {
-      log('toString ERROR: '+e.name+': '+e.message, 'err');
-    }
-    
-    // Try prototype chain
-    try {
-      let proto = Object.getPrototypeOf(ts);
-      let chain = [];
-      while (proto) {
-        chain.push(proto.constructor ? proto.constructor.name : 'null');
-        proto = Object.getPrototypeOf(proto);
-      }
-      log('Prototype chain: '+chain.join(' -> '), 'info');
-    } catch(e) {
-      log('Prototype chain ERROR: '+e.name+': '+e.message, 'err');
-    }
-    
-  } catch(e) {
-    log('Leak hunt exception: '+e.name+': '+e.message, 'err');
-  }
-}
-
-function testTransformStreamMerge() {
-  log('=== TransformStream + ArrayBuffer Merge ===', 'ok');
-  try {
-    // Create ArrayBuffer with specific pattern
-    const ab = new ArrayBuffer(0x100);
-    const view = new Uint8Array(ab);
-    for (let i = 0; i < 0x100; i++) view[i] = i;
-    
-    const ts = new TransformStream();
-    const writer = ts.writable.getWriter();
-    
-    // Write the ArrayBuffer view
-    writer.write(view).then(() => {
-      log('Write completed', 'ok');
-      writer.close();
-    }).catch(e => {
-      log('Write error: '+e.name+': '+e.message, 'err');
-    });
-    
-    const reader = ts.readable.getReader();
-    reader.read().then(({value, done}) => {
-      if (value) {
-        log('Read back '+value.length+' bytes', 'info');
-        // Check for corruption
-        let corrupted = false;
-        for (let i = 0; i < Math.min(value.length, 0x100); i++) {
-          if (value[i] !== (i & 0xFF)) { corrupted = true; break; }
-        }
-        log('Data integrity: '+(corrupted?'CORRUPTED':'intact'), corrupted?'err':'ok');
-      }
-    }).catch(e => {
-      log('Read error: '+e.name+': '+e.message, 'err');
-    });
-    
-  } catch(e) {
-    log('Merge exception: '+e.name+': '+e.message, 'err');
-  }
-}
-
-// ============================================================
-// 2. URL.parse() — New in Jun 2025
-// ============================================================
-function testURLParse() {
-  log('=== URL.parse() Test ===', 'ok');
-  
-  if (typeof URL.parse !== 'function') {
-    log('URL.parse() NOT FOUND — FW too old or not supported', 'warn');
-    return;
-  }
-  
-  log('URL.parse() IS AVAILABLE!', 'ok');
-  
-  const tests = [
-    'https://example.com',
-    'blob:invalid',
-    'javascript:alert(1)',
-    'file:///etc/passwd',
-    'data:text/html,alert(1)',
-    'about:blank',
-    'chrome://settings',
-    'ps5://system',
-    '',
-    null,
-    undefined,
-  ];
-  
-  for (const t of tests) {
-    try {
-      const r = URL.parse(t);
-      log('URL.parse('+JSON.stringify(t)+') = '+JSON.stringify(r), 'info');
-    } catch(e) {
-      log('URL.parse('+JSON.stringify(t)+') ERROR: '+e.name+': '+e.message, 'err');
-    }
-  }
-}
-
-function testURLParseFuzz() {
-  log('=== URL.parse() Fuzzing ===', 'ok');
-  
-  if (typeof URL.parse !== 'function') {
-    log('URL.parse() not available, skipping', 'warn');
-    return;
-  }
-  
-  const fuzzStrings = [
-    'a://'+'A'.repeat(0x10000),
-    'a://'+'%'.repeat(0x1000),
-    'a://[::1',
-    'a://user:pass@',
-    'a://?'+ '&'.repeat(0x1000),
-    'a://#'+ '#'.repeat(0x1000),
-    'blob:'+'x'.repeat(0x10000),
-    'javascript:'+'A'.repeat(0x10000),
-    'data:'+'A'.repeat(0x10000),
-    'http://'+'0'.repeat(0x10000)+'.com',
-    String.fromCharCode(0),
-    String.fromCharCode(0xD800),
-    '\x00'.repeat(100),
-  ];
-  
-  for (let i = 0; i < fuzzStrings.length; i++) {
-    try {
-      const r = URL.parse(fuzzStrings[i]);
-      log('Fuzz['+i+']: OK', 'ok');
-    } catch(e) {
-      log('Fuzz['+i+']: '+e.name+': '+e.message.substring(0,80), 'err');
-    }
-  }
-}
-
-// ============================================================
-// 3. CSS Style Builder Type Confusion
-// ============================================================
-function testCSSStyle() {
-  log('=== CSS Style Builder Confusion ===', 'ok');
-  try {
-    const div = document.createElement('div');
-    document.body.appendChild(div);
-    
-    // Set conflicting styles
-    div.style.cssText = 'content: attr(data-x); --x: url(javascript:alert(1));';
-    div.setAttribute('data-x', 'test');
-    
-    // Read back
-    log('style.cssText = '+div.style.cssText, 'info');
-    log('getPropertyValue(--x) = '+div.style.getPropertyValue('--x'), 'info');
-    log('getPropertyValue(content) = '+div.style.getPropertyValue('content'), 'info');
-    
-    // Try pseudo-element
-    const style = document.createElement('style');
-    style.textContent = 'div::before { content: attr(data-x); font-size: 999px; }';
-    document.head.appendChild(style);
-    
-    const cs = getComputedStyle(div, '::before');
-    log('computed content = '+cs.content, 'info');
-    log('computed font-size = '+cs.fontSize, 'info');
-    
-    document.body.removeChild(div);
-    document.head.removeChild(style);
-    
-  } catch(e) {
-    log('CSS exception: '+e.name+': '+e.message, 'err');
-  }
-}
-
-function testCSSComputed() {
-  log('=== Computed Style Leak Hunt ===', 'ok');
-  try {
-    const div = document.createElement('div');
-    document.body.appendChild(div);
-    
-    // Set a transform that might leak memory
-    div.style.transform = 'translate3d(0,0,0)';
-    div.style.willChange = 'transform';
-    
-    const cs = getComputedStyle(div);
-    const props = ['transform', 'willChange', 'width', 'height', 'display', 'position'];
-    for (const p of props) {
-      try {
-        log('computed.'+p+' = '+cs.getPropertyValue(p), 'info');
-      } catch(e) {
-        log('computed.'+p+' ERROR: '+e.name, 'err');
-      }
-    }
-    
-    // Try to access internal CSS values
-    try {
-      const matrix = new WebKitCSSMatrix(cs.transform);
-      log('CSSMatrix: m11='+matrix.m11+' m12='+matrix.m12, 'info');
-    } catch(e) {
-      log('CSSMatrix ERROR: '+e.name+': '+e.message, 'err');
-    }
-    
-    document.body.removeChild(div);
-  } catch(e) {
-    log('Computed style exception: '+e.name+': '+e.message, 'err');
-  }
-}
-
-// ============================================================
-// 4. Blob IPC Cross-Origin
-// ============================================================
-function testBlobIPC() {
-  log('=== Blob IPC Cross-Origin ===', 'ok');
-  try {
-    const blob = new Blob(['cross-origin-test'], {type: 'text/plain'});
-    const url = URL.createObjectURL(blob);
-    
-    log('Blob URL: '+url, 'info');
-    
-    // Try fetch with different origins
-    fetch(url).then(r => {
-      log('Same-origin fetch: '+r.status, 'ok');
-      return r.text();
-    }).then(t => {
-      log('Same-origin body: '+t.substring(0,50), 'info');
-    }).catch(e => {
-      log('Same-origin fetch ERROR: '+e.name+': '+e.message, 'err');
-    });
-    
-    // Try to create blob from data URL
-    const dataBlob = new Blob(['data-test']);
-    const dataUrl = URL.createObjectURL(dataBlob);
-    
-    // Try iframe with blob URL
-    const iframe = document.createElement('iframe');
-    iframe.src = url;
-    iframe.style.display = 'none';
-    document.body.appendChild(iframe);
+    try { v.play(); } catch(e) {}
     
     setTimeout(() => {
-      try {
-        log('iframe.contentWindow = '+typeof iframe.contentWindow, 'info');
-        document.body.removeChild(iframe);
-      } catch(e) {
-        log('iframe access ERROR: '+e.name, 'err');
-      }
-    }, 500);
+      log('Video readyState: '+v.readyState+', networkState: '+v.networkState, 'info');
+      URL.revokeObjectURL(url);
+    }, 1000);
     
+  } catch(e) {
+    log('MSE error: '+e.name+': '+e.message, 'err');
+  }
+}
+
+async function testMSECorrupt() {
+  log('=== MSE Corrupt MP4 ===', 'ok');
+  const v = document.getElementById('v');
+  
+  try {
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    v.src = url;
+    
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    
+    const mime = 'video/mp4';
+    if (!MediaSource.isTypeSupported(mime)) {
+      log('video/mp4 not supported', 'warn');
+      URL.revokeObjectURL(url);
+      return;
+    }
+    
+    const sb = ms.addSourceBuffer(mime);
+    
+    // Corrupt data: atom with size=0xFFFFFFFF
+    const corrupt = new Uint8Array([
+      0x00,0x00,0x00,0x20, 0x66,0x74,0x79,0x70,
+      0x69,0x73,0x6f,0x6d, 0x00,0x00,0x02,0x00,
+      0x69,0x73,0x6f,0x6d, 0x6d,0x70,0x34,0x31,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+      // mdat with huge size
+      0xFF,0xFF,0xFF,0xFF, 0x6d,0x64,0x61,0x74,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
+    ]);
+    
+    log('Appending corrupt data ('+corrupt.length+' bytes)...', 'warn');
+    sb.appendBuffer(corrupt);
+    
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => { sb.removeEventListener('updateend', onUp); resolve('timeout'); }, 3000);
+      const onUp = () => { clearTimeout(t); sb.removeEventListener('error', onErr); resolve('ok'); };
+      const onErr = (e) => { clearTimeout(t); sb.removeEventListener('updateend', onUp); resolve('error'); };
+      sb.addEventListener('updateend', onUp);
+      sb.addEventListener('error', onErr);
+    });
+    
+    log('Corrupt append completed', 'ok');
     URL.revokeObjectURL(url);
-    URL.revokeObjectURL(dataUrl);
     
   } catch(e) {
-    log('Blob IPC exception: '+e.name+': '+e.message, 'err');
+    log('Corrupt MSE error: '+e.name+': '+e.message, 'err');
   }
 }
 
-function testBlobTiming() {
-  log('=== Blob Timing Oracle ===', 'ok');
+async function testMSERace() {
+  log('=== MSE Race: seek + append ===', 'ok');
+  const v = document.getElementById('v');
+  
   try {
-    const sizes = [0x100, 0x1000, 0x10000, 0x100000];
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    v.src = url;
     
-    for (const size of sizes) {
-      const data = new Uint8Array(size);
-      const blob = new Blob([data]);
-      const url = URL.createObjectURL(blob);
-      
-      const start = performance.now();
-      fetch(url).then(r => r.arrayBuffer()).then(() => {
-        const elapsed = performance.now() - start;
-        log('Size 0x'+size.toString(16)+' fetch time: '+elapsed.toFixed(2)+'ms', 'info');
-        URL.revokeObjectURL(url);
-      }).catch(e => {
-        log('Size 0x'+size.toString(16)+' ERROR: '+e.name, 'err');
-        URL.revokeObjectURL(url);
-      });
-    }
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    
+    const sb = ms.addSourceBuffer('video/mp4');
+    const data = new Uint8Array(100);
+    
+    // Race
+    sb.appendBuffer(data);
+    v.currentTime = 100;
+    sb.appendBuffer(data);
+    v.currentTime = 0;
+    
+    log('Race triggered', 'ok');
+    URL.revokeObjectURL(url);
+    
   } catch(e) {
-    log('Blob timing exception: '+e.name+': '+e.message, 'err');
+    log('Race error: '+e.name+': '+e.message, 'err');
   }
 }
 
 // ============================================================
-// 5. Structure / Memory Probes
+// 2. Worker Fuzzing
 // ============================================================
-function probeStructureIDs() {
-  log('=== Structure ID Probe ===', 'ok');
+function startWorkerFuzz() {
+  if (worker) { log('Worker already running', 'warn'); return; }
+  
+  log('Starting Worker fuzz...', 'ok');
+  
+  const workerCode = `
+    self.onmessage = function(e) {
+      const cmd = e.data;
+      if (cmd === 'fuzz') {
+        // Fuzz ArrayBuffer operations
+        for (let i = 0; i < 1000; i++) {
+          try {
+            const size = Math.floor(Math.random() * 0x100000);
+            const ab = new ArrayBuffer(size);
+            const view = new Uint8Array(ab);
+            view[0] = i & 0xFF;
+            
+            // Try various TypedArray views
+            new Int32Array(ab);
+            new Float64Array(ab);
+            
+            // Try DataView
+            const dv = new DataView(ab);
+            dv.setUint32(0, 0xDEADBEEF, true);
+            
+          } catch(err) {
+            self.postMessage({type:'error', msg:err.message});
+          }
+        }
+        self.postMessage({type:'done', msg:'Fuzz complete'});
+      }
+    };
+  `;
+  
+  const blob = new Blob([workerCode], {type: 'application/javascript'});
+  worker = new Worker(URL.createObjectURL(blob));
+  
+  worker.onmessage = (e) => {
+    if (e.data.type === 'error') log('Worker: '+e.data.msg, 'err');
+    else if (e.data.type === 'done') log('Worker: '+e.data.msg, 'ok');
+  };
+  
+  worker.onerror = (e) => {
+    log('Worker ERROR: '+e.message, 'err');
+  };
+  
+  fuzzRunning = true;
+  worker.postMessage('fuzz');
+}
+
+function stopWorkerFuzz() {
+  if (worker) {
+    worker.terminate();
+    worker = null;
+    fuzzRunning = false;
+    log('Worker stopped', 'ok');
+  }
+}
+
+// ============================================================
+// 3. Canvas 2D Fuzzing
+// ============================================================
+function testCanvasFuzz() {
+  log('=== Canvas 2D Fuzz ===', 'ok');
   try {
-    // Create objects with same structure then modify
-    const objs = [];
-    for (let i = 0; i < 100; i++) {
-      objs.push({a: i, b: i+1});
-    }
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 240;
+    const ctx = canvas.getContext('2d');
     
-    // Add property to some
-    for (let i = 0; i < 50; i++) {
-      objs[i].c = i;
-    }
+    // Fuzz drawing operations
+    ctx.fillStyle = '#FF0000';
+    ctx.fillRect(0, 0, 320, 240);
     
-    // Try to detect transition
-    log('Created 100 objects, 50 with extra property', 'info');
+    ctx.strokeStyle = '#00FF00';
+    ctx.lineWidth = 999;
+    ctx.strokeRect(-100, -100, 1000, 1000);
     
-    // Try to confuse with ArrayBuffer
-    const ab = new ArrayBuffer(0x100);
-    const view = new Uint8Array(ab);
+    ctx.font = '999px Arial';
+    ctx.fillText('A', 0, 0);
     
-    // Try to read object as bytes (won't work directly in JS)
-    // But we can try type confusion via prototype
-    objs[0].__proto__ = new Uint8Array(8);
-    log('Set __proto__ to Uint8Array', 'info');
+    ctx.globalAlpha = -1;
+    ctx.fillRect(0, 0, 10, 10);
+    
+    ctx.globalAlpha = 2;
+    ctx.fillRect(0, 0, 10, 10);
+    
+    ctx.setTransform(0, 0, 0, 0, 0, 0);
+    ctx.fillRect(0, 0, 10, 10);
+    
+    ctx.setTransform(1e308, 0, 0, 1e308, 0, 0);
+    ctx.fillRect(0, 0, 10, 10);
+    
+    log('Canvas fuzz: completed', 'ok');
+    
+  } catch(e) {
+    log('Canvas fuzz error: '+e.name+': '+e.message, 'err');
+  }
+}
+
+function testCanvasImage() {
+  log('=== Canvas Image Data ===', 'ok');
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const ctx = canvas.getContext('2d');
+    
+    const imgData = ctx.createImageData(0x10000, 0x10000);
+    log('createImageData(0x10000, 0x10000): '+imgData.data.length+' bytes', 'info');
+    
+  } catch(e) {
+    log('Canvas image error: '+e.name+': '+e.message, 'err');
+  }
+}
+
+// ============================================================
+// 4. Atomics Probe
+// ============================================================
+function probeAtomics() {
+  log('=== Atomics Probe ===', 'ok');
+  try {
+    log('typeof Atomics: '+typeof Atomics, 'info');
+    log('Atomics.add: '+typeof Atomics.add, 'info');
+    log('Atomics.load: '+typeof Atomics.load, 'info');
+    log('Atomics.store: '+typeof Atomics.store, 'info');
+    log('Atomics.compareExchange: '+typeof Atomics.compareExchange, 'info');
+    
+    // Try with regular ArrayBuffer (not SharedArrayBuffer)
+    const ab = new ArrayBuffer(8);
+    const i32 = new Int32Array(ab);
+    i32[0] = 42;
     
     try {
-      const x = objs[0][0];
-      log('objs[0][0] = '+x, 'info');
+      Atomics.add(i32, 0, 1);
+      log('Atomics.add on regular ArrayBuffer: succeeded', 'ok');
     } catch(e) {
-      log('objs[0][0] ERROR: '+e.name+': '+e.message, 'err');
+      log('Atomics.add on regular ArrayBuffer: '+e.name+': '+e.message, 'warn');
     }
     
   } catch(e) {
-    log('Structure probe exception: '+e.name+': '+e.message, 'err');
+    log('Atomics probe error: '+e.name+': '+e.message, 'err');
   }
-}
-
-function probeHeapLayout() {
-  log('=== Heap Layout Oracle ===', 'ok');
-  try {
-    // Allocate many objects
-    const arrays = [];
-    for (let i = 0; i < 1000; i++) {
-      arrays.push(new Array(100).fill(i));
-    }
-    
-    // Measure time to access
-    const start = performance.now();
-    let sum = 0;
-    for (let i = 0; i < arrays.length; i++) {
-      sum += arrays[i][0];
-    }
-    const elapsed = performance.now() - start;
-    log('1000 arrays access time: '+elapsed.toFixed(3)+'ms', 'info');
-    
-    // Allocate large buffer
-    const big = new ArrayBuffer(0x100000);
-    const start2 = performance.now();
-    const view = new Uint8Array(big);
-    view[0] = 1;
-    const elapsed2 = performance.now() - start2;
-    log('1MB buffer access time: '+elapsed2.toFixed(3)+'ms', 'info');
-    
-  } catch(e) {
-    log('Heap probe exception: '+e.name+': '+e.message, 'err');
-  }
-}
-
-function probeJSCell() {
-  log('=== JSCell Header Probe ===', 'ok');
-  try {
-    // Try to access internal properties that might reveal JSCell info
-    const arr = [1.1, 2.2, 3.3];
-    
-    // Try various reflection techniques
-    try {
-      const desc = Object.getOwnPropertyDescriptor(arr, 'length');
-      log('arr.length descriptor: '+JSON.stringify(desc), 'info');
-    } catch(e) {
-      log('length descriptor ERROR: '+e.name, 'err');
-    }
-    
-    // Try to change array type
-    arr[0] = {};
-    log('After mixed store: arr[0] = '+typeof arr[0], 'info');
-    
-    // Try to create sparse array
-    const sparse = [];
-    sparse[0x100000] = 1;
-    log('Sparse array length: '+sparse.length, 'info');
-    
-    // Try to confuse with TypedArray
-    const buffer = new ArrayBuffer(24);
-    const f64 = new Float64Array(buffer);
-    const u32 = new Uint32Array(buffer);
-    f64[0] = 1.7976931348623157e+308; // Max double
-    log('f64[0] = '+f64[0], 'info');
-    log('u32 view = '+u32[0]+', '+u32[1], 'info');
-    
-  } catch(e) {
-    log('JSCell probe exception: '+e.name+': '+e.message, 'err');
-  }
-}
-
-// ============================================================
-// 6. Capability Check
-// ============================================================
-function runCapabilityCheck() {
-  log('=== System Capability Check ===', 'ok');
-  const checks = [
-    ['MediaSource', typeof MediaSource],
-    ['URL.parse', typeof URL.parse],
-    ['TransformStream', typeof TransformStream],
-    ['AudioContext', typeof AudioContext],
-    ['WebGPU', typeof navigator.gpu],
-    ['WASM', typeof WebAssembly],
-    ['SharedArrayBuffer', typeof SharedArrayBuffer],
-    ['Atomics', typeof Atomics],
-    ['WebRTC', typeof RTCPeerConnection],
-    ['WebCodecs', typeof VideoDecoder],
-    ['Canvas 2D', !!document.createElement('canvas').getContext('2d')],
-    ['WebGL', !!document.createElement('canvas').getContext('webgl')],
-    ['ServiceWorker', typeof ServiceWorkerRegistration],
-    ['Worker', typeof Worker],
-    ['Blob', typeof Blob],
-    ['FileReader', typeof FileReader],
-    ['fetch', typeof fetch],
-    ['performance.now', typeof performance.now],
-    ['console.memory', typeof console.memory],
-  ];
-  
-  for (const [name, val] of checks) {
-    const status = (val && val !== 'undefined') ? '✅' : '❌';
-    log(status+' '+name+': '+val, val && val !== 'undefined' ? 'ok' : 'warn');
-  }
-  
-  // User agent
-  log('UA: '+navigator.userAgent, 'info');
-  log('Platform: '+navigator.platform, 'info');
 }
 
 // Global handlers
 window.onerror = (m,u,l,c,e) => { log('GLOBAL: '+m+' @'+l+':'+c, 'err'); };
 window.onunhandledrejection = e => { log('REJECTION: '+e.reason, 'err'); };
 
-log('PoC loaded. Press buttons to test.', 'ok');
+log('PoC v3 loaded. MediaSource + Worker ready.', 'ok');
 </script>
 </body>
 </html>
