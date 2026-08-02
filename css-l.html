@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>PS5 FW 13.42 — localStorage Logger + Smart Crash Detection</title>
+<title>PS5 FW 13.42 — Heartbeat Monitor + MSE InvalidStateError Deep Dive</title>
 <style>
 body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:12px;font-size:15px}
 button{background:#1a1a1a;color:#0f0;border:1px solid #0f0;padding:10px 16px;margin:5px;cursor:pointer;font-family:monospace;font-size:14px}
@@ -20,39 +20,43 @@ h2{color:#ff0055;margin:5px 0;font-size:17px}
 </head>
 <body>
 
-<h2>🎯 PS5 FW 13.42 — Smart Crash Detection + localStorage</h2>
+<h2>🎯 PS5 FW 13.42 — Heartbeat Monitor + MSE Deep Dive</h2>
+<p style="color:#888;font-size:12px">576MB OK then crash | localStorage stores 13 entries before crash | InvalidStateError pattern detected</p>
 
 <div class="panel">
-<h2>📦 localStorage Status</h2>
-<div id="lsStatus" class="stats">Checking...</div>
-<button onclick="clearLocalStorage()">🗑 Clear localStorage</button>
-<button onclick="showLocalStorage()">📂 Show Stored Results</button>
+<h2>📦 Heartbeat Monitor (localStorage)</h2>
+<div id="hbStatus" class="stats">Stopped</div>
+<button onclick="startHeartbeat()">▶ Start Heartbeat</button>
+<button onclick="stopHeartbeat()">⏹ Stop Heartbeat</button>
+<button onclick="showHeartbeatLog()">📂 Show Heartbeat Log</button>
+<button onclick="clearHeartbeat()">🗑 Clear</button>
 </div>
 
 <div class="panel">
-<h2>🔴 1. Smart Canvas Crash Detection</h2>
-<p style="color:#888;font-size:12px">Tests sizes incrementally. Stores each result in localStorage BEFORE testing.</p>
-<button class="danger" onclick="smartCanvasTest()">🧠 Smart Test: Find Crash Boundary</button>
-<button class="danger" onclick="immediateVsFreeze()">⚡ Immediate (0x8000) vs Freeze (growing)</button>
-<button onclick="safeSizeFinder()">🔍 Safe Size Finder (no crash)</button>
+<h2>🔴 Canvas Crash Boundary (576MB confirmed)</h2>
+<button class="danger" onclick="crashAt576()">💥 Crash at 576MB boundary</button>
+<button class="danger" onclick="crashJustAbove()">💥 Crash just above limit</button>
+<button onclick="safeBelow576()">✅ Safe test below 576MB</button>
 </div>
 
 <div class="panel">
-<h2>🟡 2. timestampOffset + Realistic MP4</h2>
-<button class="gold" onclick="timestampOffsetWithRealMP4()">🔥 1e+308 + Realistic MP4</button>
-<button class="gold" onclick="timestampOffsetSequence()">🔥 Sequence: 0 → 1e+308 → append → seek</button>
+<h2>🟡 MSE InvalidStateError Deep Dive</h2>
+<button class="gold" onclick="mseInvalidStateTrigger()">🔥 Trigger InvalidStateError</button>
+<button class="gold" onclick="mseInvalidStateRecovery()">🔥 Can we recover from InvalidState?</button>
+<button class="gold" onclick="mseInvalidStateChain()">🔥 Chain: append→error→append</button>
 </div>
 
 <div class="panel">
-<h2>🟢 3. MSE State Machine Deep Test</h2>
-<button onclick="mseStateSequence()">🐛 Full State Sequence Test</button>
-<button onclick="mseRapidLifecycle()">🐛 Rapid MediaSource Lifecycle</button>
+<h2>🟢 MSE with Different Codecs</h2>
+<button onclick="mseCodecProbe()">🔍 Probe All Codecs</button>
+<button onclick="mseWebM()">🧪 Try WebM</button>
+<button onclick="mseAudioOnly()">🧪 Try Audio-only MP4</button>
 </div>
 
 <div class="panel">
-<h2>🔵 4. Atomics + Memory Probes</h2>
-<button onclick="probeMemoryPressure()">💾 Memory Pressure Probe</button>
-<button onclick="probeAllocationPattern()">🔍 Allocation Pattern Probe</button>
+<h2>🔵 Memory Map (576MB zone)</h2>
+<button onclick="mapMemoryZone()">🗺 Map 500-600MB Zone</button>
+<button onclick="allocateExact()">🎯 Allocate exactly 576MB</button>
 </div>
 
 <div class="panel">
@@ -63,7 +67,9 @@ h2{color:#ff0055;margin:5px 0;font-size:17px}
 
 <script>
 const L = document.getElementById('log');
-const LS_KEY = 'PS5_CRASH_LOG_v6';
+const HB_KEY = 'PS5_HEARTBEAT_v7';
+let hbInterval = null;
+let hbCounter = 0;
 
 function log(msg, cls='info') {
   const d = new Date().toLocaleTimeString('en-GB');
@@ -71,72 +77,129 @@ function log(msg, cls='info') {
   L.innerHTML += '<div class="'+cls+'">'+line+'</div>';
   L.scrollTop = L.scrollHeight;
   console.log('['+cls+'] '+msg);
-  return line;
 }
 
-// Store in localStorage BEFORE dangerous operations
-function storeBeforeTest(testName, params) {
+function hbStore(msg) {
   try {
-    const entry = {
-      time: Date.now(),
-      test: testName,
-      params: params,
-      ua: navigator.userAgent,
-      platform: navigator.platform
-    };
-    let history = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
-    history.push(entry);
-    localStorage.setItem(LS_KEY, JSON.stringify(history));
-    log('Stored in localStorage: '+testName, 'info');
+    const history = JSON.parse(localStorage.getItem(HB_KEY) || '[]');
+    history.push({time: Date.now(), msg: msg, mem: performance.memory ? performance.memory.usedJSHeapSize : 0});
+    localStorage.setItem(HB_KEY, JSON.stringify(history));
+  } catch(e) {}
+}
+
+function updateHBStatus() {
+  try {
+    const history = JSON.parse(localStorage.getItem(HB_KEY) || '[]');
+    const last = history.length > 0 ? new Date(history[history.length-1].time).toLocaleTimeString() : 'none';
+    document.getElementById('hbStatus').innerHTML = 
+      'Status: '+(hbInterval ? 'RUNNING ('+hbCounter+' beats)' : 'STOPPED')+
+      ' | Entries: '+history.length+' | Last: '+last;
   } catch(e) {
-    log('localStorage store failed: '+e.name, 'warn');
+    document.getElementById('hbStatus').innerHTML = 'ERROR';
   }
 }
 
-function updateLSStatus() {
-  try {
-    const history = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
-    const size = JSON.stringify(history).length;
-    document.getElementById('lsStatus').innerHTML = 
-      'Entries: '+history.length+' | Size: '+size+' bytes | Last: '+
-      (history.length > 0 ? new Date(history[history.length-1].time).toLocaleTimeString() : 'none');
-  } catch(e) {
-    document.getElementById('lsStatus').innerHTML = 'localStorage ERROR: '+e.name;
+function startHeartbeat() {
+  if (hbInterval) return;
+  hbCounter = 0;
+  log('Heartbeat started. Writing to localStorage every 500ms...', 'ok');
+  
+  hbInterval = setInterval(() => {
+    hbCounter++;
+    const mem = performance.memory ? (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(1) + 'MB' : 'N/A';
+    const msg = 'beat_'+hbCounter+' mem='+mem;
+    hbStore(msg);
+    if (hbCounter % 10 === 0) {
+      log('Heartbeat '+hbCounter+' — mem: '+mem, 'info');
+      updateHBStatus();
+    }
+  }, 500);
+  
+  updateHBStatus();
+}
+
+function stopHeartbeat() {
+  if (hbInterval) {
+    clearInterval(hbInterval);
+    hbInterval = null;
+    log('Heartbeat stopped at '+hbCounter+' beats', 'ok');
+    updateHBStatus();
   }
 }
 
-function clearLocalStorage() {
-  localStorage.removeItem(LS_KEY);
-  updateLSStatus();
-  log('localStorage cleared', 'ok');
-}
-
-function showLocalStorage() {
+function showHeartbeatLog() {
   try {
-    const history = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
-    log('=== localStorage Contents ('+history.length+' entries) ===', 'ok');
-    for (const entry of history) {
-      log(entry.test+' @ '+new Date(entry.time).toLocaleTimeString(), 'info');
+    const history = JSON.parse(localStorage.getItem(HB_KEY) || '[]');
+    log('=== Heartbeat Log ('+history.length+' entries) ===', 'ok');
+    // Show last 20
+    const last = history.slice(-20);
+    for (const entry of last) {
+      const mem = entry.mem ? (entry.mem / 1024 / 1024).toFixed(1)+'MB' : 'N/A';
+      log(entry.msg+' ['+mem+']', 'info');
     }
   } catch(e) {
-    log('Show LS error: '+e.name, 'err');
+    log('HB log error: '+e.name, 'err');
   }
 }
 
+function clearHeartbeat() {
+  localStorage.removeItem(HB_KEY);
+  updateHBStatus();
+  log('Heartbeat log cleared', 'ok');
+}
+
 // ============================================================
-// 1. Smart Canvas Crash Detection
+// 1. Canvas Crash Boundary
 // ============================================================
-async function smartCanvasTest() {
-  log('=== 🧠 Smart Canvas Test ===', 'err');
-  log('Testing sizes incrementally. Results stored in localStorage.', 'warn');
+function crashAt576() {
+  log('=== 💥 Crash at 576MB boundary ===', 'err');
+  log('576MB = createImageData(12288, 12288) [12288^2 * 4 / 1024^2 = 576MB]', 'info');
+  hbStore('crash_test_start_576MB');
   
-  const sizes = [0x100, 0x400, 0x800, 0x1000, 0x2000, 0x3000, 0x4000, 0x5000, 0x6000, 0x7000, 0x8000];
+  try {
+    const size = 12288; // sqrt(576 * 1024 * 1024 / 4) ≈ 12288
+    const c = document.createElement('canvas');
+    const ctx = c.getContext('2d');
+    log('Attempting createImageData('+size+','+size+')...', 'warn');
+    const t0 = performance.now();
+    const id = ctx.createImageData(size, size);
+    const elapsed = performance.now() - t0;
+    log('UNEXPECTED SUCCESS: '+id.data.length+' bytes in '+elapsed.toFixed(0)+'ms', 'ok');
+    hbStore('crash_test_OK_576MB');
+  } catch(e) {
+    log('CRASH/ERROR: '+e.name+': '+e.message, 'err');
+    hbStore('crash_test_ERROR_576MB: '+e.name);
+  }
+  updateHBStatus();
+}
+
+function crashJustAbove() {
+  log('=== 💥 Crash just above 576MB ===', 'err');
+  log('Testing 12500x12500 = 610MB', 'info');
+  hbStore('crash_test_start_610MB');
+  
+  try {
+    const size = 12500;
+    const c = document.createElement('canvas');
+    const ctx = c.getContext('2d');
+    const t0 = performance.now();
+    const id = ctx.createImageData(size, size);
+    const elapsed = performance.now() - t0;
+    log('UNEXPECTED: '+id.data.length+' bytes in '+elapsed.toFixed(0)+'ms', 'ok');
+    hbStore('crash_test_OK_610MB');
+  } catch(e) {
+    log('ERROR: '+e.name+': '+e.message, 'err');
+    hbStore('crash_test_ERROR_610MB: '+e.name);
+  }
+  updateHBStatus();
+}
+
+function safeBelow576() {
+  log('=== ✅ Safe test below 576MB ===', 'ok');
+  const sizes = [10000, 11000, 12000, 12200];
   
   for (const size of sizes) {
     const mb = (size * size * 4 / 1024 / 1024).toFixed(1);
-    storeBeforeTest('canvas_createImageData', {size: size, expectedMB: mb});
-    updateLSStatus();
-    
     try {
       const c = document.createElement('canvas');
       const ctx = c.getContext('2d');
@@ -144,424 +207,333 @@ async function smartCanvasTest() {
       const id = ctx.createImageData(size, size);
       const elapsed = performance.now() - t0;
       log(size+'x'+size+' ('+mb+'MB): OK in '+elapsed.toFixed(0)+'ms', 'ok');
-      
-      // Store success
-      storeBeforeTest('canvas_OK', {size: size, time: elapsed});
-      
-      // Small delay to let browser breathe
-      await new Promise(r => setTimeout(r, 200));
-      
+      hbStore('safe_'+mb+'MB_OK');
     } catch(e) {
-      log(size+'x'+size+' ('+mb+'MB): '+e.name+': '+e.message, 'err');
-      storeBeforeTest('canvas_ERROR', {size: size, error: e.name, msg: e.message});
-      
-      if (e.name === 'RangeError') {
-        log('>>> RangeError at '+size+'x'+size+' = HARD LIMIT REACHED', 'warn');
-        break;
-      }
+      log(size+'x'+size+' ('+mb+'MB): '+e.name, 'err');
+      hbStore('safe_'+mb+'MB_ERROR: '+e.name);
+      break;
     }
   }
-  
-  updateLSStatus();
-  log('Smart test complete. Check localStorage for full history.', 'ok');
+  updateHBStatus();
 }
 
-function immediateVsFreeze() {
-  log('=== ⚡ Immediate vs Freeze Crash ===', 'err');
+// ============================================================
+// 2. MSE InvalidStateError Deep Dive
+// ============================================================
+async function mseInvalidStateTrigger() {
+  log('=== 🔥 Trigger InvalidStateError ===', 'gold');
+  hbStore('mse_invalidstate_trigger_start');
   
-  // Test 1: Immediate error (0x8000)
-  log('Test 1: Immediate (0x8000 x 0x8000)...', 'info');
-  storeBeforeTest('immediate_test', {size: 0x8000});
   try {
-    const c = document.createElement('canvas');
-    const ctx = c.getContext('2d');
-    const t0 = performance.now();
-    const id = ctx.createImageData(0x8000, 0x8000);
-    const elapsed = performance.now() - t0;
-    log('0x8000: UNEXPECTED SUCCESS in '+elapsed.toFixed(0)+'ms', 'ok');
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true;
+    
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+    
+    // Trigger 1: append while updating
+    sb.appendBuffer(new Uint8Array(100));
+    try {
+      sb.appendBuffer(new Uint8Array(100));
+      log('Trigger 1 (double append): NO ERROR (unexpected)', 'warn');
+    } catch(e) {
+      log('Trigger 1 (double append): '+e.name, 'err');
+      hbStore('mse_trigger1_'+e.name);
+    }
+    
+    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
+    
+    // Trigger 2: remove while updating
+    sb.appendBuffer(new Uint8Array(100));
+    try {
+      sb.remove(0, 1);
+      log('Trigger 2 (remove while updating): NO ERROR', 'warn');
+    } catch(e) {
+      log('Trigger 2 (remove while updating): '+e.name, 'err');
+      hbStore('mse_trigger2_'+e.name);
+    }
+    
+    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
+    
+    // Trigger 3: abort then append
+    sb.appendBuffer(new Uint8Array(100));
+    sb.abort();
+    try {
+      sb.appendBuffer(new Uint8Array(100));
+      log('Trigger 3 (abort then append): NO ERROR', 'warn');
+    } catch(e) {
+      log('Trigger 3 (abort then append): '+e.name, 'err');
+      hbStore('mse_trigger3_'+e.name);
+    }
+    
+    URL.revokeObjectURL(url);
+    
   } catch(e) {
-    const elapsed = 'N/A';
-    log('0x8000: '+e.name+' — IMMEDIATE ERROR (no freeze)', 'err');
-    log('>>> This means browser has a HARD CODED size limit check', 'warn');
+    log('Trigger error: '+e.name+': '+e.message, 'err');
   }
   
-  // Test 2: Freeze test (start small, grow)
-  log('Test 2: Growing sizes (will freeze then crash)...', 'info');
-  storeBeforeTest('freeze_test_start', {sizes: [0x4000, 0x5000, 0x6000, 0x7000, 0x8000]});
-  log('Starting growing test in 2 seconds... CLOSE THIS TAB if you dont want to crash!', 'warn');
-  
-  setTimeout(() => {
-    const sizes = [0x4000, 0x5000, 0x6000, 0x7000, 0x8000];
-    for (const size of sizes) {
-      try {
-        const c = document.createElement('canvas');
-        const ctx = c.getContext('2d');
-        ctx.createImageData(size, size);
-        log(size+'x'+size+': OK', 'info');
-      } catch(e) {
-        log(size+'x'+size+': '+e.name, 'err');
-        break;
-      }
-    }
-  }, 2000);
+  updateHBStatus();
 }
 
-async function safeSizeFinder() {
-  log('=== 🔍 Safe Size Finder ===', 'ok');
-  log('Finding max safe size WITHOUT crashing...', 'info');
+async function mseInvalidStateRecovery() {
+  log('=== 🔥 Can we recover from InvalidState? ===', 'gold');
+  hbStore('mse_recovery_start');
   
-  let low = 0x100, high = 0x10000;
-  let lastSafe = 0;
-  
-  while (low <= high) {
-    const mid = Math.floor((low + high) / 2);
-    const mb = (mid * mid * 4 / 1024 / 1024).toFixed(1);
+  try {
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true;
     
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+    
+    // Cause InvalidStateError
+    sb.appendBuffer(new Uint8Array(100));
+    try {
+      sb.appendBuffer(new Uint8Array(100));
+    } catch(e) {
+      log('Got '+e.name+'. Trying to recover...', 'warn');
+    }
+    
+    // Wait for first append to finish
+    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
+    log('First append finished. sb.updating='+sb.updating, 'info');
+    
+    // Try append again
+    try {
+      sb.appendBuffer(new Uint8Array(100));
+      log('Recovery: appendBuffer succeeded!', 'ok');
+      hbStore('mse_recovery_OK');
+    } catch(e) {
+      log('Recovery: appendBuffer failed: '+e.name, 'err');
+      hbStore('mse_recovery_FAIL: '+e.name);
+    }
+    
+    URL.revokeObjectURL(url);
+    
+  } catch(e) {
+    log('Recovery error: '+e.name, 'err');
+  }
+  
+  updateHBStatus();
+}
+
+async function mseInvalidStateChain() {
+  log('=== 🔥 Chain: append→error→append→error ===', 'gold');
+  hbStore('mse_chain_start');
+  
+  try {
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true;
+    
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+    
+    for (let i = 0; i < 10; i++) {
+      try {
+        sb.appendBuffer(new Uint8Array(100));
+        log('Chain['+i+']: append OK', 'ok');
+      } catch(e) {
+        log('Chain['+i+']: '+e.name, 'err');
+        hbStore('mse_chain_'+i+'_'+e.name);
+      }
+      await new Promise(r => setTimeout(r, 50));
+    }
+    
+    URL.revokeObjectURL(url);
+    
+  } catch(e) {
+    log('Chain error: '+e.name, 'err');
+  }
+  
+  updateHBStatus();
+}
+
+// ============================================================
+// 3. MSE with Different Codecs
+// ============================================================
+async function mseCodecProbe() {
+  log('=== 🔍 Probe All Codecs ===', 'ok');
+  hbStore('codec_probe_start');
+  
+  const codecs = [
+    'video/mp4',
+    'video/mp4; codecs="avc1.42E01E"',
+    'video/mp4; codecs="avc1.64001E"',
+    'video/mp4; codecs="mp4a.40.2"',
+    'audio/mp4',
+    'audio/mp4; codecs="mp4a.40.2"',
+    'video/webm',
+    'video/webm; codecs="vp9"',
+    'video/webm; codecs="vp8"',
+    'audio/webm',
+  ];
+  
+  for (const codec of codecs) {
+    const supported = MediaSource.isTypeSupported(codec);
+    log(codec+': '+(supported ? '✅ SUPPORTED' : '❌ NOT SUPPORTED'), supported ? 'ok' : 'warn');
+    hbStore('codec_'+codec+':'+(supported?'OK':'FAIL'));
+  }
+  
+  updateHBStatus();
+}
+
+async function mseWebM() {
+  log('=== 🧪 Try WebM ===', 'ok');
+  hbStore('webm_test_start');
+  
+  if (!MediaSource.isTypeSupported('video/webm')) {
+    log('WebM not supported on this PS5', 'warn');
+    return;
+  }
+  
+  try {
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true;
+    
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    const sb = ms.addSourceBuffer('video/webm; codecs="vp9"');
+    
+    // Minimal WebM header (just EBML)
+    const webm = new Uint8Array([
+      0x1A,0x45,0xDF,0xA3, // EBML ID
+      0x01,0x00,0x00,0x00, // size
+      0x00,0x00,0x00,0x1F, // 31 bytes
+      0x42,0x86,0x81,0x01, // EBMLVersion = 1
+      0x42,0xF7,0x81,0x01, // EBMLReadVersion = 1
+      0x42,0xF2,0x81,0x04, // EBMLMaxIDLength = 4
+      0x42,0xF3,0x81,0x08, // EBMLMaxSizeLength = 8
+      0x42,0x82,0x84,0x77,0x65,0x62,0x6D, // DocType = webm
+      0x00,0x00,0x00,0x00
+    ]);
+    
+    sb.appendBuffer(webm);
+    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
+    log('WebM appendBuffer: OK', 'ok');
+    
+    URL.revokeObjectURL(url);
+    
+  } catch(e) {
+    log('WebM error: '+e.name+': '+e.message, 'err');
+    hbStore('webm_error: '+e.name);
+  }
+  
+  updateHBStatus();
+}
+
+async function mseAudioOnly() {
+  log('=== 🧪 Try Audio-only MP4 ===', 'ok');
+  hbStore('audio_test_start');
+  
+  try {
+    const ms = new MediaSource();
+    const url = URL.createObjectURL(ms);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true;
+    
+    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
+    
+    const mime = 'audio/mp4; codecs="mp4a.40.2"';
+    if (!MediaSource.isTypeSupported(mime)) {
+      log(mime+' not supported', 'warn');
+      URL.revokeObjectURL(url);
+      return;
+    }
+    
+    const sb = ms.addSourceBuffer(mime);
+    
+    // Minimal audio data
+    const audioData = new Uint8Array([
+      0x00,0x00,0x00,0x20, 0x66,0x74,0x79,0x70,
+      0x69,0x73,0x6f,0x6d, 0x00,0x00,0x02,0x00,
+      0x69,0x73,0x6f,0x6d, 0x6d,0x70,0x34,0x31,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
+    ]);
+    
+    sb.appendBuffer(audioData);
+    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
+    log('Audio appendBuffer: OK', 'ok');
+    
+    URL.revokeObjectURL(url);
+    
+  } catch(e) {
+    log('Audio error: '+e.name+': '+e.message, 'err');
+    hbStore('audio_error: '+e.name);
+  }
+  
+  updateHBStatus();
+}
+
+// ============================================================
+// 4. Memory Map
+// ============================================================
+async function mapMemoryZone() {
+  log('=== 🗺 Map 500-600MB Zone ===', 'ok');
+  hbStore('memory_map_start');
+  
+  const sizes = [];
+  for (let mb = 500; mb <= 600; mb += 10) {
+    sizes.push(Math.floor(Math.sqrt(mb * 1024 * 1024 / 4)));
+  }
+  
+  for (const size of sizes) {
+    const mb = (size * size * 4 / 1024 / 1024).toFixed(1);
     try {
       const c = document.createElement('canvas');
       const ctx = c.getContext('2d');
       const t0 = performance.now();
-      const id = ctx.createImageData(mid, mid);
+      const id = ctx.createImageData(size, size);
       const elapsed = performance.now() - t0;
-      
-      log(mid+'x'+mid+' ('+mb+'MB): OK in '+elapsed.toFixed(0)+'ms', 'ok');
-      lastSafe = mid;
-      low = mid + 1;
-      
-      // Store success
-      storeBeforeTest('safe_size_OK', {size: mid, mb: mb, time: elapsed});
-      
-      // Small delay
-      await new Promise(r => setTimeout(r, 100));
-      
+      log(size+'x'+size+' ('+mb+'MB): OK in '+elapsed.toFixed(0)+'ms', 'ok');
+      hbStore('map_'+mb+'MB_OK');
     } catch(e) {
-      log(mid+'x'+mid+' ('+mb+'MB): '+e.name, 'err');
-      storeBeforeTest('safe_size_FAIL', {size: mid, mb: mb, error: e.name});
-      high = mid - 1;
-    }
-  }
-  
-  log('MAX SAFE SIZE: '+lastSafe+'x'+lastSafe, 'ok');
-  log('Next size ('+(lastSafe+1)+') will crash or error', 'warn');
-  updateLSStatus();
-}
-
-// ============================================================
-// 2. timestampOffset + Realistic MP4
-// ============================================================
-function buildRealisticMP4() {
-  // More realistic MP4 with proper structure
-  const atoms = [];
-  
-  // ftyp
-  atoms.push(new Uint8Array([
-    0x00,0x00,0x00,0x20, 0x66,0x74,0x79,0x70,
-    0x69,0x73,0x6f,0x6d, 0x00,0x00,0x02,0x00,
-    0x69,0x73,0x6f,0x6d, 0x6d,0x70,0x34,0x31,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
-  ]));
-  
-  // moov with mvhd + trak
-  const mvhd = new Uint8Array([
-    0x00,0x00,0x00,0x6c, 0x6d,0x76,0x68,0x64,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x03,0xe8,
-    0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00,
-    0x01,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x01,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x40,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
-  ]);
-  
-  const trak = new Uint8Array([
-    0x00,0x00,0x00,0x5c, 0x74,0x72,0x61,0x6b,
-    0x00,0x00,0x00,0x5c, 0x74,0x6b,0x68,0x64,
-    0x00,0x00,0x00,0x07, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x01,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x01,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x01,0x40,0x00,0x00, 0x00,0xf0,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
-  ]);
-  
-  const moovLen = 8 + mvhd.length + trak.length;
-  const moov = new Uint8Array(moovLen);
-  moov[0] = (moovLen >> 24) & 0xFF; moov[1] = (moovLen >> 16) & 0xFF;
-  moov[2] = (moovLen >> 8) & 0xFF; moov[3] = moovLen & 0xFF;
-  moov[4] = 0x6d; moov[5] = 0x6f; moov[6] = 0x6f; moov[7] = 0x76;
-  moov.set(mvhd, 8);
-  moov.set(trak, 8 + mvhd.length);
-  atoms.push(moov);
-  
-  // mdat with some data
-  const mdatData = new Uint8Array(0x200);
-  const mdatLen = mdatData.length + 8;
-  mdatData[0] = (mdatLen >> 24) & 0xFF; mdatData[1] = (mdatLen >> 16) & 0xFF;
-  mdatData[2] = (mdatLen >> 8) & 0xFF; mdatData[3] = mdatLen & 0xFF;
-  mdatData[4] = 0x6d; mdatData[5] = 0x64; mdatData[6] = 0x61; mdatData[7] = 0x74;
-  atoms.push(mdatData);
-  
-  let total = 0;
-  for (const a of atoms) total += a.length;
-  const mp4 = new Uint8Array(total);
-  let off = 0;
-  for (const a of atoms) { mp4.set(a, off); off += a.length; }
-  return mp4;
-}
-
-async function timestampOffsetWithRealMP4() {
-  log('=== 🔥 timestampOffset=1e+308 + Realistic MP4 ===', 'gold');
-  storeBeforeTest('timestampOffset_realMP4', {offset: 1e308});
-  
-  try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    document.body.appendChild(v);
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    log('MediaSource opened', 'ok');
-    
-    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-    
-    // Set insane timestampOffset
-    sb.timestampOffset = 1e+308;
-    log('timestampOffset set to 1e+308', 'ok');
-    log('Read back: '+sb.timestampOffset, 'info');
-    
-    // Append realistic MP4
-    const data = buildRealisticMP4();
-    log('Appending '+data.length+' bytes...', 'info');
-    
-    sb.appendBuffer(data);
-    
-    await new Promise((resolve) => {
-      const t = setTimeout(() => resolve('timeout'), 5000);
-      sb.addEventListener('updateend', () => { clearTimeout(t); resolve('ok'); }, {once:true});
-      sb.addEventListener('error', () => { clearTimeout(t); resolve('error'); }, {once:true});
-    });
-    
-    log('appendBuffer completed', 'ok');
-    log('Video readyState: '+v.readyState+', networkState: '+v.networkState, 'info');
-    
-    // Try to play
-    try {
-      v.play();
-      log('play() called', 'info');
-    } catch(e) {
-      log('play() error: '+e.name, 'warn');
-    }
-    
-    setTimeout(() => {
-      log('After 2s — readyState: '+v.readyState+', networkState: '+v.networkState, 'info');
-      document.body.removeChild(v);
-      URL.revokeObjectURL(url);
-    }, 2000);
-    
-  } catch(e) {
-    log('Error: '+e.name+': '+e.message, 'err');
-  }
-  
-  updateLSStatus();
-}
-
-async function timestampOffsetSequence() {
-  log('=== 🔥 Sequence: 0 → 1e+308 → append → seek ===', 'gold');
-  storeBeforeTest('timestampOffset_sequence', {steps: ['set0', 'set1e308', 'append', 'seek']});
-  
-  try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-    const data = buildRealisticMP4();
-    
-    // Step 1: Normal offset
-    sb.timestampOffset = 0;
-    sb.appendBuffer(data);
-    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
-    log('Step 1: append with offset=0 — OK', 'ok');
-    
-    // Step 2: Change to insane offset
-    sb.timestampOffset = 1e+308;
-    log('Step 2: timestampOffset = 1e+308', 'ok');
-    
-    // Step 3: Append again with insane offset
-    sb.appendBuffer(data);
-    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
-    log('Step 3: append with offset=1e+308 — OK', 'ok');
-    
-    // Step 4: Seek
-    v.currentTime = 1;
-    log('Step 4: seek to 1s', 'ok');
-    
-    // Step 5: Seek to insane time
-    try {
-      v.currentTime = 1e+300;
-      log('Step 5: seek to 1e+300 — OK (unexpected!)', 'warn');
-    } catch(e) {
-      log('Step 5: seek to 1e+300 — '+e.name, 'err');
-    }
-    
-    log('Sequence complete. readyState='+v.readyState, 'ok');
-    URL.revokeObjectURL(url);
-    
-  } catch(e) {
-    log('Sequence error: '+e.name+': '+e.message, 'err');
-  }
-  
-  updateLSStatus();
-}
-
-// ============================================================
-// 3. MSE State Machine Deep Test
-// ============================================================
-async function mseStateSequence() {
-  log('=== 🐛 MSE Full State Sequence ===', 'ok');
-  storeBeforeTest('mse_state_sequence', {});
-  
-  try {
-    const states = [];
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    const v = document.createElement('video');
-    v.src = url; v.muted = true;
-    
-    states.push({event: 'created', msReadyState: ms.readyState});
-    
-    await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-    states.push({event: 'sourceopen', msReadyState: ms.readyState});
-    
-    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-    states.push({event: 'addSourceBuffer', sbUpdating: sb.updating});
-    
-    const data = buildRealisticMP4();
-    sb.appendBuffer(data);
-    states.push({event: 'appendBuffer called', sbUpdating: sb.updating});
-    
-    await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
-    states.push({event: 'updateend', sbUpdating: sb.updating});
-    
-    ms.endOfStream();
-    states.push({event: 'endOfStream', msReadyState: ms.readyState});
-    
-    for (const s of states) {
-      log(JSON.stringify(s), 'info');
-    }
-    
-    URL.revokeObjectURL(url);
-    
-  } catch(e) {
-    log('State sequence error: '+e.name+': '+e.message, 'err');
-  }
-  
-  updateLSStatus();
-}
-
-async function mseRapidLifecycle() {
-  log('=== 🐛 Rapid MediaSource Lifecycle ===', 'ok');
-  storeBeforeTest('mse_rapid_lifecycle', {count: 10});
-  
-  for (let i = 0; i < 10; i++) {
-    try {
-      const ms = new MediaSource();
-      const url = URL.createObjectURL(ms);
-      const v = document.createElement('video');
-      v.src = url; v.muted = true;
-      
-      await new Promise(r => ms.addEventListener('sourceopen', r, {once:true}));
-      const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-      sb.appendBuffer(buildRealisticMP4());
-      await new Promise(r => sb.addEventListener('updateend', r, {once:true}));
-      
-      URL.revokeObjectURL(url);
-      if (i % 3 === 0) log('Lifecycle '+i+': OK', 'info');
-      
-    } catch(e) {
-      log('Lifecycle '+i+': '+e.name, 'err');
-    }
-  }
-  
-  log('10 lifecycles complete', 'ok');
-  updateLSStatus();
-}
-
-// ============================================================
-// 4. Memory Probes
-// ============================================================
-function probeMemoryPressure() {
-  log('=== 💾 Memory Pressure Probe ===', 'ok');
-  storeBeforeTest('memory_pressure', {});
-  
-  const results = [];
-  const sizes = [0x100000, 0x200000, 0x400000, 0x800000, 0x1000000];
-  
-  for (const size of sizes) {
-    try {
-      const t0 = performance.now();
-      const ab = new ArrayBuffer(size);
-      const elapsed = performance.now() - t0;
-      const mb = (size / 1024 / 1024).toFixed(1);
-      log(mb+'MB allocation: '+elapsed.toFixed(2)+'ms', 'ok');
-      results.push({size: size, time: elapsed, ok: true});
-    } catch(e) {
-      const mb = (size / 1024 / 1024).toFixed(1);
-      log(mb+'MB allocation: '+e.name, 'err');
-      results.push({size: size, error: e.name, ok: false});
+      log(size+'x'+size+' ('+mb+'MB): '+e.name, 'err');
+      hbStore('map_'+mb+'MB_'+e.name);
       break;
     }
+    await new Promise(r => setTimeout(r, 100));
   }
   
-  storeBeforeTest('memory_pressure_results', {results: results});
-  updateLSStatus();
+  updateHBStatus();
 }
 
-function probeAllocationPattern() {
-  log('=== 🔍 Allocation Pattern Probe ===', 'ok');
-  storeBeforeTest('allocation_pattern', {});
+function allocateExact() {
+  log('=== 🎯 Allocate exactly 576MB ===', 'ok');
+  hbStore('allocate_576MB_start');
   
-  // Allocate many small buffers and measure time
-  const count = 10000;
-  const size = 1024;
-  const bufs = [];
+  const size = 12288;
+  const mb = (size * size * 4 / 1024 / 1024).toFixed(1);
+  log('Target: '+size+'x'+size+' = '+mb+'MB', 'info');
   
-  const t0 = performance.now();
-  for (let i = 0; i < count; i++) {
-    bufs.push(new ArrayBuffer(size));
+  try {
+    const c = document.createElement('canvas');
+    const ctx = c.getContext('2d');
+    const t0 = performance.now();
+    const id = ctx.createImageData(size, size);
+    const elapsed = performance.now() - t0;
+    log('SUCCESS: '+id.data.length+' bytes in '+elapsed.toFixed(0)+'ms', 'ok');
+    hbStore('allocate_576MB_OK');
+  } catch(e) {
+    log('FAILED: '+e.name+': '+e.message, 'err');
+    hbStore('allocate_576MB_'+e.name);
   }
-  const elapsed = performance.now() - t0;
   
-  log(count+' x '+size+'B allocations in '+elapsed.toFixed(2)+'ms', 'info');
-  log('Total: '+(count * size / 1024 / 1024).toFixed(2)+'MB', 'info');
-  log('Avg: '+(elapsed / count).toFixed(4)+'ms per allocation', 'info');
-  
-  storeBeforeTest('allocation_pattern_results', {
-    count: count, size: size, totalTime: elapsed, avgTime: elapsed/count
-  });
-  updateLSStatus();
+  updateHBStatus();
 }
 
 // Init
-updateLSStatus();
-window.onerror = (m,u,l,c,e) => { log('GLOBAL: '+m+' @'+l+':'+c, 'err'); };
-window.onunhandledrejection = e => { log('REJECTION: '+e.reason, 'err'); };
-log('FINAL PoC v6 loaded. localStorage + Smart Crash Detection.', 'ok');
-log('Results are stored in localStorage before each dangerous test.', 'ok');
+updateHBStatus();
+window.onerror = (m,u,l,c,e) => { log('GLOBAL: '+m+' @'+l+':'+c, 'err'); hbStore('GLOBAL_ERROR: '+m); };
+window.onunhandledrejection = e => { log('REJECTION: '+e.reason, 'err'); hbStore('REJECTION: '+e.reason); };
+log('PoC v7 loaded. Heartbeat Monitor + MSE Deep Dive.', 'ok');
+log('Press ▶ Start Heartbeat before running dangerous tests.', 'warn');
 </script>
 </body>
 </html>
