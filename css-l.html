@@ -1,388 +1,584 @@
 
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html>
 <head>
 <meta charset="UTF-8">
-<title>PS5 MSE Exploitation PoC — FW 13.42</title>
+<title>PS5 FW 13.42 — Lightweight Exploitation PoC</title>
 <style>
-  body { font-family: monospace; background: #0a0a0a; color: #00ff41; padding: 20px; }
-  h1 { color: #ff0055; text-shadow: 0 0 10px #ff0055; }
-  h2 { color: #00ccff; }
-  .panel { border: 1px solid #333; padding: 15px; margin: 10px 0; background: #111; border-radius: 8px; }
-  .log { background: #000; border: 1px solid #222; padding: 10px; height: 300px; overflow-y: auto; font-size: 12px; white-space: pre-wrap; }
-  .error { color: #ff4444; }
-  .warn { color: #ffaa00; }
-  .ok { color: #00ff41; }
-  .info { color: #00ccff; }
-  button { background: #1a1a1a; color: #00ff41; border: 1px solid #00ff41; padding: 10px 20px; margin: 5px; cursor: pointer; font-family: monospace; }
-  button:hover { background: #00ff41; color: #000; }
-  button:disabled { opacity: 0.3; cursor: not-allowed; }
-  .status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
-  .status-pending { background: #333; color: #aaa; }
-  .status-crash { background: #ff0000; color: #fff; }
-  .status-ok { background: #00aa00; color: #fff; }
-  .strategy-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #222; }
-  video { width: 320px; height: 180px; background: #000; border: 1px solid #333; display: block; margin: 10px 0; }
+body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:10px;font-size:13px}
+button{background:#1a1a1a;color:#0f0;border:1px solid #0f0;padding:8px 14px;margin:4px;cursor:pointer;font-family:monospace}
+button:hover{background:#0f0;color:#000}
+.panel{border:1px solid #333;padding:10px;margin:8px 0;background:#111;border-radius:6px}
+.log{background:#000;border:1px solid #222;padding:8px;height:250px;overflow-y:auto;white-space:pre-wrap;font-size:11px}
+.ok{color:#0f0}.err{color:#f44}.warn{color:#fa0}.info{color:#0cf}
+h2{color:#ff0055;margin:4px 0;font-size:14px}
 </style>
 </head>
 <body>
 
-<h1>🎯 PS5 FW 13.42 — MSE Exploitation PoC</h1>
-<p>استهداف MediaSource + SourceBuffer.appendBuffer() مع بيانات MP4 تالفة</p>
+<h2>🎯 PS5 FW 13.42 — Lightweight PoC Suite</h2>
+<p style="color:#888;font-size:11px">No MSE. No complex video. Direct browser surface testing.</p>
 
 <div class="panel">
-  <h2>📹 Video Element (Target)</h2>
-  <video id="v" controls muted></video>
-  <div>
-    <span>ReadyState: </span><span id="rs">-</span> |
-    <span>NetworkState: </span><span id="ns">-</span> |
-    <span>Error: </span><span id="ve">-</span>
-  </div>
+<h2>1️⃣ TransformStream Type Confusion (Confirmed)</h2>
+<button onclick="testTransformStream()">Crash via TransformStream</button>
+<button onclick="testTransformStreamLeak()">Hunt Info Leak</button>
+<button onclick="testTransformStreamMerge()">Merge with ArrayBuffer</button>
 </div>
 
 <div class="panel">
-  <h2>🧪 MP4 Fuzzing Strategies</h2>
-  <div id="strategies"></div>
-  <button onclick="runAll()">▶ Run All Strategies</button>
-  <button onclick="stopAll()">⏹ Stop</button>
+<h2>2️⃣ URL.parse() — New Jun 2025 (DOMURL)</h2>
+<button onclick="testURLParse()">Test URL.parse()</button>
+<button onclick="testURLParseFuzz()">Fuzz URL.parse()</button>
 </div>
 
 <div class="panel">
-  <h2>⚡ Race Condition Tests</h2>
-  <button onclick="raceSeekAppend()">Race: seek + appendBuffer</button>
-  <button onclick="raceRemoveAppend()">Race: remove + appendBuffer</button>
-  <button onclick="raceBufferedUAR()">Trigger: buffered() Stack UAR</button>
-  <button onclick="rapidSeekLoop()">Rapid Seek Loop (100x)</button>
+<h2>3️⃣ CSS Style Builder Type Confusion</h2>
+<button onclick="testCSSStyle()">CSS Style Confusion</button>
+<button onclick="testCSSComputed()">Computed Style Leak</button>
 </div>
 
 <div class="panel">
-  <h2>📊 System Info</h2>
-  <div id="sysinfo"></div>
+<h2>4️⃣ Blob IPC Cross-Origin</h2>
+<button onclick="testBlobIPC()">Cross-Origin Blob Access</button>
+<button onclick="testBlobTiming()">Blob Timing Oracle</button>
 </div>
 
 <div class="panel">
-  <h2>📝 Execution Log</h2>
-  <div class="log" id="log"></div>
-  <button onclick="clearLog()">Clear Log</button>
+<h2>5️⃣ Structure / Memory Probes</h2>
+<button onclick="probeStructureIDs()">Probe Structure IDs</button>
+<button onclick="probeHeapLayout()">Heap Layout Oracle</button>
+<button onclick="probeJSCell()">JSCell Header Read</button>
+</div>
+
+<div class="panel">
+<h2>6️⃣ System Capability Check</h2>
+<button onclick="runCapabilityCheck()">Run Full Check</button>
+</div>
+
+<div class="panel">
+<h2>📝 Log</h2>
+<div class="log" id="log"></div>
+<button onclick="document.getElementById('log').innerHTML=''">Clear</button>
 </div>
 
 <script>
-// ============================================================
-// MP4 Corruption Strategies (Base64 encoded)
-// ============================================================
-const MP4_STRATEGIES = ''' + str({k: v for k, v in b64_strategies.items()}).replace("'", '"') + ''';
-
-const logEl = document.getElementById('log');
-const v = document.getElementById('v');
-let running = false;
-let abortController = null;
-
+const L = document.getElementById('log');
 function log(msg, cls='info') {
-  const time = new Date().toLocaleTimeString('en-GB');
-  const line = document.createElement('div');
-  line.className = cls;
-  line.textContent = `[${time}] ${msg}`;
-  logEl.appendChild(line);
-  logEl.scrollTop = logEl.scrollHeight;
-  console.log(`[${cls.toUpperCase()}] ${msg}`);
-}
-
-function clearLog() { logEl.innerHTML = ''; }
-
-// ============================================================
-// System Detection
-// ============================================================
-function detectSystem() {
-  const info = [];
-  info.push(`User-Agent: ${navigator.userAgent}`);
-  info.push(`Platform: ${navigator.platform}`);
-  info.push(`MSE Supported: ${!!window.MediaSource}`);
-  info.push(`MediaSource.isTypeSupported(video/mp4): ${window.MediaSource ? MediaSource.isTypeSupported('video/mp4') : 'N/A'}`);
-  info.push(`MediaSource.isTypeSupported(video/mp4; codecs=avc1.42E01E): ${window.MediaSource ? MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E"') : 'N/A'}`);
-  info.push(`Video.canPlayType: ${v.canPlayType('video/mp4')}`);
-  info.push(`Blob: ${!!window.Blob}`);
-  info.push(`URL.createObjectURL: ${!!window.URL?.createObjectURL}`);
-  info.push(`SharedArrayBuffer: ${typeof SharedArrayBuffer}`);
-  info.push(`Atomics: ${typeof Atomics}`);
-  info.push(`WebAssembly: ${typeof WebAssembly}`);
-  info.push(`AudioContext: ${typeof AudioContext}`);
-  info.push(`navigator.gpu: ${typeof navigator.gpu}`);
-  info.push(`TransformStream: ${typeof TransformStream}`);
-  document.getElementById('sysinfo').innerHTML = info.map(s => `<div>${s}</div>`).join('');
+  const d = new Date().toLocaleTimeString('en-GB');
+  L.innerHTML += '<div class="'+cls+'">['+d+'] '+msg+'</div>';
+  L.scrollTop = L.scrollHeight;
+  console.log('['+cls+'] '+msg);
 }
 
 // ============================================================
-// Strategy Runner
+// 1. TransformStream Type Confusion
 // ============================================================
-async function runStrategy(name, b64data) {
-  const row = document.getElementById(`row-${name}`);
-  const status = document.getElementById(`status-${name}`);
-  status.textContent = 'RUNNING...';
-  status.className = 'status status-pending';
-  
+function testTransformStream() {
+  log('=== TransformStream Crash Test ===', 'ok');
   try {
-    const bytes = Uint8Array.from(atob(b64data), c => c.charCodeAt(0));
-    log(`Strategy [${name}]: ${bytes.length} bytes`, 'info');
+    const ts = new TransformStream();
+    const reader = ts.readable.getReader();
+    const writer = ts.writable.getWriter();
     
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
+    // Confuse the stream by writing then immediately closing
+    writer.write(new Uint8Array(0x1000));
+    writer.close();
     
-    const video = document.createElement('video');
-    video.muted = true;
-    video.src = url;
-    
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('sourceopen timeout')), 5000);
-      ms.addEventListener('sourceopen', () => {
-        clearTimeout(timeout);
-        resolve();
-      }, { once: true });
+    // Force read
+    reader.read().then(() => {
+      log('TransformStream: read completed', 'ok');
+    }).catch(e => {
+      log('TransformStream: read error — '+e.name+': '+e.message, 'err');
     });
     
-    const mime = 'video/mp4; codecs="avc1.42E01E"';
-    if (!MediaSource.isTypeSupported(mime)) {
-      log(`Strategy [${name}]: MIME not supported, skipping`, 'warn');
-      status.textContent = 'SKIP';
-      status.className = 'status';
-      URL.revokeObjectURL(url);
-      return;
-    }
+    // Try to access internal properties
+    try { log('ts.readable = '+typeof ts.readable, 'info'); } catch(e){}
+    try { log('ts.writable = '+typeof ts.writable, 'info'); } catch(e){}
     
-    const sb = ms.addSourceBuffer(mime);
-    
-    // Append corrupted data
-    sb.appendBuffer(bytes);
-    
-    await new Promise((resolve, reject) => {
-      const onUpdate = () => {
-        sb.removeEventListener('updateend', onUpdate);
-        sb.removeEventListener('error', onError);
-        resolve();
-      };
-      const onError = (e) => {
-        sb.removeEventListener('updateend', onUpdate);
-        sb.removeEventListener('error', onError);
-        reject(new Error(`SourceBuffer error: ${e.message || 'unknown'}`));
-      };
-      sb.addEventListener('updateend', onUpdate);
-      sb.addEventListener('error', onError);
-      
-      // Also timeout
-      setTimeout(() => {
-        sb.removeEventListener('updateend', onUpdate);
-        sb.removeEventListener('error', onError);
-        resolve(); // timeout is not necessarily a crash
-      }, 3000);
-    });
-    
-    // Try to trigger playback
-    try { video.play(); } catch(e) {}
-    
-    // Check for crash indicators
-    await new Promise(r => setTimeout(r, 500));
-    
-    if (ms.readyState === 'closed') {
-      log(`Strategy [${name}]: MediaSource closed unexpectedly (possible crash)`, 'error');
-      status.textContent = 'CRASH?';
-      status.className = 'status status-crash';
-    } else {
-      log(`Strategy [${name}]: Completed without crash`, 'ok');
-      status.textContent = 'OK';
-      status.className = 'status status-ok';
-    }
-    
-    URL.revokeObjectURL(url);
-    
-  } catch (e) {
-    log(`Strategy [${name}]: Exception — ${e.name}: ${e.message}`, 'error');
-    status.textContent = 'ERROR';
-    status.className = 'status status-crash';
-  }
-}
-
-async function runAll() {
-  if (running) return;
-  running = true;
-  log('=== Starting Full Fuzzing Run ===', 'ok');
-  
-  for (const [name, b64] of Object.entries(MP4_STRATEGIES)) {
-    if (!running) { log('Stopped by user', 'warn'); break; }
-    await runStrategy(name, b64);
-    await new Promise(r => setTimeout(r, 500));
-  }
-  
-  running = false;
-  log('=== Fuzzing Run Complete ===', 'ok');
-}
-
-function stopAll() {
-  running = false;
-  log('Stop requested', 'warn');
-}
-
-// ============================================================
-// Race Condition Tests
-// ============================================================
-async function raceSeekAppend() {
-  log('=== Race: seek + appendBuffer ===', 'info');
-  try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    v.src = url;
-    
-    await new Promise((resolve) => {
-      ms.addEventListener('sourceopen', resolve, { once: true });
-    });
-    
-    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-    const data = Uint8Array.from(atob(MP4_STRATEGIES.standard), c => c.charCodeAt(0));
-    
-    // Race: seek while appending
-    sb.appendBuffer(data);
-    v.currentTime = 9999;
-    sb.appendBuffer(data);
-    v.currentTime = 0;
-    
-    await new Promise(r => setTimeout(r, 1000));
-    log('Race seek+append: completed', v.error ? 'error' : 'ok');
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    log(`Race seek+append: ${e.message}`, 'error');
-  }
-}
-
-async function raceRemoveAppend() {
-  log('=== Race: remove + appendBuffer ===', 'info');
-  try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    v.src = url;
-    
-    await new Promise((resolve) => {
-      ms.addEventListener('sourceopen', resolve, { once: true });
-    });
-    
-    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-    const data = Uint8Array.from(atob(MP4_STRATEGIES.standard), c => c.charCodeAt(0));
-    
-    sb.appendBuffer(data);
-    await new Promise(r => sb.addEventListener('updateend', r, { once: true }));
-    
-    // Race: remove while appending
-    sb.remove(0, 1);
-    sb.appendBuffer(data);
-    
-    await new Promise(r => setTimeout(r, 1000));
-    log('Race remove+append: completed', v.error ? 'error' : 'ok');
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    log(`Race remove+append: ${e.message}`, 'error');
-  }
-}
-
-async function raceBufferedUAR() {
-  log('=== Trigger: buffered() Stack UAR ===', 'info');
-  try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    v.src = url;
-    
-    await new Promise((resolve) => {
-      ms.addEventListener('sourceopen', resolve, { once: true });
-    });
-    
-    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-    const data = Uint8Array.from(atob(MP4_STRATEGIES.standard), c => c.charCodeAt(0));
-    sb.appendBuffer(data);
-    
-    // Trigger buffered() in rapid succession during append
-    for (let i = 0; i < 50; i++) {
+    // Crash trigger: access locked getter
+    setTimeout(() => {
       try {
-        const b = sb.buffered;
-        const b2 = ms.buffered;
-        if (b.length > 0) {
-          log(`buffered[0] = ${b.start(0)}-${b.end(0)}`, 'info');
-        }
-      } catch (e) {
-        log(`buffered() exception: ${e.message}`, 'error');
+        const r = ts.readable.getReader();
+        log('Second getReader: succeeded (unexpected)', 'warn');
+      } catch(e) {
+        log('Second getReader: '+e.name+' — '+e.message, 'err');
+      }
+    }, 100);
+    
+  } catch(e) {
+    log('TransformStream exception: '+e.name+': '+e.message, 'err');
+  }
+}
+
+function testTransformStreamLeak() {
+  log('=== TransformStream Info Leak Hunt ===', 'ok');
+  try {
+    const ts = new TransformStream();
+    
+    // Try to leak via error messages
+    const props = ['readable','writable','locked','getReader','getWriter','pipeTo','pipeThrough','tee'];
+    for (const p of props) {
+      try {
+        const v = ts[p];
+        log('ts.'+p+' = '+typeof v + (v!==null&&v!==undefined?' ('+v.toString()+')':''), 'info');
+      } catch(e) {
+        log('ts.'+p+' ERROR: '+e.name+': '+e.message, 'err');
       }
     }
     
-    await new Promise(r => setTimeout(r, 500));
-    log('Stack UAR trigger: completed', 'ok');
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    log(`Stack UAR: ${e.message}`, 'error');
-  }
-}
-
-async function rapidSeekLoop() {
-  log('=== Rapid Seek Loop (100x) ===', 'info');
-  try {
-    const ms = new MediaSource();
-    const url = URL.createObjectURL(ms);
-    v.src = url;
-    
-    await new Promise((resolve) => {
-      ms.addEventListener('sourceopen', resolve, { once: true });
-    });
-    
-    const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-    const data = Uint8Array.from(atob(MP4_STRATEGIES.standard), c => c.charCodeAt(0));
-    sb.appendBuffer(data);
-    await new Promise(r => sb.addEventListener('updateend', r, { once: true }));
-    
-    for (let i = 0; i < 100; i++) {
-      v.currentTime = Math.random() * 10;
-      if (i % 10 === 0) log(`Seek iteration ${i}`, 'info');
+    // Try JSON.stringify
+    try {
+      const s = JSON.stringify(ts);
+      log('JSON.stringify(ts) = '+s, 'info');
+    } catch(e) {
+      log('JSON.stringify ERROR: '+e.name+': '+e.message, 'err');
     }
     
-    log('Rapid seek: completed', 'ok');
+    // Try Object.keys
+    try {
+      const keys = Object.keys(ts);
+      log('Object.keys(ts) = ['+keys.join(', ')+']', 'info');
+    } catch(e) {
+      log('Object.keys ERROR: '+e.name+': '+e.message, 'err');
+    }
+    
+    // Try Reflect.ownKeys
+    try {
+      const keys = Reflect.ownKeys(ts);
+      log('Reflect.ownKeys(ts) = ['+keys.join(', ')+']', 'info');
+    } catch(e) {
+      log('Reflect.ownKeys ERROR: '+e.name+': '+e.message, 'err');
+    }
+    
+    // Try Symbol.toStringTag
+    try {
+      const tag = Object.prototype.toString.call(ts);
+      log('toString.call(ts) = '+tag, 'info');
+    } catch(e) {
+      log('toString ERROR: '+e.name+': '+e.message, 'err');
+    }
+    
+    // Try prototype chain
+    try {
+      let proto = Object.getPrototypeOf(ts);
+      let chain = [];
+      while (proto) {
+        chain.push(proto.constructor ? proto.constructor.name : 'null');
+        proto = Object.getPrototypeOf(proto);
+      }
+      log('Prototype chain: '+chain.join(' -> '), 'info');
+    } catch(e) {
+      log('Prototype chain ERROR: '+e.name+': '+e.message, 'err');
+    }
+    
+  } catch(e) {
+    log('Leak hunt exception: '+e.name+': '+e.message, 'err');
+  }
+}
+
+function testTransformStreamMerge() {
+  log('=== TransformStream + ArrayBuffer Merge ===', 'ok');
+  try {
+    // Create ArrayBuffer with specific pattern
+    const ab = new ArrayBuffer(0x100);
+    const view = new Uint8Array(ab);
+    for (let i = 0; i < 0x100; i++) view[i] = i;
+    
+    const ts = new TransformStream();
+    const writer = ts.writable.getWriter();
+    
+    // Write the ArrayBuffer view
+    writer.write(view).then(() => {
+      log('Write completed', 'ok');
+      writer.close();
+    }).catch(e => {
+      log('Write error: '+e.name+': '+e.message, 'err');
+    });
+    
+    const reader = ts.readable.getReader();
+    reader.read().then(({value, done}) => {
+      if (value) {
+        log('Read back '+value.length+' bytes', 'info');
+        // Check for corruption
+        let corrupted = false;
+        for (let i = 0; i < Math.min(value.length, 0x100); i++) {
+          if (value[i] !== (i & 0xFF)) { corrupted = true; break; }
+        }
+        log('Data integrity: '+(corrupted?'CORRUPTED':'intact'), corrupted?'err':'ok');
+      }
+    }).catch(e => {
+      log('Read error: '+e.name+': '+e.message, 'err');
+    });
+    
+  } catch(e) {
+    log('Merge exception: '+e.name+': '+e.message, 'err');
+  }
+}
+
+// ============================================================
+// 2. URL.parse() — New in Jun 2025
+// ============================================================
+function testURLParse() {
+  log('=== URL.parse() Test ===', 'ok');
+  
+  if (typeof URL.parse !== 'function') {
+    log('URL.parse() NOT FOUND — FW too old or not supported', 'warn');
+    return;
+  }
+  
+  log('URL.parse() IS AVAILABLE!', 'ok');
+  
+  const tests = [
+    'https://example.com',
+    'blob:invalid',
+    'javascript:alert(1)',
+    'file:///etc/passwd',
+    'data:text/html,<script>alert(1)</script>',
+    'about:blank',
+    'chrome://settings',
+    'ps5://system',
+    '',
+    null,
+    undefined,
+  ];
+  
+  for (const t of tests) {
+    try {
+      const r = URL.parse(t);
+      log('URL.parse('+JSON.stringify(t)+') = '+JSON.stringify(r), 'info');
+    } catch(e) {
+      log('URL.parse('+JSON.stringify(t)+') ERROR: '+e.name+': '+e.message, 'err');
+    }
+  }
+}
+
+function testURLParseFuzz() {
+  log('=== URL.parse() Fuzzing ===', 'ok');
+  
+  if (typeof URL.parse !== 'function') {
+    log('URL.parse() not available, skipping', 'warn');
+    return;
+  }
+  
+  const fuzzStrings = [
+    'a://'+'A'.repeat(0x10000),
+    'a://'+'%'.repeat(0x1000),
+    'a://[::1',
+    'a://user:pass@',
+    'a://?'+ '&'.repeat(0x1000),
+    'a://#'+ '#'.repeat(0x1000),
+    'blob:'+'x'.repeat(0x10000),
+    'javascript:'+'A'.repeat(0x10000),
+    'data:'+'A'.repeat(0x10000),
+    'http://'+'0'.repeat(0x10000)+'.com',
+    String.fromCharCode(0),
+    String.fromCharCode(0xD800),
+    '\x00'.repeat(100),
+  ];
+  
+  for (let i = 0; i < fuzzStrings.length; i++) {
+    try {
+      const r = URL.parse(fuzzStrings[i]);
+      log('Fuzz['+i+']: OK', 'ok');
+    } catch(e) {
+      log('Fuzz['+i+']: '+e.name+': '+e.message.substring(0,80), 'err');
+    }
+  }
+}
+
+// ============================================================
+// 3. CSS Style Builder Type Confusion
+// ============================================================
+function testCSSStyle() {
+  log('=== CSS Style Builder Confusion ===', 'ok');
+  try {
+    const div = document.createElement('div');
+    document.body.appendChild(div);
+    
+    // Set conflicting styles
+    div.style.cssText = 'content: attr(data-x); --x: url(javascript:alert(1));';
+    div.setAttribute('data-x', 'test');
+    
+    // Read back
+    log('style.cssText = '+div.style.cssText, 'info');
+    log('getPropertyValue(--x) = '+div.style.getPropertyValue('--x'), 'info');
+    log('getPropertyValue(content) = '+div.style.getPropertyValue('content'), 'info');
+    
+    // Try pseudo-element
+    const style = document.createElement('style');
+    style.textContent = 'div::before { content: attr(data-x); font-size: 999px; }';
+    document.head.appendChild(style);
+    
+    const cs = getComputedStyle(div, '::before');
+    log('computed content = '+cs.content, 'info');
+    log('computed font-size = '+cs.fontSize, 'info');
+    
+    document.body.removeChild(div);
+    document.head.removeChild(style);
+    
+  } catch(e) {
+    log('CSS exception: '+e.name+': '+e.message, 'err');
+  }
+}
+
+function testCSSComputed() {
+  log('=== Computed Style Leak Hunt ===', 'ok');
+  try {
+    const div = document.createElement('div');
+    document.body.appendChild(div);
+    
+    // Set a transform that might leak memory
+    div.style.transform = 'translate3d(0,0,0)';
+    div.style.willChange = 'transform';
+    
+    const cs = getComputedStyle(div);
+    const props = ['transform', 'willChange', 'width', 'height', 'display', 'position'];
+    for (const p of props) {
+      try {
+        log('computed.'+p+' = '+cs.getPropertyValue(p), 'info');
+      } catch(e) {
+        log('computed.'+p+' ERROR: '+e.name, 'err');
+      }
+    }
+    
+    // Try to access internal CSS values
+    try {
+      const matrix = new WebKitCSSMatrix(cs.transform);
+      log('CSSMatrix: m11='+matrix.m11+' m12='+matrix.m12, 'info');
+    } catch(e) {
+      log('CSSMatrix ERROR: '+e.name+': '+e.message, 'err');
+    }
+    
+    document.body.removeChild(div);
+  } catch(e) {
+    log('Computed style exception: '+e.name+': '+e.message, 'err');
+  }
+}
+
+// ============================================================
+// 4. Blob IPC Cross-Origin
+// ============================================================
+function testBlobIPC() {
+  log('=== Blob IPC Cross-Origin ===', 'ok');
+  try {
+    const blob = new Blob(['cross-origin-test'], {type: 'text/plain'});
+    const url = URL.createObjectURL(blob);
+    
+    log('Blob URL: '+url, 'info');
+    
+    // Try fetch with different origins
+    fetch(url).then(r => {
+      log('Same-origin fetch: '+r.status, 'ok');
+      return r.text();
+    }).then(t => {
+      log('Same-origin body: '+t.substring(0,50), 'info');
+    }).catch(e => {
+      log('Same-origin fetch ERROR: '+e.name+': '+e.message, 'err');
+    });
+    
+    // Try to create blob from data URL
+    const dataBlob = new Blob(['data-test']);
+    const dataUrl = URL.createObjectURL(dataBlob);
+    
+    // Try iframe with blob URL
+    const iframe = document.createElement('iframe');
+    iframe.src = url;
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+    
+    setTimeout(() => {
+      try {
+        log('iframe.contentWindow = '+typeof iframe.contentWindow, 'info');
+        document.body.removeChild(iframe);
+      } catch(e) {
+        log('iframe access ERROR: '+e.name, 'err');
+      }
+    }, 500);
+    
     URL.revokeObjectURL(url);
-  } catch (e) {
-    log(`Rapid seek: ${e.message}`, 'error');
+    URL.revokeObjectURL(dataUrl);
+    
+  } catch(e) {
+    log('Blob IPC exception: '+e.name+': '+e.message, 'err');
+  }
+}
+
+function testBlobTiming() {
+  log('=== Blob Timing Oracle ===', 'ok');
+  try {
+    const sizes = [0x100, 0x1000, 0x10000, 0x100000];
+    
+    for (const size of sizes) {
+      const data = new Uint8Array(size);
+      const blob = new Blob([data]);
+      const url = URL.createObjectURL(blob);
+      
+      const start = performance.now();
+      fetch(url).then(r => r.arrayBuffer()).then(() => {
+        const elapsed = performance.now() - start;
+        log('Size 0x'+size.toString(16)+' fetch time: '+elapsed.toFixed(2)+'ms', 'info');
+        URL.revokeObjectURL(url);
+      }).catch(e => {
+        log('Size 0x'+size.toString(16)+' ERROR: '+e.name, 'err');
+        URL.revokeObjectURL(url);
+      });
+    }
+  } catch(e) {
+    log('Blob timing exception: '+e.name+': '+e.message, 'err');
   }
 }
 
 // ============================================================
-// UI Setup
+// 5. Structure / Memory Probes
 // ============================================================
-function setupUI() {
-  const container = document.getElementById('strategies');
-  for (const name of Object.keys(MP4_STRATEGIES)) {
-    const row = document.createElement('div');
-    row.className = 'strategy-row';
-    row.id = `row-${name}`;
-    row.innerHTML = `
-      <span>${name}</span>
-      <span class="status status-pending" id="status-${name}">PENDING</span>
-      <button onclick="runStrategy('${name}', MP4_STRATEGIES['${name}'])">Run</button>
-    `;
-    container.appendChild(row);
+function probeStructureIDs() {
+  log('=== Structure ID Probe ===', 'ok');
+  try {
+    // Create objects with same structure then modify
+    const objs = [];
+    for (let i = 0; i < 100; i++) {
+      objs.push({a: i, b: i+1});
+    }
+    
+    // Add property to some
+    for (let i = 0; i < 50; i++) {
+      objs[i].c = i;
+    }
+    
+    // Try to detect transition
+    log('Created 100 objects, 50 with extra property', 'info');
+    
+    // Try to confuse with ArrayBuffer
+    const ab = new ArrayBuffer(0x100);
+    const view = new Uint8Array(ab);
+    
+    // Try to read object as bytes (won't work directly in JS)
+    // But we can try type confusion via prototype
+    objs[0].__proto__ = new Uint8Array(8);
+    log('Set __proto__ to Uint8Array', 'info');
+    
+    try {
+      const x = objs[0][0];
+      log('objs[0][0] = '+x, 'info');
+    } catch(e) {
+      log('objs[0][0] ERROR: '+e.name+': '+e.message, 'err');
+    }
+    
+  } catch(e) {
+    log('Structure probe exception: '+e.name+': '+e.message, 'err');
   }
 }
 
-// Update video stats
-setInterval(() => {
-  document.getElementById('rs').textContent = v.readyState;
-  document.getElementById('ns').textContent = v.networkState;
-  document.getElementById('ve').textContent = v.error ? v.error.code : 'none';
-}, 500);
+function probeHeapLayout() {
+  log('=== Heap Layout Oracle ===', 'ok');
+  try {
+    // Allocate many objects
+    const arrays = [];
+    for (let i = 0; i < 1000; i++) {
+      arrays.push(new Array(100).fill(i));
+    }
+    
+    // Measure time to access
+    const start = performance.now();
+    let sum = 0;
+    for (let i = 0; i < arrays.length; i++) {
+      sum += arrays[i][0];
+    }
+    const elapsed = performance.now() - start;
+    log('1000 arrays access time: '+elapsed.toFixed(3)+'ms', 'info');
+    
+    // Allocate large buffer
+    const big = new ArrayBuffer(0x100000);
+    const start2 = performance.now();
+    const view = new Uint8Array(big);
+    view[0] = 1;
+    const elapsed2 = performance.now() - start2;
+    log('1MB buffer access time: '+elapsed2.toFixed(3)+'ms', 'info');
+    
+  } catch(e) {
+    log('Heap probe exception: '+e.name+': '+e.message, 'err');
+  }
+}
 
-// Global error handlers
-window.onerror = (msg, url, line, col, err) => {
-  log(`GLOBAL ERROR: ${msg} at ${line}:${col}`, 'error');
-};
-window.onunhandledrejection = (e) => {
-  log(`UNHANDLED REJECTION: ${e.reason}`, 'error');
-};
+function probeJSCell() {
+  log('=== JSCell Header Probe ===', 'ok');
+  try {
+    // Try to access internal properties that might reveal JSCell info
+    const arr = [1.1, 2.2, 3.3];
+    
+    // Try various reflection techniques
+    try {
+      const desc = Object.getOwnPropertyDescriptor(arr, 'length');
+      log('arr.length descriptor: '+JSON.stringify(desc), 'info');
+    } catch(e) {
+      log('length descriptor ERROR: '+e.name, 'err');
+    }
+    
+    // Try to change array type
+    arr[0] = {};
+    log('After mixed store: arr[0] = '+typeof arr[0], 'info');
+    
+    // Try to create sparse array
+    const sparse = [];
+    sparse[0x100000] = 1;
+    log('Sparse array length: '+sparse.length, 'info');
+    
+    // Try to confuse with TypedArray
+    const buffer = new ArrayBuffer(24);
+    const f64 = new Float64Array(buffer);
+    const u32 = new Uint32Array(buffer);
+    f64[0] = 1.7976931348623157e+308; // Max double
+    log('f64[0] = '+f64[0], 'info');
+    log('u32 view = '+u32[0]+', '+u32[1], 'info');
+    
+  } catch(e) {
+    log('JSCell probe exception: '+e.name+': '+e.message, 'err');
+  }
+}
 
-// Init
-detectSystem();
-setupUI();
-log('PoC initialized. Ready for exploitation testing.', 'ok');
+// ============================================================
+// 6. Capability Check
+// ============================================================
+function runCapabilityCheck() {
+  log('=== System Capability Check ===', 'ok');
+  const checks = [
+    ['MediaSource', typeof MediaSource],
+    ['URL.parse', typeof URL.parse],
+    ['TransformStream', typeof TransformStream],
+    ['AudioContext', typeof AudioContext],
+    ['WebGPU', typeof navigator.gpu],
+    ['WASM', typeof WebAssembly],
+    ['SharedArrayBuffer', typeof SharedArrayBuffer],
+    ['Atomics', typeof Atomics],
+    ['WebRTC', typeof RTCPeerConnection],
+    ['WebCodecs', typeof VideoDecoder],
+    ['Canvas 2D', !!document.createElement('canvas').getContext('2d')],
+    ['WebGL', !!document.createElement('canvas').getContext('webgl')],
+    ['ServiceWorker', typeof ServiceWorkerRegistration],
+    ['Worker', typeof Worker],
+    ['Blob', typeof Blob],
+    ['FileReader', typeof FileReader],
+    ['fetch', typeof fetch],
+    ['performance.now', typeof performance.now],
+    ['console.memory', typeof console.memory],
+  ];
+  
+  for (const [name, val] of checks) {
+    const status = (val && val !== 'undefined') ? '✅' : '❌';
+    log(status+' '+name+': '+val, val && val !== 'undefined' ? 'ok' : 'warn');
+  }
+  
+  // User agent
+  log('UA: '+navigator.userAgent, 'info');
+  log('Platform: '+navigator.platform, 'info');
+}
+
+// Global handlers
+window.onerror = (m,u,l,c,e) => { log('GLOBAL: '+m+' @'+l+':'+c, 'err'); };
+window.onunhandledrejection = e => { log('REJECTION: '+e.reason, 'err'); };
+
+log('PoC loaded. Press buttons to test.', 'ok');
 </script>
-
 </body>
 </html>
-
