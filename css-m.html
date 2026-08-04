@@ -1030,7 +1030,7 @@ function leakASLR() {
         // سنضع قيمة تقريبية الآن، ويجب تحديثها بعد الـ Dump
         // في FW 4.03 كان حوالي 0x1358E0. في FW 13.42 قد يكون مختلفاً.
         // سنطرح 0x150000 كتخمين أولي لرؤية الـ Base.
-        let DUMMY_OFFSET = 0x150000; 
+        let DUMMY_OFFSET = 0xe50e98; 
         
         webKitBaseAddr = firstFunc - DUMMY_OFFSET;
         plog("========================================");
