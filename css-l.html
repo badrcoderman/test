@@ -1,76 +1,75 @@
 <!DOCTYPE html>
 <html>
 <body>
-<h2>PoC 3: RegExp.lastMatch Heap Leak</h2>
-<button onclick="runRegExpLeak()">ابدأ التسريب</button>
-<div id="result" style="font-family: monospace; white-space: pre;"></div>
+<h2>PoC 4: CSS-based Info Leak</h2>
+<button onclick="runCSSLeak()">جرب تسريبات CSS</button>
+<div id="target" style="width: 100px; height: 100px;"></div>
+<div id="cssLog" style="font-family: monospace; white-space: pre;"></div>
 
 <script>
 function log(msg) {
-    document.getElementById('result').textContent += msg + '\n';
+    document.getElementById('cssLog').textContent += msg + '\n';
 }
 
-function runRegExpLeak() {
-    log('=== RegExp.lastMatch Leak ===\n');
+function runCSSLeak() {
+    log('=== CSS Leak Hunter ===\n');
     
-    // 1. إنشاء string ضخم يحتوي على marker
-    const marker = 'AAAA' + 'B'.repeat(1000) + 'CCCC';
+    const target = document.getElementById('target');
     
-    // 2. تشغيل regex يلتقط أجزاء
-    const re = /(.{100})/;
-    re.exec(marker);
+    // قائمة بكل الـ CSS properties غير الموثقة أو الخطيرة
+    const dangerousProps = [
+        '-webkit-clip-path',
+        '-webkit-mask-image',
+        '-webkit-shape-outside',
+        '-webkit-text-fill-color',
+        'will-change',
+        'transform',
+        'backdrop-filter',
+        '-webkit-box-reflect',
+        'offset-path',
+        'clip-path',
+        'filter',
+        '-webkit-filter',
+    ];
     
-    log(`RegExp.$1: ${RegExp.$1}`);
-    log(`RegExp.lastMatch: ${RegExp.lastMatch}`);
-    log(`RegExp.leftContext length: ${RegExp.leftContext.length}`);
-    log(`RegExp.rightContext length: ${RegExp.rightContext.length}`);
+    // تجربة كل خاصية مع قيم غريبة
+    dangerousProps.forEach(prop => {
+        const testValues = [
+            'url(#invalid)',
+            'linear-gradient(0deg, red 0x41414141, blue)',
+            'var(--undefined)',
+            'calc(100% + 0x1234)',
+            'initial',
+            'inherit',
+            'unset',
+            'revert',
+            'revert-layer',
+        ];
+        
+        testValues.forEach(val => {
+            try {
+                target.style[prop] = val;
+                const computed = window.getComputedStyle(target)[prop];
+                if (computed && computed !== val && computed !== '') {
+                    log(`${prop}: ${val} → ${computed}`);
+                    
+                    // فحص hex في الناتج
+                    const hexMatches = computed.match(/0x[0-9a-f]+/i);
+                    if (hexMatches) {
+                        log(`🔥 HEX LEAK in ${prop}: ${hexMatches[0]}`);
+                    }
+                }
+            } catch(e) {}
+        });
+    });
     
-    // 3. محاولة التلاعب بـ lastIndex
-    re.lastIndex = 500000000; // قيمة غير منطقية
-    try {
-        const result = re.exec('x'.repeat(100));
-        log(`After lastIndex manipulation: ${result}`);
-    } catch(e) {
-        log(`Error: ${e.message}`);
-    }
+    // محاولة مع CSS variables
+    log('\n=== CSS Variables Test ===');
+    target.style.setProperty('--test', '0x41414141');
+    const val = getComputedStyle(target).getPropertyValue('--test');
+    log(`CSS Variable: ${val}`);
     
-    // 4. اختبار مع string مُحرر
-    let bigStr = 'X'.repeat(1024 * 1024); // 1MB
-    const re2 = /(X{100})/g;
-    re2.exec(bigStr);
-    
-    // تحرير الـ string
-    bigStr = null;
-    if (typeof gc !== 'undefined') gc();
-    
-    // محاولة الوصول بعد التحرير
-    log(`\nAfter GC:`);
-    log(`RegExp.lastMatch: ${RegExp.lastMatch}`);
-    
-    // 5. استغلال race condition مع Worker
-    log('\n=== Worker Race Condition ===');
-    const workerCode = `
-        self.onmessage = function(e) {
-            const re = /(.+)/;
-            re.exec(e.data);
-            self.postMessage({
-                lastMatch: RegExp.lastMatch,
-                leftContext: RegExp.leftContext,
-                rightContext: RegExp.rightContext
-            });
-        };
-    `;
-    
-    const blob = new Blob([workerCode], {type: 'application/javascript'});
-    const worker = new Worker(URL.createObjectURL(blob));
-    
-    worker.onmessage = function(e) {
-        log('Worker result: ' + JSON.stringify(e.data));
-    };
-    
-    worker.postMessage('A'.repeat(10000));
-    
-    log('\n=== انتهى PoC 3 ===');
+    log('\n=== انتهى PoC 4 ===');
 }
 </script>
 </body>
