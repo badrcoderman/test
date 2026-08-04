@@ -16,7 +16,14 @@
   html, body { width: 100%; height: 100%; background: #000; color: #0f0; font: 11px "Courier New", monospace; overflow: hidden; }
   #out { width: 100%; height: 100vh; padding: 4px; white-space: pre; overflow-y: auto; overflow-x: auto; line-height: 1.4; }
 </style>
-<body><pre id="out"></pre>
+<body><pre id="out">
+</pre>
+
+<center>
+  <button onclick="initPrimitives()">تجهيز أدوات الذاكرة (Setup Primitives)</button>
+
+</center>
+
 <script>
 "use strict";
 
@@ -905,6 +912,94 @@ function startMemoryScanner() {
         }, 500);
     }, 500);
 }
+
+
+// function - 1
+function initPrimitives() {
+    // التأكد من أن rwView و addrof معرفة مسبقاً في الصفحة
+    if (typeof rwView === 'undefined' || typeof addrof === 'undefined') {
+        console.log("[-] خطأ: لم يتم العثور على rwView أو addrof في الذاكرة!");
+        return;
+    }
+
+    // ==========================================
+    // 1. بناء أدوات read64 و write64 الديناميكية
+    // ==========================================
+
+    // الحصول على عنوان rwView في الذاكرة
+    let addr_rwView = addrof(rwView); 
+    console.log("[+] rwView Address: 0x" + addr_rwView.toString(16));
+
+    // عنوان m_vector داخل rwView
+    let addr_m_vector = addr_rwView + 0x10; 
+
+    // حفظ العنوان الأصلي لـ m_vector
+    let original_m_vector_low = rwView[0x10] | (rwView[0x11] << 8) | (rwView[0x12] << 16) | (rwView[0x13] << 24);
+    let original_m_vector_high = rwView[0x14] | (rwView[0x15] << 8);
+    let original_m_vector = original_m_vector_low + (original_m_vector_high * 0x100000000);
+
+    console.log("[+] Original m_vector: 0x" + original_m_vector.toString(16));
+
+    // دالة لتغيير العنوان الذي يقرأ منه rwView
+    function setFakeVector(addr) {
+        let low = addr_m_vector & 0xFFFFFFFF;
+        let high = Math.floor(addr_m_vector / 0x100000000);
+        
+        rwView[0x10] = low & 0xff;
+        rwView[0x11] = (low >> 8) & 0xff;
+        rwView[0x12] = (low >> 16) & 0xff;
+        rwView[0x13] = (low >> 24) & 0xff;
+        rwView[0x14] = high & 0xff;
+        rwView[0x15] = (high >> 8) & 0xff;
+        
+        let new_low = addr & 0xFFFFFFFF;
+        let new_high = Math.floor(addr / 0x100000000);
+        
+        rwView[0] = new_low & 0xff;
+        rwView[1] = (new_low >> 8) & 0xff;
+        rwView[2] = (new_low >> 16) & 0xff;
+        rwView[3] = (new_low >> 24) & 0xff;
+        rwView[4] = new_high & 0xff;
+        rwView[5] = (new_high >> 8) & 0xff;
+        
+        rwView[0x10] = low & 0xff;
+        rwView[0x11] = (low >> 8) & 0xff;
+        rwView[0x12] = (low >> 16) & 0xff;
+        rwView[0x13] = (low >> 24) & 0xff;
+        rwView[0x14] = high & 0xff;
+        rwView[0x15] = (high >> 8) & 0xff;
+    }
+
+    // تعيين read64 و write64 على نطاق window لترتبط بالصفحة بشكل عام
+    window.read64 = function(addr) {
+        setFakeVector(addr);
+        let low = rwView[0] | (rwView[1] << 8) | (rwView[2] << 16) | (rwView[3] << 24);
+        let high = rwView[4] | (rwView[5] << 8) | (rwView[6] << 16) | (rwView[7] << 24);
+        return {
+            low: low >>> 0,
+            high: high >>> 0,
+            value: low + (high * 0x100000000)
+        };
+    };
+
+    window.write64 = function(addr, value) {
+        setFakeVector(addr);
+        let low = value & 0xFFFFFFFF;
+        let high = Math.floor(value / 0x100000000);
+        
+        rwView[0] = low & 0xff;
+        rwView[1] = (low >> 8) & 0xff;
+        rwView[2] = (low >> 16) & 0xff;
+        rwView[3] = (low >> 24) & 0xff;
+        rwView[4] = high & 0xff;
+        rwView[5] = (high >> 8) & 0xff;
+        rwView[6] = 0;
+        rwView[7] = 0;
+    };
+
+    console.log("[+] Primitives Ready! Use read64(addr) and write64(addr, val)");
+}
+
 </script>
 </body>
 </html>
